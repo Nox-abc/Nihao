@@ -35,6 +35,10 @@ Worlds are saved automatically in your browser (IndexedDB).
 | F1 / F2 / F3 / F5 | Hide HUD / screenshot / debug screen / camera perspective |
 | Esc | Pause menu |
 
+**Touch screens** (phones/tablets) get on-screen controls automatically: left stick to move
+(push all the way to sprint), drag anywhere on the right to look, hold to break, tap to
+place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots to select them.
+
 ### Commands
 
 `/gamemode survival|creative`, `/time set day|noon|night|midnight|<n>`, `/weather clear|rain`,
@@ -56,8 +60,13 @@ Worlds are saved automatically in your browser (IndexedDB).
 - **Survival**: health, hunger, saturation, air, fall damage, drowning, XP, mining speeds
   and tool tiers (wood, stone, iron, gold, diamond) with durability.
 - **Crafting**: 2×2 and 3×3 crafting, furnace smelting with fuels, chests.
-- **Mobs**: pigs, cows, sheep, chickens and zombies (which burn in daylight), with drops; TNT
-  explosions; falling sand and gravel; leaf decay; growing saplings, sugar cane and cactus.
+- **Farming**: hoes, farmland that hydrates near water, wheat that grows in stages, bread.
+- **Building**: 120+ blocks including slabs (top/bottom, stack into full blocks), ladders,
+  torches, glass, wool, ores and metal blocks; half-block step-up like the original.
+- **Beds** let you sleep through the night and set your respawn point.
+- **Mobs**: pigs, cows, sheep, chickens, undead that burn in daylight, and wall-climbing spiders,
+  all with drops; TNT explosions; falling sand and gravel; leaf decay; growing saplings, sugar
+  cane and cactus.
 - **Creative mode** with flight and a searchable item menu.
 - First-person hand, held items, third-person view, block-breaking cracks, particles, synthesized
   sound effects and generative ambient music.

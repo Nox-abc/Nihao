@@ -115,6 +115,13 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 .creative-scroll::-webkit-scrollbar-thumb { background: #c6c6c6; border: 2px solid #555; }
 .trash { background: #8b8b8b; }
 .sep { height: 8px; }
+#touch { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+#touch .tb { position: absolute; pointer-events: auto; width: 64px; height: 64px; border-radius: 12px; background: rgba(255,255,255,.18); border: 2px solid rgba(255,255,255,.35); color: #fff; font: inherit; font-size: 26px; display: flex; align-items: center; justify-content: center; touch-action: none; user-select: none; }
+#touch .tb.on { background: rgba(255,255,255,.45); }
+#t-stick { position: absolute; left: 28px; bottom: 120px; width: 150px; height: 150px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.3); pointer-events: auto; touch-action: none; }
+#t-knob { position: absolute; left: 45px; top: 45px; width: 60px; height: 60px; border-radius: 50%; background: rgba(255,255,255,.4); }
+#t-look { position: absolute; left: 35%; right: 0; top: 0; bottom: 0; pointer-events: auto; touch-action: none; }
+body.touch #hotbar { pointer-events: auto; }
 #mobile-note { position: fixed; bottom: 8px; left: 0; right: 0; text-align: center; color: #ccc; font-size: 18px; }
 </style>
 </head>
@@ -136,6 +143,16 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
     <div id="xpbar"><div id="xpfill"></div><div id="xplevel"></div></div>
     <div id="hotbar"></div>
   </div>
+</div>
+<div id="touch" class="hidden">
+  <div id="t-look"></div>
+  <div id="t-stick"><div id="t-knob"></div></div>
+  <button class="tb" id="t-jump" style="right:40px;bottom:150px">&#9650;</button>
+  <button class="tb" id="t-sneak" style="right:120px;bottom:110px">&#9660;</button>
+  <button class="tb" id="t-place" style="right:40px;bottom:240px;font-size:20px">USE</button>
+  <button class="tb" id="t-inv" style="right:40px;top:16px;font-size:20px">INV</button>
+  <button class="tb" id="t-pause" style="right:116px;top:16px">II</button>
+  <button class="tb" id="t-chat" style="right:192px;top:16px;font-size:20px">/</button>
 </div>
 <div id="chatbox" class="hidden"><input id="chatin" autocomplete="off" spellcheck="false" maxlength="256"></div>
 
@@ -1545,7 +1562,7 @@ function genTextures() {
     for (let i = 0; i < n; i++) sp(d, crackPx[i][0], crackPx[i][1], [20, 20, 20], 180);
   });
 
-  T('rain', (d, r) => { clear(d); for (let k = 0; k < 14; k++) { const x = Math.floor(r() * 16), y0 = Math.floor(r() * 16), len = 3 + Math.floor(r() * 4); for (let i = 0; i < len; i++) sp(d, x, (y0 + i) & 15, [170, 190, 255], 150); } });
+  T('rain', (d, r) => { clear(d); for (let k = 0; k < 10; k++) { const x = Math.floor(r() * 16), y0 = Math.floor(r() * 16), len = 3 + Math.floor(r() * 4); for (let i = 0; i < len; i++) sp(d, x, (y0 + i) & 15, [210, 225, 255], 120 + i * 25); } });
   T('snowfall', (d, r) => { clear(d); for (let k = 0; k < 18; k++) { const x = Math.floor(r() * 16), y = Math.floor(r() * 16); sp(d, x, y, [255, 255, 255], 230); if (r() < 0.4) sp(d, (x + 1) & 15, y, [235, 240, 255], 200); } });
   // =============== ITEM SPRITES ===============
   const IT = (name, fn, noOutline) => T(name, (d, r) => { fn(d, r); if (!noOutline) { edgeShade(d); outline(d); } });
@@ -2551,7 +2568,7 @@ vec3 lightCol(vec2 L){
   float b = bright(L.y);
   vec3 c = max(vec3(s) * uSkyTint, vec3(b) * vec3(1.0, 0.88, 0.7) * (1.0 + 0.06 * sin(L.y)));
   c = max(c, vec3(0.025 + uNightVision));
-  c = mix(c, sqrt(c), uGamma);
+  c = mix(c, 1.0 - pow(1.0 - min(c, vec3(1.0)), vec3(4.0)), uGamma);
   return min(c, vec3(1.0));
 }`;
 const SH_CHUNK_F = `#version 300 es
@@ -4583,6 +4600,89 @@ function playerPreview() {
 }
 function escapeHTML(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+/* ---------------- touch controls ---------------- */
+class TouchControls {
+  constructor(game) {
+    this.g = game; this.active = false;
+    this.supported = (window.matchMedia && matchMedia('(pointer: coarse)').matches) || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
+    if (!this.supported) return;
+    document.body.classList.add('touch');
+    const inp = game.input;
+    const key = (code, on) => { if (on) { if (!inp.keys.has(code)) inp.pressQ.add(code); inp.keys.add(code); } else inp.keys.delete(code); };
+    // joystick
+    const stick = $('t-stick'), knob = $('t-knob');
+    let sid = null, sx = 0, sy = 0;
+    const setStick = (dx, dy) => {
+      const r = 60, l = Math.hypot(dx, dy), k = l > r ? r / l : 1;
+      dx *= k; dy *= k;
+      knob.style.left = (45 + dx) + 'px'; knob.style.top = (45 + dy) + 'px';
+      const nx = dx / r, ny = dy / r;
+      key('KeyW', ny < -0.3); key('KeyS', ny > 0.3); key('KeyA', nx < -0.3); key('KeyD', nx > 0.3);
+      key('ControlLeft', ny < -0.92);
+    };
+    stick.addEventListener('touchstart', e => { e.preventDefault(); const t = e.changedTouches[0]; sid = t.identifier; const r = stick.getBoundingClientRect(); sx = r.left + r.width / 2; sy = r.top + r.height / 2; setStick(t.clientX - sx, t.clientY - sy); AUDIO.init(); }, { passive: false });
+    stick.addEventListener('touchmove', e => { e.preventDefault(); for (const t of e.changedTouches) if (t.identifier === sid) setStick(t.clientX - sx, t.clientY - sy); }, { passive: false });
+    const endStick = e => { for (const t of e.changedTouches) if (t.identifier === sid) { sid = null; setStick(0, 0); } };
+    stick.addEventListener('touchend', endStick); stick.addEventListener('touchcancel', endStick);
+    // look / break / use
+    const look = $('t-look');
+    const lt = new Map();
+    look.addEventListener('touchstart', e => {
+      e.preventDefault(); AUDIO.init();
+      for (const t of e.changedTouches) {
+        const st = { x: t.clientX, y: t.clientY, t0: performance.now(), moved: 0, holding: false };
+        st.timer = setTimeout(() => { if (st.moved < 12) { st.holding = true; inp.mouse[0] = true; inp.mouseQ[0] = true; } }, 280);
+        lt.set(t.identifier, st);
+      }
+    }, { passive: false });
+    look.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const p = game.player;
+      for (const t of e.changedTouches) {
+        const st = lt.get(t.identifier); if (!st || !p) continue;
+        const dx = t.clientX - st.x, dy = t.clientY - st.y;
+        st.moved += Math.abs(dx) + Math.abs(dy); st.x = t.clientX; st.y = t.clientY;
+        const s = OPTIONS.sens * 0.009;
+        p.yaw -= dx * s; p.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, p.pitch - dy * s));
+      }
+    }, { passive: false });
+    const endLook = e => {
+      for (const t of e.changedTouches) {
+        const st = lt.get(t.identifier); if (!st) continue;
+        clearTimeout(st.timer);
+        if (st.holding) inp.mouse[0] = false;
+        else if (st.moved < 12 && performance.now() - st.t0 < 280) { inp.mouse[2] = true; inp.mouseQ[2] = true; setTimeout(() => inp.mouse[2] = false, 120); }
+        lt.delete(t.identifier);
+      }
+    };
+    look.addEventListener('touchend', endLook); look.addEventListener('touchcancel', endLook);
+    const btn = (id, down, up) => {
+      const b = $(id);
+      b.addEventListener('touchstart', e => { e.preventDefault(); b.classList.add('on'); AUDIO.init(); down(); }, { passive: false });
+      const u = e => { e.preventDefault(); b.classList.remove('on'); if (up) up(); };
+      b.addEventListener('touchend', u); b.addEventListener('touchcancel', u);
+    };
+    btn('t-jump', () => key('Space', true), () => key('Space', false));
+    let sneak = false;
+    btn('t-sneak', () => { sneak = !sneak; key('ShiftLeft', sneak); $('t-sneak').style.background = sneak ? 'rgba(255,255,255,.5)' : ''; });
+    btn('t-place', () => { inp.mouse[2] = true; inp.mouseQ[2] = true; }, () => { inp.mouse[2] = false; });
+    btn('t-inv', () => { if (game.ui.inv) game.ui.closeInv(); else if (game.player) game.ui.openInv(game.player.mode === 1 ? 'creative' : 'inventory'); });
+    btn('t-pause', () => { inp.reset(); game.ui.show('scr-pause'); });
+    btn('t-chat', () => { inp.reset(); game.ui.openChat('/'); });
+    game.ui.hslots.forEach((s, i) => s.addEventListener('touchstart', e => { e.preventDefault(); if (game.player) { game.player.sel = i; game.ui.refreshHotbar(); game.ui.showItemName(game.player.held); } }, { passive: false }));
+    let saved = null;
+    try { saved = localStorage.getItem('blockcraft.options'); } catch (e) { }
+    if (!saved) { OPTIONS.renderDist = 5; OPTIONS.resScale = 0.8; }
+  }
+  update() {
+    if (!this.supported) return;
+    const g = this.g;
+    const show = g.state === 'playing' && !g.ui.screen && !g.ui.inv && !g.ui.chatOpen && g.player && !g.player.dead;
+    $('touch').classList.toggle('hidden', !show);
+    this.active = show;
+  }
+}
+
 /* ---------------- persistence (IndexedDB) ---------------- */
 const DB = {
   db: null,
@@ -4802,6 +4902,7 @@ class Game {
     this.itemModels = {};
     this.setupWorkers();
     this.bindInput();
+    this.touch = new TouchControls(this);
     this.applyOptions();
     this.decorateMenus();
     this.ui.show('scr-title');
@@ -4857,6 +4958,7 @@ class Game {
     if (!c || c.state !== 0) return;
     c.blocks = blocks; c.biomes = biomes; c.meta = meta || new Uint8Array(65536); c.light = new Uint8Array(65536);
     if (be) for (const [i, v] of be) {
+      v.x = cx * 16 + (i & 15); v.y = i >> 8; v.z = cz * 16 + ((i >> 4) & 15);
       c.be.set(i, v);
       if (v.type === 'furnace') this.furnaces.set(this.beKey(cx * 16 + (i & 15), i >> 8, cz * 16 + ((i >> 4) & 15)), { x: cx * 16 + (i & 15), y: i >> 8, z: cz * 16 + ((i >> 4) & 15), be: v });
     }
@@ -5061,7 +5163,7 @@ class Game {
     this.ui.chat('Welcome to Blockcraft! Click to play. Press E for inventory, T for chat, F3 for debug.', '#ffff80');
     if (p.mode === 0 && !this.meta.player) this.ui.chat('Tip: hold left click on a tree to collect wood, then craft planks (E).', '#aaa');
     this.ui.show('scr-pause');
-    $('pause-hint').textContent = 'Click "Back to Game" to start playing';
+    $('pause-hint').textContent = this.touch.supported ? 'Tap "Back to Game" to start. Left stick: move. Drag: look. Hold: break. Tap: place/use.' : 'Click "Back to Game" to start playing';
   }
   async quitToTitle() {
     this.ui.show('scr-loading'); $('load-title').textContent = 'Saving world'; $('load-msg').textContent = ''; $('load-bar').style.width = '100%';
@@ -5172,7 +5274,7 @@ class Game {
     window.addEventListener('blur', () => inp.reset());
   }
   lockPointer() {
-    if (this.state !== 'playing') return;
+    if (this.state !== 'playing' || (this.touch && this.touch.supported)) return;
     try { const r = this.canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { }); } catch (e) { }
   }
   releasePointer() { if (document.pointerLockElement) document.exitPointerLock(); }
@@ -5236,7 +5338,8 @@ class Game {
   }
   playFrame(dt) {
     const paused = this.ui.screen === 'scr-pause' || this.ui.screen === 'scr-options' || this.ui.screen === 'scr-controls';
-    this.input.enabled = this.locked && !this.ui.inv && !this.ui.chatOpen && !this.ui.screen;
+    this.touch.update();
+    this.input.enabled = (this.locked || this.touch.active) && !this.ui.inv && !this.ui.chatOpen && !this.ui.screen;
     if (!paused) {
       this.acc += dt;
       let n = 0;
@@ -5711,6 +5814,7 @@ class Game {
       if (id === B.TNT) { w.setBlock(bx, by, bz, 0, 0); this.entities.push(new PrimedTNT(this, bx, by, bz, 10 + Math.floor(Math.random() * 20))); continue; }
       const be = w.getBE(bx, by, bz);
       if (be && be.items) for (const st of be.items) if (st) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
+      if (be && be.type === 'furnace') this.furnaces.delete(this.beKey(bx, by, bz));
       if (Math.random() < 0.25) for (const st of this.dropsFor(id, 0)) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
       w.setBlock(bx, by, bz, 0, 0, false);
       changed.push([bx, by, bz]);
