@@ -8,6 +8,8 @@ No install, no server, no build step: the whole game is a single self-contained 
 > Mojang or Microsoft. All textures, models, sounds and music are generated
 > procedurally in code at startup, so the file contains no copyrighted game assets.
 > The Nether and End creatures and the final boss are original designs.
+> For the official look, load the textures from your own copy of Minecraft
+> (see [Resource packs](#resource-packs-and-the-official-minecraft-textures)).
 
 ## How to play
 
@@ -47,6 +49,50 @@ place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots
 zombie, spider, wisp, charred_ghoul, wraith, sentinel, crystal, tnt), `/kill`, `/seed`,
 `/spawnpoint`, `/clear`, `/locate <biome|fortress|portal_room>`, `/setblock x y z <block>`,
 `/difficulty`, `/keepinventory`, `/dim overworld|nether|end`, `/help`.
+
+## Resource packs and the official Minecraft textures
+
+Blockcraft reads Java Edition resource packs, including the textures inside your own copy of
+Minecraft, so the game can look like the real thing.
+
+1. Open **Options... → Resource Packs...** (from the title screen or the pause menu).
+2. Click **Add Pack File...** (or drag the file onto the list) and pick one of these:
+   - **The official Minecraft textures**: the version `.jar` from your Minecraft installation.
+     Run that version once in the Minecraft Launcher so the file exists.
+
+     | System | File |
+     | --- | --- |
+     | Windows | `%APPDATA%\.minecraft\versions\1.21.4\1.21.4.jar` |
+     | macOS | `~/Library/Application Support/minecraft/versions/1.21.4/1.21.4.jar` (press Cmd+Shift+G in the file picker to type the path) |
+     | Linux | `~/.minecraft/versions/1.21.4/1.21.4.jar` |
+
+     Any version from 1.13 onwards works; newer versions cover more blocks. The pack shows up as
+     "Minecraft 1.21.4".
+   - **Any resource pack** `.zip`, such as Faithful or packs from Modrinth and CurseForge.
+     HD packs up to 128×128 are used at full resolution; bigger ones are scaled down to 128×128.
+3. Click **Done**. The game switches over straight away, even in the middle of a world.
+
+You can stack several packs. The pack at the top of the list wins, and anything it does not
+include comes from the next pack down, then from Blockcraft's own art. Use ▲ ▼ to reorder packs,
+**Use** / **Turn off** to switch one on or off, and **Default Textures** to go back to the built-in
+look. Packs are saved in your browser, so you only add them once. The file is read on your
+computer and is never uploaded anywhere, and none of Mojang's assets are included in this repository.
+
+What a pack changes:
+
+- **Blocks and items**, including animated water, lava and nether portals (`.mcmeta` animations),
+  grass, foliage and water tinting, block-breaking cracks, chests, beds and the end portal.
+- **Interface**: hotbar, hearts, hunger, air and XP bar, crosshair, buttons, the title logo, the
+  menu background, and the inventory, crafting table, furnace and chest windows.
+- **Sky and effects**: sun, moon phases, clouds, the End sky, rain, snow and particles.
+- **Mobs** switch to the classic Java Edition model shapes so the pack's skins fit: pigs, cows
+  (including the 1.21.5+ temperate cow), sheep with wool, chickens, zombies, spiders, and the
+  player, who uses the pack's Steve skin. The original creatures borrow their closest vanilla
+  look-alike: Ember Wisps use the blaze texture, Void Wraiths the enderman, Charred Ghouls the
+  wither skeleton, and Void Crystals the end crystal.
+
+Not covered: the font, the creative item menu, and the Void Sentinel and void reeds, which keep
+their own look.
 
 ## Reaching the End
 
@@ -98,5 +144,7 @@ zombie, spider, wisp, charred_ghoul, wraith, sentinel, crystal, tnt), `/kill`, `
   Ember Wisps, Charred Ghouls, Void Wraiths and the Void Sentinel boss with a boss bar;
   TNT explosions; falling sand and gravel; leaf decay; growing saplings, sugar cane and cactus.
 - **Creative mode** with flight and a searchable item menu.
+- **Resource packs**: load Java Edition `.zip` packs or your own Minecraft `.jar` for the official
+  textures, stack several packs, and use HD packs up to 128×128.
 - First-person hand, held items, third-person view, block-breaking cracks, particles, synthesized
   sound effects and generative ambient music with a different mood in each dimension.
