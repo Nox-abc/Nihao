@@ -52,7 +52,11 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 #fx-lava { position: fixed; inset: 0; pointer-events: none; background: rgba(220,90,10,.55); }
 #fx-hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 180px rgba(200,0,0,.0); transition: box-shadow .3s; }
 #fx-vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,.35) 100%); }
-#fx-portal { position: fixed; inset: 0; pointer-events: none; }
+#fx-portal { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(170,70,255,.25) 0%, rgba(110,20,210,.8) 100%); animation: portalfx 2.4s ease-in-out infinite alternate; }
+@keyframes portalfx { from { filter: hue-rotate(0deg); } to { filter: hue-rotate(40deg); } }
+#bossbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 364px; text-align: center; font-size: 22px; text-shadow: 2px 2px 0 #3f3f3f; }
+#bossbar .bb { height: 10px; margin-top: 2px; background: #2c0f3c; border: 2px solid #000; position: relative; }
+#bossfill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(#f0a0ff, #a040e0); }
 /* ---------- screens ---------- */
 .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .dim { background: rgba(16,16,16,.6); }
@@ -131,9 +135,11 @@ body.touch #hotbar { pointer-events: auto; }
 <div id="fx-lava" class="hidden"></div>
 <div id="fx-vignette" class="hidden"></div>
 <div id="fx-hurt"></div>
+<div id="fx-portal"></div>
 <div id="fx-sleep" style="position:fixed;inset:0;background:#000;opacity:0;pointer-events:none"></div>
 <div id="hud" class="hidden">
   <div id="crosshair"></div>
+  <div id="bossbar" class="hidden"><div>Void Sentinel</div><div class="bb"><i id="bossfill"></i></div></div>
   <div id="debug"></div>
   <div id="debugR"></div>
   <div id="chat"></div>
@@ -201,7 +207,7 @@ body.touch #hotbar { pointer-events: auto; }
     <div><b>T or /</b> Chat & commands</div><div><b>F1</b> Hide HUD</div><div><b>F3</b> Debug screen</div>
     <div><b>F5</b> Change perspective</div><div><b>F2</b> Screenshot</div><div><b>Esc</b> Pause menu</div>
   </div>
-  <div class="hint">Commands: /gamemode, /time set, /tp, /give, /summon, /weather, /kill, /seed, /spawnpoint, /clear, /locate, /help</div>
+  <div class="hint">Commands: /gamemode, /time set, /tp, /give, /summon, /weather, /kill, /seed, /spawnpoint, /clear, /locate, /dim, /help</div>
   <button class="btn" id="b-kback">Done</button>
 </div>
 
@@ -253,14 +259,27 @@ const BLOCK_NAMES = [
   'white_wool','orange_wool','magenta_wool','light_blue_wool','yellow_wool','lime_wool','pink_wool','gray_wool','light_gray_wool','cyan_wool',
   'purple_wool','blue_wool','brown_wool','green_wool','red_wool','black_wool',
   'packed_ice','smooth_stone','deepslate_bricks','oxeye_daisy','allium','azure_bluet','farmland','wheat','red_bed',
-  'oak_slab','stone_slab','cobblestone_slab','stone_brick_slab','sandstone_slab','brick_slab','spruce_slab','birch_slab','cherry_slab','ladder'
+  'oak_slab','stone_slab','cobblestone_slab','stone_brick_slab','sandstone_slab','brick_slab','spruce_slab','birch_slab','cherry_slab','ladder',
+  'oak_stairs','spruce_stairs','birch_stairs','cherry_stairs','cobblestone_stairs','stone_brick_stairs','brick_stairs','sandstone_stairs','nether_brick_stairs','blackstone_stairs',
+  'quartz_stairs','purpur_stairs','oak_fence','spruce_fence','nether_brick_fence','oak_door','spruce_door','glass_pane','iron_bars','lantern',
+  'white_concrete','orange_concrete','magenta_concrete','light_blue_concrete','yellow_concrete','lime_concrete','pink_concrete','gray_concrete','light_gray_concrete','cyan_concrete',
+  'purple_concrete','blue_concrete','brown_concrete','green_concrete','red_concrete','black_concrete',
+  'exposed_copper','weathered_copper','oxidized_copper','cut_copper','polished_granite','polished_diorite','polished_andesite','cracked_stone_bricks','chiseled_stone_bricks','smooth_sandstone',
+  'polished_deepslate','deepslate_tiles','budding_amethyst','amethyst_cluster','smooth_basalt','bone_block','jack_o_lantern','melon','hay_block','coarse_dirt',
+  'podzol','red_mushroom','brown_mushroom','cobweb',
+  'netherrack','nether_quartz_ore','nether_gold_ore','ancient_debris','soul_sand','soul_soil','basalt','polished_basalt','blackstone','polished_blackstone',
+  'magma_block','nether_bricks','red_nether_bricks','nether_wart_block','warped_wart_block','crimson_nylium','warped_nylium','crimson_stem','warped_stem','crimson_planks',
+  'warped_planks','shroomlight','crying_obsidian','quartz_block','netherite_block','nether_portal','crimson_fungus','warped_fungus','crimson_roots','warped_roots',
+  'end_stone','end_stone_bricks','purpur_block','purpur_pillar','end_portal_frame','end_portal','void_reed','sentinel_core'
 ];
+if (BLOCK_NAMES.length > 256) throw new Error('too many block ids');
 const B = {};
 BLOCK_NAMES.forEach((n, i) => { B[n.toUpperCase()] = i; });
 
 const BIOME_NAMES = ['Ocean','Deep Ocean','Frozen Ocean','Beach','Snowy Beach','River','Frozen River','Plains','Forest','Birch Forest',
   'Taiga','Snowy Plains','Snowy Taiga','Desert','Badlands','Savanna','Meadow','Cherry Grove','Grove','Snowy Slopes',
-  'Stony Peaks','Jagged Peaks','Windswept Hills','Swamp'];
+  'Stony Peaks','Jagged Peaks','Windswept Hills','Swamp',
+  'Nether Wastes','Crimson Forest','Warped Forest','Soul Sand Valley','Basalt Deltas','The End'];
 const BI = {};
 BIOME_NAMES.forEach((n, i) => { BI[n.toUpperCase().replace(/ /g, '_')] = i; });
 const SNOWY_BIOMES = new Set([BI.SNOWY_BEACH, BI.SNOWY_PLAINS, BI.SNOWY_TAIGA, BI.GROVE, BI.SNOWY_SLOPES, BI.JAGGED_PEAKS, BI.FROZEN_RIVER, BI.FROZEN_OCEAN]);
@@ -591,6 +610,7 @@ Generator.prototype.genChunk = function (cx, cz) {
       case BI.STONY_PEAKS: top = B.STONE; fill = B.STONE; if (r < 0.2) top = B.CALCITE; break;
       case BI.WINDSWEPT_HILLS: if (this.nS.n2(wx / 12, wz / 12) > 0.25) { top = B.GRAVEL; fill = B.GRAVEL; } break;
       case BI.SWAMP: if (h < SEA) { top = r < 0.3 ? B.CLAY : B.DIRT; } break;
+      case BI.TAIGA: case BI.SNOWY_TAIGA: { const pz = this.nS.n2(wx / 18, wz / 18); if (pz > 0.3) top = B.PODZOL; else if (pz < -0.45) top = B.COARSE_DIRT; break; }
     }
     if (steep >= (mountain ? 3 : 5) && b !== BI.DESERT && b !== BI.BADLANDS && b !== BI.BEACH && h > SEA) { top = B.STONE; fill = B.STONE; }
     if (steep >= 4 && b === BI.DESERT) { top = B.SANDSTONE; fill = B.SANDSTONE; }
@@ -681,6 +701,24 @@ Generator.prototype.genChunk = function (cx, cz) {
   vein(B.LAPIS_ORE, 2, 6, 1, 40, true);
   vein(B.DIAMOND_ORE, 3, 6, 1, 16, false);
   if (MOUNTAIN_BIOMES.has(biomes[136])) vein(B.EMERALD_ORE, 6, 1, 32, 200, false);
+  // amethyst geode (kept inside the chunk)
+  if (hash2(cx, cz, seed + 6001) < 0.035) {
+    const gy = 14 + Math.floor(hash2(cx, cz, seed + 6002) * 40), R0 = 6.4;
+    const shell = [];
+    for (let dy = -7; dy <= 7; dy++) for (let dz = -7; dz <= 7; dz++) for (let dx = -7; dx <= 7; dx++) {
+      const x = 8 + dx, y = gy + dy, z = 8 + dz;
+      if (x < 0 || x > 15 || z < 0 || z > 15 || y < 2) continue;
+      const d = Math.sqrt(dx * dx + dy * dy * 1.1 + dz * dz) + (hash3(x, y, z, seed + 6003) - 0.5) * 0.6;
+      const i = I(x, y, z);
+      if (blocks[i] === B.BEDROCK || blocks[i] === B.WATER) continue;
+      if (d > R0) continue;
+      if (d > R0 - 1) blocks[i] = B.SMOOTH_BASALT;
+      else if (d > R0 - 2) blocks[i] = B.CALCITE;
+      else if (d > R0 - 3) { blocks[i] = hash3(x, y, z, seed + 6004) < 0.12 ? B.BUDDING_AMETHYST : B.AMETHYST_BLOCK; shell.push(i); }
+      else blocks[i] = B.AIR;
+    }
+    for (const i of shell) { const above = i + 256; if (above < 65536 && blocks[above] === B.AIR && hash3(i, 1, 2, seed + 6005) < 0.35) blocks[above] = B.AMETHYST_CLUSTER; }
+  }
   // ---- trees ----
   const setT = (x, y, z, id, isLog) => {
     if (x < 0 || x > 15 || z < 0 || z > 15 || y < 1 || y > 255) return;
@@ -730,7 +768,11 @@ Generator.prototype.genChunk = function (cx, cz) {
         case BI.CHERRY_GROVE: if (r < 0.14) plant = B.SHORT_GRASS; else if (r < 0.17) plant = B.ALLIUM; break;
       }
       if (r2 > 0.9993 && (b === BI.PLAINS || b === BI.FOREST || b === BI.MEADOW)) plant = B.PUMPKIN;
+      if (r2 > 0.9996 && (b === BI.SWAMP || b === BI.BIRCH_FOREST)) plant = B.MELON;
+      if (r2 < 0.006 && (b === BI.TAIGA || b === BI.SWAMP || b === BI.SNOWY_TAIGA || b === BI.FOREST)) plant = r2 < 0.003 ? B.BROWN_MUSHROOM : B.RED_MUSHROOM;
       if (plant) blocks[I(x, h + 1, z)] = plant;
+    } else if ((topB === B.PODZOL || topB === B.COARSE_DIRT) && r < 0.12) {
+      blocks[I(x, h + 1, z)] = r < 0.08 ? B.FERN : B.BROWN_MUSHROOM;
     } else if ((topB === B.SAND || topB === B.RED_SAND) && (b === BI.DESERT || b === BI.BADLANDS)) {
       if (r < 0.01) blocks[I(x, h + 1, z)] = B.DEAD_BUSH;
       else if (r < 0.016 && b === BI.DESERT && x > 0 && x < 15 && z > 0 && z < 15) {
@@ -744,6 +786,12 @@ Generator.prototype.genChunk = function (cx, cz) {
         for (let k = 1; k <= n; k++) blocks[I(x, h + k, z)] = B.SUGAR_CANE;
       }
     }
+  }
+  // ---- cave cobwebs ----
+  for (let k = 0; k < 6; k++) {
+    if (hash2(cx * 7 + k, cz, seed + 6101) > 0.18) continue;
+    const x = Math.floor(hash2(cx, cz * 5 + k, seed + 6102) * 16), z = Math.floor(hash2(cx * 3 + k, cz, seed + 6103) * 16), y0 = 8 + Math.floor(hash2(cx, cz + k, seed + 6104) * 40);
+    for (let y = y0; y < y0 + 20; y++) if (blocks[I(x, y, z)] === B.AIR && OPAQUE_GEN[blocks[I(x, y + 1, z)]]) { blocks[I(x, y, z)] = B.COBWEB; break; }
   }
   // ---- snow cover ----
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
@@ -760,14 +808,357 @@ Generator.prototype.genChunk = function (cx, cz) {
       break;
     }
   }
+  buildPortalRoom(blocks, cx, cz, seed);
   return { blocks, biomes };
 };
+// opaque lookup usable inside workers (no block registry there)
+const OPAQUE_GEN = new Uint8Array(256);
+[B.STONE, B.DEEPSLATE, B.DIRT, B.GRANITE, B.DIORITE, B.ANDESITE, B.TUFF, B.GRAVEL, B.COAL_ORE, B.IRON_ORE, B.COPPER_ORE, B.CALCITE].forEach(i => OPAQUE_GEN[i] = 1);
+/* ===================================================================
+   NETHER & END GENERATORS, STRUCTURES (shared with the workers)
+   =================================================================== */
+const NETHER_TOP = 128;
+
+// huge fungus: stem with a hollow dome cap of wart blocks dotted with shroomlights
+function growFungus(type, x, y, z, r, set) {
+  const stem = type === 'crimson' ? B.CRIMSON_STEM : B.WARPED_STEM;
+  const wart = type === 'crimson' ? B.NETHER_WART_BLOCK : B.WARPED_WART_BLOCK;
+  const h = 5 + Math.floor(r() * 7), rad = h > 8 ? 3 : 2;
+  for (let dy = -2; dy <= 1; dy++) {
+    const rr = dy === 1 ? rad - 1 : rad;
+    for (let dx = -rr; dx <= rr; dx++) for (let dz = -rr; dz <= rr; dz++) {
+      const d2 = dx * dx + dz * dz;
+      if (d2 > rr * rr + 1) continue;
+      if (dy < 0 && d2 < (rr - 1) * (rr - 1)) continue;
+      set(x + dx, y + h + dy, z + dz, r() < 0.08 ? B.SHROOMLIGHT : wart, false);
+    }
+  }
+  for (let k = 0; k < 6; k++) {
+    const a = r() * Math.PI * 2, dx = Math.round(Math.cos(a) * rad), dz = Math.round(Math.sin(a) * rad), len = 1 + Math.floor(r() * 3);
+    for (let j = 1; j <= len; j++) set(x + dx, y + h - 2 - j, z + dz, wart, false);
+  }
+  for (let i = 0; i < h; i++) set(x, y + i, z, stem, true);
+}
+
+/* ---------- fortresses: deterministic bridge networks in the Nether ---------- */
+const FORTRESS_CELL = 224;
+function fortressAt(seed, fx, fz) {
+  if (hash2(fx, fz, seed + 7001) > 0.6) return null;
+  const x = fx * FORTRESS_CELL + 56 + Math.floor(hash2(fx, fz, seed + 7002) * 112);
+  const z = fz * FORTRESS_CELL + 56 + Math.floor(hash2(fx, fz, seed + 7003) * 112);
+  const y = 58 + Math.floor(hash2(fx, fz, seed + 7004) * 14);
+  const segs = [[x - 70, z, x + 70, z], [x, z - 70, x, z + 70]];
+  for (const k of [-40, 40]) {
+    if (hash2(fx + k, fz, seed + 7005) < 0.7) segs.push([x + k, z - 26, x + k, z + 26]);
+    if (hash2(fx, fz + k, seed + 7006) < 0.7) segs.push([x - 26, z + k, x + 26, z + k]);
+  }
+  return { x, y, z, segs };
+}
+function nearestFortress(seed, wx, wz) {
+  let best = null, bd = 1e18;
+  const fx0 = Math.floor(wx / FORTRESS_CELL), fz0 = Math.floor(wz / FORTRESS_CELL);
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+    const f = fortressAt(seed, fx0 + dx, fz0 + dz);
+    if (!f) continue;
+    const d = (f.x - wx) ** 2 + (f.z - wz) ** 2;
+    if (d < bd) { bd = d; best = f; }
+  }
+  return best;
+}
+function buildFortress(blocks, cx, cz, seed) {
+  const I = (x, y, z) => (y << 8) | (z << 4) | x;
+  const bx = cx * 16, bz = cz * 16;
+  const fx0 = Math.floor((bx + 8) / FORTRESS_CELL), fz0 = Math.floor((bz + 8) / FORTRESS_CELL);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const f = fortressAt(seed, fx0 + dx, fz0 + dz);
+    if (!f) continue;
+    const Y = f.y;
+    for (const [x0, z0, x1, z1] of f.segs) {
+      const alongX = z0 === z1;
+      // bridge footprint, 5 wide, clipped to this chunk
+      const ax0 = Math.min(x0, x1) - (alongX ? 0 : 2), ax1 = Math.max(x0, x1) + (alongX ? 0 : 2);
+      const az0 = Math.min(z0, z1) - (alongX ? 2 : 0), az1 = Math.max(z0, z1) + (alongX ? 2 : 0);
+      for (let wz = Math.max(az0, bz); wz <= Math.min(az1, bz + 15); wz++) for (let wx = Math.max(ax0, bx); wx <= Math.min(ax1, bx + 15); wx++) {
+        const lx = wx - bx, lz = wz - bz;
+        const across = alongX ? wz - z0 : wx - x0, along = alongX ? wx : wz;
+        blocks[I(lx, Y, lz)] = B.NETHER_BRICKS;
+        for (let y = Y + 1; y <= Y + 4; y++) blocks[I(lx, y, lz)] = 0;
+        if (Math.abs(across) === 2) {
+          blocks[I(lx, Y + 1, lz)] = B.NETHER_BRICK_FENCE;
+          if (((along % 12) + 12) % 12 === 0) {
+            for (let y = Y - 1; y > 30 && y > Y - 40; y--) { const b = blocks[I(lx, y, lz)]; if (b !== 0 && b !== B.LAVA) break; blocks[I(lx, y, lz)] = B.NETHER_BRICKS; }
+          }
+        }
+      }
+    }
+    // central hall: 11x11 room with openings toward the bridges
+    for (let wz = Math.max(f.z - 5, bz); wz <= Math.min(f.z + 5, bz + 15); wz++) for (let wx = Math.max(f.x - 5, bx); wx <= Math.min(f.x + 5, bx + 15); wx++) {
+      const lx = wx - bx, lz = wz - bz, ex = Math.abs(wx - f.x), ez = Math.abs(wz - f.z);
+      blocks[I(lx, Y, lz)] = B.NETHER_BRICKS;
+      blocks[I(lx, Y + 5, lz)] = B.NETHER_BRICKS;
+      for (let y = Y + 1; y <= Y + 4; y++) {
+        const wall = ex === 5 || ez === 5, door = (ex <= 1 || ez <= 1) && y <= Y + 3;
+        blocks[I(lx, y, lz)] = wall && !door ? (y === Y + 2 && (ex + ez) % 3 === 0 ? B.NETHER_BRICK_FENCE : B.NETHER_BRICKS) : 0;
+      }
+      if (ex === 0 && ez === 0) blocks[I(lx, Y + 1, lz)] = B.SOUL_SAND;
+    }
+  }
+}
+
+function NetherGenerator(seed) {
+  this.seed = seed | 0;
+  const P = i => new Perlin((this.seed ^ Math.imul(i + 201, 0x9E3779B1)) | 0);
+  this.n1 = P(1); this.n2 = P(2); this.nb = P(3); this.nb2 = P(4); this.nf = P(5);
+}
+NetherGenerator.prototype.biome = function (wx, wz) {
+  const t = fbm2(this.nb, wx / 260, wz / 260, 3) * 1.8, h = fbm2(this.nb2, wx / 260, wz / 260, 3) * 1.8;
+  if (t > 0.3) return h > -0.05 ? BI.CRIMSON_FOREST : BI.BASALT_DELTAS;
+  if (t < -0.3) return h > -0.05 ? BI.WARPED_FOREST : BI.SOUL_SAND_VALLEY;
+  if (h > 0.42) return BI.SOUL_SAND_VALLEY;
+  return BI.NETHER_WASTES;
+};
+NetherGenerator.prototype.column = function (wx, wz) { return { h: 64, b: this.biome(wx, wz) }; };
+NetherGenerator.prototype.genChunk = function (cx, cz) {
+  const seed = this.seed;
+  const blocks = new Uint8Array(65536), biomes = new Uint8Array(256);
+  const I = (x, y, z) => (y << 8) | (z << 4) | x;
+  const GY = NETHER_TOP / 8;
+  const dv = new Float32Array(25 * (GY + 1));
+  for (let gy = 0; gy <= GY; gy++) for (let gz = 0; gz < 5; gz++) for (let gx = 0; gx < 5; gx++) {
+    const wx = cx * 16 + gx * 4, wy = gy * 8, wz = cz * 16 + gz * 4;
+    let d = this.n1.n3(wx / 64, wy / 40, wz / 64) * 0.95 + this.n2.n3(wx / 22, wy / 16, wz / 22) * 0.35;
+    d += 0.7 * (1 - smoothstep(0, 30, wy)) + 0.8 * smoothstep(90, 126, wy) - 0.22;
+    dv[(gy * 5 + gz) * 5 + gx] = d;
+  }
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const wx = cx * 16 + x, wz = cz * 16 + z;
+    biomes[z * 16 + x] = this.biome(wx, wz);
+    const gx = x >> 2, gz = z >> 2, fx = (x & 3) / 4, fz = (z & 3) / 4;
+    for (let y = 0; y < NETHER_TOP; y++) {
+      let id;
+      if (y === 0 || y === NETHER_TOP - 1) id = B.BEDROCK;
+      else if (y < 5 && hash3(wx, y, wz, seed) < (5 - y) / 5) id = B.BEDROCK;
+      else if (y > NETHER_TOP - 6 && hash3(wx, y, wz, seed + 1) < (y - (NETHER_TOP - 6)) / 5) id = B.BEDROCK;
+      else {
+        const gy = y >> 3, fy = (y & 7) / 8;
+        const i0 = (gy * 5 + gz) * 5 + gx, i1 = i0 + 25;
+        const c00 = dv[i0] + (dv[i0 + 1] - dv[i0]) * fx, c10 = dv[i0 + 5] + (dv[i0 + 6] - dv[i0 + 5]) * fx;
+        const c01 = dv[i1] + (dv[i1 + 1] - dv[i1]) * fx, c11 = dv[i1 + 5] + (dv[i1 + 6] - dv[i1 + 5]) * fx;
+        const c0 = c00 + (c10 - c00) * fz, c1 = c01 + (c11 - c01) * fz;
+        id = c0 + (c1 - c0) * fy > 0 ? B.NETHERRACK : (y <= 31 ? B.LAVA : B.AIR);
+      }
+      blocks[I(x, y, z)] = id;
+    }
+  }
+  const rng = mulberry32((hash2(cx, cz, seed + 4999) * 4294967296) | 0);
+  // ---- ores ----
+  const vein = (id, count, size, y0, y1) => {
+    for (let n = 0; n < count; n++) {
+      let x = rng() * 16, y = y0 + rng() * (y1 - y0), z = rng() * 16;
+      for (let k = 0; k < size; k++) {
+        const ix = x | 0, iy = y | 0, iz = z | 0;
+        if (ix >= 0 && ix < 16 && iz >= 0 && iz < 16 && iy > 0 && iy < NETHER_TOP && blocks[I(ix, iy, iz)] === B.NETHERRACK) blocks[I(ix, iy, iz)] = id;
+        x += rng() * 2 - 1; y += rng() * 2 - 1; z += rng() * 2 - 1;
+      }
+    }
+  };
+  vein(B.NETHER_QUARTZ_ORE, 14, 9, 10, 118);
+  vein(B.NETHER_GOLD_ORE, 9, 6, 10, 118);
+  vein(B.MAGMA_BLOCK, 3, 10, 26, 37);
+  if (rng() < 0.45) vein(B.ANCIENT_DEBRIS, 1, 2, 8, 24);
+  // ---- surfaces, plants and decorations ----
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const b = biomes[z * 16 + x], wx = cx * 16 + x, wz = cz * 16 + z;
+    for (let y = NETHER_TOP - 3; y > 1; y--) {
+      const i = I(x, y, z), id = blocks[i];
+      if (id !== B.NETHERRACK || blocks[I(x, y + 1, z)] !== B.AIR) continue;
+      const r = hash3(wx, y, wz, seed + 11);
+      if (b === BI.CRIMSON_FOREST || b === BI.WARPED_FOREST) {
+        const crimson = b === BI.CRIMSON_FOREST;
+        blocks[i] = crimson ? B.CRIMSON_NYLIUM : B.WARPED_NYLIUM;
+        if (r < 0.05) blocks[I(x, y + 1, z)] = crimson ? B.CRIMSON_FUNGUS : B.WARPED_FUNGUS;
+        else if (r < 0.2) blocks[I(x, y + 1, z)] = crimson ? B.CRIMSON_ROOTS : B.WARPED_ROOTS;
+      } else if (b === BI.SOUL_SAND_VALLEY) {
+        blocks[i] = r < 0.6 ? B.SOUL_SAND : B.SOUL_SOIL;
+        if (y > 1 && blocks[I(x, y - 1, z)] === B.NETHERRACK) blocks[I(x, y - 1, z)] = B.SOUL_SOIL;
+        if (r > 0.997 && x > 1 && x < 14 && z > 1 && z < 14) {
+          const h = 4 + Math.floor(hash2(wx, wz, seed + 12) * 12);
+          for (let k = 1; k <= h && y + k < NETHER_TOP - 2; k++) blocks[I(x, y + k, z)] = B.BASALT;
+        }
+        if (r > 0.985 && r <= 0.997) blocks[i] = B.BONE_BLOCK;
+      } else if (b === BI.BASALT_DELTAS) {
+        blocks[i] = r < 0.06 ? B.MAGMA_BLOCK : r < 0.6 ? B.BASALT : B.BLACKSTONE;
+        if (y > 1 && blocks[I(x, y - 1, z)] === B.NETHERRACK) blocks[I(x, y - 1, z)] = r < 0.5 ? B.BASALT : B.BLACKSTONE;
+      } else {
+        if (this.nf.n2(wx / 30, wz / 30) > 0.35) blocks[i] = B.SOUL_SAND;
+        else if (y >= 30 && y <= 34 && r < 0.5) blocks[i] = B.GRAVEL;
+        else if (r < 0.01) blocks[I(x, y + 1, z)] = hash2(wx, wz, seed + 13) < 0.5 ? B.RED_MUSHROOM : B.BROWN_MUSHROOM;
+      }
+    }
+  }
+  // basalt deltas: turn exposed netherrack walls into basalt/blackstone too
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    if (biomes[z * 16 + x] !== BI.BASALT_DELTAS) continue;
+    for (let y = 2; y < NETHER_TOP - 2; y++) { const i = I(x, y, z); if (blocks[i] === B.NETHERRACK && hash3(x, y, z, seed + 14) < 0.7) blocks[i] = (y + x + z) % 5 === 0 ? B.BLACKSTONE : B.BASALT; }
+  }
+  // huge fungi (kept inside the chunk so neighbours never cut them)
+  for (let z = 3; z < 13; z++) for (let x = 3; x < 13; x++) {
+    const b = biomes[z * 16 + x];
+    if (b !== BI.CRIMSON_FOREST && b !== BI.WARPED_FOREST) continue;
+    const wx = cx * 16 + x, wz = cz * 16 + z;
+    if (hash2(wx, wz, seed + 15) > 0.02) continue;
+    for (let y = 100; y > 32; y--) {
+      const g = blocks[I(x, y, z)];
+      if ((g === B.CRIMSON_NYLIUM || g === B.WARPED_NYLIUM) && blocks[I(x, y + 1, z)] !== B.LAVA) {
+        const tr = mulberry32((hash2(wx, wz, seed + 16) * 4294967296) | 0);
+        growFungus(b === BI.CRIMSON_FOREST ? 'crimson' : 'warped', x, y + 1, z, tr, (sx, sy, sz, id) => {
+          if (sx < 0 || sx > 15 || sz < 0 || sz > 15 || sy < 1 || sy >= NETHER_TOP - 1) return;
+          const cur = blocks[I(sx, sy, sz)];
+          if (cur === B.AIR || cur === B.CRIMSON_ROOTS || cur === B.WARPED_ROOTS || cur === B.CRIMSON_FUNGUS || cur === B.WARPED_FUNGUS || ((id === B.CRIMSON_STEM || id === B.WARPED_STEM) && (cur === B.NETHER_WART_BLOCK || cur === B.WARPED_WART_BLOCK))) blocks[I(sx, sy, sz)] = id;
+        });
+        break;
+      }
+    }
+  }
+  // glowstone clusters hanging from ceilings
+  for (let n = 0; n < 2; n++) {
+    if (rng() > 0.55) continue;
+    const x = 3 + Math.floor(rng() * 10), z = 3 + Math.floor(rng() * 10);
+    for (let y = NETHER_TOP - 6; y > 40; y--) {
+      if (blocks[I(x, y, z)] === B.AIR && blocks[I(x, y + 1, z)] !== B.AIR && blocks[I(x, y + 1, z)] !== B.LAVA) {
+        let px = x, py = y, pz = z;
+        for (let k = 0; k < 40; k++) {
+          if (px >= 0 && px < 16 && pz >= 0 && pz < 16 && py > 1 && blocks[I(px, py, pz)] === B.AIR) blocks[I(px, py, pz)] = B.GLOWSTONE;
+          px = Math.max(0, Math.min(15, px + Math.floor(rng() * 3) - 1)); pz = Math.max(0, Math.min(15, pz + Math.floor(rng() * 3) - 1)); py -= rng() < 0.6 ? 1 : 0;
+        }
+        break;
+      }
+    }
+  }
+  buildFortress(blocks, cx, cz, seed);
+  return { blocks, biomes };
+};
+
+/* ---------- the End ---------- */
+function EndGenerator(seed) {
+  this.seed = seed | 0;
+  const P = i => new Perlin((this.seed ^ Math.imul(i + 301, 0x9E3779B1)) | 0);
+  this.n1 = P(1); this.n2 = P(2);
+  this.fountainY = Math.floor(60 + fbm2(this.n1, 0, 0, 3) * 4) + 1;
+}
+EndGenerator.prototype.column = function () { return { h: 60, b: BI.THE_END }; };
+function endPillars(seed) {
+  const out = [];
+  for (let k = 0; k < 10; k++) {
+    const a = k / 10 * Math.PI * 2;
+    out.push({ x: Math.round(Math.cos(a) * 42), z: Math.round(Math.sin(a) * 42), r: 2 + (k % 3), h: 76 + Math.floor(hash2(k, 3, seed + 31) * 9) * 3 });
+  }
+  return out;
+}
+EndGenerator.prototype.genChunk = function (cx, cz) {
+  const seed = this.seed;
+  const blocks = new Uint8Array(65536), biomes = new Uint8Array(256).fill(BI.THE_END);
+  const I = (x, y, z) => (y << 8) | (z << 4) | x;
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const wx = cx * 16 + x, wz = cz * 16 + z, d = Math.hypot(wx, wz);
+    if (d < 140) {
+      const t = d / 140, n = fbm2(this.n1, wx / 60, wz / 60, 3);
+      const top = Math.floor(60 + n * 4 - t * t * 10), bottom = Math.floor(60 - (1 - t * t) * (34 + n * 10));
+      for (let y = Math.max(1, bottom); y <= top; y++) blocks[I(x, y, z)] = B.END_STONE;
+    }
+    if (d > 700) {
+      const n = fbm2(this.n2, wx / 90, wz / 90, 4) * 1.6;
+      if (n > 0.32) {
+        const k = n - 0.32, top = Math.floor(58 + k * 18), bottom = Math.floor(58 - k * 60);
+        for (let y = Math.max(1, bottom); y <= top; y++) blocks[I(x, y, z)] = B.END_STONE;
+        const r = hash2(wx, wz, seed + 41);
+        if (r < 0.025 && top < 250) { const h = 1 + Math.floor(hash2(wx, wz, seed + 42) * 4); for (let j = 1; j <= h; j++) blocks[I(x, top + j, z)] = B.VOID_REED; }
+      }
+    }
+  }
+  // obsidian pillars around the central island
+  for (const p of endPillars(seed)) {
+    for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+      const wx = cx * 16 + x, wz = cz * 16 + z, dd = (wx - p.x) ** 2 + (wz - p.z) ** 2;
+      if (dd > (p.r + 0.5) ** 2) continue;
+      for (let y = 30; y <= p.h; y++) blocks[I(x, y, z)] = B.OBSIDIAN;
+      if (wx === p.x && wz === p.z) blocks[I(x, p.h, z)] = B.BEDROCK;
+    }
+  }
+  // exit fountain (portal blocks are added once the guardian is defeated)
+  const fy = this.fountainY;
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const wx = cx * 16 + x, wz = cz * 16 + z, d2 = wx * wx + wz * wz;
+    if (d2 > 30) continue;
+    for (let y = fy; y < fy + 8; y++) blocks[I(x, y, z)] = 0;
+    if (d2 <= 12.5) blocks[I(x, fy - 1, z)] = B.BEDROCK;
+    if (d2 > 6.5 && d2 <= 12.5) blocks[I(x, fy, z)] = B.BEDROCK;
+    if (d2 === 0) for (let y = fy; y < fy + 4; y++) blocks[I(x, y, z)] = B.BEDROCK;
+  }
+  return { blocks, biomes };
+};
+
+/* ---------- overworld structures ---------- */
+const PORTAL_ROOM_REGION = 1024;
+function portalRoomAt(seed, rx, rz) {
+  return {
+    x: rx * PORTAL_ROOM_REGION + 256 + Math.floor(hash2(rx, rz, seed + 8101) * 512),
+    z: rz * PORTAL_ROOM_REGION + 256 + Math.floor(hash2(rx, rz, seed + 8102) * 512),
+    y: 22 + Math.floor(hash2(rx, rz, seed + 8103) * 12),
+  };
+}
+function nearestPortalRoom(seed, wx, wz) {
+  let best = null, bd = 1e18;
+  const rx0 = Math.floor(wx / PORTAL_ROOM_REGION), rz0 = Math.floor(wz / PORTAL_ROOM_REGION);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const p = portalRoomAt(seed, rx0 + dx, rz0 + dz);
+    const d = (p.x - wx) ** 2 + (p.z - wz) ** 2;
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+// frame positions around the 3x3 portal: [dx, dz, facing]
+const FRAME_RING = [];
+for (let i = -1; i <= 1; i++) { FRAME_RING.push([i, -2, 2], [i, 2, 0], [-2, i, 1], [2, i, 3]); }
+function buildPortalRoom(blocks, cx, cz, seed) {
+  const I = (x, y, z) => (y << 8) | (z << 4) | x;
+  const bx = cx * 16, bz = cz * 16;
+  const p = portalRoomAt(seed, Math.floor((bx + 8) / PORTAL_ROOM_REGION), Math.floor((bz + 8) / PORTAL_ROOM_REGION));
+  const R = 7, H = 7, TUN = 14;
+  if (bx > p.x + R + TUN || bx + 15 < p.x - R - TUN || bz > p.z + R + TUN || bz + 15 < p.z - R - TUN) return;
+  const brick = (wx, y, wz) => { const h = hash3(wx, y, wz, seed + 8104); return h < 0.18 ? B.MOSSY_COBBLESTONE : h < 0.32 ? B.CRACKED_STONE_BRICKS : B.STONE_BRICKS; };
+  const set = (wx, y, wz, id) => { const lx = wx - bx, lz = wz - bz; if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) blocks[I(lx, y, lz)] = id; };
+  // tunnels in the four directions
+  for (let t = R; t <= R + TUN; t++) for (let a = -2; a <= 2; a++) for (let y = p.y - 1; y <= p.y + 3; y++) {
+    const wall = Math.abs(a) === 2 || y === p.y - 1 || y === p.y + 3;
+    for (const [wx, wz] of [[p.x + t, p.z + a], [p.x - t, p.z + a], [p.x + a, p.z + t], [p.x + a, p.z - t]]) set(wx, y, wz, wall ? brick(wx, y, wz) : 0);
+  }
+  // the hall
+  for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) for (let y = p.y - 1; y <= p.y + H; y++) {
+    const wx = p.x + dx, wz = p.z + dz;
+    const shell = Math.abs(dx) === R || Math.abs(dz) === R || y === p.y - 1 || y === p.y + H;
+    const doorway = (Math.abs(dx) <= 1 || Math.abs(dz) <= 1) && (Math.abs(dx) === R || Math.abs(dz) === R) && y >= p.y && y <= p.y + 2;
+    set(wx, y, wz, shell && !doorway ? brick(wx, y, wz) : 0);
+  }
+  // raised dais with a lava pit, ringed by portal frames
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) set(p.x + dx, p.y, p.z + dz, B.STONE_BRICKS);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) set(p.x + dx, p.y, p.z + dz, B.LAVA);
+  for (const [dx, dz, f] of FRAME_RING) set(p.x + dx, p.y + 1, p.z + dz, B.END_PORTAL_FRAME);
+  for (const [dx, dz] of [[-5, -5], [5, -5], [-5, 5], [5, 5]]) set(p.x + dx, p.y, p.z + dz, B.LANTERN);
+}
+function framesMeta(seed, wx, wz) { return hash2(wx, wz, seed + 8105) < 0.1 ? 4 : 0; }
+
+function makeGenerator(seed, dim) {
+  if (dim === 'nether') return new NetherGenerator(seed);
+  if (dim === 'end') return new EndGenerator(seed);
+  return new Generator(seed);
+}
 </script>
 <script>
 /* ===================================================================
    BLOCK & ITEM REGISTRY
    =================================================================== */
-const SH = { NONE: 0, CUBE: 1, CROSS: 2, TORCH: 3, LIQUID: 4, LAYER: 5, CACTUS: 6, CROP: 7, SLAB: 8, LADDER: 9 };
+const SH = { NONE: 0, CUBE: 1, CROSS: 2, TORCH: 3, LIQUID: 4, LAYER: 5, CACTUS: 6, CROP: 7, SLAB: 8, LADDER: 9, STAIRS: 10, FENCE: 11, DOOR: 12, PANE: 13, LANTERN: 14, PORTAL: 15, EPORTAL: 16, FRAME: 17 };
 const BLK = [];
 const OPAQUE = new Uint8Array(256);     // full opaque cube: hides neighbour faces
 const OPACITY = new Uint8Array(256);    // light attenuation 0..15
@@ -879,6 +1270,88 @@ for (const [slab, base] of [['oak_slab', 'oak_planks'], ['stone_slab', 'stone'],
 }
 defB('ladder', { shape: SH.LADDER, hard: 0.4, tool: AXE, sound: 'wood', cutout: true, needs: 'wall', fuel: 300 });
 
+// ---- more overworld building blocks
+for (const c in WOOL_COLORS) defB(c + '_concrete', { hard: 1.8, tool: PICK, lvl: 0 });
+BLK[B.COPPER_BLOCK].copper = 0;
+defB('exposed_copper', { hard: 3, tool: PICK, lvl: 1, sound: 'metal', copper: 1 });
+defB('weathered_copper', { hard: 3, tool: PICK, lvl: 1, sound: 'metal', copper: 2 });
+defB('oxidized_copper', { hard: 3, tool: PICK, lvl: 1, sound: 'metal', copper: 3 });
+defB('cut_copper', { hard: 3, tool: PICK, lvl: 1, sound: 'metal' });
+defB('polished_granite', { hard: 1.5, tool: PICK, lvl: 0 }); defB('polished_diorite', { hard: 1.5, tool: PICK, lvl: 0 }); defB('polished_andesite', { hard: 1.5, tool: PICK, lvl: 0 });
+defB('cracked_stone_bricks', { hard: 1.5, tool: PICK, lvl: 0 }); defB('chiseled_stone_bricks', { hard: 1.5, tool: PICK, lvl: 0 });
+defB('smooth_sandstone', { hard: 2, tool: PICK, lvl: 0 });
+defB('polished_deepslate', { hard: 3.5, tool: PICK, lvl: 0 }); defB('deepslate_tiles', { hard: 3.5, tool: PICK, lvl: 0 });
+defB('budding_amethyst', { hard: 1.5, sound: 'glass', drop: null });
+defB('amethyst_cluster', { shape: SH.CROSS, hard: 1.5, tool: PICK, sound: 'glass', light: 5, needs: 'solid', drop: 'amethyst_shard', dropMin: 2, dropMax: 4 });
+defB('smooth_basalt', { hard: 1.25, tool: PICK, lvl: 0 });
+defB('bone_block', { hard: 2, tool: PICK, lvl: 0, tex: { top: 'bone_block_top', side: 'bone_block_side' }, log: true });
+defB('jack_o_lantern', { hard: 1, tool: AXE, sound: 'wood', light: 15, tex: { top: 'pumpkin_top', bottom: 'pumpkin_top', side: 'pumpkin_side', front: 'jack_o_lantern' }, facing: true, display: "Jack o'Lantern" });
+defB('melon', { hard: 1, tool: AXE, sound: 'wood', tex: { top: 'melon_top', side: 'melon_side' }, drop: 'melon_slice', dropMin: 3, dropMax: 7 });
+defB('hay_block', { hard: 0.5, sound: 'grass', tex: { top: 'hay_block_top', side: 'hay_block_side' }, log: true, display: 'Hay Bale' });
+defB('coarse_dirt', { hard: 0.5, tool: SHOVEL, sound: 'gravel' });
+defB('podzol', { hard: 0.5, tool: SHOVEL, sound: 'gravel', tex: { top: 'podzol_top', side: 'podzol_side', bottom: 'dirt' }, drop: 'dirt' });
+defB('red_mushroom', { shape: SH.CROSS, hard: 0, sound: 'grass', needs: 'solid' });
+defB('brown_mushroom', { shape: SH.CROSS, hard: 0, sound: 'grass', needs: 'solid', light: 1 });
+defB('cobweb', { shape: SH.CROSS, hard: 4, tool: 'sword', sound: 'wool', drop: 'string', web: true });
+defB('glass_pane', { shape: SH.PANE, hard: 0.3, sound: 'glass', tex: 'glass', drop: null, pane: true, cutout: true });
+defB('iron_bars', { shape: SH.PANE, hard: 5, tool: PICK, lvl: 0, sound: 'metal', pane: true, cutout: true });
+defB('lantern', { shape: SH.LANTERN, hard: 3.5, tool: PICK, lvl: 0, sound: 'metal', light: 15, cutout: true, needs: 'lantern' });
+defB('oak_door', { shape: SH.DOOR, hard: 3, tool: AXE, sound: 'wood', tex: { top: 'oak_door_top', side: 'oak_door_bottom' }, door: true, needs: 'door', cutout: true, fuel: 200 });
+defB('spruce_door', { shape: SH.DOOR, hard: 3, tool: AXE, sound: 'wood', tex: { top: 'spruce_door_top', side: 'spruce_door_bottom' }, door: true, needs: 'door', cutout: true, fuel: 200 });
+
+// ---- the Nether
+defB('netherrack', { hard: 0.4, tool: PICK, lvl: 0 });
+defB('nether_quartz_ore', { hard: 3, tool: PICK, lvl: 0, drop: 'quartz' });
+defB('nether_gold_ore', { hard: 3, tool: PICK, lvl: 0, drop: 'gold_nugget', dropMin: 2, dropMax: 6 });
+defB('ancient_debris', { hard: 30, tool: PICK, lvl: 3, tex: { top: 'ancient_debris_top', side: 'ancient_debris_side' } });
+defB('soul_sand', { hard: 0.5, tool: SHOVEL, sound: 'sand', slow: 0.4 });
+defB('soul_soil', { hard: 0.5, tool: SHOVEL, sound: 'sand' });
+defB('basalt', { hard: 1.25, tool: PICK, lvl: 0, tex: { top: 'basalt_top', side: 'basalt_side' }, log: true });
+defB('polished_basalt', { hard: 1.25, tool: PICK, lvl: 0, tex: { top: 'polished_basalt_top', side: 'polished_basalt_side' }, log: true });
+defB('blackstone', { hard: 1.5, tool: PICK, lvl: 0, tex: { top: 'blackstone_top', side: 'blackstone' } });
+defB('polished_blackstone', { hard: 2, tool: PICK, lvl: 0 });
+defB('magma_block', { hard: 0.5, tool: PICK, lvl: 0, light: 3, magma: true, tex: 'magma' });
+defB('nether_bricks', { hard: 2, tool: PICK, lvl: 0 });
+defB('red_nether_bricks', { hard: 2, tool: PICK, lvl: 0 });
+defB('nether_wart_block', { hard: 1, tool: HOE, sound: 'wood' });
+defB('warped_wart_block', { hard: 1, tool: HOE, sound: 'wood' });
+defB('crimson_nylium', { hard: 0.4, tool: PICK, lvl: 0, tex: { top: 'crimson_nylium', side: 'crimson_nylium_side', bottom: 'netherrack' }, drop: 'netherrack' });
+defB('warped_nylium', { hard: 0.4, tool: PICK, lvl: 0, tex: { top: 'warped_nylium', side: 'warped_nylium_side', bottom: 'netherrack' }, drop: 'netherrack' });
+defB('crimson_stem', { hard: 2, tool: AXE, sound: 'wood', tex: { top: 'crimson_stem_top', side: 'crimson_stem' }, log: true });
+defB('warped_stem', { hard: 2, tool: AXE, sound: 'wood', tex: { top: 'warped_stem_top', side: 'warped_stem' }, log: true });
+defB('crimson_planks', { hard: 2, tool: AXE, sound: 'wood' });
+defB('warped_planks', { hard: 2, tool: AXE, sound: 'wood' });
+defB('shroomlight', { hard: 1, tool: HOE, sound: 'wood', light: 15 });
+defB('crying_obsidian', { hard: 50, tool: PICK, lvl: 3, light: 10 });
+defB('quartz_block', { hard: 0.8, tool: PICK, lvl: 0, tex: { top: 'quartz_block_top', side: 'quartz_block_side' } });
+defB('netherite_block', { hard: 50, tool: PICK, lvl: 3, sound: 'metal' });
+defB('nether_portal', { shape: SH.PORTAL, hard: -1, light: 11, translucent: true, drop: null, portal: true, tex: 'nether_portal', needs: 'portal', sound: 'glass' });
+defB('crimson_fungus', { shape: SH.CROSS, hard: 0, sound: 'grass', needs: 'nylium' });
+defB('warped_fungus', { shape: SH.CROSS, hard: 0, sound: 'grass', needs: 'nylium' });
+defB('crimson_roots', { shape: SH.CROSS, hard: 0, sound: 'grass', needs: 'nylium', repl: true, wave: true });
+defB('warped_roots', { shape: SH.CROSS, hard: 0, sound: 'grass', needs: 'nylium', repl: true, wave: true });
+
+// ---- the End
+defB('end_stone', { hard: 3, tool: PICK, lvl: 0 });
+defB('end_stone_bricks', { hard: 3, tool: PICK, lvl: 0 });
+defB('purpur_block', { hard: 1.5, tool: PICK, lvl: 0 });
+defB('purpur_pillar', { hard: 1.5, tool: PICK, lvl: 0, tex: { top: 'purpur_pillar_top', side: 'purpur_pillar_side' }, log: true });
+defB('end_portal_frame', { shape: SH.FRAME, hard: -1, light: 1, tex: { top: 'end_portal_frame_top', side: 'end_portal_frame_side', bottom: 'end_stone' }, display: 'End Portal Frame' });
+defB('end_portal', { shape: SH.EPORTAL, hard: -1, light: 15, drop: null, portal: true, tex: 'end_portal' });
+defB('void_reed', { shape: SH.CROSS, hard: 0, sound: 'grass', needs: 'endstone', wave: true });
+defB('sentinel_core', { hard: 3, tool: PICK, lvl: 0, light: 12, sound: 'glass' });
+
+// ---- stairs and fences (defined after their base blocks)
+for (const [st, base] of [['oak_stairs', 'oak_planks'], ['spruce_stairs', 'spruce_planks'], ['birch_stairs', 'birch_planks'], ['cherry_stairs', 'cherry_planks'],
+  ['cobblestone_stairs', 'cobblestone'], ['stone_brick_stairs', 'stone_bricks'], ['brick_stairs', 'bricks'], ['sandstone_stairs', 'sandstone'],
+  ['nether_brick_stairs', 'nether_bricks'], ['blackstone_stairs', 'blackstone'], ['quartz_stairs', 'quartz_block'], ['purpur_stairs', 'purpur_block']]) {
+  const b = BLK[B[base.toUpperCase()]];
+  defB(st, { shape: SH.STAIRS, hard: b.hard, tool: b.tool, lvl: b.lvl, sound: b.sound, tex: b.tex, stairsOf: b.id, fuel: b.fuel ? 300 : 0 });
+}
+defB('oak_fence', { shape: SH.FENCE, hard: 2, tool: AXE, sound: 'wood', tex: 'oak_planks', fence: 'wood', fuel: 300 });
+defB('spruce_fence', { shape: SH.FENCE, hard: 2, tool: AXE, sound: 'wood', tex: 'spruce_planks', fence: 'wood', fuel: 300 });
+defB('nether_brick_fence', { shape: SH.FENCE, hard: 2, tool: PICK, lvl: 0, tex: 'nether_bricks', fence: 'nether' });
+
 for (let id = 0; id < BLOCK_NAMES.length; id++) {
   const d = BLK[id];
   if (!d) throw new Error('block without definition: ' + BLOCK_NAMES[id]);
@@ -887,7 +1360,7 @@ for (let id = 0; id < BLOCK_NAMES.length; id++) {
   OPAQUE[id] = cube && !d.cutout && !d.translucent ? 1 : 0;
   OPACITY[id] = OPAQUE[id] ? 15 : (d.leaves || d.liquid || d.translucent || d.shape === SH.CACTUS ? 1 : 0);
   EMIT[id] = d.light || 0;
-  SOLID[id] = (cube || d.shape === SH.CACTUS || d.shape === SH.SLAB) ? 1 : 0;
+  SOLID[id] = (cube || [SH.CACTUS, SH.SLAB, SH.STAIRS, SH.FENCE, SH.DOOR, SH.PANE, SH.LANTERN, SH.FRAME].includes(d.shape)) ? 1 : 0;
   CULLSAME[id] = d.cullSame || d.liquid ? 1 : 0;
   AOOCC[id] = OPAQUE[id] || d.leaves ? 1 : 0;
   TRANSL[id] = d.translucent ? 1 : 0;
@@ -895,7 +1368,7 @@ for (let id = 0; id < BLOCK_NAMES.length; id++) {
   TINT[id] = d.tint || 0;
   WAVE[id] = d.wave ? 1 : 0;
   GRAVITY[id] = d.gravity ? 1 : 0;
-  TARGET[id] = id !== 0 && !d.liquid ? 1 : 0;
+  TARGET[id] = id !== 0 && !d.liquid && !d.portal ? 1 : 0;
 }
 TINT[B.WATER] = 5;
 
@@ -904,7 +1377,7 @@ const ITEMS = [];       // index = item id (0..255 blocks, 256+ items)
 const ITEM_BY_NAME = {};
 for (let id = 1; id < BLOCK_NAMES.length; id++) {
   const d = BLK[id];
-  if (id === B.WATER || id === B.LAVA || id === B.LIT_FURNACE || id === B.WHEAT) continue;
+  if (id === B.WATER || id === B.LAVA || id === B.LIT_FURNACE || id === B.WHEAT || id === B.NETHER_PORTAL || id === B.END_PORTAL) continue;
   const it = { id, name: d.name, display: d.display, stack: 64, block: id, fuel: d.fuel || 0 };
   ITEMS[id] = it; ITEM_BY_NAME[d.name] = it;
 }
@@ -930,8 +1403,12 @@ defI('mutton', { food: [2, 1.2], display: 'Raw Mutton' }); defI('cooked_mutton',
 defI('rotten_flesh', { food: [4, 0.8] });
 defI('wheat_seeds', { place: 'wheat' }); defI('wheat'); defI('bread', { food: [5, 6] }); defI('string');
 defI('bucket', { stack: 16 }); defI('water_bucket', { stack: 1 }); defI('lava_bucket', { stack: 1, fuel: 20000 });
-const TIERS = [['wooden', 0, 2, 59, 0], ['stone', 1, 4, 131, 1], ['iron', 2, 6, 250, 2], ['golden', 0, 12, 32, 0], ['diamond', 3, 8, 1561, 3]];
-const TOOL_DMG = { sword: [4, 5, 6, 4, 7], axe: [7, 9, 9, 7, 9], pickaxe: [2, 3, 4, 2, 5], shovel: [2.5, 3.5, 4.5, 2.5, 5.5], hoe: [1, 1, 1, 1, 1] };
+defI('quartz', { display: 'Nether Quartz' }); defI('nether_brick'); defI('gold_nugget'); defI('netherite_scrap'); defI('netherite_ingot');
+defI('amethyst_shard'); defI('melon_slice', { food: [2, 1.2] });
+defI('ember_dust'); defI('void_pearl', { stack: 16 }); defI('eye_of_the_void', { stack: 16, display: 'Eye of the Void' });
+defI('bow', { stack: 1, dur: 384, fuel: 300 }); defI('arrow');
+const TIERS = [['wooden', 0, 2, 59, 0], ['stone', 1, 4, 131, 1], ['iron', 2, 6, 250, 2], ['golden', 0, 12, 32, 0], ['diamond', 3, 8, 1561, 3], ['netherite', 4, 9, 2031, 4]];
+const TOOL_DMG = { sword: [4, 5, 6, 4, 7, 8], axe: [7, 9, 9, 7, 9, 10], pickaxe: [2, 3, 4, 2, 5, 6], shovel: [2.5, 3.5, 4.5, 2.5, 5.5, 6.5], hoe: [1, 1, 1, 1, 1, 1] };
 for (let t = 0; t < TIERS.length; t++) {
   const [tier, lvl, speed, dur] = TIERS[t];
   for (const type of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) {
@@ -945,7 +1422,7 @@ function maxStack(id) { return ITEMS[id] ? ITEMS[id].stack : 64; }
 
 /* ---------------- crafting ---------------- */
 const TAGS = {
-  planks: [B.OAK_PLANKS, B.BIRCH_PLANKS, B.SPRUCE_PLANKS, B.CHERRY_PLANKS],
+  planks: [B.OAK_PLANKS, B.BIRCH_PLANKS, B.SPRUCE_PLANKS, B.CHERRY_PLANKS, B.CRIMSON_PLANKS, B.WARPED_PLANKS],
   logs: [B.OAK_LOG, B.BIRCH_LOG, B.SPRUCE_LOG, B.CHERRY_LOG],
   stone_tool: [B.COBBLESTONE, B.COBBLED_DEEPSLATE],
   coals: [I.COAL, I.CHARCOAL],
@@ -981,7 +1458,9 @@ for (const [tier, mat] of TOOL_MATS) {
 shaped('sandstone', 1, ['##', '##'], { '#': 'sand' });
 shaped('bricks', 1, ['##', '##'], { '#': 'brick' });
 shaped('stone_bricks', 4, ['##', '##'], { '#': 'stone' });
-shaped('deepslate_bricks', 4, ['##', '##'], { '#': 'cobbled_deepslate' });
+shaped('polished_deepslate', 4, ['##', '##'], { '#': 'cobbled_deepslate' });
+shaped('deepslate_bricks', 4, ['##', '##'], { '#': 'polished_deepslate' });
+shaped('deepslate_tiles', 4, ['##', '##'], { '#': 'deepslate_bricks' });
 shaped('mud_bricks', 4, ['##', '##'], { '#': 'mud' });
 shaped('snow_block', 1, ['##', '##'], { '#': 'snowball' });
 shaped('clay', 1, ['##', '##'], { '#': 'clay_ball' });
@@ -1003,6 +1482,42 @@ for (const [blk, it] of [['iron_block', 'iron_ingot'], ['gold_block', 'gold_ingo
   shaped(blk, 1, ['###', '###', '###'], { '#': it });
   shapeless(it, 9, [blk]);
 }
+// new blocks
+for (const c in WOOL_COLORS) shapeless(c + '_concrete', 4, [c + '_wool', 'sand', 'sand', 'gravel', 'gravel']);
+shaped('cut_copper', 4, ['##', '##'], { '#': 'copper_block' });
+for (const s of ['granite', 'diorite', 'andesite']) shaped('polished_' + s, 4, ['##', '##'], { '#': s });
+shaped('chiseled_stone_bricks', 1, ['#', '#'], { '#': 'stone_brick_slab' });
+shaped('amethyst_block', 1, ['##', '##'], { '#': 'amethyst_shard' });
+shapeless('jack_o_lantern', 1, ['pumpkin', 'torch']);
+shaped('melon', 1, ['###', '###', '###'], { '#': 'melon_slice' });
+shaped('hay_block', 1, ['###', '###', '###'], { '#': 'wheat' }); shapeless('wheat', 9, ['hay_block']);
+shaped('coarse_dirt', 4, ['DG', 'GD'], { D: 'dirt', G: 'gravel' });
+shaped('glass_pane', 16, ['###', '###'], { '#': 'glass' });
+shaped('iron_bars', 16, ['###', '###'], { '#': 'iron_ingot' });
+shaped('lantern', 1, [' I ', 'ITI', ' I '], { I: 'iron_ingot', T: 'torch' });
+shaped('oak_door', 3, ['##', '##', '##'], { '#': 'oak_planks' });
+shaped('spruce_door', 3, ['##', '##', '##'], { '#': 'spruce_planks' });
+shaped('oak_fence', 3, ['PSP', 'PSP'], { P: 'oak_planks', S: 'stick' });
+shaped('spruce_fence', 3, ['PSP', 'PSP'], { P: 'spruce_planks', S: 'stick' });
+shaped('nether_brick_fence', 6, ['NBN', 'NBN'], { N: 'nether_bricks', B: 'nether_brick' });
+for (const id of BLOCK_NAMES.map((n, i) => i).filter(i => BLK[i].stairsOf !== undefined)) RECIPES.push({ type: 'shaped', out: id, count: 4, pattern: ['#  ', '## ', '###'], key: { '#': [BLK[id].stairsOf] }, w: 3, h: 3 });
+// nether & end
+shaped('quartz_block', 1, ['##', '##'], { '#': 'quartz' });
+shaped('nether_bricks', 1, ['##', '##'], { '#': 'nether_brick' });
+shaped('red_nether_bricks', 1, ['NW', 'WN'], { N: 'nether_brick', W: 'nether_wart_block' });
+shapeless('crimson_planks', 4, ['crimson_stem']); shapeless('warped_planks', 4, ['warped_stem']);
+shaped('polished_basalt', 4, ['##', '##'], { '#': 'basalt' });
+shaped('polished_blackstone', 4, ['##', '##'], { '#': 'blackstone' });
+shaped('gold_ingot', 1, ['###', '###', '###'], { '#': 'gold_nugget' });
+shapeless('netherite_ingot', 1, ['netherite_scrap', 'netherite_scrap', 'netherite_scrap', 'netherite_scrap', 'gold_ingot', 'gold_ingot', 'gold_ingot', 'gold_ingot']);
+shaped('netherite_block', 1, ['###', '###', '###'], { '#': 'netherite_ingot' }); shapeless('netherite_ingot', 9, ['netherite_block']);
+for (const t of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) shapeless('netherite_' + t, 1, ['diamond_' + t, 'netherite_ingot']);
+shaped('end_stone_bricks', 4, ['##', '##'], { '#': 'end_stone' });
+shaped('purpur_block', 4, ['##', '##'], { '#': 'void_reed' });
+shaped('purpur_pillar', 2, ['#', '#'], { '#': 'purpur_block' });
+shapeless('eye_of_the_void', 1, ['void_pearl', 'ember_dust']);
+shaped('bow', 1, [' #S', '# S', ' #S'], { '#': 'stick', S: 'string' });
+shaped('arrow', 4, ['F', '#', 'E'], { F: 'flint', '#': 'stick', E: 'feather' });
 // furnace
 const SMELT = {};
 function smelt(a, b) { SMELT[typeof a === 'string' ? itemOf(a) : a] = itemOf(b); }
@@ -1012,6 +1527,8 @@ smelt('sand', 'glass'); smelt('red_sand', 'glass'); smelt('cobblestone', 'stone'
 smelt('clay_ball', 'brick'); smelt('clay', 'terracotta'); smelt('porkchop', 'cooked_porkchop'); smelt('beef', 'cooked_beef');
 smelt('chicken', 'cooked_chicken'); smelt('mutton', 'cooked_mutton'); smelt('cactus', 'green_wool');
 for (const l of TAGS.logs) SMELT[l] = I.CHARCOAL;
+smelt('netherrack', 'nether_brick'); smelt('ancient_debris', 'netherite_scrap'); smelt('nether_quartz_ore', 'quartz'); smelt('nether_gold_ore', 'gold_ingot');
+smelt('stone_bricks', 'cracked_stone_bricks'); smelt('sandstone', 'smooth_sandstone'); smelt('basalt', 'smooth_basalt');
 
 function matchRecipe(grid, gw) {
   // grid: array of item ids (0 = empty), gw x gw
@@ -1543,6 +2060,150 @@ function genTextures() {
   T('emerald_block', metalFn([44, 204, 90], 'gem')); T('copper_block', metalFn([192, 108, 80], 'shine')); T('coal_block', metalFn([24, 24, 24], 'mosaic'));
   T('lapis_block', metalFn([32, 66, 146], 'mosaic')); T('redstone_block', metalFn([172, 26, 10], 'mosaic'));
   T('amethyst_block', (d, r) => fillF(d, (x, y) => { const s = (x + 2 * y) % 7, t = (2 * x - y + 32) % 6; let f = 0.9 + r() * 0.1; if (s === 0) f *= 1.25; if (t === 0) f *= 0.82; return mul([136, 98, 192], f); }));
+  // ---------- more building blocks ----------
+  for (const c in WOOL_COLORS) T(c + '_concrete', (d, r) => { const base = mul(WOOL_COLORS[c], 0.86); fillF(d, () => mul(base, 0.96 + r() * 0.06)); });
+  const copperFn = k => (d, r) => {
+    const n = tn(r, 4);
+    fillF(d, (x, y) => {
+      const verd = n[y * 16 + x] + r() * 0.15 < k;
+      let f = 0.92 + r() * 0.08;
+      if (x === 0 || y === 0) f *= 1.15; else if (x === 15 || y === 15) f *= 0.75;
+      return mul(verd ? lerpC([96, 166, 134], [70, 140, 120], r()) : [192, 108, 80], f);
+    });
+  };
+  T('exposed_copper', copperFn(0.3)); T('weathered_copper', copperFn(0.62)); T('oxidized_copper', copperFn(1.3));
+  T('cut_copper', (d, r) => fillF(d, (x, y) => { const lx = x % 8, ly = y % 8; let f = 0.92 + r() * 0.06; if (lx === 0 || ly === 0) f = 1.12; else if (lx === 7 || ly === 7) f = 0.72; return mul([196, 112, 82], f); }));
+  const polishedFn = (base, speck) => (d, r) => fillF(d, (x, y) => {
+    let f = 0.95 + r() * 0.06;
+    if (x === 0 || y === 0) f *= 1.12; else if (x === 15 || y === 15) f *= 0.78;
+    if (speck && r() < 0.06) return mul(speck, 0.95);
+    return mul(base, f);
+  });
+  T('polished_granite', polishedFn([156, 108, 90], [122, 82, 68])); T('polished_diorite', polishedFn([198, 198, 200], [150, 150, 152])); T('polished_andesite', polishedFn([132, 134, 134], [108, 108, 110]));
+  T('cracked_stone_bricks', (d, r) => {
+    d.set(copyOf('stone_bricks'));
+    for (let k = 0; k < 4; k++) { let x = Math.floor(r() * 16), y = Math.floor(r() * 16); for (let s = 0; s < 7; s++) { sp(d, x, y, [70, 70, 70]); x += Math.round(r() * 2 - 1); y += r() < 0.6 ? 1 : 0; } }
+  });
+  T('chiseled_stone_bricks', (d, r) => fillF(d, (x, y) => {
+    const e = Math.min(x, y, 15 - x, 15 - y);
+    let f = 0.92 + r() * 0.08;
+    if (e === 0) f *= 0.7; else if (e === 1) f *= 1.12; else if (e === 3 || e === 6) f *= 0.78; else if (e === 4) f *= 1.08;
+    return mul([124, 124, 124], f);
+  }));
+  T('smooth_sandstone', (d, r) => fillF(d, () => mul([220, 207, 160], 0.96 + r() * 0.05)));
+  T('polished_deepslate', polishedFn([72, 72, 78]));
+  T('deepslate_tiles', (d, r) => fillF(d, (x, y) => { const lx = x % 4, ly = y % 4; let f = 0.9 + r() * 0.12; if (lx === 3 || ly === 3) f = 0.55; else if (lx === 0 || ly === 0) f *= 1.1; return mul([66, 66, 72], f); }));
+  T('budding_amethyst', (d, r) => { d.set(copyOf('amethyst_block')); for (let k = 0; k < 10; k++) { const x = Math.floor(r() * 15), y = Math.floor(r() * 15); sp(d, x, y, [60, 30, 90]); sp(d, x + 1, y, [80, 40, 110]); sp(d, x, y + 1, [230, 200, 255]); } });
+  T('amethyst_cluster', (d) => {
+    clear(d);
+    for (const [bx, h, lean] of [[8, 13, 0], [4, 8, -0.35], [12, 9, 0.35], [6, 6, -0.1], [10, 7, 0.15]]) for (let k = 0; k < h; k++) {
+      const x = Math.round(bx + lean * k), w = Math.max(0, Math.round((h - k) / h * 1.5));
+      for (let dx = -w; dx <= w; dx++) sp(d, x + dx, 15 - k, dx < 0 ? [206, 166, 244] : dx > 0 ? [128, 80, 184] : [170, 120, 220]);
+    }
+  });
+  T('smooth_basalt', (d, r) => { const n = tn(r, 4); fillF(d, (x, y) => mul([72, 72, 78], 0.88 + n[y * 16 + x] * 0.12 + r() * 0.05)); });
+  T('bone_block_side', (d, r) => fillF(d, (x, y) => { let f = 0.92 + r() * 0.07; if (x % 5 === 2) f *= 0.85; if (y === 0 || y === 15) f *= 0.9; return mul([230, 226, 204], f); }));
+  T('bone_block_top', (d, r) => fillF(d, (x, y) => { const e = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); let f = 0.92 + r() * 0.07; if (e < 2) f *= 0.75; else if (e > 6.5) f *= 0.88; else if (Math.floor(e) === 4) f *= 0.85; return mul([232, 228, 206], f); }));
+  T('jack_o_lantern', (d) => {
+    d.set(copyOf('pumpkin_side'));
+    const glow = (x, y) => sp(d, x, y, (x + y) % 3 === 0 ? [255, 236, 120] : [255, 178, 40]);
+    for (const [ex, flip] of [[3, 0], [10, 1]]) for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) glow(ex + (flip ? 2 - j : j), 4 + k);
+    for (let x = 3; x <= 12; x++) { glow(x, 10); if (x % 3 !== 0) glow(x, 11); if (x % 3 === 1) glow(x, 9); }
+  });
+  T('melon_side', (d, r) => fillF(d, (x, y) => mul((x % 4 < 2) ? [104, 156, 44] : [72, 116, 30], 0.88 + r() * 0.14)));
+  T('melon_top', (d, r) => fillF(d, (x, y) => { const a = Math.atan2(y - 7.5, x - 7.5), dd = Math.hypot(x - 7.5, y - 7.5); if (dd < 1.5) return [80, 110, 40]; return mul(Math.floor((a + Math.PI) / (Math.PI / 6)) % 2 ? [110, 160, 50] : [80, 124, 34], 0.9 + r() * 0.12); }));
+  T('hay_block_side', (d, r) => { const n = tn(r, 8, 1); fillF(d, (x, y) => { if (y === 3 || y === 4 || y === 11 || y === 12) return mul([150, 104, 40], 0.9 + r() * 0.12); return mul([206, 174, 72], 0.8 + n[y * 16 + x] * 0.3 + r() * 0.06); }); });
+  T('hay_block_top', (d, r) => fillF(d, () => { const q = r(); return mul(q < 0.25 ? [150, 110, 44] : [214, 182, 80], 0.85 + r() * 0.2); }));
+  T('coarse_dirt', (d, r) => { d.set(copyOf('dirt')); for (let k = 0; k < 30; k++) sp(d, Math.floor(r() * 16), Math.floor(r() * 16), mul([120, 112, 104], 0.8 + r() * 0.4)); });
+  T('podzol_top', (d, r) => fillF(d, () => { const q = r(); return q < 0.2 ? mul([150, 90, 40], 0.9 + r() * 0.2) : q < 0.3 ? [60, 40, 20] : mul([104, 72, 38], 0.85 + r() * 0.2); }));
+  T('podzol_side', (d, r) => { d.set(copyOf('dirt')); for (let x = 0; x < 16; x++) { const len = 2 + Math.floor(r() * 3); for (let y = 0; y < len; y++) sp(d, x, y, mul([110, 76, 40], 0.85 + r() * 0.25)); } });
+  T('red_mushroom', (d, r) => { clear(d); for (let y = 10; y < 16; y++) { sp(d, 7, y, [230, 222, 206]); sp(d, 8, y, [200, 190, 172]); } fillEl(d, 7.5, 8, 4.5, 3.2, (x, y) => ((x * 3 + y * 5) % 7 === 0) ? [250, 240, 230] : mul([210, 30, 30], 0.9 + r() * 0.15)); });
+  T('brown_mushroom', (d, r) => { clear(d); for (let y = 10; y < 16; y++) { sp(d, 7, y, [220, 210, 190]); sp(d, 8, y, [190, 178, 160]); } fillEl(d, 7.5, 9, 5.5, 2.2, () => mul([150, 110, 80], 0.85 + r() * 0.2)); });
+  T('cobweb', (d) => {
+    clear(d);
+    for (let a = 0; a < 8; a++) dline(d, 8, 8, Math.round(8 + Math.cos(a * Math.PI / 4) * 8), Math.round(8 + Math.sin(a * Math.PI / 4) * 8), [235, 235, 240, 200]);
+    for (const rr of [3, 5.5]) for (let a = 0; a < 32; a++) sp(d, Math.round(8 + Math.cos(a / 32 * Math.PI * 2) * rr), Math.round(8 + Math.sin(a / 32 * Math.PI * 2) * rr), [220, 220, 228], 180);
+  });
+  T('iron_bars', (d, r) => fillF(d, (x, y) => { if (y === 0 || y === 15) return x % 4 === 1 || x % 4 === 2 ? [150, 152, 156] : [0, 0, 0, 0]; if (x % 4 === 1) return [176, 178, 182]; if (x % 4 === 2) return [112, 114, 118]; return [0, 0, 0, 0]; }));
+  T('lantern', (d, r) => fillF(d, (x, y) => {
+    // side faces sample x/z 5..10 and v 9..15 (body) / 7..8 (cap); the top samples 5..10 x 5..10
+    const iron = [58, 58, 66];
+    if (y >= 9) { if (x <= 5 || x >= 10 || y === 9 || y === 15) return mul(iron, 0.9 + r() * 0.2); return (x + y) % 3 ? [255, 214, 110] : [255, 244, 190]; }
+    if (y >= 7) return mul(iron, 1.1);
+    if (x >= 5 && x <= 10 && y >= 2 && y <= 6) return (x === 7 || x === 8) && (y === 4 || y === 5) ? [30, 30, 34] : mul(iron, 0.9 + r() * 0.2);
+    return mul(iron, 0.8);
+  }));
+  const doorFn = (base, top) => (d, r) => fillF(d, (x, y) => {
+    if (x === 0 || x === 15 || (top ? y === 0 : y === 15)) return mul(base, 0.7);
+    if (top && x > 2 && x < 13 && y > 2 && y < 13 && !(x === 7 || x === 8 || y === 7 || y === 8)) return [0, 0, 0, 0];
+    let f = 0.88 + r() * 0.1 + (Math.floor(x / 4) % 2) * 0.06;
+    if (x % 4 === 0) f *= 0.82;
+    if (!top && (y === 4 || y === 11)) f *= 0.8;
+    if (!top && y === 8 && x === 12) return [60, 60, 66];
+    return mul(base, f);
+  });
+  T('oak_door_top', doorFn([168, 134, 82], true)); T('oak_door_bottom', doorFn([168, 134, 82], false));
+  T('spruce_door_top', doorFn([106, 78, 46], true)); T('spruce_door_bottom', doorFn([106, 78, 46], false));
+  // ---------- the Nether ----------
+  T('netherrack', (d, r) => { const n = tn(r, 4), n2 = tn(r, 8); fillF(d, (x, y) => { const i = y * 16 + x, q = r(); let f = 0.76 + n[i] * 0.25 + n2[i] * 0.15 + q * 0.1; if (q < 0.1) f *= 0.7; return mul([112, 44, 44], f); }); });
+  T('nether_quartz_ore', oreFn('netherrack', [[236, 230, 222], [255, 255, 250], [196, 186, 176]], 7));
+  T('nether_gold_ore', oreFn('netherrack', [[250, 210, 60], [255, 245, 150], [190, 140, 30]], 8));
+  T('ancient_debris_side', (d, r) => fillF(d, (x, y) => { const ring = Math.floor((Math.abs(y - 8) + Math.sin(x * 0.8) * 1.2) / 2) % 2; return mul(ring ? [98, 72, 64] : [76, 54, 48], 0.85 + r() * 0.2); }));
+  T('ancient_debris_top', (d, r) => fillF(d, (x, y) => { const dd = Math.hypot(x - 7.5, y - 7.5); return mul(Math.floor(dd / 1.6) % 2 ? [102, 76, 68] : [70, 50, 44], 0.85 + r() * 0.2); }));
+  T('soul_sand', (d, r) => { const v = voronoi(r, 9); fillF(d, (x, y) => { let f = 0.85 + r() * 0.15; if (v.d1[y * 16 + x] < 1.5) f *= 0.55; return mul([90, 68, 54], f); }); });
+  T('soul_soil', (d, r) => { const n = tn(r, 8); fillF(d, (x, y) => mul([78, 60, 48], 0.8 + n[y * 16 + x] * 0.3 + r() * 0.1)); });
+  T('basalt_side', (d, r) => { const n = tn(r, 8, 1); fillF(d, (x, y) => mul([84, 84, 90], 0.75 + n[y * 16 + x] * 0.35 + r() * 0.08)); });
+  T('basalt_top', (d, r) => fillF(d, (x, y) => { const e = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); let f = 0.85 + r() * 0.12; if (e > 6.5) f *= 0.8; else if (Math.floor(e) % 3 === 0) f *= 0.9; return mul([88, 88, 94], f); }));
+  T('polished_basalt_side', (d, r) => fillF(d, (x) => { let f = 0.92 + r() * 0.06; if (x % 5 === 0) f *= 0.82; return mul([96, 96, 102], f); }));
+  T('polished_basalt_top', (d, r) => fillF(d, (x, y) => { const e = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); let f = 0.92 + r() * 0.06; if (e > 6.5) f *= 0.75; else if (e > 5.5) f *= 1.1; return mul([98, 98, 106], f); }));
+  T('blackstone', (d, r) => { const n = tn(r, 4); fillF(d, (x, y) => { const q = r(); let f = 0.75 + n[y * 16 + x] * 0.35 + q * 0.12; if (q > 0.95) f *= 1.4; return mul([46, 40, 46], f); }); });
+  T('blackstone_top', (d, r) => { const v = voronoi(r, 6); fillF(d, (x, y) => { const i = y * 16 + x; let f = 0.85 + r() * 0.12; if (v.d2[i] - v.d1[i] < 0.8) f *= 0.7; return mul([50, 44, 50], f); }); });
+  T('polished_blackstone', polishedFn([56, 50, 58]));
+  T('magma', (d, r) => { const v = voronoi(r, 10); fillF(d, (x, y) => { const i = y * 16 + x; if (v.d2[i] - v.d1[i] < 0.9) return lerpC([255, 172, 40], [230, 90, 20], r()); return mul([76, 34, 24], 0.8 + r() * 0.3); }); });
+  T('nether_bricks', brickFn([52, 25, 31], [26, 12, 16], 8, 4, true));
+  T('red_nether_bricks', brickFn([100, 15, 19], [50, 6, 8], 8, 4, true));
+  T('nether_wart_block', (d, r) => { const n = tn(r, 8); fillF(d, (x, y) => { const q = r(); if (q > 0.93) return [190, 50, 40]; return mul([122, 9, 11], 0.75 + n[y * 16 + x] * 0.3 + q * 0.12); }); });
+  T('warped_wart_block', (d, r) => { const n = tn(r, 8); fillF(d, (x, y) => { const q = r(); if (q > 0.93) return [60, 200, 190]; return mul([24, 124, 124], 0.75 + n[y * 16 + x] * 0.3 + q * 0.12); }); });
+  const nyliumTop = c => (d, r) => fillF(d, () => mul(c, 0.75 + r() * 0.4));
+  const nyliumSide = c => (d, r) => { d.set(copyOf('netherrack')); for (let x = 0; x < 16; x++) { const len = 3 + Math.floor(r() * 3); for (let y = 0; y < len; y++) sp(d, x, y, mul(c, 0.75 + r() * 0.4)); } };
+  T('crimson_nylium', nyliumTop([152, 30, 34])); T('crimson_nylium_side', nyliumSide([152, 30, 34]));
+  T('warped_nylium', nyliumTop([40, 132, 112])); T('warped_nylium_side', nyliumSide([40, 132, 112]));
+  T('crimson_stem', barkFn([112, 32, 48])); T('crimson_stem_top', ringFn([128, 54, 72], [98, 38, 56], [112, 32, 48]));
+  T('warped_stem', barkFn([46, 98, 106])); T('warped_stem_top', ringFn([62, 132, 126], [46, 102, 100], [46, 98, 106]));
+  T('crimson_planks', planksFn([114, 54, 78])); T('warped_planks', planksFn([48, 114, 108]));
+  T('shroomlight', (d, r) => { const n = tn(r, 4); fillF(d, (x, y) => { const q = r(), v = n[y * 16 + x]; if (v > 0.7 && q > 0.5) return [255, 232, 164]; return lerpC([240, 140, 60], [255, 192, 92], v * 0.6 + q * 0.4); }); });
+  T('crying_obsidian', (d, r) => { d.set(copyOf('obsidian')); for (let k = 0; k < 14; k++) { const x = Math.floor(r() * 16), y = Math.floor(r() * 15); sp(d, x, y, [152, 42, 240]); if (r() < 0.5) sp(d, x, y + 1, [110, 20, 200]); } });
+  T('quartz_block_side', (d, r) => fillF(d, (x, y) => mul([236, 230, 222], (0.95 + r() * 0.04) * (y % 8 === 0 ? 0.96 : 1))));
+  T('quartz_block_top', (d, r) => fillF(d, (x, y) => mul([238, 232, 224], (0.96 + r() * 0.04) * (Math.min(x, y, 15 - x, 15 - y) === 0 ? 0.88 : 1))));
+  T('netherite_block', metalFn([72, 66, 72], 'grain'));
+  for (let f = 0; f < 8; f++) T(f === 0 ? 'nether_portal' : 'nether_portal_' + f, (d) => {
+    const ph = f / 8 * Math.PI * 2, P2 = Math.PI * 2 / 16;
+    fillF(d, (x, y) => {
+      const v = Math.sin(P2 * (2 * x + y) + ph) * 0.35 + Math.sin(P2 * (3 * y - x) - ph) * 0.3 + Math.sin(P2 * (x + y) + ph * 2) * 0.2;
+      const k = Math.max(0, Math.min(1, (v + 0.85) / 1.7));
+      const c = lerpC([64, 12, 156], [206, 128, 255], k);
+      return [c[0], c[1], c[2], 180 + k * 60];
+    });
+  });
+  const fungus = (cap, stem) => (d, r) => { clear(d); for (let y = 8; y < 16; y++) sp(d, 7 + (y > 12 ? 1 : 0), y, stem); fillEl(d, 7.5, 6, 5, 3, () => mul(cap, 0.8 + r() * 0.35)); for (let k = 0; k < 4; k++) sp(d, 4 + Math.floor(r() * 8), 4 + Math.floor(r() * 3), mul(cap, 1.4)); };
+  T('crimson_fungus', fungus([172, 30, 30], [204, 122, 82])); T('warped_fungus', fungus([30, 152, 132], [222, 122, 82]));
+  const roots = c => (d, r) => { clear(d); for (let k = 0; k < 7; k++) { let x = 2 + r() * 12; const h = 5 + r() * 9, lean = (r() - 0.5) * 0.6; for (let y = 15; y > 15 - h; y--) { sp(d, Math.round(x), y, mul(c, 0.75 + r() * 0.4)); x += lean; } } };
+  T('crimson_roots', roots([162, 30, 40])); T('warped_roots', roots([30, 162, 142]));
+  // ---------- the End ----------
+  T('end_stone', (d, r) => { const n = tn(r, 4); fillF(d, (x, y) => { const q = r(); let f = 0.88 + n[y * 16 + x] * 0.15 + q * 0.06; if (q < 0.08) f *= 0.8; return mul([222, 224, 162], f); }); });
+  T('end_stone_bricks', brickFn([226, 228, 168], [180, 180, 128], 8, 4, true));
+  T('purpur_block', (d, r) => fillF(d, (x, y) => { const lx = x % 8, ly = y % 8; let f = 0.92 + r() * 0.08; if (lx === 0 || ly === 0) f *= 1.1; else if (lx === 7 || ly === 7) f *= 0.78; return mul([170, 126, 170], f); }));
+  T('purpur_pillar_side', (d, r) => fillF(d, (x) => { let f = 0.92 + r() * 0.08; if (x % 4 === 0) f *= 0.8; else if (x % 4 === 1) f *= 1.08; return mul([172, 128, 172], f); }));
+  T('purpur_pillar_top', (d, r) => fillF(d, (x, y) => { const e = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); let f = 0.92 + r() * 0.08; if (e > 6.5) f *= 0.78; else if (e > 3.5 && e < 4.5) f *= 0.85; return mul([174, 130, 174], f); }));
+  T('end_portal_frame_top', (d, r) => fillF(d, (x, y) => { const dd = Math.hypot(x - 7.5, y - 7.5); if (dd < 4.2) return mul([34, 60, 52], 0.8 + r() * 0.2); if (dd < 5.2) return [60, 96, 80]; return mul([84, 120, 98], (Math.min(x, y, 15 - x, 15 - y) === 0 ? 0.75 : 0.92) + r() * 0.08); }));
+  T('end_portal_frame_side', (d, r) => fillF(d, (x, y) => { if (y < 6) return mul([84, 120, 98], 0.9 + r() * 0.1); if (y === 6) return [50, 80, 66]; return mul([214, 216, 156], 0.85 + r() * 0.12); }));
+  T('end_portal_frame_eye', (d) => fillF(d, (x, y) => { const dd = Math.hypot(x - 7.5, y - 7.5); if (dd < 2.2) return [10, 30, 24]; if (dd < 5.5) return lerpC([60, 200, 150], [180, 240, 120], (5.5 - dd) / 3.3); return [40, 110, 90]; }));
+  for (let f = 0; f < 4; f++) T(f === 0 ? 'end_portal' : 'end_portal_' + f, (d) => {
+    const rr = mulberry32(900 + f);
+    fillF(d, () => { const q = rr(); return q < 0.03 ? [140, 220, 210] : q < 0.06 ? [90, 120, 200] : q < 0.08 ? [220, 255, 240] : [6 + q * 10, 10 + q * 12, 16 + q * 14]; });
+  });
+  T('void_reed', (d) => { clear(d); for (const bx of [5, 10]) { for (let y = 2; y < 16; y++) sp(d, bx, y, (y % 4 === 0) ? [120, 70, 150] : [170, 120, 200]); sp(d, bx - 1, 3, [220, 180, 240]); sp(d, bx + 1, 3, [220, 180, 240]); sp(d, bx, 1, [240, 210, 255]); } });
+  T('sentinel_core', (d, r) => fillF(d, (x, y) => { const e = Math.abs(x - 7.5) + Math.abs(y - 7.5); if (e < 4) return [240, 200, 255]; if (e < 7) return mul([170, 90, 230], 0.9 + r() * 0.1); return mul([60, 30, 90], 0.9 + r() * 0.15); }));
   // ---------- break cracks ----------
   const crackPx = [];
   {
@@ -1569,7 +2230,7 @@ function genTextures() {
   const S2 = Math.SQRT1_2;
   const rot = (x, y) => { const px = x + 0.5 - 2.5, py = y + 0.5 - 13.5; return [(px - py) * S2, (-px - py) * S2]; }; // [v along handle, u to upper-left]
   const handle = (d, from, to) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const [v, u] = rot(x, y); if (Math.abs(u) < 0.5 && v >= from && v <= to) sp(d, x, y, v < (from + to) / 2 ? [104, 76, 40] : [140, 104, 58]); } };
-  const TIER_COL = { wooden: [160, 122, 70], stone: [136, 136, 136], iron: [222, 222, 222], golden: [250, 222, 66], diamond: [84, 232, 222] };
+  const TIER_COL = { wooden: [160, 122, 70], stone: [136, 136, 136], iron: [222, 222, 222], golden: [250, 222, 66], diamond: [84, 232, 222], netherite: [80, 72, 82] };
   for (const tier in TIER_COL) {
     const c = TIER_COL[tier];
     IT(tier + '_pickaxe', (d) => {
@@ -1658,6 +2319,35 @@ function genTextures() {
   IT('wheat', (d, r) => { for (let k = 0; k < 4; k++) { const ox = k - 1; dline(d, 3 + ox, 14, 10 + ox, 4 + k, [200, 170, 70]); } fillEl(d, 11.5, 4.5, 2.5, 2.2, () => mul([226, 196, 96], 0.9 + r() * 0.2)); });
   IT('bread', (d, r) => { fillEl(d, 8, 9, 7, 4, (x, y) => y < 8 ? [196, 136, 64] : [160, 104, 46]); for (const x of [5, 8, 11]) { sp(d, x, 7, [230, 190, 120]); sp(d, x + 1, 8, [230, 190, 120]); } });
   IT('string', (d) => { for (let x = 2; x < 14; x++) sp(d, x, Math.round(8 + Math.sin(x * 0.9) * 3), [236, 236, 236]); });
+  IT('quartz', (d) => fillPoly(d, [[4, 12], [8, 2], [12, 8], [10, 14]], (x) => x < 8 ? [250, 248, 240] : [210, 204, 196]));
+  IT('nether_brick', ingot([112, 42, 42]));
+  IT('gold_nugget', (d, r) => fillEl(d, 8, 9, 4, 3.2, () => mul([250, 214, 60], 0.85 + r() * 0.25)));
+  IT('netherite_scrap', rawOre([102, 78, 68], [70, 50, 44]));
+  IT('netherite_ingot', ingot([76, 70, 76]));
+  IT('amethyst_shard', (d) => fillPoly(d, [[5, 14], [9, 2], [12, 6], [9, 14]], (x) => x < 9 ? [212, 172, 250] : [150, 100, 210]));
+  IT('melon_slice', (d) => { fillPoly(d, [[2, 4], [14, 4], [8, 14]], (x, y) => y < 6 ? [100, 160, 50] : (y < 7 ? [230, 240, 200] : [230, 60, 60])); for (const [x, y] of [[6, 8], [9, 8], [8, 11], [7, 10]]) sp(d, x, y, [30, 20, 20]); });
+  IT('ember_dust', (d, r) => { for (let k = 0; k < 40; k++) { const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * 5; sp(d, Math.round(7.5 + Math.cos(a) * rr), Math.round(9 + Math.sin(a) * rr * 0.7), r() < 0.3 ? [255, 240, 140] : [250, 150, 30]); } });
+  IT('void_pearl', (d) => fillEl(d, 8, 8, 5.5, 5.5, (x, y) => { const dd = Math.hypot(x - 6, y - 6); return dd < 2 ? [190, 255, 240] : lerpC([30, 140, 130], [10, 50, 60], Math.min(1, dd / 7)); }));
+  IT('eye_of_the_void', (d) => fillEl(d, 8, 8, 5.5, 5.5, (x, y) => { const dd = Math.hypot(x - 8, y - 8); return dd < 1.6 ? [10, 20, 16] : dd < 3.5 ? [180, 240, 120] : [40, 130, 110]; }));
+  IT('bow', (d) => {
+    // limb: quadratic curve between the string ends, bulging to the upper left
+    const P0 = [2.5, 13.5], C = [1.5, 1.5], P2 = [13.5, 2.5];
+    for (let i = 0; i <= 40; i++) {
+      const t = i / 40, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+      const x = a * P0[0] + b * C[0] + c * P2[0], y = a * P0[1] + b * C[1] + c * P2[1];
+      const grip = Math.abs(t - 0.5) < 0.1, tip = t < 0.06 || t > 0.94;
+      const col = grip ? [92, 60, 34] : tip ? [70, 70, 74] : [150, 104, 56];
+      sp(d, Math.floor(x), Math.floor(y), col); sp(d, Math.floor(x + 0.7), Math.floor(y + 0.7), grip ? [70, 44, 24] : mul(col, 0.75));
+    }
+    dline(d, 3, 13, 13, 3, [226, 226, 226]);
+  });
+  IT('arrow', (d) => {
+    dline(d, 3, 12, 11, 4, [128, 92, 52]);
+    fillPoly(d, [[10, 2.5], [14, 2], [13.5, 6]], [210, 210, 214]); sp(d, 12, 3, [150, 150, 156]); sp(d, 11, 4, [150, 150, 156]);
+    for (const [x, y] of [[2, 12], [3, 13], [1, 13], [2, 14], [3, 11], [4, 12], [1, 11], [4, 14]]) sp(d, x, y, (x + y) % 2 ? [240, 240, 240] : [196, 196, 200]);
+  });
+  IT('fireball', (d) => fillEl(d, 8, 8, 6, 6, (x, y) => { const dd = Math.hypot(x - 8, y - 8); return dd < 2.5 ? [255, 250, 200] : dd < 4.5 ? [255, 170, 40] : [200, 60, 10]; }), true);
+  IT('void_orb', (d) => fillEl(d, 8, 8, 6, 6, (x, y) => { const dd = Math.hypot(x - 8, y - 8); return dd < 2.5 ? [250, 230, 255] : dd < 4.5 ? [170, 90, 240] : [70, 20, 120]; }), true);
   const bucket = inner => (d) => {
     fillPoly(d, [[3, 5], [13, 5], [11.5, 14], [4.5, 14]], (x, y) => x < 6 ? [200, 200, 204] : [160, 160, 166]);
     fillEl(d, 8, 5, 5, 1.6, inner || [70, 70, 76]);
@@ -1709,8 +2399,10 @@ class Chunk {
 }
 
 class World {
-  constructor(seed) {
+  constructor(seed, dim) {
     this.seed = seed;
+    this.dim = dim || 'overworld';
+    this.hasSky = this.dim === 'overworld';
     this.chunks = new Map();
     this._lk = -1; this._lc = null;
     this.tick = 0;
@@ -1840,7 +2532,7 @@ class World {
       this.spread(lqA, an, x, z, false);
     }
     // sky light
-    {
+    if (this.hasSky) {
       let rn = 0, an = 0;
       const cur = c.light[i] >> 4;
       if (opN > opO && cur > 0) { c.light[i] &= 15; lqR[rn++] = pk(x, y, z, x, z) | (cur << 28); }
@@ -1862,7 +2554,7 @@ class World {
     const hm = c.hmap = new Uint16Array(256);
     for (let col = 0; col < 256; col++) {
       let y = 255;
-      for (; y >= 0; y--) { if (OPACITY[bl[(y << 8) | col]] > 0) break; L[(y << 8) | col] = 0xF0; }
+      for (; y >= 0; y--) { if (OPACITY[bl[(y << 8) | col]] > 0) break; if (this.hasSky) L[(y << 8) | col] = 0xF0; }
       hm[col] = y + 1;
     }
     const bx = c.cx * 16, bz = c.cz * 16, ox = bx + 8, oz = bz + 8;
@@ -1893,7 +2585,7 @@ class World {
     c.state = 2;
     this._lighting = c;
     // sky
-    {
+    if (this.hasSky) {
       const extra = border(true);
       // border() writes from 0; merge: re-run seeds after border entries
       const tmp = lqA.slice(0, extra);
@@ -1945,6 +2637,7 @@ class World {
     if (notify !== false) this.notify(x, y, z);
     return true;
   }
+  conn(x, y, z, id) { return connMask(id, this.getBlock(x + 1, y, z), this.getBlock(x - 1, y, z), this.getBlock(x, y, z + 1), this.getBlock(x, y, z - 1)); }
   setMeta(x, y, z, meta) { return this.setBlock(x, y, z, this.getBlock(x, y, z), meta, true); }
   getBE(x, y, z) { const c = this.getChunk(x >> 4, z >> 4); return c ? c.be.get((y << 8) | ((z & 15) << 4) | (x & 15)) : undefined; }
   setBE(x, y, z, be) { const c = this.getChunk(x >> 4, z >> 4); if (c) { c.be.set((y << 8) | ((z & 15) << 4) | (x & 15), be); c.modified = c.unsaved = true; } }
@@ -1966,7 +2659,7 @@ class World {
     const id = this.getBlock(x, y, z);
     if (id === 0) return;
     if (id === B.WATER) this.schedule(x, y, z, 5, 'fluid');
-    else if (id === B.LAVA) this.schedule(x, y, z, 30, 'fluid');
+    else if (id === B.LAVA) this.schedule(x, y, z, this.dim === 'nether' ? 10 : 30, 'fluid');
     else if (GRAVITY[id]) this.schedule(x, y, z, 2, 'fall');
     else if (BLK[id].needs || id === B.SNOW) { if (!this.canStay(id, x, y, z, this.getMeta(x, y, z))) this.schedule(x, y, z, 1, 'pop'); }
   }
@@ -1995,6 +2688,16 @@ class World {
       }
       case 'snow': return OPAQUE[below] === 1 || BLK[below].leaves === true;
       case 'farmland': return below === B.FARMLAND;
+      case 'solid': return OPAQUE[below] === 1;
+      case 'nylium': return below === B.CRIMSON_NYLIUM || below === B.WARPED_NYLIUM || below === B.SOUL_SOIL || below === B.GRASS_BLOCK || below === B.DIRT || below === B.NETHERRACK;
+      case 'endstone': return below === B.END_STONE || below === B.VOID_REED;
+      case 'lantern': return meta === 1 ? SOLID[this.getBlock(x, y + 1, z)] === 1 : SOLID[below] === 1;
+      case 'door': return (meta & 8) ? below === id : (SOLID[below] === 1 && this.getBlock(x, y + 1, z) === id);
+      case 'portal': {
+        const ok = b => b === B.NETHER_PORTAL || b === B.OBSIDIAN;
+        if (!ok(this.getBlock(x, y + 1, z)) || !ok(below)) return false;
+        return (meta & 1) ? ok(this.getBlock(x, y, z - 1)) && ok(this.getBlock(x, y, z + 1)) : ok(this.getBlock(x - 1, y, z)) && ok(this.getBlock(x + 1, y, z));
+      }
       case 'wall': {
         const w2 = meta === 1 ? this.getBlock(x - 1, y, z) : meta === 2 ? this.getBlock(x + 1, y, z) : meta === 3 ? this.getBlock(x, y, z - 1) : this.getBlock(x, y, z + 1);
         return SOLID[w2] === 1 && SHAPE[w2] === SH.CUBE;
@@ -2029,7 +2732,7 @@ class World {
   fluidTick(x, y, z) {
     const id = this.getBlock(x, y, z);
     if (id !== B.WATER && id !== B.LAVA) return;
-    const lava = id === B.LAVA, drop = lava ? 2 : 1, other = lava ? B.WATER : B.LAVA;
+    const lava = id === B.LAVA, drop = lava && this.dim !== 'nether' ? 2 : 1, other = lava ? B.WATER : B.LAVA;
     let meta = this.getMeta(x, y, z);
     // lava meets water
     if (lava) {
@@ -2264,6 +2967,72 @@ function quad(mb, pts, layer, uvs, sky, blk, r, g, b, fl, flTopOnly) {
   }
 }
 const UV_FULL = [[0, 16], [16, 16], [16, 0], [0, 0]];
+const FL_PORTAL = 32, FL_EPORTAL = 64;
+// horizontal connection mask for fences and panes: E=1, W=2, S=4, N=8
+function connMask(id, e, w, s, n) {
+  const d = BLK[id];
+  const ok = o => OPAQUE[o] === 1 || (d.fence && BLK[o].fence === d.fence) || (d.pane && BLK[o].pane === true);
+  return (ok(e) ? 1 : 0) | (ok(w) ? 2 : 0) | (ok(s) ? 4 : 0) | (ok(n) ? 8 : 0);
+}
+const DOOR_BOX = [[0, 0, 0, 16, 16, 3], [13, 0, 0, 16, 16, 16], [0, 0, 13, 16, 16, 16], [0, 0, 0, 3, 16, 16]];
+// boxes in 1/16 block units for non-cube shapes (used by the mesher, collision and selection)
+function shapeBoxes(id, meta, conn, forCollision) {
+  switch (SHAPE[id]) {
+    case SH.STAIRS: {
+      const up = meta & 4, f = meta & 3, y0 = up ? 0 : 8, y1 = up ? 8 : 16;
+      return [up ? [0, 8, 0, 16, 16, 16] : [0, 0, 0, 16, 8, 16],
+        f === 0 ? [0, y0, 0, 16, y1, 8] : f === 1 ? [8, y0, 0, 16, y1, 16] : f === 2 ? [0, y0, 8, 16, y1, 16] : [0, y0, 0, 8, y1, 16]];
+    }
+    case SH.FENCE: {
+      if (forCollision) {
+        const out = [[6, 0, 6, 10, 24, 10]];
+        if (conn & 1) out.push([10, 0, 6, 16, 24, 10]); if (conn & 2) out.push([0, 0, 6, 6, 24, 10]);
+        if (conn & 4) out.push([6, 0, 10, 10, 24, 16]); if (conn & 8) out.push([6, 0, 0, 10, 24, 6]);
+        return out;
+      }
+      const out = [[6, 0, 6, 10, 16, 10]];
+      for (const [y0, y1] of [[6, 9], [12, 15]]) {
+        if (conn & 1) out.push([10, y0, 7, 16, y1, 9]); if (conn & 2) out.push([0, y0, 7, 6, y1, 9]);
+        if (conn & 4) out.push([7, y0, 10, 9, y1, 16]); if (conn & 8) out.push([7, y0, 0, 9, y1, 6]);
+      }
+      return out;
+    }
+    case SH.PANE: {
+      const c = conn || 15, out = [[7, 0, 7, 9, 16, 9]];
+      if (c & 1) out.push([9, 0, 7, 16, 16, 9]); if (c & 2) out.push([0, 0, 7, 7, 16, 9]);
+      if (c & 4) out.push([7, 0, 9, 9, 16, 16]); if (c & 8) out.push([7, 0, 0, 9, 16, 7]);
+      return out;
+    }
+    case SH.DOOR: return [DOOR_BOX[((meta & 3) + ((meta & 4) ? 1 : 0)) & 3]];
+    case SH.LANTERN: { const o = meta === 1 ? 7 : 0; return [[5, o, 5, 11, o + 7, 11], [6, o + 7, 6, 10, o + 9, 10]]; }
+    case SH.FRAME: return (meta & 4) ? [[0, 0, 0, 16, 13, 16], [4, 13, 4, 12, 16, 12]] : [[0, 0, 0, 16, 13, 16]];
+    case SH.SLAB: { const h = BLK[id].height, yo = (meta & 1) ? 16 - h : 0; return [[0, yo, 0, 16, yo + h, 16]]; }
+    case SH.CACTUS: return [[1, 0, 1, 15, 15, 15]];
+  }
+  return [[0, 0, 0, 16, 16, 16]];
+}
+// emit boxes with UVs locked to block space; faces on the block boundary are culled against opaque neighbours
+function emitBoxes(mb, boxes, X, Y, Z, pi, l, layerOf, dy) {
+  const sky = (l >> 4) * 16, blk = (l & 15) * 16;
+  dy = dy || 0;
+  for (let bi = 0; bi < boxes.length; bi++) {
+    const b = boxes[bi];
+    for (let f = 0; f < 6; f++) {
+      const onEdge = (f === 0 && b[3] === 16) || (f === 1 && b[0] === 0) || (f === 2 && b[4] + dy >= 16) || (f === 3 && b[1] + dy <= 0) || (f === 4 && b[5] === 16) || (f === 5 && b[2] === 0);
+      if (onEdge && OPAQUE[pBlk[pi + FND[f]]]) continue;
+      const layer = layerOf(f, bi), s = 255 * FSHADE[f], vt = FV[f];
+      for (let k = 0; k < 4; k++) {
+        const p = vt[k];
+        const px = p[0] ? b[3] : b[0], py = p[1] ? b[4] : b[1], pz = p[2] ? b[5] : b[2];
+        let u, v;
+        if (f === 0) { u = 16 - pz; v = 16 - py; } else if (f === 1) { u = pz; v = 16 - py; }
+        else if (f === 4) { u = px; v = 16 - py; } else if (f === 5) { u = 16 - px; v = 16 - py; }
+        else if (f === 2) { u = px; v = pz; } else { u = px; v = 16 - pz; }
+        mb.v(X + px, Y + py + dy, Z + pz, layer, u, v, sky, blk, s, s, s, 0);
+      }
+    }
+  }
+}
 
 function meshSection(world, c, sy) {
   const opq = MESH_OPQ, trn = MESH_TRN;
@@ -2383,6 +3152,27 @@ function meshSection(world, c, sy) {
         }
       } else if (shape === SH.LIQUID) {
         meshLiquid(id === B.WATER ? trn : opq, id, meta, pi, lx, ly, lz, sy, tint, to);
+      } else if (shape === SH.STAIRS || shape === SH.FENCE || shape === SH.PANE || shape === SH.DOOR || shape === SH.LANTERN || shape === SH.FRAME) {
+        const X = lx * 16, Y = (sy * 16 + ly) * 16, Z = lz * 16;
+        const conn = (shape === SH.FENCE || shape === SH.PANE) ? connMask(id, pBlk[pi + 1], pBlk[pi - 1], pBlk[pi + PADW], pBlk[pi - PADW]) : 0;
+        if (shape === SH.LANTERN) {
+          emitBoxes(opq, shapeBoxes(id, 0, 0, false), X, Y, Z, pi, pLight[pi], () => FACETEX[id * 6], meta === 1 ? 7 : 0);
+        } else if (shape === SH.DOOR) {
+          const L = (meta & 8) ? FACETEX[id * 6 + 2] : FACETEX[id * 6];
+          emitBoxes(opq, shapeBoxes(id, meta, 0, false), X, Y, Z, pi, pLight[pi], () => L, 0);
+        } else if (shape === SH.FRAME) {
+          const eye = TEX_FRAME_EYE;
+          emitBoxes(opq, shapeBoxes(id, meta, 0, false), X, Y, Z, pi, pLight[pi], (f, bi) => bi ? eye : FACETEX[id * 6 + f], 0);
+        } else emitBoxes(opq, shapeBoxes(id, meta, conn, false), X, Y, Z, pi, pLight[pi], f => FACETEX[id * 6 + f], 0);
+      } else if (shape === SH.PORTAL) {
+        const X = lx * 16, Y = (sy * 16 + ly) * 16, Z = lz * 16, layer = FACETEX[id * 6];
+        const pts = (meta & 1)
+          ? [[[X + 10, Y, Z + 16], [X + 10, Y, Z], [X + 10, Y + 16, Z], [X + 10, Y + 16, Z + 16]], [[X + 6, Y, Z], [X + 6, Y, Z + 16], [X + 6, Y + 16, Z + 16], [X + 6, Y + 16, Z]]]
+          : [[[X, Y, Z + 10], [X + 16, Y, Z + 10], [X + 16, Y + 16, Z + 10], [X, Y + 16, Z + 10]], [[X + 16, Y, Z + 6], [X, Y, Z + 6], [X, Y + 16, Z + 6], [X + 16, Y + 16, Z + 6]]];
+        for (const q of pts) quad(trn, q, layer, UV_FULL, 240, 240, 255, 255, 255, FL_PORTAL);
+      } else if (shape === SH.EPORTAL) {
+        const X = lx * 16, Y = (sy * 16 + ly) * 16 + 12, Z = lz * 16;
+        quad(opq, [[X, Y, Z + 16], [X + 16, Y, Z + 16], [X + 16, Y, Z], [X, Y, Z]], FACETEX[id * 6], UV_FULL, 240, 240, 255, 255, 255, FL_EPORTAL);
       }
     }
   }
@@ -2471,7 +3261,7 @@ function meshLiquid(mb, id, meta, pi, lx, ly, lz, sy, tint, to) {
       [[0, 16], [16, 16], [16, 16 - Bc[2] * 16], [0, 16 - A[2] * 16]], Math.max(s, (pLight[pi] >> 4) * 16), bl, r * sh, g * sh, b * sh, fl | FL_FLOW);
   }
 }
-let TEX_GRASS_TOP, TEX_DIRT, TEX_GRASS_SNOWY, TEX_GRASS_OVERLAY;
+let TEX_GRASS_TOP, TEX_DIRT, TEX_GRASS_SNOWY, TEX_GRASS_OVERLAY, TEX_FRAME_EYE;
 function resolveFaceTextures() {
   for (let id = 0; id < BLOCK_NAMES.length; id++) {
     const d = BLK[id];
@@ -2484,6 +3274,7 @@ function resolveFaceTextures() {
     FACETEX[id * 6 + 4] = L(front); FACETEX[id * 6 + 5] = L(id === B.CRAFTING_TABLE ? front : side);
   }
   TEX_GRASS_TOP = texL('grass_top'); TEX_DIRT = texL('dirt'); TEX_GRASS_SNOWY = texL('grass_side_snowy'); TEX_GRASS_OVERLAY = texL('grass_side_overlay');
+  TEX_FRAME_EYE = texL('end_portal_frame_eye');
 }
 
 /* ===================================================================
@@ -2550,6 +3341,11 @@ void main(){
   if ((fl & 2) != 0) {
     layer += mod(floor(uTime * 10.0), 16.0);
     if ((fl & 8) != 0) uv.y -= uTime * 1.2;
+  } else if ((fl & 32) != 0) {
+    layer += mod(floor(uTime * 8.0), 8.0);
+  } else if ((fl & 64) != 0) {
+    layer += mod(floor(uTime * 3.0), 4.0);
+    uv += vec2(uTime * 0.02, uTime * 0.013);
   } else if ((fl & 4) != 0) {
     layer += mod(floor(uTime * 4.0), 8.0);
     if ((fl & 8) != 0) uv.y -= uTime * 0.35;
@@ -2560,26 +3356,33 @@ void main(){
   vLight = aDat.zw / 16.0;
   vDist = length(p.xz) + max(0.0, abs(p.y) - 40.0) * 0.5;
 }`;
+const SH_TEX_FN = `
+uniform sampler2DArray uTex; uniform sampler2DArray uTex2; uniform float uSplit;
+vec4 texArr(vec3 uvl) {
+  vec2 dx = dFdx(uvl.xy), dy = dFdy(uvl.xy);
+  if (uvl.z < uSplit - 0.5) return textureGrad(uTex, uvl, dx, dy);
+  return textureGrad(uTex2, vec3(uvl.xy, uvl.z - uSplit), dx, dy);
+}`;
 const SH_LIGHT_FN = `
-uniform float uDay; uniform vec3 uSkyTint; uniform float uGamma; uniform float uNightVision;
+uniform float uDay; uniform vec3 uSkyTint; uniform float uGamma; uniform float uNightVision; uniform vec3 uAmbient;
 float bright(float l){ float f = 1.0 - clamp(l, 0.0, 15.0) / 15.0; return (1.0 - f) / (f * 3.0 + 1.0); }
 vec3 lightCol(vec2 L){
   float s = bright(L.x) * uDay;
   float b = bright(L.y);
   vec3 c = max(vec3(s) * uSkyTint, vec3(b) * vec3(1.0, 0.88, 0.7) * (1.0 + 0.06 * sin(L.y)));
-  c = max(c, vec3(0.025 + uNightVision));
+  c = max(c, uAmbient + uNightVision);
   c = mix(c, 1.0 - pow(1.0 - min(c, vec3(1.0)), vec3(4.0)), uGamma);
   return min(c, vec3(1.0));
 }`;
 const SH_CHUNK_F = `#version 300 es
 precision highp float; precision highp sampler2DArray;
-uniform sampler2DArray uTex;
+${SH_TEX_FN}
 uniform vec3 uFogCol; uniform vec2 uFog; uniform float uAlphaTest; uniform float uAlphaMul;
 ${SH_LIGHT_FN}
 in vec3 vUV; in vec3 vCol; in vec2 vLight; in float vDist;
 out vec4 o;
 void main(){
-  vec4 c = texture(uTex, vUV);
+  vec4 c = texArr(vUV);
   if (c.a < uAlphaTest) discard;
   vec3 col = c.rgb * vCol * lightCol(vLight);
   float f = clamp((vDist - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);
@@ -2597,12 +3400,23 @@ void main(){
 }`;
 const SH_SKY_F = `#version 300 es
 precision highp float;
-uniform vec3 uTop, uHor, uSun, uSunset; uniform float uSunsetAmt, uStars, uTime, uRain, uUnder;
+uniform vec3 uTop, uHor, uSun, uSunset; uniform float uSunsetAmt, uStars, uTime, uRain, uUnder, uDim;
 in vec3 vDir; out vec4 o;
 float h3(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
 void main(){
   vec3 d = normalize(vDir);
   float h = d.y;
+  if (uDim > 0.5) {
+    // nether: nothing but haze; end: a dim, speckled void
+    if (uDim < 1.5) { o = vec4(uHor, 1.0); return; }
+    vec3 a = abs(d); vec2 f2 = a.x > a.y && a.x > a.z ? d.yz / a.x : a.y > a.z ? d.xz / a.y : d.xy / a.z;
+    float face = a.x > a.y && a.x > a.z ? 1.0 : a.y > a.z ? 2.0 : 3.0;
+    float n = h3(vec3(floor(f2 * 40.0), face)) * 0.4 + h3(vec3(floor(f2 * 12.0), face + 9.0)) * 0.35 + h3(vec3(floor(f2 * 4.0), face + 3.0)) * 0.25;
+    vec3 col = mix(vec3(0.05, 0.04, 0.065), vec3(0.11, 0.085, 0.135), n * n);
+    if (h3(vec3(floor(f2 * 90.0), face + 4.0)) > 0.996) col += vec3(0.25, 0.22, 0.3);
+    o = vec4(mix(col, uHor, 0.35 * (1.0 - smoothstep(-0.15, 0.25, abs(h)))), 1.0);
+    return;
+  }
   vec3 col = mix(uHor, uTop, smoothstep(-0.02, 0.5, h));
   col = mix(col, uHor * 0.55, smoothstep(0.0, -0.4, h));
   vec3 sh = normalize(vec3(uSun.x, 0.0001, uSun.z + 0.0001));
@@ -2651,12 +3465,13 @@ out vec3 vUV; out vec4 vCol; out vec2 vLight; out float vDist;
 void main(){ gl_Position = uVP * vec4(aPos, 1.0); vUV = aUV; vCol = aCol; vLight = aLight; vDist = length(aPos.xz); }`;
 const SH_DYN_F = `#version 300 es
 precision highp float; precision highp sampler2DArray;
-uniform sampler2DArray uTex; uniform sampler2D uAtlas;
+${SH_TEX_FN}
+uniform sampler2D uAtlas;
 uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright;
 ${SH_LIGHT_FN}
 in vec3 vUV; in vec4 vCol; in vec2 vLight; in float vDist; out vec4 o;
 void main(){
-  vec4 c = vUV.z < -0.5 ? texture(uAtlas, vUV.xy) : texture(uTex, vUV);
+  vec4 c = vUV.z < -0.5 ? texture(uAtlas, vUV.xy) : texArr(vUV);
   if (c.a < 0.1) discard;
   vec3 L = uFullBright > 0.5 ? vec3(1.0) : lightCol(vLight);
   vec3 col = c.rgb * vCol.rgb * L;
@@ -2750,8 +3565,10 @@ class Renderer {
   }
   uploadTextures() {
     const gl = this.gl, n = TEX.imgs.length;
-    const maxL = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS);
-    if (n > maxL) throw new Error('Too many texture layers: ' + n + ' > ' + maxL);
+    // WebGL2 only guarantees 256 layers per array, so textures are split over two arrays
+    const per = Math.min(256, gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS));
+    if (n > per * 2) throw new Error('Too many texture layers: ' + n);
+    this.split = per;
     const data = new Uint8Array(n * 1024);
     for (let i = 0; i < n; i++) {
       const src = TEX.imgs[i], d = new Uint8Array(src);
@@ -2770,13 +3587,24 @@ class Renderer {
       }
       data.set(d, i * 1024);
     }
-    this.tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
-    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, 16, 16, n, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAX_LEVEL, 4);
-    gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+    const mkArr = (from, count) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
+      gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, 16, 16, Math.max(1, count), 0, gl.RGBA, gl.UNSIGNED_BYTE, count ? data.subarray(from * 1024, (from + count) * 1024) : new Uint8Array(1024));
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAX_LEVEL, 4);
+      gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+      return t;
+    };
+    this.tex = mkArr(0, Math.min(n, per));
+    this.tex2 = mkArr(per, Math.max(0, n - per));
+  }
+  bindTex(u) {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex2); gl.uniform1i(u.uTex2, 2);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex); gl.uniform1i(u.uTex, 0);
+    gl.uniform1f(u.uSplit, this.split);
   }
   uploadAtlas(canvas) {
     const gl = this.gl;
@@ -2890,6 +3718,7 @@ class Renderer {
     gl.uniform3fv(u.uSkyTint, env.skyTint);
     gl.uniform1f(u.uGamma, OPTIONS.brightness);
     gl.uniform1f(u.uNightVision, env.nightVision || 0);
+    gl.uniform3fv(u.uAmbient, env.ambient || [0.025, 0.025, 0.025]);
     gl.uniform3fv(u.uFogCol, env.fogCol);
     gl.uniform2f(u.uFog, env.fogStart, env.fogEnd);
   }
@@ -2900,7 +3729,7 @@ class Renderer {
     gl.uniform3fv(u.uTop, env.skyTop); gl.uniform3fv(u.uHor, env.fogCol);
     gl.uniform3fv(u.uSun, env.sunDir); gl.uniform3fv(u.uSunset, env.sunsetCol);
     gl.uniform1f(u.uSunsetAmt, env.sunset); gl.uniform1f(u.uStars, env.stars); gl.uniform1f(u.uTime, env.time);
-    gl.uniform1f(u.uRain, env.rain); gl.uniform1f(u.uUnder, env.under ? 1 : 0);
+    gl.uniform1f(u.uRain, env.rain); gl.uniform1f(u.uUnder, env.under ? 1 : 0); gl.uniform1f(u.uDim, env.dim || 0);
     gl.depthMask(false);
     gl.bindVertexArray(this.emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -2913,8 +3742,7 @@ class Renderer {
     gl.uniform1f(u.uTime, env.time);
     gl.uniform3f(u.uCamW, cam[0], cam[1], cam[2]);
     this.setLightUniforms(u, env);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
-    gl.uniform1i(u.uTex, 0);
+    this.bindTex(u);
     if (!translucent) {
       gl.uniform1f(u.uAlphaTest, 0.5); gl.uniform1f(u.uAlphaMul, 1);
       let drawn = 0, quads = 0;
@@ -2993,7 +3821,7 @@ class Renderer {
     this.setLightUniforms(u, env);
     if (opts && opts.noFog) gl.uniform2f(u.uFog, 1e5, 2e5);
     gl.uniform1f(u.uFullBright, opts && opts.fullBright ? 1 : 0);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex); gl.uniform1i(u.uTex, 0);
+    this.bindTex(u);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.atlas); gl.uniform1i(u.uAtlas, 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindVertexArray(this.dynVao);
@@ -3025,14 +3853,15 @@ class Renderer {
 const _boxes = [];
 function collectBoxes(world, x0, y0, z0, x1, y1, z1) {
   _boxes.length = 0;
-  for (let y = Math.floor(y0); y <= Math.floor(y1); y++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let x = Math.floor(x0); x <= Math.floor(x1); x++) {
+  // start one block lower: fences reach 1.5 blocks high
+  for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let x = Math.floor(x0); x <= Math.floor(x1); x++) {
     if (!world.isLoadedAt(x, z)) { _boxes.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
     if (y < 0) { _boxes.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
     const id = world.getBlock(x, y, z);
     if (!SOLID[id]) continue;
-    if (SHAPE[id] === SH.CACTUS) _boxes.push([x + 0.0625, y, z + 0.0625, x + 0.9375, y + 0.9375, z + 0.9375]);
-    else if (SHAPE[id] === SH.SLAB) { const yo = (world.getMeta(x, y, z) & 1) ? 1 - BLK[id].height / 16 : 0; _boxes.push([x, y + yo, z, x + 1, y + yo + BLK[id].height / 16, z + 1]); }
-    else _boxes.push([x, y, z, x + 1, y + 1, z + 1]);
+    if (SHAPE[id] === SH.CUBE) { _boxes.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
+    const conn = (SHAPE[id] === SH.FENCE || SHAPE[id] === SH.PANE) ? world.conn(x, y, z, id) : 0;
+    for (const b of shapeBoxes(id, world.getMeta(x, y, z), conn, true)) _boxes.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + b[4] / 16, z + b[5] / 16]);
   }
   return _boxes;
 }
@@ -3225,6 +4054,45 @@ function buildModels() {
     { size: [10, 8, 12], pivot: [0, 9, -3], off: [-5, -4, -12], paint: (f, u, v, W, H, r) => ((f === 2 || f === 0 || f === 1) && v % 4 < 2) ? noiseC([150, 116, 70], r) : noiseC(sp2, r) },
     ...legs,
   ]);
+  // Ember Wisp (original design): glowing core with four orbiting cinder shards
+  const ember = [255, 150, 40], hot = [255, 232, 150], rock = [54, 40, 40];
+  defModel('wisp', [
+    { size: [6, 6, 6], pivot: [0, 8, 0], off: [-3, -3, -3], anim: 'core', paint: (f, u, v, W, H, r) => (f === 4 && v === 2 && (u === 1 || u === 4)) ? [70, 24, 10] : lerpC(ember, hot, 0.3 + r() * 0.7) },
+    ...[0, 1, 2, 3].map(k => ({ size: [3, 3, 3], pivot: [0, 8, 0], off: [6, k % 2 ? 0.5 : -3.5, -1.5], anim: 'shard' + k,
+      paint: (f, u, v, W, H, r) => r() < 0.22 ? [255, 120, 30] : noiseC(rock, r) })),
+  ]);
+  // Charred Ghoul (original design): soot-black undead with ember eyes
+  defModel('charred_ghoul', humanoidParts({ skin: [60, 50, 52], hair: [30, 24, 26], eyes: [255, 140, 40], eyeWhite: [90, 34, 12], shirt: [78, 44, 34], sleeve: [66, 38, 30],
+    pants: [38, 32, 34], shoes: [60, 50, 52], mouth: [160, 64, 20], fringe: 1, torn: true, sideHair: 1 }));
+  // Void Wraith (original design): floating hooded robe with glowing teal eyes
+  const cloth = [46, 32, 66], cloth2 = [34, 22, 50], glowE = [120, 255, 236];
+  defModel('wraith', [
+    { size: [9, 10, 9], pivot: [0, 28, 0], off: [-4.5, -1, -4.5], anim: 'head', paint: (f, u, v, W, H, r) => {
+      if (f === 4 && u >= 2 && u <= 6 && v >= 3 && v <= 8) return (v === 5 && (u === 3 || u === 5)) ? glowE : [10, 8, 14];
+      return noiseC(cloth, r, 0.1);
+    } },
+    { size: [9, 12, 5], pivot: [0, 28, 0], off: [-4.5, -13, -2.5], paint: (f, u, v, W, H, r) => (f === 4 && u === 4) ? cloth2 : noiseC(cloth, r, 0.1) },
+    { size: [11, 12, 7], pivot: [0, 16, 0], off: [-5.5, -12, -3.5], paint: (f, u, v, W, H, r) => (v >= H - 2 && (u + v) % 3 === 0) ? [0, 0, 0, 0] : noiseC(cloth2, r, 0.12) },
+    { size: [3, 13, 3], pivot: [-6, 27, 0], off: [-1.5, -12, -1.5], anim: 'armR', paint: (f, u, v, W, H, r) => v >= H - 2 ? [200, 190, 220] : noiseC(cloth, r, 0.1) },
+    { size: [3, 13, 3], pivot: [6, 27, 0], off: [-1.5, -12, -1.5], anim: 'armL', paint: (f, u, v, W, H, r) => v >= H - 2 ? [200, 190, 220] : noiseC(cloth, r, 0.1) },
+  ]);
+  // Void Sentinel (original boss design): radiant core inside a ring of rotating obsidian plates
+  defModel('sentinel', [
+    { size: [12, 12, 12], pivot: [0, 11.5, 0], off: [-6, -6, -6], anim: 'core', paint: (f, u, v, W, H, r) => {
+      const e = Math.max(Math.abs(u - 5.5), Math.abs(v - 5.5));
+      if (e < 1.6) return [255, 255, 255];
+      return lerpC([140, 70, 220], [250, 220, 255], Math.max(0, 1 - e / 6) * 0.7 + r() * 0.2);
+    } },
+    { size: [4, 8, 4], pivot: [0, 11.5, 0], off: [-2, 6, -2], anim: 'core', paint: (f, u, v, W, H, r) => noiseC([40, 26, 60], r) },
+    { size: [4, 8, 4], pivot: [0, 11.5, 0], off: [-2, -14, -2], anim: 'core', paint: (f, u, v, W, H, r) => noiseC([40, 26, 60], r) },
+    ...[0, 1, 2, 3, 4, 5, 6, 7].map(k => ({ size: [4, 14, 2], pivot: [0, 11.5, 0], off: [-2, -7, 11], anim: 'plate' + k,
+      paint: (f, u, v, W, H, r) => (u === 0 || u === W - 1 || v === 0 || v === H - 1) ? [190, 110, 255] : noiseC([30, 20, 44], r) })),
+  ]);
+  // Void Crystal: a violet cage around a bright heart
+  defModel('crystal', [
+    { size: [8, 8, 8], pivot: [0, 8, 0], off: [-4, -4, -4], anim: 'spin1', paint: (f, u, v, W, H) => (u === 0 || v === 0 || u === W - 1 || v === H - 1) ? [200, 140, 255] : [0, 0, 0, 0] },
+    { size: [4, 4, 4], pivot: [0, 8, 0], off: [-2, -2, -2], anim: 'spin2', paint: (f, u, v, W, H, r) => lerpC([255, 200, 255], [255, 255, 255], r()) },
+  ]);
   atlasFinish();
 }
 
@@ -3301,6 +4169,38 @@ function itemLayer(id) {
   return texL(it.name);
 }
 function isCubeItem(id) { return id < 256 && (SHAPE[id] === SH.CUBE || SHAPE[id] === SH.CACTUS); }
+// item form of shaped blocks, in 1/16 units (null = flat sprite or plain cube)
+const FENCE_ITEM = [[0, 0, 6, 4, 16, 10], [12, 0, 6, 16, 16, 10], [4, 6, 7, 12, 9, 9], [4, 12, 7, 12, 15, 9]];
+function itemBoxes(id) {
+  if (id >= 256) return null;
+  switch (SHAPE[id]) {
+    case SH.SLAB: return [[0, 0, 0, 16, BLK[id].height, 16]];
+    case SH.STAIRS: return shapeBoxes(id, 3, 0, false);
+    case SH.FENCE: return FENCE_ITEM;
+    case SH.FRAME: return shapeBoxes(id, 0, 0, false);
+  }
+  return null;
+}
+// texture coordinates locked to block space (same mapping as the chunk mesher)
+function boxUV(f, px, py, pz) {
+  let u, v;
+  if (f === 0) { u = 16 - pz; v = 16 - py; } else if (f === 1) { u = pz; v = 16 - py; }
+  else if (f === 4) { u = px; v = 16 - py; } else if (f === 5) { u = 16 - px; v = 16 - py; }
+  else if (f === 2) { u = px; v = pz; } else { u = px; v = 16 - pz; }
+  return [u / 16, v / 16];
+}
+function drawBlockBoxes(r, id, boxes, cx, cy, cz, size, yaw, tint, light) {
+  const Ry = rot3(0, yaw || 0, 0);
+  for (const b of boxes) for (let f = 0; f < 6; f++) {
+    const layer = FACETEX[id * 6 + f], fs = FSHADE[f];
+    for (let k = 0; k < 4; k++) {
+      const fv = FV[f][k], px = fv[0] ? b[3] : b[0], py = fv[1] ? b[4] : b[1], pz = fv[2] ? b[5] : b[2];
+      const uv = boxUV(f, px, py, pz);
+      const [wx, wy, wz] = m3v(Ry, (px / 16 - 0.5) * size, (py / 16 - 0.5) * size, (pz / 16 - 0.5) * size);
+      r.dv(cx + wx, cy + wy, cz + wz, uv[0], uv[1], layer, tint[0] * fs, tint[1] * fs, tint[2] * fs, tint[3], light[0], light[1]);
+    }
+  }
+}
 
 /* ---------------- entity classes ---------------- */
 let ENTITY_ID = 1;
@@ -3394,7 +4294,9 @@ class ItemEntity extends Entity {
     const n = this.stack.count > 32 ? 3 : this.stack.count > 1 ? 2 : 1;
     for (let i = 0; i < n; i++) {
       const ox = i * 0.06, oy = i * 0.04;
+      const bx = itemBoxes(this.stack.id);
       if (isCubeItem(this.stack.id)) drawBlockCube(r, this.stack.id, p[0] + ox, p[1] + bob + 0.12 + oy, p[2] + ox * 0.5, 0.25, t + this.spin, [1, 1, 1, 1], L);
+      else if (bx) drawBlockBoxes(r, this.stack.id, bx, p[0] + ox, p[1] + bob + 0.12 + oy, p[2] + ox * 0.5, 0.25, t + this.spin, [1, 1, 1, 1], L);
       else drawSprite(r, itemLayer(this.stack.id), p[0] + ox, p[1] + bob + 0.2 + oy, p[2], 0.45, t + this.spin, [1, 1, 1, 1], L);
     }
   }
@@ -3444,7 +4346,13 @@ const MOB_TYPES = {
   chicken: { w: 0.4, h: 0.7, hp: 4, speed: 0.1, drops: [['chicken', 1, 1], ['feather', 0, 2]], sound: 'cluck', passive: true, xp: 1 },
   zombie: { w: 0.6, h: 1.95, hp: 20, speed: 0.105, drops: [['rotten_flesh', 0, 2]], sound: 'groan', passive: false, xp: 5, dmg: 3, burns: true },
   spider: { w: 1.4, h: 0.9, hp: 16, speed: 0.12, drops: [['string', 0, 2]], sound: 'hiss', passive: false, xp: 5, dmg: 2, climbs: true, neutralDay: true },
+  wisp: { w: 0.8, h: 0.9, hp: 12, speed: 0.05, drops: [['ember_dust', 0, 2]], sound: 'wisp', passive: false, xp: 10, flying: true, fireproof: true, glow: true },
+  charred_ghoul: { w: 0.6, h: 1.95, hp: 22, speed: 0.11, drops: [['coal', 0, 1], ['rotten_flesh', 0, 1]], sound: 'groan', passive: false, xp: 5, dmg: 4, fireproof: true },
+  wraith: { w: 0.7, h: 2.3, hp: 30, speed: 0.1, drops: [['void_pearl', 0, 1]], sound: 'wraith', passive: false, xp: 6, dmg: 5, teleports: true, neutral: true },
+  crystal: { w: 1.2, h: 1.6, hp: 1, speed: 0, drops: [], sound: 'wisp', passive: true, xp: 0, glow: true, fireproof: true, hidden: true },
+  sentinel: { w: 3.6, h: 3.6, hp: 200, speed: 0, drops: [], sound: 'sentinel', passive: false, xp: 0, glow: true, fireproof: true, hidden: true },
 };
+const HURT_SOUND = { zombie: 'zhurt', charred_ghoul: 'zhurt', wraith: 'wraith', wisp: 'wisp' };
 class Mob extends Entity {
   constructor(game, type, x, y, z) {
     super(game, x, y, z);
@@ -3460,7 +4368,8 @@ class Mob extends Entity {
     if (this.dead || this.deathTime > 0) return false;
     if (this.invuln > 0) return false;
     this.health -= amount; this.hurtTime = 10; this.invuln = 10;
-    this.game.sound(this.type === 'zombie' ? 'zhurt' : 'hurt_animal', this.x, this.y, this.z);
+    this.game.sound(HURT_SOUND[this.type] || 'hurt_animal', this.x, this.y, this.z);
+    if (this.T.teleports && this.health > 0) this.teleportAway();
     if (attacker) {
       const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1;
       this.vx += dx / l * 0.4; this.vz += dz / l * 0.4; this.vy = Math.max(this.vy, 0.36);
@@ -3491,11 +4400,13 @@ class Mob extends Entity {
       return;
     }
     this.updateFluids();
+    if (this.T.flying) { this.flyTick(); return; }
+    if (this.T.teleports && Math.random() < 0.0015 && !this.target) this.teleportAway();
     // AI
     let mx = 0, mz = 0, speed = this.T.speed, wantJump = false;
     const pl = g.player;
     if (!this.T.passive) {
-      const calm = this.T.neutralDay && g.isDay() && !this.provoked && w.getLightRaw(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z)) >> 4 > 11;
+      const calm = (this.T.neutralDay && g.isDay() && !this.provoked && w.getLightRaw(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z)) >> 4 > 11) || (this.T.neutral && !this.provoked);
       if (pl && !pl.dead && pl.mode === 0 && !calm) {
         const dx = pl.x - this.x, dz = pl.z - this.z, dy = pl.y - this.y, d = Math.hypot(dx, dz);
         if (d < 32 && Math.abs(dy) < 16) this.target = pl; else if (d > 40) this.target = null;
@@ -3564,19 +4475,65 @@ class Mob extends Entity {
     if (this.inWater || this.inLava) {
       this.vy -= 0.02;
       if (this.headInWater || this.inLava || this.vy < 0) this.vy += 0.04 + (this.headInWater ? 0.02 : 0);
-    } else this.vy -= 0.08;
+    }
     const res = this.physicsStep();
+    // gravity after the move (vanilla order) so jumps clear a full block
+    if (this.inWater || this.inLava) this.vy *= 0.98; else this.vy = (this.vy - 0.08) * 0.98;
     if ((res.hx || res.hz) && moving && this.T.climbs) this.vy = 0.2;
     else if ((res.hx || res.hz) && moving && (this.onGround || this.inWater) && this.jumpCd <= 0) { this.vy = 0.42; this.jumpCd = 10; }
     if (this.jumpCd > 0) this.jumpCd--;
     const fr = this.inWater ? 0.8 : this.inLava ? 0.5 : this.onGround ? 0.546 : 0.91;
-    this.vx *= fr; this.vz *= fr; this.vy *= 0.98;
+    this.vx *= fr; this.vz *= fr;
     if (this.type === 'chicken' && !this.onGround && this.vy < 0) this.vy *= 0.6;
     const sp = Math.hypot(this.x - this.px, this.z - this.pz);
     this.walkAmt += (Math.min(1, sp * 4) - this.walkAmt) * 0.4;
     this.walk += sp * 4;
-    if (this.inLava) { this.hurt(4, 'lava'); }
+    if (this.inLava && !this.T.fireproof) { this.hurt(4, 'lava'); }
     if (this.y < -64) this.dead = true;
+  }
+  teleportAway() {
+    const g = this.game, w = g.world;
+    for (let k = 0; k < 16; k++) {
+      const x = Math.floor(this.x + (Math.random() - 0.5) * 16), z = Math.floor(this.z + (Math.random() - 0.5) * 16);
+      for (let y = Math.floor(this.y) + 6; y > this.y - 8; y--) {
+        if (SOLID[w.getBlock(x, y - 1, z)] && !SOLID[w.getBlock(x, y, z)] && !SOLID[w.getBlock(x, y + 1, z)] && !SOLID[w.getBlock(x, y + 2, z)] && !BLK[w.getBlock(x, y, z)].liquid) {
+          g.particles.poof(this.x, this.y + 1, this.z, [0.5, 0.3, 0.8]);
+          this.x = this.px = x + 0.5; this.y = this.py = y; this.z = this.pz = z + 0.5;
+          g.sound('teleport', this.x, this.y, this.z);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  flyTick() {
+    const g = this.game, w = g.world, pl = g.player;
+    if (pl && !pl.dead && pl.mode === 0 && Math.hypot(pl.x - this.x, pl.y - this.y, pl.z - this.z) < 26) this.target = pl;
+    else if (!pl || pl.dead || pl.mode !== 0 || Math.hypot(pl.x - this.x, pl.z - this.z) > 34) this.target = null;
+    let ax = 0, ay = 0, az = 0;
+    if (this.target) {
+      const t = this.target, dx = t.x - this.x, dz = t.z - this.z, d = Math.hypot(dx, dz) || 1;
+      const want = d > 10 ? 1 : d < 5 ? -0.6 : 0;
+      ax = dx / d * want * 0.02; az = dz / d * want * 0.02; ay = (t.y + 3 - this.y) * 0.004;
+      this.yaw = Math.atan2(dx, dz);
+      if (--this.attackCd <= 0 && d < 22) {
+        this.attackCd = 50 + Math.random() * 50;
+        const sx = this.x, sy = this.y + 0.5, sz = this.z, tx = t.x - sx, ty = t.y + 1.4 - sy, tz = t.z - sz, l = Math.hypot(tx, ty, tz);
+        const hit = raycast(w, sx, sy, sz, tx / l, ty / l, tz / l, l, false);
+        if (!hit) { g.spawnProjectile('fire', sx, sy, sz, tx / l * 0.55, ty / l * 0.55, tz / l * 0.55, this); g.sound('shoot', sx, sy, sz); }
+      }
+    } else {
+      if (--this.wanderT <= 0) { this.wanderT = 40 + Math.random() * 80; this.wanderDir = Math.random() * Math.PI * 2; }
+      ax = Math.sin(this.wanderDir || 0) * 0.008; az = Math.cos(this.wanderDir || 0) * 0.008;
+      let gy = Math.floor(this.y); while (gy > this.y - 12 && !SOLID[w.getBlock(Math.floor(this.x), gy, Math.floor(this.z))]) gy--;
+      ay = (gy + 4.5 - this.y) * 0.004;
+    }
+    ay += Math.sin(this.age * 0.15) * 0.003;
+    this.vx = (this.vx + ax) * 0.92; this.vy = (this.vy + ay) * 0.92; this.vz = (this.vz + az) * 0.92;
+    const res = moveEntity(w, this, this.vx, this.vy, this.vz);
+    if (res.hx) this.vx = 0; if (res.hy) this.vy = 0; if (res.hz) this.vz = 0;
+    if (this.age % 4 === 0) g.particles.flame(this.x, this.y + 0.3, this.z);
+    if (--this.ambientT <= 0) { this.ambientT = 200 + Math.random() * 300; g.sound('wisp', this.x, this.y, this.z); }
   }
   landed(dist) { if (dist > 3) this.hurt(Math.ceil(dist - 3), 'fall'); }
   render(r, a) {
@@ -3586,8 +4543,8 @@ class Mob extends Entity {
     const sw = Math.sin(wk) * 0.8 * this.walkAmt;
     const anims = {
       head: [this.headPitch, this.headYaw, 0], legA: [sw, 0, 0], legB: [-sw, 0, 0],
-      armL: this.type === 'zombie' ? [-Math.PI / 2 + Math.sin(this.age * 0.1) * 0.05, 0, 0] : [-sw, 0, 0],
-      armR: this.type === 'zombie' ? [-Math.PI / 2 - Math.sin(this.age * 0.1) * 0.05, 0, 0] : [sw, 0, 0],
+      armL: (this.type === 'zombie' || this.type === 'charred_ghoul' || (this.type === 'wraith' && this.target)) ? [-Math.PI / 2 + Math.sin(this.age * 0.1) * 0.05, 0, 0] : [-sw * 0.4, 0, 0],
+      armR: (this.type === 'zombie' || this.type === 'charred_ghoul' || (this.type === 'wraith' && this.target)) ? [-Math.PI / 2 - Math.sin(this.age * 0.1) * 0.05, 0, 0] : [sw * 0.4, 0, 0],
       wingL: [0, 0, this.onGround ? 0 : -Math.abs(Math.sin(this.age * 0.8))], wingR: [0, 0, this.onGround ? 0 : Math.abs(Math.sin(this.age * 0.8))],
     };
     if (this.type === 'spider') {
@@ -3597,8 +4554,14 @@ class Mob extends Entity {
         anims['sleg' + i + (s > 0 ? 'R' : 'L')] = [0, s * fan[i] + ph, -s * 0.62];
       }
     }
+    if (this.type === 'wisp') {
+      const th = (this.age + a) * 0.12;
+      for (let k = 0; k < 4; k++) anims['shard' + k] = [0, th + k * Math.PI / 2, 0];
+      anims.core = [0, -th * 0.5, 0];
+    }
+    if (this.type === 'wraith') p[1] += 0.12 + Math.sin((this.age + a) * 0.1) * 0.08;
     const t = this.hurtTime > 0 || this.deathTime > 0 ? [1, 0.45, 0.45, 1] : [1, 1, 1, 1];
-    const L = this.lightAt();
+    const L = this.T.glow ? [15, 15] : this.lightAt();
     if (this.deathTime > 0) {
       // tip over
       const k = Math.min(1, (this.deathTime + a) / 15) * Math.PI / 2;
@@ -3632,6 +4595,228 @@ function drawModelTilted(r, model, pos, yaw, anims, tint, light, tilt) {
   }
 }
 
+class Projectile extends Entity {
+  constructor(game, kind, x, y, z, vx, vy, vz, owner) {
+    super(game, x, y, z);
+    this.kind = kind; this.vx = vx; this.vy = vy; this.vz = vz; this.owner = owner; this.w = 0.3; this.h = 0.3;
+    this.life = kind === 'arrow' ? 1200 : 160;
+    this.grav = kind === 'arrow' ? 0.05 : kind === 'snow' || kind === 'pearl' ? 0.03 : 0;
+    this.stuck = false; this.dir = [vx, vy, vz];
+  }
+  tick() {
+    this.savePrev(); this.age++;
+    const g = this.game, w = g.world, pl = g.player;
+    if (--this.life <= 0) { this.dead = true; return; }
+    if (this.stuck) {
+      // arrows stay in the block they hit until picked up
+      const d = this.dir, l = Math.hypot(d[0], d[1], d[2]) || 1;
+      if (!SOLID[w.getBlock(Math.floor(this.x + d[0] / l * 0.2), Math.floor(this.y + d[1] / l * 0.2), Math.floor(this.z + d[2] / l * 0.2))]) { this.stuck = false; return; }
+      if (this.pickup && pl && !pl.dead && Math.abs(pl.x - this.x) < 1.2 && Math.abs(pl.z - this.z) < 1.2 && this.y > pl.y - 0.5 && this.y < pl.y + 2.3) {
+        if (!pl.addItem({ id: I.ARROW, count: 1 })) { this.dead = true; g.sound('pop', this.x, this.y, this.z); g.ui.refreshHotbar(); }
+      }
+      return;
+    }
+    const sp = Math.hypot(this.vx, this.vy, this.vz), n = Math.max(1, Math.ceil(sp / 0.3));
+    const byPlayer = this.owner === pl;
+    for (let s = 0; s < n; s++) {
+      this.x += this.vx / n; this.y += this.vy / n; this.z += this.vz / n;
+      if (SOLID[w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z))]) {
+        if (this.kind !== 'arrow') { this.x -= this.vx / n; this.y -= this.vy / n; this.z -= this.vz / n; }
+        this.impact(null); return;
+      }
+      if (byPlayer) {
+        for (const e of g.entities) {
+          if (!(e instanceof Mob) || e.dead || e.deathTime > 0) continue;
+          const hw = e.w / 2 + 0.15;
+          if (Math.abs(e.x - this.x) < hw && Math.abs(e.z - this.z) < hw && this.y > e.y - 0.15 && this.y < e.y + e.h + 0.15) { this.impact(e); return; }
+        }
+      } else if (pl && !pl.dead && Math.abs(pl.x - this.x) < 0.5 && this.y > pl.y - 0.1 && this.y < pl.y + pl.h && Math.abs(pl.z - this.z) < 0.5) { this.impact(pl); return; }
+    }
+    if (this.grav) {
+      const wet = w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.WATER, drag = wet ? 0.6 : 0.99;
+      this.vx *= drag; this.vy = this.vy * drag - this.grav; this.vz *= drag;
+    }
+    if (Math.hypot(this.vx, this.vy, this.vz) > 0.01) this.dir = [this.vx, this.vy, this.vz];
+    if (this.kind === 'fire' && this.age % 2 === 0) g.particles.flame(this.x, this.y, this.z);
+    if (this.kind === 'void' && this.age % 2 === 0) g.particles.poof(this.x, this.y, this.z, [0.6, 0.3, 0.9], 2);
+    if (this.kind === 'pearl' && this.age % 2 === 0) g.particles.poof(this.x, this.y, this.z, [0.3, 0.8, 0.7], 1);
+    if (this.kind === 'arrow' && this.crit) g.particles.crit(this.x, this.y, this.z);
+  }
+  impact(e) {
+    const g = this.game, w = g.world;
+    if (this.kind === 'arrow') {
+      if (e) {
+        let dmg = Math.ceil(Math.hypot(this.vx, this.vy, this.vz) * 2);
+        if (this.crit) dmg += Math.floor(Math.random() * (dmg / 2 + 2));
+        if (e.hurt(dmg, 'arrow', this.owner)) {
+          if (this.owner === g.player) e.killedByPlayer = true;
+          const l = Math.hypot(this.vx, this.vz) || 1;
+          e.vx += this.vx / l * 0.4; e.vz += this.vz / l * 0.4;
+        }
+        g.sound('arrow_hit', this.x, this.y, this.z);
+        this.dead = true;
+        return;
+      }
+      this.stuck = true; this.life = 1200; this.vx = this.vy = this.vz = 0;
+      g.sound('arrow_hit', this.x, this.y, this.z);
+      return;
+    }
+    this.dead = true;
+    if (this.kind === 'snow') { if (e) e.hurt(0, 'snowball', this.owner); g.particles.poof(this.x, this.y, this.z, [1, 1, 1], 6); return; }
+    if (this.kind === 'pearl') {
+      const o = this.owner;
+      g.particles.poof(this.x, this.y, this.z, [0.3, 0.8, 0.7], 12);
+      if (o && o === g.player && !o.dead) {
+        // find room for the player near the impact point
+        const fits = (x, y, z) => !aabbHitsBlock(w, x - 0.3, y, z - 0.3, x + 0.3, y + 1.8, z + 0.3, id => SOLID[id] === 1);
+        let spot = null;
+        for (const dy of [0, 1, -1, 2]) { for (const [dx, dz] of [[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4]]) if (fits(this.x + dx, this.y + dy - 0.2, this.z + dz)) { spot = [this.x + dx, this.y + dy - 0.2, this.z + dz]; break; } if (spot) break; }
+        if (spot) {
+          o.x = spot[0]; o.y = spot[1]; o.z = spot[2]; o.vx = o.vy = o.vz = 0; o.fallDist = 0; o.savePrev();
+          g.sound('teleport', o.x, o.y, o.z);
+          o.hurt(5, 'pearl');
+        }
+      }
+      return;
+    }
+    if (e) {
+      e.hurt(g.difficultyDmg(this.kind === 'fire' ? 5 : 6), this.kind === 'fire' ? 'fireball' : 'void_orb', this.owner);
+      if (this.kind === 'fire' && e.fireTicks !== undefined) e.fireTicks = 80;
+      const l = Math.hypot(this.vx, this.vz) || 1;
+      e.vx += this.vx / l * 0.5; e.vz += this.vz / l * 0.5;
+    }
+    g.particles.smoke(this.x, this.y, this.z, 6);
+    g.sound(this.kind === 'fire' ? 'fizz' : 'teleport', this.x, this.y, this.z);
+  }
+  render(r, a) {
+    const p = this.ipos(a);
+    if (this.kind !== 'arrow') {
+      const tex = { fire: 'fireball', void: 'void_orb', snow: 'snowball', pearl: 'void_pearl' }[this.kind];
+      drawSprite(r, texL(tex), p[0], p[1], p[2], this.kind === 'fire' ? 0.5 : this.kind === 'void' ? 0.7 : 0.3, (this.game.camYaw || 0), [1, 1, 1, 1], this.kind === 'fire' || this.kind === 'void' ? [15, 15] : this.lightAt());
+      return;
+    }
+    // arrows: two crossed quads along the flight direction
+    const d0 = this.dir, l = Math.hypot(d0[0], d0[1], d0[2]) || 1, d = [d0[0] / l, d0[1] / l, d0[2] / l];
+    let s1 = [d[2], 0, -d[0]]; const ls = Math.hypot(s1[0], s1[2]);
+    s1 = ls < 1e-3 ? [1, 0, 0] : [s1[0] / ls, 0, s1[2] / ls];
+    const s2 = [d[1] * s1[2] - d[2] * s1[1], d[2] * s1[0] - d[0] * s1[2], d[0] * s1[1] - d[1] * s1[0]];
+    const h = 0.35, L = this.lightAt(), layer = texL('arrow');
+    const c = [p[0] - d[0] * 0.25, p[1] - d[1] * 0.25, p[2] - d[2] * 0.25];
+    for (const sv of [s1, s2]) for (const flip of [1, -1]) {
+      const pts = [[c[0] - d[0] * h, c[1] - d[1] * h, c[2] - d[2] * h, 0, 1], [c[0] + sv[0] * h * flip, c[1] + sv[1] * h * flip, c[2] + sv[2] * h * flip, 1, 1],
+        [c[0] + d[0] * h, c[1] + d[1] * h, c[2] + d[2] * h, 1, 0], [c[0] - sv[0] * h * flip, c[1] - sv[1] * h * flip, c[2] - sv[2] * h * flip, 0, 0]];
+      for (const q of pts) r.dv(q[0], q[1], q[2], q[3], q[4], layer, 1, 1, 1, 1, L[0], L[1]);
+    }
+  }
+}
+class EyeEntity extends Entity {
+  constructor(game, x, y, z, tx, tz) { super(game, x, y, z); this.tx = tx; this.tz = tz; this.w = 0.25; this.h = 0.25; }
+  tick() {
+    this.savePrev(); this.age++;
+    const g = this.game, dx = this.tx - this.x, dz = this.tz - this.z, d = Math.hypot(dx, dz) || 1;
+    const sp = d < 12 ? d * 0.02 : 0.32;
+    this.x += dx / d * sp; this.z += dz / d * sp;
+    this.y += this.age < 25 ? 0.12 : -0.03;
+    if (this.age % 2 === 0) g.particles.poof(this.x, this.y, this.z, [0.4, 0.9, 0.7], 1);
+    if (this.age >= 70) {
+      this.dead = true;
+      if (Math.random() < 0.8) g.dropItem(this.x, this.y, this.z, { id: I.EYE_OF_THE_VOID, count: 1 });
+      else { g.sound('break_glass', this.x, this.y, this.z); g.particles.poof(this.x, this.y, this.z, [0.3, 0.8, 0.6]); }
+    }
+  }
+  render(r, a) { const p = this.ipos(a); drawSprite(r, texL('eye_of_the_void'), p[0], p[1], p[2], 0.4, (this.game.camYaw || 0), [1, 1, 1, 1], [15, 15]); }
+}
+class VoidCrystal extends Mob {
+  constructor(game, x, y, z, idx) { super(game, 'crystal', x, y, z); this.idx = idx; this.yaw = 0; this.stepH = 0; }
+  tick() { this.savePrev(); this.age++; }
+  hurt() {
+    if (this.dead) return false;
+    this.dead = true;
+    this.game.onCrystalDestroyed(this);
+    this.game.explode(this.x, this.y + 0.6, this.z, 4, true);
+    return true;
+  }
+  render(r, a) {
+    const t = (this.age + a) * 0.05, p = this.ipos(a);
+    drawModel(r, MODELS.crystal, [p[0], p[1] + 0.2 + Math.sin(t) * 0.15, p[2]], 0, { spin1: [t, t * 1.3, 0], spin2: [-t * 1.7, t, t * 0.5] }, [1, 1, 1, 1], [15, 15], 1.4);
+  }
+}
+class Sentinel extends Mob {
+  constructor(game, x, y, z) {
+    super(game, 'sentinel', x, y, z);
+    this.phase = 'circle'; this.ang = Math.atan2(z, x); this.phaseT = 0; this.orbCd = 120; this.swoopCd = 320; this.contactCd = 0; this.dying = 0; this.noDrops = true; this.stepH = 0;
+    this.healers = [];
+  }
+  hurt(amount, source) {
+    if (this.dying || this.dead || this.invuln > 0) return false;
+    if (source === 'explosion') amount *= 0.6;
+    this.health -= amount; this.hurtTime = 10; this.invuln = 8;
+    this.game.sound('sentinel_hurt', this.x, this.y, this.z);
+    if (this.health <= 0) { this.health = 0; this.dying = 1; this.game.sound('sentinel_death', this.x, this.y, this.z); }
+    return true;
+  }
+  tick() {
+    this.savePrev(); this.age++;
+    const g = this.game, pl = g.player;
+    if (this.hurtTime > 0) this.hurtTime--;
+    if (this.invuln > 0) this.invuln--;
+    if (this.dying) {
+      this.dying++; this.y += 0.06;
+      if (this.dying % 3 === 0) g.particles.poof(this.x + (Math.random() - 0.5) * 4, this.y + 1.8 + (Math.random() - 0.5) * 4, this.z + (Math.random() - 0.5) * 4, [0.8, 0.5, 1.0]);
+      if (this.dying > 140) { this.dead = true; g.onSentinelDefeated(this); }
+      return;
+    }
+    this.healers = g.entities.filter(e => e instanceof VoidCrystal && !e.dead && Math.hypot(e.x - this.x, e.y - this.y, e.z - this.z) < 72);
+    if (this.healers.length && this.age % 10 === 0) this.health = Math.min(this.maxHealth, this.health + 1);
+    let tx, ty, tz, sp = 0.42;
+    const engaged = pl && !pl.dead && pl.mode === 0 && g.world.dim === 'end' && Math.hypot(pl.x, pl.z) < 180;
+    if (this.phase === 'swoop' && engaged) {
+      this.phaseT++;
+      tx = pl.x; ty = pl.y + 0.6; tz = pl.z; sp = 0.75;
+      if (this.phaseT > 150 || Math.hypot(pl.x - this.x, pl.y + 1 - this.y - 1.8, pl.z - this.z) < 2.6) {
+        this.phase = Math.random() < 0.35 ? 'perch' : 'circle'; this.phaseT = 0; this.swoopCd = 200 + Math.random() * 160;
+      }
+    } else if (this.phase === 'perch' && engaged) {
+      // rests above the fountain for a while: the best time to strike
+      this.phaseT++;
+      tx = 0; ty = (g.endFountainY || 61) + 5; tz = 0; sp = 0.3;
+      if (this.phaseT > 220) { this.phase = 'circle'; this.swoopCd = 200 + Math.random() * 120; }
+    } else {
+      this.phase = 'circle';
+      this.ang += 0.009;
+      tx = Math.cos(this.ang) * 46; tz = Math.sin(this.ang) * 46; ty = 84 + Math.sin(this.ang * 3) * 10;
+      if (engaged) {
+        if (--this.orbCd <= 0) {
+          this.orbCd = 80 + Math.random() * 70;
+          const sx = this.x, sy = this.y + 1.8, sz = this.z, dx = pl.x - sx, dy = pl.y + 1.2 - sy, dz = pl.z - sz, l = Math.hypot(dx, dy, dz);
+          if (l < 100) { g.spawnProjectile('void', sx, sy, sz, dx / l * 0.7, dy / l * 0.7, dz / l * 0.7, this); g.sound('shoot', sx, sy, sz); }
+        }
+        if (--this.swoopCd <= 0) { this.phase = 'swoop'; this.phaseT = 0; }
+      }
+    }
+    const dx = tx - this.x, dy = ty - this.y, dz = tz - this.z, d = Math.hypot(dx, dy, dz) || 1;
+    this.vx += (dx / d * sp - this.vx) * 0.06; this.vy += (dy / d * sp - this.vy) * 0.06; this.vz += (dz / d * sp - this.vz) * 0.06;
+    this.x += this.vx; this.y += this.vy; this.z += this.vz;
+    if (Math.hypot(this.vx, this.vz) > 0.05) this.yaw = Math.atan2(this.vx, this.vz);
+    if (this.contactCd > 0) this.contactCd--;
+    if (pl && !pl.dead && this.contactCd === 0 && Math.abs(pl.x - this.x) < 2.2 && Math.abs(pl.z - this.z) < 2.2 && pl.y + pl.h > this.y && pl.y < this.y + this.h) {
+      this.contactCd = 20;
+      if (pl.hurt(g.difficultyDmg(8), 'sentinel', this)) {
+        const l = Math.hypot(pl.x - this.x, pl.z - this.z) || 1;
+        pl.vx += (pl.x - this.x) / l * 1.2; pl.vz += (pl.z - this.z) / l * 1.2; pl.vy = 0.6;
+      }
+    }
+    if (this.age % 160 === 0) g.sound('sentinel', this.x, this.y, this.z);
+  }
+  render(r, a) {
+    const p = this.ipos(a), t = (this.age + a) * 0.04;
+    const anims = { core: [t * 0.7, t, 0] };
+    for (let k = 0; k < 8; k++) anims['plate' + k] = [0, k * Math.PI / 4 + t * 0.8, Math.sin(t + k) * 0.15];
+    const tint = this.hurtTime > 0 ? [1.4, 0.6, 0.6, 1] : this.dying ? [1.5, 1.5, 1.5, 1] : [1, 1, 1, 1];
+    drawModel(r, MODELS.sentinel, p, this.pyaw + (this.yaw - this.pyaw) * a, anims, tint, [15, 15], 2.5);
+  }
+}
+
 /* ---------------- particles ---------------- */
 class Particles {
   constructor(game) { this.game = game; this.list = []; }
@@ -3655,9 +4840,10 @@ class Particles {
   smoke(x, y, z, n) {
     for (let i = 0; i < n; i++) this.add({ x: x + (Math.random() - 0.5) * 0.3, y, z: z + (Math.random() - 0.5) * 0.3, vx: 0, vy: 0.04, vz: 0, life: 30 + Math.random() * 20, layer: texL('white_wool'), u: 0, v: 0, us: 1, size: 0.15 + Math.random() * 0.1, g: -0.001, col: [0.35, 0.35, 0.35], grow: true, bright: true });
   }
-  poof(x, y, z) {
-    for (let i = 0; i < 20; i++) this.add({ x: x + (Math.random() - 0.5), y: y + (Math.random() - 0.5), z: z + (Math.random() - 0.5), vx: (Math.random() - 0.5) * 0.1, vy: Math.random() * 0.1, vz: (Math.random() - 0.5) * 0.1, life: 15 + Math.random() * 10, layer: texL('white_wool'), u: 0, v: 0, us: 1, size: 0.25, g: 0, col: [0.9, 0.9, 0.9], grow: true, bright: true });
+  poof(x, y, z, col, n) {
+    for (let i = 0; i < (n || 20); i++) this.add({ x: x + (Math.random() - 0.5), y: y + (Math.random() - 0.5), z: z + (Math.random() - 0.5), vx: (Math.random() - 0.5) * 0.1, vy: Math.random() * 0.1, vz: (Math.random() - 0.5) * 0.1, life: 15 + Math.random() * 10, layer: texL('white_wool'), u: 0, v: 0, us: 1, size: 0.25, g: 0, col: col || [0.9, 0.9, 0.9], grow: true, bright: true });
   }
+  portal(x, y, z) { this.add({ x: x + (Math.random() - 0.5), y: y + Math.random() * 2, z: z + (Math.random() - 0.5), vx: (Math.random() - 0.5) * 0.04, vy: -0.02, vz: (Math.random() - 0.5) * 0.04, life: 20 + Math.random() * 20, layer: texL('white_wool'), u: 0, v: 0, us: 1, size: 0.06, g: 0, col: [0.7, 0.3, 1.0], bright: true }); }
   explosion(x, y, z) {
     for (let i = 0; i < 60; i++) {
       const a = Math.random() * Math.PI * 2, b = Math.random() * Math.PI - Math.PI / 2, s = Math.random() * 0.5;
@@ -3700,7 +4886,7 @@ class Particles {
 /* ===================================================================
    PLAYER
    =================================================================== */
-function selBox(id, meta) {
+function selBox(id, meta, world, x, y, z) {
   switch (SHAPE[id]) {
     case SH.CROSS: return [0.15, 0, 0.15, 0.85, id === B.SUGAR_CANE ? 1 : 0.8, 0.85];
     case SH.TORCH: {
@@ -3713,6 +4899,14 @@ function selBox(id, meta) {
     case SH.LADDER: return [[0, 0, 0, 0.1875, 1, 1], [0, 0, 0, 0.1875, 1, 1], [0.8125, 0, 0, 1, 1, 1], [0, 0, 0, 1, 1, 0.1875], [0, 0, 0.8125, 1, 1, 1]][meta] || [0, 0, 0, 1, 1, 1];
     case SH.CROP: return [0, 0, 0, 1, 0.125 + (meta & 7) * 0.11, 1];
     case SH.CACTUS: return [0.0625, 0, 0.0625, 0.9375, 1, 0.9375];
+    case SH.FENCE: case SH.PANE: case SH.DOOR: case SH.LANTERN: case SH.FRAME: {
+      const conn = world && (SHAPE[id] === SH.FENCE || SHAPE[id] === SH.PANE) ? world.conn(x, y, z, id) : 0;
+      const bb = [16, 16, 16, 0, 0, 0];
+      for (const b of shapeBoxes(id, meta, conn, false)) for (let k = 0; k < 3; k++) { bb[k] = Math.min(bb[k], b[k]); bb[k + 3] = Math.max(bb[k + 3], b[k + 3]); }
+      if (SHAPE[id] === SH.LANTERN && meta === 1) { bb[1] += 7; bb[4] += 7; }
+      return bb.map(v => v / 16);
+    }
+    case SH.EPORTAL: return [0, 0, 0, 1, 0.75, 1];
   }
   return [0, 0, 0, 1, 1, 1];
 }
@@ -3744,7 +4938,7 @@ function raycast(world, ox, oy, oz, dx, dy, dz, maxD, fluids) {
     if (TARGET[id] || isFluid) {
       if (SHAPE[id] === SH.CUBE || isFluid) { if (face >= 0 || i === 0) return { x, y, z, face: face < 0 ? 2 : face, id, t }; }
       else {
-        const b = selBox(id, world.getMeta(x, y, z));
+        const b = selBox(id, world.getMeta(x, y, z), world, x, y, z);
         const hit = rayBox(ox - x, oy - y, oz - z, dx, dy, dz, b);
         if (hit && hit.t <= maxD) return { x, y, z, face: hit.face, id, t: hit.t };
       }
@@ -3770,6 +4964,7 @@ class Player extends Entity {
     this.walkDist = 0; this.pwalkDist = 0; this.bob = 0; this.pbob = 0;
     this.jumpT = 0; this.lastSpace = -100; this.lastW = -100; this.regenT = 0; this.starveT = 0;
     this.sprintJumpBoost = 0;
+    this.portalTime = 0; this.portalCd = false; this.drawT = 0; this.spawnDim = 'overworld';
   }
   get held() { return this.inv[this.sel]; }
   heldId() { const h = this.inv[this.sel]; return h ? h.id : 0; }
@@ -3888,7 +5083,7 @@ class Player extends Entity {
     else if (this.onGround) speed = 0.1 * (this.sprinting ? 1.3 : 1) * (0.16277136 / (fric * fric * fric));
     else speed = this.sprinting ? 0.026 : 0.02;
     if (this.sneaking) speed *= 0.3;
-    if (this.eat > 0) speed *= 0.2;
+    if (this.eat > 0 || this.drawT > 0) speed *= 0.2;
     let len = Math.hypot(fwd, str);
     if (len > 0) {
       fwd /= len; str /= len;
@@ -3909,7 +5104,6 @@ class Player extends Entity {
         this.vy = 0.42; this.jumpT = 10;
         if (this.sprinting) { this.vx += -Math.sin(this.yaw) * 0.2; this.vz += -Math.cos(this.yaw) * 0.2; this.exh += 0.2; } else this.exh += 0.05;
       }
-      this.vy -= 0.08;
     }
     const fx0 = Math.floor(this.x), fz0 = Math.floor(this.z);
     const onLadder = !this.flying && (w.getBlock(fx0, Math.floor(this.y), fz0) === B.LADDER || w.getBlock(fx0, Math.floor(this.y + 1), fz0) === B.LADDER);
@@ -3930,15 +5124,21 @@ class Player extends Entity {
     }
     const ox = this.x, oz = this.z;
     const prevVy = this.vy;
-    // spectator-ish noclip not supported; regular collision
+    // cobwebs: movement is slowed to a crawl and momentum is lost
+    const whw = this.w / 2;
+    const inWeb = !this.flying && aabbHitsBlock(w, this.x - whw, this.y, this.z - whw, this.x + whw, this.y + this.h, this.z + whw, id => BLK[id].web === true);
+    if (inWeb) { this.vx *= 0.25; this.vy *= 0.05; this.vz *= 0.25; this.fallDist = 0; }
     const res = this.physicsStep();
+    if (inWeb) { this.vx = 0; this.vz = 0; this.vy = 0; }
     if ((res.hx || res.hz) && this.sprinting && !this.flying) { this.sprinting = false; this.sprintReq = false; }
     if (this.flying && this.onGround && !jump) this.flying = false;
     // drag
     if (this.flying) { this.vx *= 0.91; this.vz *= 0.91; }
     else if (this.inWater) { this.vx *= 0.8; this.vz *= 0.8; this.vy *= 0.8; }
     else if (this.inLava) { this.vx *= 0.5; this.vz *= 0.5; this.vy *= 0.5; }
-    else { const f = this.onGround ? fric : 0.91; this.vx *= f; this.vz *= f; this.vy *= 0.98; }
+    else { const f = this.onGround ? fric : 0.91; this.vx *= f; this.vz *= f; this.vy = (this.vy - 0.08) * 0.98; }
+    // soul sand drags at your feet
+    if (this.onGround && !this.flying && BLK[slipB].slow) { this.vx *= BLK[slipB].slow; this.vz *= BLK[slipB].slow; }
     if ((this.inWater || this.inLava) && res.hx && jump) this.vy = 0.3; // climb out of water
     if (onLadder && (res.hx || res.hz || jump)) { this.vy = 0.2; this.fallDist = 0; }
     const moved = Math.hypot(this.x - ox, this.z - oz);
@@ -3986,6 +5186,7 @@ class Player extends Entity {
       if (Math.random() < 0.1) g.particles.bubble(this.x + (Math.random() - 0.5) * 0.4, this.y + this.eyeCur, this.z + (Math.random() - 0.5) * 0.4);
     } else this.air = Math.min(300, this.air + 4);
     if (this.inLava) { this.hurt(4, 'lava'); this.fireTicks = 140; }
+    if (this.onGround && !this.sneaking && BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z))].magma) this.hurt(1, 'magma');
     if (this.fireTicks > 0) { this.fireTicks--; if (this.inWater) this.fireTicks = 0; else if (this.fireTicks % 20 === 0) { this.hurt(1, 'fire'); this.invuln = 0; } }
     // cactus
     const hw = this.w / 2 + 0.01;
@@ -4005,7 +5206,7 @@ class Player extends Entity {
     if (this.mineCd > 0) this.mineCd--;
     if (this.useCd > 0) this.useCd--;
     if (this.attackCd > 0) this.attackCd--;
-    if (!inp.enabled) { this.mining = null; this.mineProgress = 0; this.eat = 0; return; }
+    if (!inp.enabled) { this.mining = null; this.mineProgress = 0; this.eat = 0; this.drawT = 0; return; }
     const hit = g.target;
     const ent = g.targetEntity;
     // ---- left button: attack / mine ----
@@ -4034,6 +5235,13 @@ class Player extends Entity {
     // ---- right button: use / place / eat ----
     const held = this.inv[this.sel];
     const it = held ? ITEMS[held.id] : null;
+    // bows charge while the button is held and fire on release
+    if (held && held.id === I.BOW && !(hit && (BLK[hit.id].use || BLK[hit.id].door) && !this.sneaking)) {
+      if (inp.mouse[2] && (this.mode === 1 || this.findItem(I.ARROW) >= 0)) this.drawT++;
+      else if (this.drawT > 0) { this.shootBow(this.drawT); this.drawT = 0; }
+      return;
+    }
+    this.drawT = 0;
     if (inp.mouse[2]) {
       if (it && it.food && (this.food < 20 || this.mode === 1 && false)) {
         if (!this.eat) this.eat = 1;
@@ -4051,6 +5259,23 @@ class Player extends Entity {
     } else { this.eat = 0; if (!inp.mouse[2]) this.useCd = 0; }
   }
   doSwing() { if (this.swingT <= 2) this.swingT = 6; }
+  findItem(id) { for (let i = 0; i < 36; i++) if (this.inv[i] && this.inv[i].id === id) return i; return -1; }
+  shootBow(ticks) {
+    const g = this.game, t = ticks / 20;
+    let f = (t * t + t * 2) / 3;
+    if (f < 0.1) return;
+    if (f > 1) f = 1;
+    const e = this.eye(), d = this.look(), v = f * 3;
+    const pr = g.spawnProjectile('arrow', e[0], e[1] - 0.1, e[2], d[0] * v, d[1] * v, d[2] * v, this);
+    pr.crit = f >= 1; pr.pickup = this.mode === 0;
+    g.sound('bow', this.x, this.y + 1.5, this.z);
+    if (this.mode === 0) {
+      const i = this.findItem(I.ARROW);
+      if (i >= 0 && --this.inv[i].count <= 0) this.inv[i] = null;
+      this.damageHeld(1);
+    }
+    g.ui.refreshHotbar();
+  }
   attack(ent) {
     const g = this.game;
     const it = ITEMS[this.heldId()];
@@ -4101,6 +5326,16 @@ function iconFor(id) {
     g.setTransform(30 / 16, 15 / 16, -30 / 16, 15 / 16, 32, 2); g.drawImage(tileCanvas(topL, topTint, 1), 0, 0);
     g.setTransform(30 / 16, 15 / 16, 0, 30 / 16, 2, 17); g.drawImage(tileCanvas(sideL, tint, 0.8), 0, 0);
     g.setTransform(30 / 16, -15 / 16, 0, 30 / 16, 32, 32); g.drawImage(tileCanvas(rightL, tint, 0.62), 0, 0);
+  } else if (itemBoxes(id)) {
+    // shaped blocks (slabs, stairs, fences, frames) drawn as isometric boxes, back to front
+    const boxes = itemBoxes(id).slice().sort((a, b) => (a[0] + a[2]) - (b[0] + b[2]) || a[1] - b[1]);
+    const k = 30 / 16, hk = 15 / 16;
+    const face = (layer, shade, tf, rx, ry, rw, rh) => { g.save(); g.setTransform(...tf); g.beginPath(); g.rect(rx, ry, rw, rh); g.clip(); g.drawImage(tileCanvas(layer, null, shade), 0, 0); g.restore(); };
+    for (const b of boxes) {
+      face(FACETEX[id * 6 + 4], 0.8, [k, hk, 0, k, 32 - k * b[5], 2 + hk * b[5]], b[0], 16 - b[4], b[3] - b[0], b[4] - b[1]);
+      face(FACETEX[id * 6], 0.62, [k, -hk, 0, k, 2 + k * b[3], 17 + hk * b[3]], 16 - b[5], 16 - b[4], b[5] - b[2], b[4] - b[1]);
+      face(FACETEX[id * 6 + 2], 1, [k, hk, -k, hk, 32, 2 + k * (16 - b[4])], b[0], b[2], b[3] - b[0], b[5] - b[2]);
+    }
   } else {
     let layer, tint = null;
     if (id < 256) { layer = FACETEX[id * 6]; if (TINT[id] === 1) tint = [120, 180, 80]; }
@@ -4829,6 +6064,26 @@ class Audio {
       case 'bucket': this.noiseHit(dst, 'bandpass', 700, 1, 0.25, 0.3); break;
       case 'door': this.tone(dst, 'triangle', 200, 150, 0.15, 0.2); break;
       case 'chest': this.noiseHit(dst, 'bandpass', 400, 2, 0.25, 0.4); this.tone(dst, 'triangle', 160, 120, 0.2, 0.15); break;
+      case 'door_open': this.tone(dst, 'triangle', 240, 170, 0.18, 0.2); this.noiseHit(dst, 'bandpass', 600, 2, 0.12, 0.2); break;
+      case 'door_close': this.tone(dst, 'triangle', 170, 110, 0.12, 0.25); this.noiseHit(dst, 'lowpass', 500, 1, 0.1, 0.35); break;
+      case 'wisp': this.tone(dst, 'sine', 620 + Math.random() * 120, 980, 0.5, 0.12); this.noiseHit(dst, 'highpass', 3000, 0.5, 0.4, 0.06); break;
+      case 'wraith': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 900; f2.connect(dst); for (let i = 0; i < 3; i++) this.tone(f2, 'square', 95 + i * 7, 70, 0.22, 0.12, now + i * 0.14); break; }
+      case 'teleport': this.tone(dst, 'sine', 260, 1600, 0.25, 0.2); this.noiseHit(dst, 'bandpass', 1800, 1.5, 0.2, 0.15); break;
+      case 'shoot': this.noiseHit(dst, 'lowpass', 900, 0.8, 0.35, 0.45); this.tone(dst, 'sawtooth', 220, 70, 0.3, 0.12); break;
+      case 'throw': this.noiseHit(dst, 'bandpass', 1400, 1, 0.15, 0.25); break;
+      case 'bow': this.noiseHit(dst, 'bandpass', 900, 3, 0.15, 0.35); this.tone(dst, 'triangle', 420, 160, 0.12, 0.15); break;
+      case 'arrow_hit': this.noiseHit(dst, 'bandpass', 1200, 2, 0.08, 0.3); this.tone(dst, 'square', 300, 200, 0.05, 0.08); break;
+      case 'scrape': for (let i = 0; i < 3; i++) this.noiseHit(dst, 'highpass', 2600, 2, 0.1, 0.18, now + i * 0.08); break;
+      case 'lavapop': this.tone(dst, 'sine', 300 + Math.random() * 200, 90, 0.08, 0.15); break;
+      case 'sentinel': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 420; f2.connect(dst); this.tone(f2, 'sawtooth', 75, 45, 1.6, 0.5); this.tone(f2, 'sawtooth', 112, 70, 1.4, 0.3); this.noiseHit(dst, 'lowpass', 300, 1, 1.2, 0.3); break; }
+      case 'sentinel_hurt': this.tone(dst, 'sawtooth', 190, 90, 0.4, 0.35); this.tone(dst, 'square', 140, 60, 0.35, 0.15); break;
+      case 'sentinel_death': this.tone(dst, 'sawtooth', 220, 30, 4.5, 0.5); this.tone(dst, 'sawtooth', 150, 25, 5, 0.35); this.noiseHit(dst, 'lowpass', 500, 0.7, 4, 0.6); break;
+      case 'portal': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 500; f2.Q.value = 1; f2.connect(dst); this.tone(f2, 'sawtooth', 110, 130, 1.4, 0.12); this.noiseHit(dst, 'bandpass', 420, 2, 1.2, 0.06); break; }
+      case 'portal_trigger': this.tone(dst, 'sine', 140, 420, 3.5, 0.18); this.tone(dst, 'triangle', 210, 630, 3.5, 0.1); this.noiseHit(dst, 'bandpass', 600, 1, 3, 0.08); break;
+      case 'portal_ignite': this.noiseHit(dst, 'bandpass', 700, 1, 0.8, 0.4); this.tone(dst, 'sine', 200, 600, 0.8, 0.2); break;
+      case 'travel': [196, 247, 294, 392].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.5, 1.6, 0.1, now + i * 0.05)); this.noiseHit(dst, 'bandpass', 900, 0.8, 1.5, 0.2); break;
+      case 'eye_place': this.tone(dst, 'sine', 880, 1320, 0.25, 0.2); this.tone(dst, 'triangle', 1320, 1320, 0.4, 0.08, now + 0.08); break;
+      case 'end_portal_open': [262, 330, 392, 523, 659].forEach((f, i) => this.tone(dst, 'triangle', f, f, 3.5, 0.12, now + i * 0.12)); this.tone(dst, 'sine', 65, 60, 3.5, 0.4); break;
     }
   }
   // generative ambient music: soft piano-like notes over a slow progression
@@ -4838,9 +6093,10 @@ class Audio {
     if (this.musicT > 0) return;
     this.musicT = 180 + Math.random() * 240;
     if (!playing) { this.musicT = 20; }
-    const scales = [[0, 2, 4, 7, 9], [0, 2, 3, 7, 8], [0, 4, 5, 7, 11], [0, 2, 5, 7, 9]];
+    // darker modes in the nether and the end
+    const scales = this.mood === 'nether' ? [[0, 1, 3, 7, 8], [0, 1, 5, 6, 10]] : this.mood === 'end' ? [[0, 2, 3, 6, 7], [0, 3, 5, 6, 10]] : [[0, 2, 4, 7, 9], [0, 2, 3, 7, 8], [0, 4, 5, 7, 11], [0, 2, 5, 7, 9]];
     const sc = scales[Math.floor(Math.random() * scales.length)];
-    const root = 48 + Math.floor(Math.random() * 7);
+    const root = (this.mood === 'nether' ? 40 : this.mood === 'end' ? 44 : 48) + Math.floor(Math.random() * 7);
     const t0 = this.ctx.currentTime + 0.5;
     let t = t0;
     const n = 24 + Math.floor(Math.random() * 20);
@@ -4879,9 +6135,23 @@ class Input {
   reset() { this.keys.clear(); this.mouse = [false, false, false]; }
 }
 const DEATH_MSG = { fall: 'hit the ground too hard', lava: 'tried to swim in lava', drown: 'drowned', zombie: 'was slain by Zombie', starve: 'starved to death',
-  cactus: 'was pricked to death', spider: 'was slain by Spider', void: 'fell out of the world', explosion: 'blew up', fire: 'burned to death', kill: 'died', block: 'was squashed by a falling block' };
+  cactus: 'was pricked to death', spider: 'was slain by Spider', void: 'fell out of the world', explosion: 'blew up', fire: 'burned to death', kill: 'died', block: 'was squashed by a falling block',
+  fireball: 'was fireballed by an Ember Wisp', charred_ghoul: 'was slain by a Charred Ghoul', wraith: 'was slain by a Void Wraith', void_orb: 'was blasted by the Void Sentinel',
+  sentinel: 'was crushed by the Void Sentinel', magma: 'discovered the floor was lava', arrow: 'was shot', pearl: 'hit the ground too hard', bed: 'was killed by [Intentional Game Design]' };
+const DIM_PREFIX = { overworld: '', nether: 'n:', end: 'e:' };
+const DIM_TITLE = { overworld: 'the Overworld', nether: 'the Nether', end: 'the End' };
+const END_PLATFORM = { x: 124, y: 52, z: 0 };
+// fog colours of the nether biomes
+const NETHER_FOG = { [BI.NETHER_WASTES]: [0.2, 0.03, 0.03], [BI.CRIMSON_FOREST]: [0.2, 0.012, 0.012], [BI.WARPED_FOREST]: [0.1, 0.02, 0.1],
+  [BI.SOUL_SAND_VALLEY]: [0.106, 0.278, 0.27], [BI.BASALT_DELTAS]: [0.41, 0.37, 0.44] };
+// ambient particles drifting through the nether biomes
+const NETHER_MOTES = { [BI.CRIMSON_FOREST]: [0.9, 0.25, 0.2], [BI.WARPED_FOREST]: [0.3, 0.9, 0.85], [BI.SOUL_SAND_VALLEY]: [0.55, 0.85, 0.9], [BI.BASALT_DELTAS]: [0.85, 0.85, 0.85] };
+const COPPER_STAGES = [B.COPPER_BLOCK, B.EXPOSED_COPPER, B.WEATHERED_COPPER, B.OXIDIZED_COPPER];
+const MOB_NAMES = { wisp: 'Ember Wisp', charred_ghoul: 'Charred Ghoul', wraith: 'Void Wraith' };
+function mobName(t) { return MOB_NAMES[t] || titleCase(t); }
 const SPLASHES = ['100% one file!', 'Now with cherry trees!', 'Punch a tree!', 'Procedurally textured!', 'Made of blocks!', 'Also try the original!', 'Infinite terrain!',
-  'Synthesized sounds!', 'WebGL2!', 'Mind the creepy zombies!', 'Mountains reach the clouds!', 'Deep caves!', 'Crafting included!', 'Look up at night!', 'Don\'t dig straight down!'];
+  'Synthesized sounds!', 'WebGL2!', 'Mind the creepy zombies!', 'Mountains reach the clouds!', 'Deep caves!', 'Crafting included!', 'Look up at night!', 'Don\'t dig straight down!',
+  'Now with the Nether!', 'Beware the Void Sentinel!', 'Follow the eye!', 'Bring a bow to the End!', 'Huge fungi!'];
 
 class Game {
   constructor() {
@@ -4897,7 +6167,7 @@ class Game {
     this.particles = new Particles(this);
     this.entities = []; this.world = null; this.player = null;
     this.state = 'title'; this.thirdPerson = 0; this.fovCur = OPTIONS.fov;
-    this.lightQueue = []; this.inflight = 0; this.meshList = []; this.furnaces = new Map(); this.pendingSaves = [];
+    this.lightQueue = []; this.inflight = 0; this.meshList = []; this.furnaces = new Map(); this.pendingSaves = []; this.memChunks = new Map();
     this.acc = 0; this.last = performance.now(); this.fps = 0; this.frames = 0; this.fpsT = 0;
     this.itemModels = {};
     this.setupWorkers();
@@ -4921,22 +6191,25 @@ class Game {
   }
   // ---------------- workers ----------------
   setupWorkers() {
-    const src = $('shared-src').textContent + '\nlet G=null;onmessage=function(e){const d=e.data;if(!G||G.seed!==(d.seed|0))G=new Generator(d.seed);const r=G.genChunk(d.cx,d.cz);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,blocks:r.blocks,biomes:r.biomes},[r.blocks.buffer,r.biomes.buffer]);};';
+    const src = $('shared-src').textContent + '\nconst G={};onmessage=function(e){const d=e.data,k=d.dim+":"+(d.seed|0);if(!G[k])G[k]=makeGenerator(d.seed,d.dim);const r=G[k].genChunk(d.cx,d.cz);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,dim:d.dim,blocks:r.blocks,biomes:r.biomes},[r.blocks.buffer,r.biomes.buffer]);};';
     this.workers = [];
     try {
       const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
       const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
       for (let i = 0; i < n; i++) {
         const w = new Worker(url);
-        w.onmessage = e => { if (e.data.tok !== this.tok) return; this.inflight--; this.onChunkData(e.data.cx, e.data.cz, e.data.seed, e.data.blocks, e.data.biomes, null, null); };
+        w.onmessage = e => { if (e.data.tok !== this.tok) return; this.inflight--; this.onChunkData(e.data.cx, e.data.cz, e.data.seed, e.data.blocks, e.data.biomes, null, null, e.data.dim); };
         w.onerror = () => { this.workers = []; };
         this.workers.push(w);
       }
     } catch (e) { this.workers = []; }
     this.wrr = 0;
   }
+  chunkKey(cx, cz) { return this.meta.id + ':' + DIM_PREFIX[this.world.dim] + cx + ',' + cz; }
   requestChunk(c) {
-    const w = this.world, key = this.meta.id + ':' + c.cx + ',' + c.cz, tok = this.tok;
+    const w = this.world, key = this.chunkKey(c.cx, c.cz), tok = this.tok;
+    const mem = this.memChunks.get(key);
+    if (mem) { this.onChunkData(c.cx, c.cz, w.seed, rleDecode(mem.blocks, 65536), mem.biomes, rleDecode(mem.meta, 65536), mem.be); return; }
     this.inflight++;
     if (this.savedKeys.has(key)) {
       DB.getChunk(key).then(rec => {
@@ -4948,15 +6221,16 @@ class Game {
     } else this.genChunk(c);
   }
   genChunk(c) {
-    if (this.workers.length) { this.workers[this.wrr++ % this.workers.length].postMessage({ cx: c.cx, cz: c.cz, seed: this.world.seed, tok: this.tok }); }
+    if (this.workers.length) { this.workers[this.wrr++ % this.workers.length].postMessage({ cx: c.cx, cz: c.cz, seed: this.world.seed, tok: this.tok, dim: this.world.dim }); }
     else { this.localQueue = this.localQueue || []; this.localQueue.push(c); }
   }
-  onChunkData(cx, cz, seed, blocks, biomes, meta, be) {
+  onChunkData(cx, cz, seed, blocks, biomes, meta, be, dim) {
     const w = this.world;
-    if (!w || (seed | 0) !== (w.seed | 0)) return;
+    if (!w || (seed | 0) !== (w.seed | 0) || (dim && dim !== w.dim)) return;
     const c = w.chunks.get(w.key(cx, cz));
     if (!c || c.state !== 0) return;
     c.blocks = blocks; c.biomes = biomes; c.meta = meta || new Uint8Array(65536); c.light = new Uint8Array(65536);
+    if (!meta && w.dim === 'overworld') this.initStructureMeta(c);
     if (be) for (const [i, v] of be) {
       v.x = cx * 16 + (i & 15); v.y = i >> 8; v.z = cz * 16 + ((i >> 4) & 15);
       c.be.set(i, v);
@@ -4967,6 +6241,17 @@ class Game {
     this.lightQueue.push(c);
   }
   beKey(x, y, z) { return x + ',' + y + ',' + z; }
+  // freshly generated portal rooms: some frames already hold an eye
+  initStructureMeta(c) {
+    const seed = this.world.seed, bx = c.cx * 16, bz = c.cz * 16;
+    const p = portalRoomAt(seed, Math.floor((bx + 8) / PORTAL_ROOM_REGION), Math.floor((bz + 8) / PORTAL_ROOM_REGION));
+    for (const [dx, dz] of FRAME_RING) {
+      const wx = p.x + dx, wz = p.z + dz;
+      if (wx < bx || wx >= bx + 16 || wz < bz || wz >= bz + 16) continue;
+      const i = ((p.y + 1) << 8) | ((wz - bz) << 4) | (wx - bx);
+      if (c.blocks[i] === B.END_PORTAL_FRAME) c.meta[i] = framesMeta(seed, wx, wz);
+    }
+  }
   // ---------------- chunk streaming ----------------
   updateChunks(budget) {
     const w = this.world, p = this.player;
@@ -4982,7 +6267,7 @@ class Game {
       for (const [k, c] of w.chunks) {
         const dx = c.cx - pcx, dz = c.cz - pcz;
         if (dx * dx + dz * dz > (LR + 2.5) * (LR + 2.5)) {
-          if (c.unsaved && c.state >= 1) this.pendingSaves.push([this.meta.id + ':' + c.cx + ',' + c.cz, w.serializeChunk(c)]);
+          if (c.unsaved && c.state >= 1) this.pendingSaves.push([this.chunkKey(c.cx, c.cz), w.serializeChunk(c)]);
           for (const [i, v] of c.be) if (v.type === 'furnace') this.furnaces.delete(this.beKey(c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15)));
           this.r.freeChunk(c);
           w.chunks.delete(k);
@@ -5003,11 +6288,11 @@ class Game {
     const t0 = performance.now();
     // main-thread generation fallback
     if (this.localQueue && this.localQueue.length) {
-      if (!this.localGen || this.localGen.seed !== (w.seed | 0)) this.localGen = new Generator(w.seed);
+      if (!this.localGen || this.localGen.seed !== (w.seed | 0) || this.localGenDim !== w.dim) { this.localGen = makeGenerator(w.seed, w.dim); this.localGenDim = w.dim; }
       while (this.localQueue.length && performance.now() - t0 < budget * 0.5) {
         const c = this.localQueue.shift(); this.inflight--;
         const r = this.localGen.genChunk(c.cx, c.cz);
-        this.onChunkData(c.cx, c.cz, w.seed, r.blocks, r.biomes, null, null);
+        this.onChunkData(c.cx, c.cz, w.seed, r.blocks, r.biomes, null, null, w.dim);
       }
     }
     // lighting
@@ -5093,10 +6378,7 @@ class Game {
     this.stopPanorama();
     this.cleanupWorld();
     this.meta = meta; this.savedKeys = saved;
-    const w = this.world = new World(meta.seed);
-    w.time = meta.time || 1000; w.tick = meta.tick || 0;
-    w.raining = !!meta.raining; w.rainTime = meta.rainTime || (12000 + Math.random() * 24000); w.rainStrength = w.raining ? 1 : 0;
-    w.onFizz = (x, y, z) => { this.sound('fizz', x, y, z); this.particles.smoke(x + 0.5, y + 1, z + 0.5, 4); };
+    this.world = this.newWorld(meta.dim || 'overworld', { time: meta.time || 1000, tick: meta.tick || 0, raining: meta.raining, rainTime: meta.rainTime });
     if (!meta.spawn) meta.spawn = this.findSpawn(meta.seed);
     const p = this.player = new Player(this, meta.spawn[0] + 0.5, 120, meta.spawn[1] + 0.5);
     p.mode = meta.mode | 0;
@@ -5105,7 +6387,7 @@ class Game {
       const s = meta.player;
       Object.assign(p, { x: s.x, y: s.y, z: s.z, yaw: s.yaw, pitch: s.pitch, health: s.health, food: s.food, sat: s.sat, mode: s.mode, xpLevel: s.xpLevel || 0, xp: s.xp || 0, flying: !!s.flying, sel: s.sel || 0 });
       p.inv = s.inv.map(x => x ? Object.assign({}, x) : null);
-      p.spawn = s.spawn || null;
+      p.spawn = s.spawn || null; p.spawnDim = s.spawnDim || 'overworld';
       p.savePrev();
       this.waitSpawn = false;
       if (s.dead) { p.health = 0; }
@@ -5115,6 +6397,7 @@ class Game {
       const starter = ['grass_block', 'dirt', 'stone', 'cobblestone', 'oak_planks', 'oak_log', 'glass', 'torch', 'tnt'];
       starter.forEach((n, i) => p.inv[i] = { id: itemOf(n), count: 64, dmg: 0 });
     }
+    this.arrival = meta.pendingArrival || null; this.traveling = false;
     this.state = 'loading';
     this.lastPcx = null; this.loadStart = performance.now();
     this.ui.show('scr-loading');
@@ -5122,11 +6405,22 @@ class Game {
     $('hud').classList.add('hidden');
     this.ui.refreshHotbar();
   }
+  newWorld(dim, st) {
+    const w = new World(this.meta.seed, dim);
+    w.time = st.time; w.tick = st.tick;
+    w.raining = !!st.raining; w.rainTime = st.rainTime || (12000 + Math.random() * 24000); w.rainStrength = w.raining && dim === 'overworld' ? 1 : 0;
+    w.onFizz = (x, y, z) => { this.sound('fizz', x, y, z); this.particles.smoke(x + 0.5, y + 1, z + 0.5, 4); };
+    AUDIO.mood = dim;
+    return w;
+  }
   cleanupWorld() {
     if (this.world) for (const c of this.world.chunks.values()) this.r.freeChunk(c);
+    this.sentinel = null; this.arrival = null; this.traveling = false; this.sleeping = 0;
+    $('bossbar').classList.add('hidden'); $('fx-portal').style.opacity = 0;
     this.world = null; this.player = null; this.entities = []; this.particles.list = [];
     this.lightQueue = []; this.meshList = []; this.furnaces = new Map(); this.inflight = 0; this.localQueue = [];
     this.tok = (this.tok || 0) + 1; // stale worker/DB results are ignored
+    this.memChunks = new Map();
   }
   groundY(x, z) {
     const w = this.world;
@@ -5155,15 +6449,292 @@ class Game {
       this.meta.spawnY = p.y;
       this.waitSpawn = false;
     }
-    if (p.health <= 0) { p.dead = true; this.onDeath('kill', true); }
+    const traveling = this.traveling, firstLoad = !this.meta.player;
+    this.traveling = false;
+    if (this.arrival) { this.completeArrival(this.arrival); this.arrival = null; delete this.meta.pendingArrival; }
+    this.onEnterDim();
     this.state = 'playing';
     this.ui.show(null);
     $('hud').classList.remove('hidden');
     this.ui.refreshHotbar(); this.ui.refreshBars();
+    if (traveling) { this.lockPointer(); return; }
     this.ui.chat('Welcome to Blockcraft! Click to play. Press E for inventory, T for chat, F3 for debug.', '#ffff80');
-    if (p.mode === 0 && !this.meta.player) this.ui.chat('Tip: hold left click on a tree to collect wood, then craft planks (E).', '#aaa');
+    if (p.mode === 0 && firstLoad) this.ui.chat('Tip: hold left click on a tree to collect wood, then craft planks (E).', '#aaa');
     this.ui.show('scr-pause');
     $('pause-hint').textContent = this.touch.supported ? 'Tap "Back to Game" to start. Left stick: move. Drag: look. Hold: break. Tap: place/use.' : 'Click "Back to Game" to start playing';
+    if (p.health <= 0) { p.dead = true; this.onDeath('kill', true); }
+  }
+  // ---------------- dimensions & portals ----------------
+  placePlayer(x, y, z) { const p = this.player; p.x = x; p.y = y; p.z = z; p.vx = p.vy = p.vz = 0; p.fallDist = 0; p.savePrev(); }
+  travel(dest, how) {
+    const old = this.world, p = this.player, meta = this.meta;
+    if (!old || this.pano || this.state !== 'playing') return;
+    this.ui.closeInv();
+    // remember the portal we left through so the way back links to it
+    if (how.kind === 'portal') { const src = this.portalAt(Math.floor(p.x), Math.floor(p.y + 0.2), Math.floor(p.z)); if (src) this.rememberPortal(old.dim, src); }
+    for (const c of old.chunks.values()) {
+      if (c.unsaved && c.state >= 1) { this.pendingSaves.push([this.chunkKey(c.cx, c.cz), old.serializeChunk(c)]); c.unsaved = false; }
+      this.r.freeChunk(c);
+    }
+    if (this.sentinel && !this.sentinel.dead && meta.end) meta.end.hp = this.sentinel.health;
+    this.entities = []; this.particles.list = []; this.lightQueue = []; this.meshList = []; this.need = [];
+    this.furnaces = new Map(); this.inflight = 0; this.localQueue = []; this.sentinel = null; this.sleeping = 0;
+    $('fx-sleep').style.opacity = 0;
+    this.tok = (this.tok || 0) + 1;
+    this.world = this.newWorld(dest, old);
+    meta.dim = dest;
+    let a;
+    if (how.kind === 'portal') {
+      const scale = dest === 'nether' ? 1 / 8 : old.dim === 'nether' ? 8 : 1;
+      const tx = Math.max(-29999000, Math.min(29999000, Math.floor(p.x * scale))), tz = Math.max(-29999000, Math.min(29999000, Math.floor(p.z * scale)));
+      const range = dest === 'nether' ? 16 : 128;
+      let best = null, bd = Infinity;
+      for (const q of this.portalList(dest)) { const d = Math.max(Math.abs(q[0] - tx), Math.abs(q[2] - tz)); if (d <= range && d < bd) { bd = d; best = q; } }
+      a = { kind: 'portal', link: best, tx, tz };
+      if (best) this.placePlayer(best[0] + 0.5, best[1], best[2] + 0.5); else this.placePlayer(tx + 0.5, dest === 'nether' ? 70 : 100, tz + 0.5);
+    } else if (how.kind === 'end') {
+      a = { kind: 'end' };
+      this.placePlayer(END_PLATFORM.x + 0.5, END_PLATFORM.y + 1, END_PLATFORM.z + 0.5);
+      p.yaw = Math.PI / 2;
+    } else {
+      const sp = p.spawn && (p.spawnDim || 'overworld') === dest ? p.spawn : null;
+      a = { kind: 'spawn', bed: !!sp, exit: old.dim === 'end' && !how.respawn };
+      if (sp) this.placePlayer(sp[0], sp[1], sp[2]); else this.placePlayer(meta.spawn[0] + 0.5, meta.spawnY || 100, meta.spawn[1] + 0.5);
+    }
+    this.arrival = a; meta.pendingArrival = a;
+    p.portalTime = 0; p.portalCd = true; p.mining = null; p.mineProgress = 0;
+    this.state = 'loading'; this.traveling = true; this.lastPcx = null; this.loadStart = performance.now();
+    this.ui.show('scr-loading');
+    $('load-title').textContent = dest === 'overworld' ? (a.exit ? 'Returning to the Overworld' : 'Loading the Overworld') : 'Entering ' + DIM_TITLE[dest];
+    $('load-msg').textContent = 'Building terrain...'; $('load-bar').style.width = '0%';
+    $('hud').classList.add('hidden'); $('fx-portal').style.opacity = 0; $('bossbar').classList.add('hidden');
+    this.sound('travel');
+    this.saveAll();
+  }
+  completeArrival(a) {
+    const w = this.world, p = this.player;
+    if (a.kind === 'portal') {
+      let spot = a.link && w.getBlock(a.link[0], a.link[1], a.link[2]) === B.NETHER_PORTAL ? a.link : null;
+      if (!spot) {
+        if (a.link) this.forgetPortal(w.dim, a.link);
+        spot = this.buildArrivalPortal(a.tx, a.tz);
+        this.rememberPortal(w.dim, spot);
+      }
+      const ax = (w.getMeta(spot[0], spot[1], spot[2]) & 1) ? 0 : 1, az = 1 - ax;
+      const wide = w.getBlock(spot[0] + ax, spot[1], spot[2] + az) === B.NETHER_PORTAL ? 0.5 : 0;
+      this.placePlayer(spot[0] + 0.5 + wide * ax, spot[1], spot[2] + 0.5 + wide * az);
+    } else if (a.kind === 'end') {
+      this.buildEndPlatform();
+      this.placePlayer(END_PLATFORM.x + 0.5, END_PLATFORM.y + 1, END_PLATFORM.z + 0.5);
+    } else if (!a.bed) {
+      const s = this.safeSpot(Math.floor(p.x), Math.floor(p.z));
+      this.placePlayer(s[0], s[1], s[2]);
+    }
+    if (a.exit && !this.meta.endExited) {
+      this.meta.endExited = true;
+      this.ui.chat('You escaped the End. Thank you for playing Blockcraft!', '#d8a8ff');
+    }
+    p.portalCd = true;
+  }
+  onEnterDim() {
+    const w = this.world;
+    AUDIO.mood = w.dim;
+    if (w.dim === 'end') this.setupEnd();
+  }
+  portalList(dim) { const m = this.meta; if (!m.portals) m.portals = {}; return m.portals[dim] || (m.portals[dim] = []); }
+  rememberPortal(dim, pos) {
+    const list = this.portalList(dim);
+    if (list.some(q => Math.abs(q[0] - pos[0]) <= 3 && Math.abs(q[1] - pos[1]) <= 3 && Math.abs(q[2] - pos[2]) <= 3)) return;
+    list.push([pos[0], pos[1], pos[2]]);
+    if (list.length > 64) list.shift();
+  }
+  forgetPortal(dim, pos) { const list = this.portalList(dim), i = list.findIndex(q => q[0] === pos[0] && q[1] === pos[1] && q[2] === pos[2]); if (i >= 0) list.splice(i, 1); }
+  // lowest corner block of the nether portal touching (x, y, z), or null
+  portalAt(x, y, z) {
+    const w = this.world;
+    let f = null;
+    for (let dy = -1; dy <= 1 && !f; dy++) for (let dx = -1; dx <= 1 && !f; dx++) for (let dz = -1; dz <= 1 && !f; dz++) if (w.getBlock(x + dx, y + dy, z + dz) === B.NETHER_PORTAL) f = [x + dx, y + dy, z + dz];
+    if (!f) return null;
+    let [px, py, pz] = f;
+    const ax = (w.getMeta(px, py, pz) & 1) ? 0 : 1, az = 1 - ax;
+    for (let n = 0; n < 24 && w.getBlock(px, py - 1, pz) === B.NETHER_PORTAL; n++) py--;
+    for (let n = 0; n < 24 && w.getBlock(px - ax, py, pz - az) === B.NETHER_PORTAL; n++) { px -= ax; pz -= az; }
+    return [px, py, pz];
+  }
+  // a 4x5 obsidian frame filled with portal blocks; (x, y, z) is the lower interior corner
+  makePortal(x, y, z, ax) {
+    const w = this.world, az = 1 - ax, meta = ax ? 0 : 1, cells = [];
+    for (let i = -1; i <= 2; i++) for (let j = -1; j <= 3; j++) {
+      const bx = x + i * ax, bz = z + i * az, frame = i === -1 || i === 2 || j === -1 || j === 3;
+      w.setBlock(bx, y + j, bz, frame ? B.OBSIDIAN : B.NETHER_PORTAL, frame ? 0 : meta, false);
+      cells.push([bx, y + j, bz]);
+    }
+    for (const [bx, by, bz] of cells) w.notify(bx, by, bz);
+  }
+  portalFits(x, y, z, ax) {
+    const w = this.world, az = 1 - ax;
+    const free = b => b === 0 || (REPL[b] === 1 && !BLK[b].liquid);
+    for (let i = -1; i <= 2; i++) {
+      const bx = x + i * ax, bz = z + i * az;
+      if (!OPAQUE[w.getBlock(bx, y - 1, bz)]) return false;
+      for (let j = 0; j <= 3; j++) if (!free(w.getBlock(bx, y + j, bz))) return false;
+    }
+    for (const s of [1, -1]) {
+      let ok = true;
+      for (let i = 0; i <= 1 && ok; i++) for (let j = 0; j <= 1 && ok; j++) if (!free(w.getBlock(x + i * ax + s * az, y + j, z + i * az + s * ax))) ok = false;
+      if (ok) return true;
+    }
+    return false;
+  }
+  buildArrivalPortal(tx, tz) {
+    const w = this.world, nether = w.dim === 'nether';
+    const loaded = (x, z) => w.isLoadedAt(x - 3, z - 3) && w.isLoadedAt(x + 3, z + 3) && w.isLoadedAt(x - 3, z + 3) && w.isLoadedAt(x + 3, z - 3);
+    for (let r = 0; r <= 16; r++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const x = tx + dx, z = tz + dz;
+      if (!loaded(x, z)) continue;
+      if (nether) {
+        for (let y = 100; y > 32; y--) {
+          if (w.getBlock(x, y, z) !== 0 || !OPAQUE[w.getBlock(x, y - 1, z)]) continue;
+          for (const ax of [1, 0]) if (this.portalFits(x, y, z, ax)) { this.makePortal(x, y, z, ax); return [x, y, z]; }
+        }
+      } else {
+        const y = this.groundY(x, z);
+        if (y < 2 || y > 250 || BLK[w.getBlock(x, y - 1, z)].liquid) continue;
+        for (const ax of [1, 0]) if (this.portalFits(x, y, z, ax)) { this.makePortal(x, y, z, ax); return [x, y, z]; }
+      }
+    }
+    // nowhere suitable: carve a pocket with an obsidian ledge
+    const y = nether ? 70 : Math.max(SEA + 2, Math.min(240, this.groundY(tx, tz)));
+    for (let i = -1; i <= 2; i++) for (let s = -1; s <= 1; s++) {
+      w.setBlock(tx + i, y - 1, tz + s, B.OBSIDIAN, 0, false);
+      for (let j = 0; j <= 3; j++) w.setBlock(tx + i, y + j, tz + s, 0, 0, false);
+    }
+    this.makePortal(tx, y, tz, 1);
+    return [tx, y, tz];
+  }
+  // flint and steel inside an obsidian frame (2x3 up to 21x21)
+  lightPortal(x, y, z) {
+    const w = this.world;
+    if (w.dim === 'end' || w.getBlock(x, y, z) !== 0) return false;
+    for (const ax of [1, 0]) {
+      const az = 1 - ax;
+      let by = y, n = 0;
+      while (w.getBlock(x, by - 1, z) === 0 && n++ < 21) by--;
+      if (w.getBlock(x, by - 1, z) !== B.OBSIDIAN) continue;
+      let lx = x, lz = z; n = 0;
+      while (w.getBlock(lx - ax, by, lz - az) === 0 && n++ < 21) { lx -= ax; lz -= az; }
+      if (w.getBlock(lx - ax, by, lz - az) !== B.OBSIDIAN) continue;
+      let width = 0;
+      while (width < 22 && w.getBlock(lx + width * ax, by, lz + width * az) === 0) width++;
+      if (width < 2 || width > 21 || w.getBlock(lx + width * ax, by, lz + width * az) !== B.OBSIDIAN) continue;
+      let height = 0;
+      while (height < 22 && w.getBlock(lx, by + height, lz) === 0) height++;
+      if (height < 3 || height > 21) continue;
+      let ok = true;
+      for (let i = 0; i < width && ok; i++) {
+        if (w.getBlock(lx + i * ax, by - 1, lz + i * az) !== B.OBSIDIAN || w.getBlock(lx + i * ax, by + height, lz + i * az) !== B.OBSIDIAN) ok = false;
+        for (let j = 0; j < height && ok; j++) if (w.getBlock(lx + i * ax, by + j, lz + i * az) !== 0) ok = false;
+      }
+      for (let j = 0; j < height && ok; j++) if (w.getBlock(lx - ax, by + j, lz - az) !== B.OBSIDIAN || w.getBlock(lx + width * ax, by + j, lz + width * az) !== B.OBSIDIAN) ok = false;
+      if (!ok) continue;
+      const meta = ax ? 0 : 1;
+      for (let i = 0; i < width; i++) for (let j = 0; j < height; j++) w.setBlock(lx + i * ax, by + j, lz + i * az, B.NETHER_PORTAL, meta, false);
+      for (let i = 0; i < width; i++) for (let j = 0; j < height; j++) w.notify(lx + i * ax, by + j, lz + i * az);
+      this.rememberPortal(w.dim, [lx, by, lz]);
+      this.sound('portal_ignite', x + 0.5, y + 0.5, z + 0.5);
+      this.remeshNear(x, z);
+      return true;
+    }
+    return false;
+  }
+  // inserting the last eye of the void opens the portal in the middle of the ring
+  checkEndPortal(x, y, z) {
+    const w = this.world;
+    for (const [dx, dz] of FRAME_RING) {
+      const cx = x - dx, cz = z - dz;
+      let ok = true;
+      for (const [ex, ez] of FRAME_RING) if (w.getBlock(cx + ex, y, cz + ez) !== B.END_PORTAL_FRAME || !(w.getMeta(cx + ex, y, cz + ez) & 4)) { ok = false; break; }
+      if (!ok) continue;
+      for (let i = -1; i <= 1; i++) for (let k = -1; k <= 1; k++) w.setBlock(cx + i, y, cz + k, B.END_PORTAL, 0);
+      this.sound('end_portal_open', cx + 0.5, y + 0.5, cz + 0.5);
+      this.remeshNear(cx, cz);
+      return true;
+    }
+    return false;
+  }
+  portalTick() {
+    const p = this.player, w = this.world;
+    if (p.dead || this.sleeping) return;
+    const hw = p.w / 2;
+    let inN = false, inE = false;
+    for (let y = Math.floor(p.y); y <= Math.floor(p.y + p.h - 0.01); y++) for (let x = Math.floor(p.x - hw); x <= Math.floor(p.x + hw); x++) for (let z = Math.floor(p.z - hw); z <= Math.floor(p.z + hw); z++) {
+      const id = w.getBlock(x, y, z);
+      if (id === B.NETHER_PORTAL) inN = true;
+      else if (id === B.END_PORTAL && p.y < y + 0.8) inE = true;
+    }
+    if (inE && !p.portalCd) { this.travel(w.dim === 'end' ? 'overworld' : 'end', { kind: w.dim === 'end' ? 'spawn' : 'end' }); return; }
+    if (inN && w.dim !== 'end') {
+      if (!p.portalCd) {
+        if (p.portalTime === 0) this.sound('portal_trigger', p.x, p.y + 1, p.z);
+        p.portalTime++;
+        if (p.portalTime >= (p.mode === 1 ? 2 : 80)) { this.travel(w.dim === 'nether' ? 'overworld' : 'nether', { kind: 'portal' }); return; }
+      }
+    } else {
+      p.portalTime = Math.max(0, p.portalTime - 4);
+      if (!inE) p.portalCd = false;
+    }
+  }
+  // ---------------- the End ----------------
+  buildEndPlatform() {
+    const w = this.world, P = END_PLATFORM;
+    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+      w.setBlock(P.x + dx, P.y, P.z + dz, B.OBSIDIAN, 0);
+      for (let dy = 1; dy <= 3; dy++) w.setBlock(P.x + dx, P.y + dy, P.z + dz, 0, 0);
+    }
+  }
+  setupEnd() {
+    const w = this.world, st = this.meta.end || (this.meta.end = { killed: false, crystals: null, hp: null, portal: false });
+    this.endFountainY = new EndGenerator(w.seed).fountainY;
+    if (st.killed) return;
+    const pillars = endPillars(w.seed);
+    if (!st.crystals) st.crystals = pillars.map(() => true);
+    pillars.forEach((pl, i) => { if (st.crystals[i]) { const c = new VoidCrystal(this, pl.x + 0.5, pl.h + 1, pl.z + 0.5, i); c.persistent = true; this.entities.push(c); } });
+    const s = this.sentinel = new Sentinel(this, 46, 86, 0);
+    s.persistent = true;
+    if (st.hp) s.health = Math.max(1, Math.min(s.maxHealth, st.hp));
+    this.entities.push(s);
+    this.ui.chat('A deep hum fills the void... the Void Sentinel guards this island.', '#d8a8ff');
+  }
+  spawnProjectile(kind, x, y, z, vx, vy, vz, owner) { const pr = new Projectile(this, kind, x, y, z, vx, vy, vz, owner); this.entities.push(pr); return pr; }
+  onCrystalDestroyed(c) { const st = this.meta && this.meta.end; if (st && st.crystals && c.idx >= 0 && this.world.dim === 'end') st.crystals[c.idx] = false; }
+  onSentinelDefeated(s) {
+    this.particles.explosion(s.x, s.y + 1.8, s.z);
+    this.sound('explode', s.x, s.y, s.z);
+    if (this.world.dim !== 'end' || s !== this.sentinel) return;
+    const st = this.meta.end, first = !st.killed;
+    st.killed = true; st.hp = null; this.sentinel = null;
+    for (const e of this.entities) if (e instanceof VoidCrystal) e.dead = true;
+    const p = this.player;
+    if (!p.dead) p.addXP(first ? 1000 : 100);
+    this.ui.chat('The Void Sentinel has been defeated! An exit portal has opened at the centre of the island.', '#d8a8ff');
+    this.ensureExitPortal();
+  }
+  ensureExitPortal() {
+    const st = this.meta.end, w = this.world;
+    if (!st || !st.killed || st.portal || w.dim !== 'end' || !w.isLoadedAt(-3, -3) || !w.isLoadedAt(3, 3) || !w.isLoadedAt(-3, 3) || !w.isLoadedAt(3, -3)) return;
+    const fy = this.endFountainY || new EndGenerator(w.seed).fountainY;
+    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) { const d2 = dx * dx + dz * dz; if (d2 > 0 && d2 <= 6.5) w.setBlock(dx, fy, dz, B.END_PORTAL, 0); }
+    w.setBlock(0, fy + 4, 0, B.SENTINEL_CORE, 0);
+    st.portal = true;
+    this.remeshNear(0, 0);
+  }
+  updateBossBar() {
+    const s = this.sentinel, p = this.player;
+    const show = !!(s && !s.dead && this.world.dim === 'end' && Math.hypot(p.x - s.x, p.z - s.z) < 240);
+    const bb = $('bossbar');
+    if (bb.classList.contains('hidden') === show) bb.classList.toggle('hidden', !show);
+    if (show) $('bossfill').style.width = (s.health / s.maxHealth * 100).toFixed(1) + '%';
   }
   async quitToTitle() {
     this.ui.show('scr-loading'); $('load-title').textContent = 'Saving world'; $('load-msg').textContent = ''; $('load-bar').style.width = '100%';
@@ -5172,7 +6743,7 @@ class Game {
     this.cleanupWorld();
     this.state = 'title';
     $('hud').classList.add('hidden');
-    $('fx-water').classList.add('hidden'); $('fx-lava').classList.add('hidden');
+    $('fx-water').classList.add('hidden'); $('fx-lava').classList.add('hidden'); $('fx-portal').style.opacity = 0;
     this.ui.show('scr-title');
     this.startPanorama();
   }
@@ -5200,16 +6771,19 @@ class Game {
   // ---------------- saving ----------------
   playerData() {
     const p = this.player;
-    return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, sat: p.sat, mode: p.mode, xpLevel: p.xpLevel, xp: p.xp, flying: p.flying, sel: p.sel, spawn: p.spawn, dead: p.dead,
+    return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, sat: p.sat, mode: p.mode, xpLevel: p.xpLevel, xp: p.xp, flying: p.flying, sel: p.sel, spawn: p.spawn, spawnDim: p.spawnDim, dead: p.dead,
       inv: p.inv.map(s => s ? { id: s.id, count: s.count, dmg: s.dmg || 0 } : null) };
   }
   async saveAll() {
-    if (!this.world || this.pano || this.noSave || !this.meta || this.state === 'loading' && this.waitSpawn) return;
+    if (!this.world || this.pano || !this.meta || this.state === 'loading' && this.waitSpawn) return;
+    // without IndexedDB, edited chunks are kept in memory for the session
+    if (this.noSave) { for (const [k, v] of this.pendingSaves) this.memChunks.set(k, v); this.pendingSaves = []; return; }
     const w = this.world, list = this.pendingSaves;
     this.pendingSaves = [];
-    for (const c of w.chunks.values()) if (c.unsaved && c.state >= 1) { list.push([this.meta.id + ':' + c.cx + ',' + c.cz, w.serializeChunk(c)]); c.unsaved = false; }
+    for (const c of w.chunks.values()) if (c.unsaved && c.state >= 1) { list.push([this.chunkKey(c.cx, c.cz), w.serializeChunk(c)]); c.unsaved = false; }
     for (const [k] of list) this.savedKeys.add(k);
-    Object.assign(this.meta, { time: w.time, tick: w.tick, lastPlayed: Date.now(), player: this.playerData(), raining: w.raining, rainTime: w.rainTime, mode: this.player.mode });
+    if (this.sentinel && !this.sentinel.dead && this.meta.end) this.meta.end.hp = this.sentinel.health;
+    Object.assign(this.meta, { time: w.time, tick: w.tick, lastPlayed: Date.now(), player: this.playerData(), raining: w.raining, rainTime: w.rainTime, mode: this.player.mode, dim: w.dim });
     try { if (list.length) await DB.putChunks(list); await DB.putWorld(this.meta); } catch (e) { console.warn('save failed', e); }
   }
   autosave() { if (this.state === 'playing') this.saveAll(); }
@@ -5343,14 +6917,16 @@ class Game {
     if (!paused) {
       this.acc += dt;
       let n = 0;
-      while (this.acc >= 0.05 && n < 5) { this.gameTick(); this.acc -= 0.05; n++; }
+      while (this.acc >= 0.05 && n < 5 && this.state === 'playing') { this.gameTick(); this.acc -= 0.05; n++; }
       if (n === 5) this.acc = 0;
+      if (this.state !== 'playing') return;
     }
     const alpha = paused ? 1 : Math.min(1, this.acc / 0.05);
     this.updateChunks(7);
     this.updateTarget();
     this.renderWorld(alpha, dt, false);
     this.updateHUD();
+    this.updateBossBar();
     AUDIO.musicTick(dt, true);
     if (this.pendingSaves.length > 8) this.saveAll();
   }
@@ -5362,9 +6938,9 @@ class Game {
   gameTick() {
     const w = this.world, p = this.player;
     w.tick++; w.time++;
-    // weather
+    // weather (only the overworld has a sky)
     if (--w.rainTime <= 0) { w.raining = !w.raining; w.rainTime = w.raining ? 6000 + Math.random() * 12000 : 12000 + Math.random() * 36000; }
-    w.rainStrength += ((w.raining ? 1 : 0) - w.rainStrength) * 0.01;
+    w.rainStrength += ((w.raining && w.dim === 'overworld' ? 1 : 0) - w.rainStrength) * 0.01;
     w.runScheduled(this);
     this.randomTicks();
     this.tickFurnaces();
@@ -5373,10 +6949,33 @@ class Game {
     for (const e of this.entities) if (!e.dead) e.tick();
     this.entities = this.entities.filter(e => !e.dead);
     this.particles.tick();
-    if (w.tick % 20 === 0) this.spawnMobs();
+    this.displayTicks();
+    if (w.tick % 20 === 0) { this.spawnMobs(); if (w.dim === 'end') this.ensureExitPortal(); }
     if (this.ui.inv && this.ui.inv.type === 'furnace' && w.tick % 2 === 0) this.ui.renderInv();
     this.input.endTick();
     if (w.tick % 4 === 0) this.ui.refreshBars();
+    $('fx-portal').style.opacity = Math.min(1, p.portalTime / 80) * 0.85;
+    this.portalTick();
+  }
+  // ambient particles and sounds around the player
+  displayTicks() {
+    const w = this.world, p = this.player, P = this.particles, wool = texL('white_wool');
+    const px = Math.floor(p.x), py = Math.floor(p.y), pz = Math.floor(p.z);
+    for (let k = 0; k < 100; k++) {
+      const x = px + Math.floor(Math.random() * 25) - 12, y = py + Math.floor(Math.random() * 25) - 12, z = pz + Math.floor(Math.random() * 25) - 12;
+      const id = w.getBlock(x, y, z);
+      if (id === B.NETHER_PORTAL) { P.portal(x + 0.5, y - 0.5, z + 0.5); if (Math.random() < 0.012) this.sound('portal', x + 0.5, y + 0.5, z + 0.5); }
+      else if (id === B.END_PORTAL) { if (Math.random() < 0.4) P.add({ x: x + Math.random(), y: y + 0.8, z: z + Math.random(), vx: 0, vy: 0.012, vz: 0, life: 25, layer: wool, u: 0, v: 0, us: 1, size: 0.05, g: 0, col: [0.15, 0.1, 0.2], bright: true }); }
+      else if (id === B.LAVA && w.getBlock(x, y + 1, z) === 0 && Math.random() < 0.04) {
+        P.add({ x: x + Math.random(), y: y + 1, z: z + Math.random(), vx: (Math.random() - 0.5) * 0.08, vy: 0.18 + Math.random() * 0.1, vz: (Math.random() - 0.5) * 0.08, life: 30, layer: texL('lava_still'), u: 0.3, v: 0.3, us: 0.2, size: 0.07, g: 0.02, col: [1.3, 1.0, 0.6], bright: true, coll: true });
+        if (Math.random() < 0.15) this.sound('lavapop', x + 0.5, y + 1, z + 0.5);
+      }
+    }
+    if (w.dim === 'nether') {
+      const c = w.getChunk(px >> 4, pz >> 4);
+      const bi = c && c.biomes ? c.biomes[((pz & 15) << 4) | (px & 15)] : BI.NETHER_WASTES, col = NETHER_MOTES[bi];
+      if (col) for (let k = 0; k < 3; k++) P.add({ x: p.x + (Math.random() - 0.5) * 24, y: p.y + (Math.random() - 0.3) * 12, z: p.z + (Math.random() - 0.5) * 24, vx: (Math.random() - 0.5) * 0.01, vy: bi === BI.BASALT_DELTAS ? -0.012 : 0.004, vz: (Math.random() - 0.5) * 0.01, life: 80 + Math.random() * 60, layer: wool, u: 0, v: 0, us: 1, size: 0.04, g: 0, col, bright: true });
+    }
   }
   randomTicks() {
     const w = this.world, p = this.player;
@@ -5389,7 +6988,7 @@ class Game {
         for (let k = 0; k < 3; k++) {
           const r = (Math.random() * 4096) | 0, i = sy * 4096 + r;
           const id = c.blocks[i];
-          if (id === 0 || id === B.STONE || id === B.DEEPSLATE) continue;
+          if (id === 0 || id === B.STONE || id === B.DEEPSLATE || id === B.NETHERRACK || id === B.END_STONE || id === B.BASALT) continue;
           this.randomTick(c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), id);
         }
       }
@@ -5428,7 +7027,9 @@ class Game {
       else if (w.getBlock(x, y + 1, z) !== B.WHEAT && Math.random() < 0.2) w.setBlock(x, y, z, B.DIRT, 0);
     } else if (id === B.ICE) {
       const l = w.getLightRaw(x, y, z);
-      if ((l & 15) > 11) w.setBlock(x, y, z, B.WATER, 0);
+      if ((l & 15) > 11) w.setBlock(x, y, z, w.dim === 'nether' ? 0 : B.WATER, 0);
+    } else if (BLK[id].copper !== undefined && BLK[id].copper < 3) {
+      if (Math.random() < 0.02) w.setBlock(x, y, z, COPPER_STAGES[BLK[id].copper + 1], 0);
     }
   }
   growSapling(x, y, z, type) {
@@ -5481,7 +7082,7 @@ class Game {
     if (p.dead) return;
     let passive = 0, hostile = 0;
     for (const e of this.entities) {
-      if (!(e instanceof Mob)) continue;
+      if (!(e instanceof Mob) || e.persistent) continue;
       const d = Math.hypot(e.x - p.x, e.z - p.z);
       if (e.T.passive) { passive++; if (d > 140) e.dead = true; }
       else { hostile++; if (d > 128 || (d > 40 && Math.random() < 0.01)) e.dead = true; }
@@ -5492,6 +7093,7 @@ class Game {
       if (!w.isLoadedAt(x, z)) return null;
       return [x, z];
     };
+    if (w.dim !== 'overworld') { this.spawnOther(hostile, tryPos); return; }
     if (passive < 10) {
       const pos = tryPos(24, 64);
       if (pos) {
@@ -5520,11 +7122,38 @@ class Game {
         if (w.getBlock(x, y, z) !== 0 || w.getBlock(x, y + 1, z) !== 0 || !SOLID[w.getBlock(x, y - 1, z)] || !OPAQUE[w.getBlock(x, y - 1, z)]) continue;
         const l = w.getLightRaw(x, y, z);
         if ((l & 15) > 0 || (l >> 4) - dark > 7) continue;
-        const t = Math.random() < 0.3 ? 'spider' : 'zombie';
+        const rr = Math.random(), t = rr < 0.08 ? 'wraith' : rr < 0.36 ? 'spider' : 'zombie';
         if (t === 'spider' && (SOLID[w.getBlock(x + 1, y, z)] || SOLID[w.getBlock(x, y, z + 1)])) continue;
+        if (t === 'wraith' && w.getBlock(x, y + 2, z) !== 0) continue;
         this.entities.push(new Mob(this, t, x + 0.5, y, z + 0.5));
         break;
       }
+    }
+  }
+  spawnOther(hostile, tryPos) {
+    const w = this.world, p = this.player, nether = w.dim === 'nether';
+    if (OPTIONS.difficulty === 0 || p.mode !== 0 || hostile >= (nether ? 10 : 12)) return;
+    const minY = nether ? 31 : 20;
+    for (let k = 0; k < 4; k++) {
+      const pos = tryPos(nether ? 20 : 16, nether ? 56 : 64);
+      if (!pos) continue;
+      const [x, z] = pos;
+      let y = nether ? 32 + Math.floor(Math.random() * 88) : 80;
+      while (y > minY && !(OPAQUE[w.getBlock(x, y - 1, z)] && w.getBlock(x, y, z) === 0 && w.getBlock(x, y + 1, z) === 0)) y--;
+      if (y <= minY) continue;
+      if (nether) {
+        if ((w.getLightRaw(x, y, z) & 15) > 11) continue;
+        if (Math.random() < 0.3) {
+          let open = true;
+          for (let dy = 0; dy < 5 && open; dy++) for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) if (w.getBlock(x + dx, y + dy, z + dz) !== 0) { open = false; break; }
+          if (!open) continue;
+          this.entities.push(new Mob(this, 'wisp', x + 0.5, y + 2.5, z + 0.5));
+        } else this.entities.push(new Mob(this, 'charred_ghoul', x + 0.5, y, z + 0.5));
+      } else {
+        if (w.getBlock(x, y - 1, z) !== B.END_STONE || w.getBlock(x, y + 2, z) !== 0) continue;
+        this.entities.push(new Mob(this, 'wraith', x + 0.5, y, z + 0.5));
+      }
+      break;
     }
   }
   skyDarken() { const t = (this.world.time % 24000) / 24000, s = Math.sin(t * Math.PI * 2); return Math.round((1 - smoothstep(-0.18, 0.22, s)) * 11); }
@@ -5610,7 +7239,11 @@ class Game {
     const w = this.world, id = w.getBlock(x, y, z), meta = w.getMeta(x, y, z);
     if (!id) return;
     const be = w.getBE(x, y, z);
+    // doors are two blocks: the other half goes silently
+    const oy = BLK[id].door ? ((meta & 8) ? y - 1 : y + 1) : -1;
+    if (oy >= 0 && w.getBlock(x, oy, z) === id) w.setBlock(x, oy, z, 0, 0, false);
     w.setBlock(x, y, z, 0, 0);
+    if (oy >= 0) w.notify(x, oy, z);
     this.particles.blockBreak(x, y, z, id);
     this.sound('break_' + BLK[id].sound, x + 0.5, y + 0.5, z + 0.5);
     if (natural || (byPlayer && byPlayer.mode === 0 && byPlayer.canHarvest(id))) {
@@ -5630,9 +7263,10 @@ class Game {
       const it = ITEMS[p.heldId()];
       if (it && it.tool && BLK[id].hard > 0) p.damageHeld(it.tool.type === 'sword' ? 2 : 1);
       p.exh += 0.005;
-      const xp = { coal_ore: 1, deepslate_coal_ore: 1, diamond_ore: 4, deepslate_diamond_ore: 4, emerald_ore: 4, deepslate_emerald_ore: 4, lapis_ore: 3, deepslate_lapis_ore: 3, redstone_ore: 2, deepslate_redstone_ore: 2 }[BLK[id].name];
+      const xp = { coal_ore: 1, deepslate_coal_ore: 1, diamond_ore: 4, deepslate_diamond_ore: 4, emerald_ore: 4, deepslate_emerald_ore: 4, lapis_ore: 3, deepslate_lapis_ore: 3, redstone_ore: 2, deepslate_redstone_ore: 2,
+        nether_quartz_ore: 3, nether_gold_ore: 1, amethyst_cluster: 1 }[BLK[id].name];
       if (xp && harvest) p.addXP(xp);
-      if (id === B.ICE && SOLID[w.getBlock(x, y - 1, z)]) w.setBlock(x, y, z, B.WATER, 0);
+      if (id === B.ICE && SOLID[w.getBlock(x, y - 1, z)] && w.dim !== 'nether') w.setBlock(x, y, z, B.WATER, 0);
     }
     this.remeshNear(x, z);
     this.ui.refreshHotbar();
@@ -5665,10 +7299,15 @@ class Game {
   }
   useItem(p, hit, ent) {
     const w = this.world, held = p.held, it = held ? ITEMS[held.id] : null;
+    if (hit && BLK[hit.id].door && !p.sneaking) { this.toggleDoor(hit.x, hit.y, hit.z); return true; }
     // interact with blocks
     if (hit && BLK[hit.id].use && !p.sneaking) {
       const use = BLK[hit.id].use;
-      if (use === 'bed') { this.tryToSleep(p, hit); return true; }
+      if (use === 'bed') {
+        // beds only work in the overworld
+        if (w.dim !== 'overworld') { w.setBlock(hit.x, hit.y, hit.z, 0, 0); this.explode(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 5, false, 'bed'); return true; }
+        this.tryToSleep(p, hit); return true;
+      }
       if (use === 'craft') this.ui.openInv('craft');
       else {
         let be = w.getBE(hit.x, hit.y, hit.z);
@@ -5680,6 +7319,21 @@ class Game {
       return true;
     }
     if (!it) return false;
+    if (held.id === I.EYE_OF_THE_VOID) return this.useEye(p, hit);
+    if (held.id === I.SNOWBALL || held.id === I.VOID_PEARL) {
+      const e = p.eye(), d = p.look();
+      this.spawnProjectile(held.id === I.VOID_PEARL ? 'pearl' : 'snow', e[0] + d[0] * 0.3, e[1] - 0.1 + d[1] * 0.3, e[2] + d[2] * 0.3, d[0] * 1.5, d[1] * 1.5 + 0.1, d[2] * 1.5, p);
+      this.sound('throw', e[0], e[1], e[2]);
+      p.consumeHeld(1); p.useCd = 6; this.ui.refreshHotbar();
+      return true;
+    }
+    if (it.tool && it.tool.type === 'axe' && hit && BLK[hit.id].copper > 0) {
+      w.setBlock(hit.x, hit.y, hit.z, COPPER_STAGES[BLK[hit.id].copper - 1], 0);
+      this.sound('scrape', hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+      this.particles.poof(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, [0.55, 0.85, 0.75], 6);
+      p.damageHeld(1); this.remeshNear(hit.x, hit.z); this.ui.refreshHotbar();
+      return true;
+    }
     if (it.tool && it.tool.type === 'hoe') {
       if (hit && (hit.id === B.GRASS_BLOCK || hit.id === B.DIRT) && hit.face !== 3 && w.getBlock(hit.x, hit.y + 1, hit.z) === 0) {
         w.setBlock(hit.x, hit.y, hit.z, B.FARMLAND, 0);
@@ -5700,6 +7354,7 @@ class Game {
     }
     if (held.id === I.FLINT_AND_STEEL) {
       if (hit && hit.id === B.TNT) { this.primeTNT(hit.x, hit.y, hit.z, 80); p.damageHeld(1); this.ui.refreshHotbar(); return true; }
+      if (hit && this.lightPortal(hit.x + DX[hit.face], hit.y + DY[hit.face], hit.z + DZ[hit.face])) { p.damageHeld(1); this.ui.refreshHotbar(); return true; }
       return false;
     }
     if (held.id === I.BUCKET) {
@@ -5720,6 +7375,13 @@ class Game {
       if (!REPL[hit.id]) { x += DX[hit.face]; y += DY[hit.face]; z += DZ[hit.face]; }
       const cur = w.getBlock(x, y, z);
       if (cur !== 0 && !REPL[cur]) return false;
+      if (held.id === I.WATER_BUCKET && w.dim === 'nether') {
+        // water boils away instantly in the nether
+        this.sound('fizz', x + 0.5, y + 0.5, z + 0.5); this.particles.smoke(x + 0.5, y + 0.3, z + 0.5, 10);
+        if (p.mode === 0) p.inv[p.sel] = { id: I.BUCKET, count: 1 };
+        this.ui.refreshHotbar();
+        return true;
+      }
       w.setBlock(x, y, z, held.id === I.WATER_BUCKET ? B.WATER : B.LAVA, 0);
       if (p.mode === 0) p.inv[p.sel] = { id: I.BUCKET, count: 1 };
       this.sound('bucket', x, y, z); this.remeshNear(x, z); this.ui.refreshHotbar();
@@ -5727,6 +7389,36 @@ class Game {
     }
     if (it.block !== undefined && hit) return this.placeBlock(p, hit, it.block);
     return false;
+  }
+  useEye(p, hit) {
+    const w = this.world;
+    if (hit && hit.id === B.END_PORTAL_FRAME) {
+      const m = w.getMeta(hit.x, hit.y, hit.z);
+      if (m & 4) return false;
+      w.setBlock(hit.x, hit.y, hit.z, B.END_PORTAL_FRAME, m | 4);
+      p.consumeHeld(1); this.ui.refreshHotbar();
+      this.sound('eye_place', hit.x + 0.5, hit.y + 1, hit.z + 0.5);
+      this.particles.poof(hit.x + 0.5, hit.y + 1, hit.z + 0.5, [0.4, 0.9, 0.7], 8);
+      this.checkEndPortal(hit.x, hit.y, hit.z);
+      this.remeshNear(hit.x, hit.z);
+      return true;
+    }
+    if (w.dim !== 'overworld') return false;
+    // the eye drifts towards the nearest portal room
+    const room = nearestPortalRoom(w.seed, p.x, p.z);
+    this.entities.push(new EyeEntity(this, p.x, p.y + 1.5, p.z, room.x + 0.5, room.z + 0.5));
+    this.sound('throw', p.x, p.y + 1.5, p.z);
+    p.consumeHeld(1); p.useCd = 10; this.ui.refreshHotbar();
+    return true;
+  }
+  toggleDoor(x, y, z) {
+    const w = this.world, id = w.getBlock(x, y, z), m = w.getMeta(x, y, z);
+    const by = (m & 8) ? y - 1 : y;
+    if (w.getBlock(x, by, z) !== id || w.getBlock(x, by + 1, z) !== id) return;
+    const nl = w.getMeta(x, by, z) ^ 4;
+    w.setBlock(x, by, z, id, nl & 7, false); w.setBlock(x, by + 1, z, id, (nl & 7) | 8, false);
+    this.sound((nl & 4) ? 'door_open' : 'door_close', x + 0.5, by + 1, z + 0.5);
+    this.remeshNear(x, z);
   }
   placeBlock(p, hit, id) {
     const w = this.world;
@@ -5750,6 +7442,26 @@ class Game {
       const hy = p.eye()[1] + p.look()[1] * hit.t - hit.y;
       meta = face === 3 || (face !== 2 && hy > 0.5) ? 1 : 0;
       if (cur === id && w.getMeta(x, y, z) !== meta) { w.setBlock(x, y, z, d.slabOf, 0); this.sound('place_' + d.sound, x + 0.5, y + 0.5, z + 0.5); p.consumeHeld(1); this.remeshNear(x, z); this.ui.refreshHotbar(); return true; }
+    }
+    if (d.door) {
+      const up = w.getBlock(x, y + 1, z);
+      if (y >= 255 || (up !== 0 && !REPL[up]) || SOLID[w.getBlock(x, y - 1, z)] !== 1) return false;
+      for (const e of this.mobsAndPlayer()) { const hw = e.w / 2; if (e.x + hw > x && e.x - hw < x + 1 && e.y + e.h > y && e.y < y + 2 && e.z + hw > z && e.z - hw < z + 1) return false; }
+      const lk = p.look();
+      const f = ((Math.abs(lk[0]) > Math.abs(lk[2]) ? (lk[0] > 0 ? 1 : 3) : (lk[2] > 0 ? 2 : 0)) + 2) & 3;
+      w.setBlock(x, y, z, id, f, false); w.setBlock(x, y + 1, z, id, f | 8, false);
+      w.notify(x, y, z); w.notify(x, y + 1, z);
+      this.sound('place_' + d.sound, x + 0.5, y + 0.5, z + 0.5); p.consumeHeld(1); this.remeshNear(x, z); this.ui.refreshHotbar();
+      return true;
+    }
+    if (d.stairsOf !== undefined) {
+      const lk = p.look(), hy = p.eye()[1] + lk[1] * hit.t - hit.y;
+      meta = Math.abs(lk[0]) > Math.abs(lk[2]) ? (lk[0] > 0 ? 1 : 3) : (lk[2] > 0 ? 2 : 0);
+      if (face === 3 || (face !== 2 && hy > 0.5)) meta |= 4;
+    }
+    if (SHAPE[id] === SH.LANTERN) {
+      meta = face === 3 ? 1 : 0;
+      if (!w.canStay(id, x, y, z, meta)) { meta = 1 - meta; if (!w.canStay(id, x, y, z, meta)) return false; }
     }
     if (id === B.LADDER) { if (face === 2 || face === 3) return false; meta = [1, 2, 0, 0, 3, 4][face]; if (!w.canStay(id, x, y, z, meta)) return false; }
     if (d.log) meta = face === 0 || face === 1 ? 1 : face === 4 || face === 5 ? 2 : 0;
@@ -5779,7 +7491,7 @@ class Game {
   }
   tryToSleep(p, hit) {
     const w = this.world, t = w.time % 24000;
-    p.spawn = [hit.x + 0.5, hit.y + 1, hit.z + 0.5];
+    p.spawn = [hit.x + 0.5, hit.y + 1, hit.z + 0.5]; p.spawnDim = 'overworld';
     if (t > 1000 && t < 12542 && !w.raining) { this.ui.chat('You can sleep only at night. Respawn point set.', '#ccc'); return; }
     if (this.entities.some(e => e instanceof Mob && !e.T.passive && e.target && Math.hypot(e.x - p.x, e.z - p.z) < 10)) { this.ui.chat('You may not rest now; there are monsters nearby', '#f88'); return; }
     this.sleeping = 1;
@@ -5799,18 +7511,18 @@ class Game {
     if (this.sleeping > 100) f.style.opacity = Math.max(0, 1 - (this.sleeping - 100) / 20);
     if (this.sleeping > 120) { this.sleeping = 0; f.style.opacity = 0; }
   }
-  explode(x, y, z, power) {
+  explode(x, y, z, power, noBlocks, source) {
     const w = this.world;
     this.sound('explode', x, y, z);
     this.particles.explosion(x, y, z);
-    const R = Math.ceil(power);
+    const R = noBlocks ? -1 : Math.ceil(power);
     const changed = [];
     for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       const dd = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (dd > power * (0.7 + Math.random() * 0.45)) continue;
       const bx = Math.floor(x + dx), by = Math.floor(y + dy), bz = Math.floor(z + dz);
       const id = w.getBlock(bx, by, bz);
-      if (!id || id === B.BEDROCK || id === B.OBSIDIAN || BLK[id].liquid) continue;
+      if (!id || BLK[id].hard < 0 || BLK[id].hard >= 30 || BLK[id].liquid) continue;
       if (id === B.TNT) { w.setBlock(bx, by, bz, 0, 0); this.entities.push(new PrimedTNT(this, bx, by, bz, 10 + Math.floor(Math.random() * 20))); continue; }
       const be = w.getBE(bx, by, bz);
       if (be && be.items) for (const st of be.items) if (st) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
@@ -5825,7 +7537,7 @@ class Game {
       if (d > power * 2) continue;
       const imp = 1 - d / (power * 2);
       if (e instanceof ItemEntity) { if (d < power) e.dead = true; continue; }
-      e.hurt(Math.floor((imp * imp + imp) / 2 * 7 * power + 1) * (e instanceof Player ? [0, 0.5, 1, 1.5][OPTIONS.difficulty] || 1 : 1), 'explosion', null);
+      e.hurt(Math.floor((imp * imp + imp) / 2 * 7 * power + 1) * (e instanceof Player ? [0, 0.5, 1, 1.5][OPTIONS.difficulty] || 1 : 1), source || 'explosion', null);
       const l = d || 1;
       e.vx += dx / l * imp * 1.2; e.vy += dy / l * imp * 1.2 + 0.2; e.vz += dz / l * imp * 1.2;
     }
@@ -5846,6 +7558,14 @@ class Game {
   }
   respawn() {
     const p = this.player, w = this.world;
+    const dest = p.spawn ? (p.spawnDim || 'overworld') : 'overworld';
+    if (w.dim !== dest) {
+      p.health = 20; p.food = 20; p.sat = 5; p.air = 300; p.fallDist = 0; p.dead = false; p.fireTicks = 0;
+      this.ui.show(null);
+      this.state = 'playing';
+      this.travel(dest, { kind: 'spawn', respawn: true });
+      return;
+    }
     const sp = p.spawn || [this.meta.spawn[0] + 0.5, this.meta.spawnY || 100, this.meta.spawn[1] + 0.5];
     p.x = sp[0]; p.z = sp[2]; p.y = sp[1];
     const x = Math.floor(p.x), z = Math.floor(p.z);
@@ -5862,7 +7582,14 @@ class Game {
     const say = (m, c) => this.ui.chat(m, c || '#ccc');
     try {
       switch (cmd) {
-        case 'help': say('Commands: /gamemode <survival|creative>, /time set <day|noon|night|midnight|n>, /time add <n>, /weather <clear|rain>, /tp <x y z>, /give <item> [n], /summon <mob>, /kill, /seed, /spawnpoint, /clear, /locate <biome>, /setblock <x y z block>, /difficulty <0-3>, /keepinventory'); break;
+        case 'help': say('Commands: /gamemode <survival|creative>, /time set <day|noon|night|midnight|n>, /time add <n>, /weather <clear|rain>, /tp <x y z>, /give <item> [n], /summon <mob>, /kill, /seed, /spawnpoint, /clear, /locate <biome|fortress|portal_room>, /setblock <x y z block>, /difficulty <0-3>, /keepinventory, /dim <overworld|nether|end>'); break;
+        case 'dim': case 'dimension': {
+          const d = { overworld: 'overworld', o: 'overworld', nether: 'nether', n: 'nether', the_nether: 'nether', end: 'end', e: 'end', the_end: 'end' }[(a[1] || '').toLowerCase().replace(/^minecraft:/, '')];
+          if (!d) return say('Usage: /dim <overworld|nether|end>', '#f66');
+          if (d === w.dim) return say('You are already in ' + DIM_TITLE[d], '#f66');
+          this.travel(d, { kind: d === 'end' ? 'end' : w.dim === 'end' ? 'spawn' : 'portal' });
+          break;
+        }
         case 'gamemode': case 'gm': {
           const m = (a[1] || '').toLowerCase();
           const mode = ['survival', 's', '0'].includes(m) ? 0 : ['creative', 'c', '1'].includes(m) ? 1 : -1;
@@ -5892,14 +7619,16 @@ class Game {
         }
         case 'summon': {
           const t = (a[1] || '').replace(/^minecraft:/, '');
-          if (t === 'tnt') { this.primeTNT(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z), 80); break; }
-          if (!MOB_TYPES[t]) return say('Unknown entity. Try: ' + Object.keys(MOB_TYPES).join(', ') + ', tnt', '#f66');
           const d = p.look();
-          this.entities.push(new Mob(this, t, p.x + d[0] * 2, p.y + 0.2, p.z + d[2] * 2)); say('Summoned new ' + titleCase(t)); break;
+          if (t === 'tnt') { this.primeTNT(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z), 80); break; }
+          if (t === 'sentinel' || t === 'void_sentinel') { const s = new Sentinel(this, p.x, p.y + 12, p.z); this.entities.push(s); if (w.dim === 'end' && (!this.sentinel || this.sentinel.dead)) { this.sentinel = s; s.persistent = true; } say('Summoned new Void Sentinel'); break; }
+          if (t === 'crystal' || t === 'void_crystal') { this.entities.push(new VoidCrystal(this, p.x + d[0] * 3, p.y, p.z + d[2] * 3, -1)); say('Summoned new Void Crystal'); break; }
+          if (!MOB_TYPES[t] || MOB_TYPES[t].hidden) return say('Unknown entity. Try: ' + Object.keys(MOB_TYPES).filter(k => !MOB_TYPES[k].hidden).join(', ') + ', sentinel, crystal, tnt', '#f66');
+          this.entities.push(new Mob(this, t, p.x + d[0] * 2, p.y + 0.2, p.z + d[2] * 2)); say('Summoned new ' + mobName(t)); break;
         }
         case 'kill': p.mode === 1 ? (p.health = 0, p.dead = true, this.onDeath('kill')) : p.hurt(1000, 'kill'); break;
         case 'seed': say('Seed: [' + w.seed + ']'); break;
-        case 'spawnpoint': p.spawn = [p.x, p.y, p.z]; say('Set spawn point to ' + Math.floor(p.x) + ', ' + Math.floor(p.y) + ', ' + Math.floor(p.z)); break;
+        case 'spawnpoint': p.spawn = [p.x, p.y, p.z]; p.spawnDim = w.dim; say('Set spawn point to ' + Math.floor(p.x) + ', ' + Math.floor(p.y) + ', ' + Math.floor(p.z)); break;
         case 'clear': p.inv.fill(null); this.ui.refreshHotbar(); say('Cleared inventory'); break;
         case 'difficulty': { const v = { peaceful: 0, easy: 1, normal: 2, hard: 3 }[a[1]] ?? parseInt(a[1], 10); if (!(v >= 0 && v <= 3)) return say('Usage: /difficulty <peaceful|easy|normal|hard>', '#f66'); OPTIONS.difficulty = v; saveOptions(); say('Difficulty set'); break; }
         case 'keepinventory': this.keepInventory = !this.keepInventory; say('keepInventory is now ' + this.keepInventory); break;
@@ -5910,10 +7639,23 @@ class Game {
           w.setBlock(x, y, z, id, 0); this.remeshNear(x, z); say('Changed the block'); break;
         }
         case 'locate': {
-          const name = a.slice(1).join(' ').replace(/^biome\s+/, '').replace(/_/g, ' ').toLowerCase();
+          const what = a.slice(1).join(' ').replace(/^(biome|structure)\s+/, '').replace(/minecraft:/, '').toLowerCase();
+          const dist = (x, z) => Math.round(Math.hypot(x - p.x, z - p.z));
+          if (what === 'fortress' || what === 'nether_fortress') {
+            if (w.dim !== 'nether') return say('Fortresses are found in the Nether', '#f66');
+            const f = nearestFortress(w.seed, p.x, p.z);
+            if (!f) return say('Could not find a fortress nearby', '#f66');
+            return say('The nearest fortress is at ' + f.x + ', ' + f.y + ', ' + f.z + ' (' + dist(f.x, f.z) + ' blocks away)', '#8f8');
+          }
+          if (what === 'portal_room' || what === 'portal room' || what === 'stronghold') {
+            if (w.dim !== 'overworld') return say('Portal rooms are found in the Overworld', '#f66');
+            const pr = nearestPortalRoom(w.seed, p.x, p.z);
+            return say('The nearest portal room is at ' + pr.x + ', ' + pr.y + ', ' + pr.z + ' (' + dist(pr.x, pr.z) + ' blocks away)', '#8f8');
+          }
+          const name = what.replace(/_/g, ' ');
           const bi = BIOME_NAMES.findIndex(n => n.toLowerCase() === name);
-          if (bi < 0) return say('Unknown biome. Biomes: ' + BIOME_NAMES.join(', '), '#f66');
-          const g = new Generator(w.seed);
+          if (bi < 0) return say('Unknown biome or structure. Try fortress, portal_room or a biome: ' + BIOME_NAMES.join(', '), '#f66');
+          const g = makeGenerator(w.seed, w.dim);
           for (let r = 0; r < 4000; r += 32) {
             const n = Math.max(1, Math.floor(r / 16));
             for (let k = 0; k < n; k++) {
@@ -5930,6 +7672,7 @@ class Game {
   // ---------------- rendering ----------------
   computeEnv(eye, look) {
     const w = this.world, p = this.player;
+    if (w.dim !== 'overworld') return this.computeEnvOther(eye);
     const t = (w.time % 24000) / 24000, ang = t * Math.PI * 2;
     const sunDir = [Math.cos(ang), Math.sin(ang), 0];
     const sh = sunDir[1];
@@ -5950,14 +7693,37 @@ class Game {
       skyTint: L(L([0.6, 0.66, 1.0], [1, 1, 1], day), [1.0, 0.86, 0.72], sunset * 0.5),
       cloudCol: L(L([0.08, 0.08, 0.12], [1, 1, 1], day), [1.0, 0.72, 0.55], sunset * 0.6).map(v => v * (1 - 0.35 * rain)),
       fogEnd: OPTIONS.renderDist * 16 - 6, fogStart: 0, under: false,
-      nightVision: 0,
+      nightVision: 0, dim: 0, ambient: [0.025, 0.025, 0.025],
     };
     env.fogStart = env.fogEnd * (0.72 - rain * 0.2);
-    const eb = w.getBlock(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]));
-    if (eb === B.WATER) {
-      const k = Math.max(0.12, env.day);
-      env.fogCol = [0.05 * k, 0.16 * k, 0.42 * k]; env.fogStart = 1; env.fogEnd = 40; env.under = 'water';
-    } else if (eb === B.LAVA) { env.fogCol = [0.6, 0.12, 0.0]; env.fogStart = 0; env.fogEnd = 2.5; env.under = 'lava'; }
+    this.underFluid(env, eye, Math.max(0.12, env.day));
+    return env;
+  }
+  underFluid(env, eye, k) {
+    const eb = this.world.getBlock(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]));
+    if (eb === B.WATER) { env.fogCol = [0.05 * k, 0.16 * k, 0.42 * k]; env.fogStart = 1; env.fogEnd = 40; env.under = 'water'; }
+    else if (eb === B.LAVA) { env.fogCol = [0.6, 0.12, 0.0]; env.fogStart = 0; env.fogEnd = 2.5; env.under = 'lava'; }
+  }
+  // the nether and the end have no sun: fixed ambient light, coloured fog
+  computeEnvOther(eye) {
+    const w = this.world, nether = w.dim === 'nether';
+    let target;
+    if (nether) {
+      const x = Math.floor(eye[0]), z = Math.floor(eye[2]), c = w.getChunk(x >> 4, z >> 4);
+      target = NETHER_FOG[c && c.biomes ? c.biomes[((z & 15) << 4) | (x & 15)] : BI.NETHER_WASTES] || NETHER_FOG[BI.NETHER_WASTES];
+    } else target = [0.075, 0.06, 0.095];
+    const f = this.fogCur && this.fogDim === w.dim ? this.fogCur : (this.fogCur = target.slice());
+    this.fogDim = w.dim;
+    for (let i = 0; i < 3; i++) f[i] += (target[i] - f[i]) * 0.03;
+    const far = OPTIONS.renderDist * 16 - 6;
+    const env = {
+      time: performance.now() / 1000 % 3600, sunDir: [0, -1, 0], skyTop: f.slice(), fogCol: f.slice(), sunset: 0, sunsetCol: [0, 0, 0], stars: 0, rain: 0,
+      day: 0, skyTint: [1, 1, 1], cloudCol: [1, 1, 1], under: false, nightVision: 0,
+      fogEnd: nether ? Math.min(far, 96) : far, fogStart: 0, dim: nether ? 1 : 2,
+      ambient: nether ? [0.3, 0.24, 0.21] : [0.31, 0.33, 0.32],
+    };
+    env.fogStart = env.fogEnd * (nether ? 0.1 : 0.5);
+    this.underFluid(env, eye, 1);
     return env;
   }
   renderWorld(alpha, dt, panorama) {
@@ -5986,7 +7752,7 @@ class Game {
     }
     const env = this.computeEnv(eye, look);
     // fov
-    let fovT = OPTIONS.fov * (p.sprinting ? 1.12 : 1) * (p.flying && p.sprinting ? 1.05 : 1) * (env.under === 'water' ? 0.88 : 1);
+    let fovT = OPTIONS.fov * (p.sprinting ? 1.12 : 1) * (p.flying && p.sprinting ? 1.05 : 1) * (env.under === 'water' ? 0.88 : 1) * (p.drawT > 0 ? 1 - Math.min(1, p.drawT / 20) * 0.15 : 1);
     this.fovCur += (fovT - this.fovCur) * Math.min(1, dt * 10);
     const far = Math.max(64, OPTIONS.renderDist * 16 + 64) + 400;
     r.setCamera(this.fovCur, camYaw, camPitch, roll, far, bobX, bobY);
@@ -5998,6 +7764,7 @@ class Game {
     // entities
     r.org = eye;
     r.dynReset();
+    this.camYaw = camYaw;
     const maxD2 = (OPTIONS.renderDist * 16) ** 2;
     for (const e of this.entities) { const dx = e.x - eye[0], dz = e.z - eye[2]; if (dx * dx + dz * dz < maxD2) e.render(r, alpha); }
     if (this.thirdPerson && !panorama && !p.dead) this.renderPlayerModel(r, p, alpha);
@@ -6010,9 +7777,10 @@ class Game {
     const right = [Math.cos(camYaw), 0, -Math.sin(camYaw)];
     const up = [Math.sin(camYaw) * Math.sin(camPitch), Math.cos(camPitch), Math.cos(camYaw) * Math.sin(camPitch)];
     this.particles.render(r, eye, right, up);
+    this.renderBeams(r, alpha);
     r.dynFlush(r.vp, env, { blend: true, noCull: true });
     if (env.rain > 0.02) this.renderWeather(eye, env, alpha);
-    r.drawClouds(eye, env, w.time / 20 + (this.cloudOff || 0));
+    if (w.dim === 'overworld') r.drawClouds(eye, env, w.time / 20 + (this.cloudOff || 0));
     if (!panorama && !this.thirdPerson && !this.ui.hudHidden && !p.dead) { gl.clear(gl.DEPTH_BUFFER_BIT); this.renderHand(alpha, env); }
     // overlays
     $('fx-water').classList.toggle('hidden', env.under !== 'water' || panorama);
@@ -6024,9 +7792,29 @@ class Game {
       try { const a = document.createElement('a'); a.download = 'blockcraft-' + Date.now() + '.png'; a.href = this.canvas.toDataURL('image/png'); a.click(); this.ui.chat('Saved screenshot', '#ccc'); } catch (e) { }
     }
   }
+  // healing beams from the void crystals to the sentinel
+  renderBeams(r, alpha) {
+    const s = this.sentinel;
+    if (!s || s.dead || s.dying || !s.healers || !s.healers.length) return;
+    const b = s.ipos(alpha), layer = texL('white_wool'), t = performance.now() / 1000;
+    for (const c of s.healers) {
+      const a = c.ipos(alpha);
+      const p0 = [a[0], a[1] + 0.9 + Math.sin(c.age * 0.05) * 0.15, a[2]], p1 = [b[0], b[1] + 1.8, b[2]];
+      const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], l = Math.hypot(d[0], d[1], d[2]) || 1;
+      let s1 = [d[2], 0, -d[0]]; const l1 = Math.hypot(s1[0], s1[2]) || 1; s1 = s1.map(v => v / l1 * 0.13);
+      const s2 = [(d[1] * s1[2] - d[2] * s1[1]) / l, (d[2] * s1[0] - d[0] * s1[2]) / l, (d[0] * s1[1] - d[1] * s1[0]) / l];
+      const pulse = 0.65 + 0.25 * Math.sin(t * 6 + c.idx);
+      for (const sv of [s1, s2]) {
+        r.dv(p0[0] - sv[0], p0[1] - sv[1], p0[2] - sv[2], 0, 1, layer, 0.95, 0.55, 1.0, pulse, 15, 15);
+        r.dv(p0[0] + sv[0], p0[1] + sv[1], p0[2] + sv[2], 1, 1, layer, 0.95, 0.55, 1.0, pulse, 15, 15);
+        r.dv(p1[0] + sv[0], p1[1] + sv[1], p1[2] + sv[2], 1, 0, layer, 0.95, 0.55, 1.0, pulse, 15, 15);
+        r.dv(p1[0] - sv[0], p1[1] - sv[1], p1[2] - sv[2], 0, 0, layer, 0.95, 0.55, 1.0, pulse, 15, 15);
+      }
+    }
+  }
   renderSelection(eye, env) {
     const r = this.r, gl = r.gl, t = this.target, w = this.world;
-    const b = selBox(t.id, w.getMeta(t.x, t.y, t.z));
+    const b = selBox(t.id, w.getMeta(t.x, t.y, t.z), w, t.x, t.y, t.z);
     const e = 0.002;
     const x0 = t.x + b[0] - e - eye[0], y0 = t.y + b[1] - e - eye[1], z0 = t.z + b[2] - e - eye[2];
     const x1 = t.x + b[3] + e - eye[0], y1 = t.y + b[4] + e - eye[1], z1 = t.z + b[5] + e - eye[2];
@@ -6125,9 +7913,14 @@ class Game {
       m = T(m, tr(0.54 - s2 * 0.4, -0.46 - eq * 0.6 + Math.sin(Math.sqrt(sw) * Math.PI * 2) * 0.2 + eatBob, -0.8 - s1 * 0.2));
       if (p.eat > 0) m = T(m, tr(-0.3, 0.15, 0.1));
       m = T(m, ry(-s1 * 0.35)); m = T(m, rz(-s2 * 0.35)); m = T(m, rx(-s2 * 1.2));
-      if (isCubeItem(held.id)) {
+      const boxes = itemBoxes(held.id);
+      if (isCubeItem(held.id) || boxes) {
         m = T(m, tr(0.02, -0.03, -0.05)); m = T(m, ry(Math.PI / 4)); m = T(m, sc(0.25));
-        this.pushCubeXform(r, m, held.id, l);
+        if (boxes) this.pushBoxesXform(r, m, held.id, boxes, l); else this.pushCubeXform(r, m, held.id, l);
+      } else if (held.id === I.BOW && p.drawT > 0) {
+        const k = Math.min(1, p.drawT / 20), shake = k >= 1 ? Math.sin(p.age * 1.7) * 0.004 : 0;
+        m = T(m, tr(-0.34, 0.2 + shake, -0.04 + k * 0.08)); m = T(m, ry(0.3)); m = T(m, rz(Math.PI / 4 + 0.08)); m = T(m, sc(0.48));
+        this.pushItemXform(r, m, held.id, l);
       } else {
         m = T(m, ry(-Math.PI / 2 + 0.25)); m = T(m, rz(0.3)); m = T(m, sc(0.5));
         if (ITEMS[held.id].tool) m = T(m, T(rz(0.25), tr(0.05, 0.15, 0)));
@@ -6147,6 +7940,17 @@ class Game {
         const v = FV[f][k];
         const q = M4.xform(m, v[0] - 0.5, v[1] - 0.5, v[2] - 0.5);
         r.dv(q[0], q[1], q[2], v[3] / 16, v[4] / 16, layer, tr * fs, tg * fs, tb * fs, 1, l[0], l[1]);
+      }
+    }
+  }
+  pushBoxesXform(r, m, id, boxes, l) {
+    for (const b of boxes) for (let f = 0; f < 6; f++) {
+      const layer = FACETEX[id * 6 + f], fs = FSHADE[f];
+      for (let k = 0; k < 4; k++) {
+        const v = FV[f][k], px = v[0] ? b[3] : b[0], py = v[1] ? b[4] : b[1], pz = v[2] ? b[5] : b[2];
+        const uv = boxUV(f, px, py, pz);
+        const q = M4.xform(m, px / 16 - 0.5, py / 16 - 0.5, pz / 16 - 0.5);
+        r.dv(q[0], q[1], q[2], uv[0], uv[1], layer, fs, fs, fs, 1, l[0], l[1]);
       }
     }
   }
@@ -6216,6 +8020,7 @@ class Game {
       `Facing: ${facing} (${(((-p.yaw * 180 / Math.PI) + 540) % 360 - 180).toFixed(1)} / ${(-p.pitch * 180 / Math.PI).toFixed(1)})`,
       `Light: ${Math.max(l >> 4, l & 15)} (${l >> 4} sky, ${l & 15} block)`,
       `Biome: ${biome}`,
+      `Dimension: ${w.dim}${p.portalTime > 0 ? '  (portal ' + p.portalTime + ')' : ''}`,
       `Day ${Math.floor(w.time / 24000)}, time ${w.time % 24000}${w.raining ? ', raining' : ''}`,
       `Seed: ${w.seed}`,
     ];
