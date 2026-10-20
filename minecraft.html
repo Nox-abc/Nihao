@@ -124,6 +124,7 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 <div id="fx-lava" class="hidden"></div>
 <div id="fx-vignette" class="hidden"></div>
 <div id="fx-hurt"></div>
+<div id="fx-sleep" style="position:fixed;inset:0;background:#000;opacity:0;pointer-events:none"></div>
 <div id="hud" class="hidden">
   <div id="crosshair"></div>
   <div id="debug"></div>
@@ -234,7 +235,7 @@ const BLOCK_NAMES = [
   'emerald_block','copper_block','coal_block','lapis_block','redstone_block',
   'white_wool','orange_wool','magenta_wool','light_blue_wool','yellow_wool','lime_wool','pink_wool','gray_wool','light_gray_wool','cyan_wool',
   'purple_wool','blue_wool','brown_wool','green_wool','red_wool','black_wool',
-  'packed_ice','smooth_stone','deepslate_bricks','oxeye_daisy','allium','azure_bluet'
+  'packed_ice','smooth_stone','deepslate_bricks','oxeye_daisy','allium','azure_bluet','farmland','wheat','red_bed'
 ];
 const B = {};
 BLOCK_NAMES.forEach((n, i) => { B[n.toUpperCase()] = i; });
@@ -748,7 +749,7 @@ Generator.prototype.genChunk = function (cx, cz) {
 /* ===================================================================
    BLOCK & ITEM REGISTRY
    =================================================================== */
-const SH = { NONE: 0, CUBE: 1, CROSS: 2, TORCH: 3, LIQUID: 4, LAYER: 5, CACTUS: 6 };
+const SH = { NONE: 0, CUBE: 1, CROSS: 2, TORCH: 3, LIQUID: 4, LAYER: 5, CACTUS: 6, CROP: 7, SLAB: 8 };
 const BLK = [];
 const OPAQUE = new Uint8Array(256);     // full opaque cube: hides neighbour faces
 const OPACITY = new Uint8Array(256);    // light attenuation 0..15
@@ -810,7 +811,7 @@ defB('sandstone', { hard: 0.8, tool: PICK, lvl: 0, tex: { top: 'sandstone_top', 
 defB('red_sand', { hard: 0.5, tool: SHOVEL, sound: 'sand', gravity: true });
 defB('cactus', { shape: SH.CACTUS, hard: 0.4, sound: 'wool', tex: { top: 'cactus_top', bottom: 'cactus_bottom', side: 'cactus_side' }, cutout: true, needs: 'cactus' });
 defB('snow_block', { hard: 0.2, tool: SHOVEL, sound: 'snow', tex: 'snow', drop: 'snowball', dropMin: 4, dropMax: 4 });
-defB('snow', { shape: SH.LAYER, hard: 0.1, tool: SHOVEL, sound: 'snow', tex: 'snow', drop: 'snowball', repl: true, display: 'Snow' });
+defB('snow', { shape: SH.LAYER, hard: 0.1, tool: SHOVEL, sound: 'snow', tex: 'snow', drop: 'snowball', repl: true, display: 'Snow', height: 2 });
 defB('ice', { hard: 0.5, tool: PICK, sound: 'glass', translucent: true, cullSame: true, drop: null, slip: 0.98 });
 defB('clay', { hard: 0.6, tool: SHOVEL, sound: 'gravel', drop: 'clay_ball', dropMin: 4, dropMax: 4 });
 const PLANT = { shape: SH.CROSS, hard: 0, sound: 'grass', wave: true, needs: 'soil' };
@@ -850,6 +851,9 @@ for (const c in WOOL_COLORS) defB(c + '_wool', { hard: 0.8, sound: 'wool', fuel:
 defB('packed_ice', { hard: 0.5, tool: PICK, sound: 'glass', slip: 0.98, drop: null });
 defB('smooth_stone', { hard: 2, tool: PICK, lvl: 0 });
 defB('deepslate_bricks', { hard: 3.5, tool: PICK, lvl: 0 });
+defB('farmland', { hard: 0.6, tool: SHOVEL, sound: 'gravel', drop: 'dirt', tex: { top: 'farmland', side: 'dirt', bottom: 'dirt' }, farmland: true });
+defB('wheat', { shape: SH.CROP, hard: 0, sound: 'grass', tex: 'wheat_stage0', needs: 'farmland', display: 'Wheat Crops' });
+defB('red_bed', { shape: SH.SLAB, hard: 0.2, sound: 'wool', tex: { top: 'bed_top', side: 'bed_side', bottom: 'oak_planks' }, use: 'bed', display: 'Red Bed', height: 9, cutout: true });
 
 for (let id = 0; id < BLOCK_NAMES.length; id++) {
   const d = BLK[id];
@@ -859,7 +863,7 @@ for (let id = 0; id < BLOCK_NAMES.length; id++) {
   OPAQUE[id] = cube && !d.cutout && !d.translucent ? 1 : 0;
   OPACITY[id] = OPAQUE[id] ? 15 : (d.leaves || d.liquid || d.translucent || d.shape === SH.CACTUS ? 1 : 0);
   EMIT[id] = d.light || 0;
-  SOLID[id] = (cube || d.shape === SH.CACTUS) ? 1 : 0;
+  SOLID[id] = (cube || d.shape === SH.CACTUS || d.shape === SH.SLAB) ? 1 : 0;
   CULLSAME[id] = d.cullSame || d.liquid ? 1 : 0;
   AOOCC[id] = OPAQUE[id] || d.leaves ? 1 : 0;
   TRANSL[id] = d.translucent ? 1 : 0;
@@ -876,7 +880,7 @@ const ITEMS = [];       // index = item id (0..255 blocks, 256+ items)
 const ITEM_BY_NAME = {};
 for (let id = 1; id < BLOCK_NAMES.length; id++) {
   const d = BLK[id];
-  if (id === B.WATER || id === B.LAVA || id === B.LIT_FURNACE) continue;
+  if (id === B.WATER || id === B.LAVA || id === B.LIT_FURNACE || id === B.WHEAT) continue;
   const it = { id, name: d.name, display: d.display, stack: 64, block: id, fuel: d.fuel || 0 };
   ITEMS[id] = it; ITEM_BY_NAME[d.name] = it;
 }
@@ -900,12 +904,13 @@ defI('beef', { food: [3, 1.8], display: 'Raw Beef' }); defI('cooked_beef', { foo
 defI('chicken', { food: [2, 1.2], display: 'Raw Chicken' }); defI('cooked_chicken', { food: [6, 7.2] });
 defI('mutton', { food: [2, 1.2], display: 'Raw Mutton' }); defI('cooked_mutton', { food: [6, 9.6] });
 defI('rotten_flesh', { food: [4, 0.8] });
+defI('wheat_seeds', { place: 'wheat' }); defI('wheat'); defI('bread', { food: [5, 6] }); defI('string');
 defI('bucket', { stack: 16 }); defI('water_bucket', { stack: 1 }); defI('lava_bucket', { stack: 1, fuel: 20000 });
 const TIERS = [['wooden', 0, 2, 59, 0], ['stone', 1, 4, 131, 1], ['iron', 2, 6, 250, 2], ['golden', 0, 12, 32, 0], ['diamond', 3, 8, 1561, 3]];
-const TOOL_DMG = { sword: [4, 5, 6, 4, 7], axe: [7, 9, 9, 7, 9], pickaxe: [2, 3, 4, 2, 5], shovel: [2.5, 3.5, 4.5, 2.5, 5.5] };
+const TOOL_DMG = { sword: [4, 5, 6, 4, 7], axe: [7, 9, 9, 7, 9], pickaxe: [2, 3, 4, 2, 5], shovel: [2.5, 3.5, 4.5, 2.5, 5.5], hoe: [1, 1, 1, 1, 1] };
 for (let t = 0; t < TIERS.length; t++) {
   const [tier, lvl, speed, dur] = TIERS[t];
-  for (const type of ['pickaxe', 'axe', 'shovel', 'sword']) {
+  for (const type of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) {
     defI(tier + '_' + type, { stack: 1, dur, tool: { type, lvl, speed, tier: t }, dmg: TOOL_DMG[type][t], fuel: tier === 'wooden' ? 200 : 0 });
   }
 }
@@ -947,6 +952,7 @@ for (const [tier, mat] of TOOL_MATS) {
   shaped(tier + '_axe', 1, ['XX', 'XS', ' S'], { X: mat, S: 'stick' });
   shaped(tier + '_shovel', 1, ['X', 'S', 'S'], { X: mat, S: 'stick' });
   shaped(tier + '_sword', 1, ['X', 'X', 'S'], { X: mat, S: 'stick' });
+  shaped(tier + '_hoe', 1, ['XX', ' S', ' S'], { X: mat, S: 'stick' });
 }
 shaped('sandstone', 1, ['##', '##'], { '#': 'sand' });
 shaped('bricks', 1, ['##', '##'], { '#': 'brick' });
@@ -959,6 +965,9 @@ shaped('bookshelf', 1, ['###', 'BBB', '###'], { '#': '#planks', B: 'book' });
 shaped('paper', 3, ['###'], { '#': 'sugar_cane' });
 shapeless('book', 1, ['paper', 'paper', 'paper', 'leather']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' });
+shaped('bread', 1, ['###'], { '#': 'wheat' });
+shaped('red_bed', 1, ['WWW', 'PPP'], { W: '#wool', P: '#planks' });
+shaped('white_wool', 1, ['##', '##'], { '#': 'string' });
 shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shapeless('mossy_cobblestone', 1, ['cobblestone', 'moss_block']);
 shaped('glowstone', 1, ['RGR', 'GRG', 'RGR'], { R: 'redstone', G: 'glass' });
@@ -1312,8 +1321,8 @@ function genTextures() {
     });
   });
   const ln1 = tn(mulberry32(999), 4), ln2 = tn(mulberry32(998), 8);
-  for (let f = 0; f < 16; f++) T(f === 0 ? 'lava_still' : 'lava_still_' + f, (d) => {
-    const ph = f / 16 * Math.PI * 2;
+  for (let f = 0; f < 8; f++) T(f === 0 ? 'lava_still' : 'lava_still_' + f, (d) => {
+    const ph = f / 8 * Math.PI * 2;
     fillF(d, (x, y) => {
       const i = y * 16 + x;
       let v = ln1[i] * 0.55 + ln2[i] * 0.35 + 0.16 * Math.sin(2 * Math.PI * (x + 2 * y) / 16 + ph) + 0.12 * Math.sin(2 * Math.PI * (2 * x - y) / 16 - ph);
@@ -1380,6 +1389,28 @@ function genTextures() {
     sp(d, 7, 6, [255, 230, 110]); sp(d, 8, 6, [255, 200, 60]); sp(d, 7, 7, [255, 245, 190]); sp(d, 8, 7, [255, 220, 120]);
     sp(d, 7, 5, [255, 170, 40]); sp(d, 8, 5, [255, 140, 20]);
   });
+  T('farmland', (d, r) => fillF(d, (x, y) => { let f = 0.85 + r() * 0.15; if ((y & 3) === 3) f *= 0.68; else if ((y & 3) === 0) f *= 1.08; if (x === 0 || x === 15 || y === 0 || y === 15) f *= 0.9; return mul([116, 78, 50], f); }));
+  T('farmland_moist', (d) => { d.set(copyOf('farmland')); for (let i = 0; i < 1024; i += 4) { d[i] *= 0.6; d[i + 1] *= 0.52; d[i + 2] *= 0.48; } });
+  for (let s = 0; s < 8; s++) T('wheat_stage' + s, (d, r) => {
+    clear(d);
+    const h = 3 + s * 1.7, ripe = s / 7;
+    for (let k = 0; k < 6; k++) {
+      const x = 1 + Math.floor(k * 2.6 + r() * 1.5), hh = h * (0.75 + r() * 0.25), top = Math.floor(15 - hh);
+      for (let y = 15; y > 15 - hh; y--) sp(d, x, y, mul(lerpC([66, 150, 40], [204, 172, 72], ripe * (0.7 + 0.3 * (15 - y) / hh)), 0.85 + r() * 0.2));
+      if (s >= 5) for (let y = top; y < top + 4 && y < 16; y++) { sp(d, x - 1, y, lerpC([150, 160, 60], [226, 196, 96], ripe)); sp(d, x + 1, y + 1, lerpC([140, 150, 60], [214, 182, 84], ripe)); }
+    }
+  });
+  T('bed_top', (d, r) => fillF(d, (x, y) => {
+    if (y < 5) return (x === 0 || x === 15 || y === 0) ? [196, 196, 196] : mul([240, 240, 234], 0.95 + r() * 0.05);
+    if (y === 5) return [150, 28, 28];
+    return mul([176, 38, 38], 0.88 + r() * 0.12 + ((x + y) % 4 === 0 ? 0.08 : 0));
+  }));
+  T('bed_side', (d, r) => fillF(d, (x, y) => {
+    if (y < 7) return [0, 0, 0, 0];
+    if (y < 12) return mul([166, 36, 36], 0.88 + r() * 0.12);
+    if (y < 13) return mul([122, 88, 52], 0.9 + r() * 0.1);
+    return (x < 3 || x > 12) ? mul([110, 78, 46], 0.85 + r() * 0.15) : [0, 0, 0, 0];
+  }));
   T('pumpkin_side', (d, r) => fillF(d, (x, y) => { let f = 0.92 + r() * 0.08; if (x % 4 === 0) f *= 0.8; else if (x % 4 === 2) f *= 1.06; if (y === 0 || y === 15) f *= 0.88; return mul([226, 140, 26], f); }));
   T('pumpkin_top', (d, r) => fillF(d, (x, y) => {
     const dx = x - 7.5, dy = y - 7.5;
@@ -1534,6 +1565,13 @@ function genTextures() {
         if (Math.abs(u) <= 2.0 && v >= 9 && v <= 14 && !(v > 13 && Math.abs(u) > 1.2)) sp(d, x, y, mul(c, u > 0.5 ? 1.12 : 0.9));
       }
     });
+    IT(tier + '_hoe', (d) => {
+      handle(d, 0, 11);
+      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
+        const [v, u] = rot(x, y);
+        if (v >= 9.2 && v <= 11.6 && u >= 0.4 && u <= 3.6) sp(d, x, y, mul(c, u > 2.6 ? 1.12 : 0.88));
+      }
+    });
     IT(tier + '_sword', (d) => {
       handle(d, 0, 3.4);
       for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
@@ -1583,6 +1621,10 @@ function genTextures() {
   const drum = (c, bone) => (d, r) => { fillEl(d, 9, 6.5, 4.8, 4.5, () => mul(c, 0.88 + r() * 0.2)); dline(d, 6, 9, 3, 12, bone); sp(d, 2, 12, bone); sp(d, 3, 13, bone); sp(d, 2, 13, bone); };
   IT('chicken', drum([240, 190, 180], [240, 236, 220])); IT('cooked_chicken', drum([196, 132, 70], [236, 226, 200]));
   IT('rotten_flesh', (d, r) => fillPoly(d, [[3, 4], [9, 2], [13, 5], [12, 12], [6, 14], [2, 10]], () => r() < 0.3 ? [90, 110, 50] : mul([150, 90, 60], 0.8 + r() * 0.3)));
+  IT('wheat_seeds', (d, r) => { for (const [x, y] of [[5, 6], [9, 5], [7, 9], [11, 9], [4, 11], [8, 12], [10, 7]]) { sp(d, x, y, [96, 150, 50]); sp(d, x, y + 1, [70, 110, 36]); } });
+  IT('wheat', (d, r) => { for (let k = 0; k < 4; k++) { const ox = k - 1; dline(d, 3 + ox, 14, 10 + ox, 4 + k, [200, 170, 70]); } fillEl(d, 11.5, 4.5, 2.5, 2.2, () => mul([226, 196, 96], 0.9 + r() * 0.2)); });
+  IT('bread', (d, r) => { fillEl(d, 8, 9, 7, 4, (x, y) => y < 8 ? [196, 136, 64] : [160, 104, 46]); for (const x of [5, 8, 11]) { sp(d, x, 7, [230, 190, 120]); sp(d, x + 1, 8, [230, 190, 120]); } });
+  IT('string', (d) => { for (let x = 2; x < 14; x++) sp(d, x, Math.round(8 + Math.sin(x * 0.9) * 3), [236, 236, 236]); });
   const bucket = inner => (d) => {
     fillPoly(d, [[3, 5], [13, 5], [11.5, 14], [4.5, 14]], (x, y) => x < 6 ? [200, 200, 204] : [160, 160, 166]);
     fillEl(d, 8, 5, 5, 1.6, inner || [70, 70, 76]);
@@ -1919,6 +1961,7 @@ class World {
         return SOLID[w] === 1 && SHAPE[w] === SH.CUBE;
       }
       case 'snow': return OPAQUE[below] === 1 || BLK[below].leaves === true;
+      case 'farmland': return below === B.FARMLAND;
     }
     return true;
   }
@@ -2138,6 +2181,7 @@ function faceLayer(id, meta, f) {
     const ends = axis === 0 ? (f === 2 || f === 3) : axis === 1 ? (f === 0 || f === 1) : (f === 4 || f === 5);
     return ends ? FACETEX[id * 6 + 2] : FACETEX[id * 6 + 0];
   }
+  if (d.farmland && f === 2 && meta) return FACETEX[id * 6 + 2] + 1;
   if (d.facing) {
     const front = [4, 1, 5, 0][meta & 3];
     if (f === front) return FACETEX[id * 6 + 4];
@@ -2254,11 +2298,12 @@ function meshSection(world, c, sy) {
         quad(opq, [p2[1], p2[0], p2[3], p2[2]], layer, UV_FULL, sky, blk, r * 0.9, g * 0.9, b * 0.9, fl, true);
       } else if (shape === SH.TORCH) {
         meshTorch(opq, lx, ly + sy * 16, lz, meta, pLight[pi], FACETEX[id * 6]);
-      } else if (shape === SH.LAYER) {
+      } else if (shape === SH.LAYER || shape === SH.SLAB) {
         const l = pLight[pi], sky = (l >> 4) * 16, blk = (l & 15) * 16;
-        const X = lx * 16, Y = (sy * 16 + ly) * 16, Z = lz * 16, H = 2;
+        const X = lx * 16, Y = (sy * 16 + ly) * 16, Z = lz * 16, H = BLK[id].height || 2;
         const layer = FACETEX[id * 6];
-        quad(opq, [[X, Y + H, Z + 16], [X + 16, Y + H, Z + 16], [X + 16, Y + H, Z], [X, Y + H, Z]], layer, UV_FULL, sky, blk, 255, 255, 255, 0);
+        quad(opq, [[X, Y + H, Z + 16], [X + 16, Y + H, Z + 16], [X + 16, Y + H, Z], [X, Y + H, Z]], FACETEX[id * 6 + 2], UV_FULL, sky, blk, 255, 255, 255, 0);
+        if (shape === SH.SLAB && !OPAQUE[pBlk[pi - PAD2]]) { const bl2 = pLight[pi - PAD2]; quad(opq, [[X, Y, Z], [X + 16, Y, Z], [X + 16, Y, Z + 16], [X, Y, Z + 16]], FACETEX[id * 6 + 3], UV_FULL, (bl2 >> 4) * 16, (bl2 & 15) * 16, 128, 128, 128, 0); }
         const sides = [[0, [[X + 16, Y, Z + 16], [X + 16, Y, Z], [X + 16, Y + H, Z], [X + 16, Y + H, Z + 16]]], [1, [[X, Y, Z], [X, Y, Z + 16], [X, Y + H, Z + 16], [X, Y + H, Z]]],
           [4, [[X, Y, Z + 16], [X + 16, Y, Z + 16], [X + 16, Y + H, Z + 16], [X, Y + H, Z + 16]]], [5, [[X + 16, Y, Z], [X, Y, Z], [X, Y + H, Z], [X + 16, Y + H, Z]]]];
         for (const [f, pts] of sides) {
@@ -2266,6 +2311,18 @@ function meshSection(world, c, sy) {
           if (OPAQUE[nid] || nid === id) continue;
           const nl = pLight[pi + FND[f]];
           quad(opq, pts, layer, [[0, 16], [16, 16], [16, 14], [0, 14]], (nl >> 4) * 16, (nl & 15) * 16, 255 * FSHADE[f], 255 * FSHADE[f], 255 * FSHADE[f], 0);
+        }
+      } else if (shape === SH.CROP) {
+        const l = pLight[pi], sky = (l >> 4) * 16, blk = (l & 15) * 16;
+        const X = lx * 16, Y = (sy * 16 + ly) * 16, Z = lz * 16;
+        const layer = FACETEX[id * 6] + (meta & 7);
+        for (const o of [4, 12]) {
+          const px = [[X + o, Y, Z], [X + o, Y, Z + 16], [X + o, Y + 16, Z + 16], [X + o, Y + 16, Z]];
+          const pz = [[X + 16, Y, Z + o], [X, Y, Z + o], [X, Y + 16, Z + o], [X + 16, Y + 16, Z + o]];
+          for (const pts of [px, pz]) {
+            quad(opq, pts, layer, UV_FULL, sky, blk, 230, 230, 230, FL_WAVE, true);
+            quad(opq, [pts[1], pts[0], pts[3], pts[2]], layer, UV_FULL, sky, blk, 230, 230, 230, FL_WAVE, true);
+          }
         }
       } else if (shape === SH.CACTUS) {
         for (let f = 0; f < 6; f++) {
@@ -2443,7 +2500,7 @@ void main(){
     layer += mod(floor(uTime * 10.0), 16.0);
     if ((fl & 8) != 0) uv.y -= uTime * 1.2;
   } else if ((fl & 4) != 0) {
-    layer += mod(floor(uTime * 5.0), 16.0);
+    layer += mod(floor(uTime * 4.0), 8.0);
     if ((fl & 8) != 0) uv.y -= uTime * 0.35;
   }
   gl_Position = uVP * vec4(p, 1.0);
@@ -2923,6 +2980,7 @@ function collectBoxes(world, x0, y0, z0, x1, y1, z1) {
     const id = world.getBlock(x, y, z);
     if (!SOLID[id]) continue;
     if (SHAPE[id] === SH.CACTUS) _boxes.push([x + 0.0625, y, z + 0.0625, x + 0.9375, y + 0.9375, z + 0.9375]);
+    else if (SHAPE[id] === SH.SLAB) _boxes.push([x, y, z, x + 1, y + BLK[id].height / 16, z + 1]);
     else _boxes.push([x, y, z, x + 1, y + 1, z + 1]);
   }
   return _boxes;
@@ -3050,8 +3108,9 @@ function buildModels() {
   // player (original design: orange hoodie explorer)
   defModel('player', humanoidParts({ skin: [222, 172, 132], hair: [30, 22, 18], eyes: [40, 140, 90], shirt: [222, 122, 44], sleeve: [210, 112, 38],
     pants: [52, 58, 82], shoes: [190, 190, 196], mouth: [150, 90, 80], fringe: 3, hood: true, pocket: true, strings: true, cap: [36, 150, 140] }));
-  defModel('zombie', humanoidParts({ skin: [112, 142, 100], hair: [70, 92, 62], eyes: [20, 24, 18], eyeWhite: [40, 50, 36], shirt: [104, 86, 60], sleeve: [104, 86, 60],
-    pants: [62, 64, 76], shoes: [46, 46, 50], mouth: [50, 40, 36], fringe: 1, torn: true, sideHair: 1 }));
+  // the undead (original design: pale ghoul with glowing amber eyes and a ragged maroon coat)
+  defModel('zombie', humanoidParts({ skin: [150, 146, 168], hair: [96, 90, 110], eyes: [255, 210, 70], eyeWhite: [60, 50, 70], shirt: [104, 40, 44], sleeve: [92, 36, 40],
+    pants: [44, 44, 56], shoes: [150, 146, 168], mouth: [70, 56, 80], fringe: 1, torn: true, sideHair: 1 }));
   const pink = [234, 156, 150];
   defModel('pig', [
     { size: [10, 8, 14], pivot: [0, 0, 0], off: [-5, 6, -7], paint: (f, u, v, W, H, r) => noiseC(pink, r) },
@@ -3099,6 +3158,21 @@ function buildModels() {
     { size: [1, 4, 6], pivot: [3, 9, 0], off: [0, -4, -3], anim: 'wingL', paint: (f, u, v, W, H, r) => noiseC(mul(white, 0.95), r) },
     { size: [1, 4, 1], pivot: [-1, 4, 0], off: [-0.5, -4, -0.5], anim: 'legA', paint: () => [236, 160, 40] },
     { size: [1, 4, 1], pivot: [1, 4, 0], off: [-0.5, -4, -0.5], anim: 'legB', paint: () => [236, 160, 40] },
+  ]);
+  // spider (original design: striped brown wolf-spider with green eyes)
+  const sp1 = [92, 70, 48], sp2 = [58, 44, 32];
+  const legs = [];
+  for (const s of [1, -1]) for (let i = 0; i < 4; i++) legs.push({ size: [14, 2, 2], pivot: [s * 3, 9, [2.2, 0.8, -0.8, -2.2][i]], off: s > 0 ? [0, -1, -1] : [-14, -1, -1], anim: 'sleg' + i + (s > 0 ? 'R' : 'L'),
+    paint: (f, u, v, W, H, r) => noiseC(u % 4 === 0 ? [150, 116, 70] : sp1, r) });
+  defModel('spider', [
+    { size: [6, 6, 6], pivot: [0, 0, 0], off: [-3, 6, -3], paint: (f, u, v, W, H, r) => noiseC(sp1, r) },
+    { size: [8, 8, 8], pivot: [0, 9, 3], off: [-4, -4, 0], anim: 'head', paint: (f, u, v, W, H, r) => {
+      if (f === 4 && ((v === 3 && (u === 2 || u === 5)) || (v === 2 && (u === 1 || u === 6)))) return [90, 230, 120];
+      if (f === 4 && v === 6 && (u === 3 || u === 4)) return [20, 16, 14];
+      return noiseC(sp1, r);
+    } },
+    { size: [10, 8, 12], pivot: [0, 9, -3], off: [-5, -4, -12], paint: (f, u, v, W, H, r) => ((f === 2 || f === 0 || f === 1) && v % 4 < 2) ? noiseC([150, 116, 70], r) : noiseC(sp2, r) },
+    ...legs,
   ]);
   atlasFinish();
 }
@@ -3305,7 +3379,8 @@ const MOB_TYPES = {
   cow: { w: 0.9, h: 1.4, hp: 10, speed: 0.09, drops: [['beef', 1, 3], ['leather', 0, 2]], sound: 'moo', passive: true, xp: 2 },
   sheep: { w: 0.9, h: 1.3, hp: 8, speed: 0.1, drops: [['white_wool', 1, 1], ['mutton', 1, 2]], sound: 'baa', passive: true, xp: 2 },
   chicken: { w: 0.4, h: 0.7, hp: 4, speed: 0.1, drops: [['chicken', 1, 1], ['feather', 0, 2]], sound: 'cluck', passive: true, xp: 1 },
-  zombie: { w: 0.6, h: 1.95, hp: 20, speed: 0.105, drops: [['rotten_flesh', 0, 2]], sound: 'groan', passive: false, xp: 5, dmg: 3 },
+  zombie: { w: 0.6, h: 1.95, hp: 20, speed: 0.105, drops: [['rotten_flesh', 0, 2]], sound: 'groan', passive: false, xp: 5, dmg: 3, burns: true },
+  spider: { w: 1.4, h: 0.9, hp: 16, speed: 0.12, drops: [['string', 0, 2]], sound: 'hiss', passive: false, xp: 5, dmg: 2, climbs: true, neutralDay: true },
 };
 class Mob extends Entity {
   constructor(game, type, x, y, z) {
@@ -3327,7 +3402,7 @@ class Mob extends Entity {
       const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1;
       this.vx += dx / l * 0.4; this.vz += dz / l * 0.4; this.vy = Math.max(this.vy, 0.36);
       if (this.T.passive) this.panic = 60;
-      else this.target = attacker;
+      else { this.target = attacker; this.provoked = true; }
     }
     if (this.health <= 0) { this.deathTime = 1; this.game.sound(this.type === 'zombie' ? 'zdeath' : 'hurt_animal', this.x, this.y, this.z); }
     return true;
@@ -3356,11 +3431,16 @@ class Mob extends Entity {
     // AI
     let mx = 0, mz = 0, speed = this.T.speed, wantJump = false;
     const pl = g.player;
-    if (this.type === 'zombie') {
-      if (pl && !pl.dead && pl.mode === 0) {
+    if (!this.T.passive) {
+      const calm = this.T.neutralDay && g.isDay() && !this.provoked && w.getLightRaw(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z)) >> 4 > 11;
+      if (pl && !pl.dead && pl.mode === 0 && !calm) {
         const dx = pl.x - this.x, dz = pl.z - this.z, dy = pl.y - this.y, d = Math.hypot(dx, dz);
         if (d < 32 && Math.abs(dy) < 16) this.target = pl; else if (d > 40) this.target = null;
       } else this.target = null;
+      if (!this.target) {
+        if (--this.wanderT <= 0) { this.wanderT = 80 + Math.random() * 160; this.wandering = Math.random() < 0.5; this.wanderDir = Math.random() * Math.PI * 2; }
+        if (this.wandering) { mx = Math.sin(this.wanderDir) * 0.6; mz = Math.cos(this.wanderDir) * 0.6; }
+      }
       if (this.target) {
         const t = this.target, dx = t.x - this.x, dz = t.z - this.z, d = Math.hypot(dx, dz);
         if (d > 0.6) { mx = dx / d; mz = dz / d; }
@@ -3368,15 +3448,15 @@ class Mob extends Entity {
         if (this.attackCd > 0) this.attackCd--;
         if (d < 1.3 && Math.abs(t.y - this.y) < 1.5 && this.attackCd === 0) {
           this.attackCd = 20;
-          t.hurt(g.difficultyDmg(this.T.dmg), 'zombie', this);
+          t.hurt(g.difficultyDmg(this.T.dmg), this.type, this);
         }
       }
       // burn in daylight
-      if (g.isDay() && !this.inWater && w.getLightRaw(Math.floor(this.x), Math.floor(this.y + 1.6), Math.floor(this.z)) >> 4 === 15 && !w.raining) {
+      if (this.T.burns && g.isDay() && !this.inWater && w.getLightRaw(Math.floor(this.x), Math.floor(this.y + 1.6), Math.floor(this.z)) >> 4 === 15 && !w.raining) {
         if (this.age % 20 === 0) { this.hurt(1, 'fire'); this.invuln = 0; }
         if (this.age % 3 === 0) g.particles.flame(this.x, this.y + Math.random() * this.h, this.z);
       }
-      if (--this.ambientT <= 0) { this.ambientT = 300 + Math.random() * 500; g.sound('groan', this.x, this.y, this.z); }
+      if (--this.ambientT <= 0) { this.ambientT = 300 + Math.random() * 500; g.sound(this.T.sound, this.x, this.y, this.z); }
     } else {
       if (this.panic > 0) {
         this.panic--;
@@ -3423,7 +3503,8 @@ class Mob extends Entity {
       if (this.headInWater || this.inLava || this.vy < 0) this.vy += 0.04 + (this.headInWater ? 0.02 : 0);
     } else this.vy -= 0.08;
     const res = this.physicsStep();
-    if ((res.hx || res.hz) && moving && (this.onGround || this.inWater) && this.jumpCd <= 0) { this.vy = 0.42; this.jumpCd = 10; }
+    if ((res.hx || res.hz) && moving && this.T.climbs) this.vy = 0.2;
+    else if ((res.hx || res.hz) && moving && (this.onGround || this.inWater) && this.jumpCd <= 0) { this.vy = 0.42; this.jumpCd = 10; }
     if (this.jumpCd > 0) this.jumpCd--;
     const fr = this.inWater ? 0.8 : this.inLava ? 0.5 : this.onGround ? 0.546 : 0.91;
     this.vx *= fr; this.vz *= fr; this.vy *= 0.98;
@@ -3446,6 +3527,13 @@ class Mob extends Entity {
       armR: this.type === 'zombie' ? [-Math.PI / 2 - Math.sin(this.age * 0.1) * 0.05, 0, 0] : [sw, 0, 0],
       wingL: [0, 0, this.onGround ? 0 : -Math.abs(Math.sin(this.age * 0.8))], wingR: [0, 0, this.onGround ? 0 : Math.abs(Math.sin(this.age * 0.8))],
     };
+    if (this.type === 'spider') {
+      const fan = [-0.55, -0.18, 0.18, 0.55];
+      for (let i = 0; i < 4; i++) for (const s of [1, -1]) {
+        const ph = Math.sin(wk * 1.5 + i * Math.PI / 2 + (s > 0 ? Math.PI : 0)) * 0.35 * this.walkAmt;
+        anims['sleg' + i + (s > 0 ? 'R' : 'L')] = [0, s * fan[i] + ph, -s * 0.62];
+      }
+    }
     const t = this.hurtTime > 0 || this.deathTime > 0 ? [1, 0.45, 0.45, 1] : [1, 1, 1, 1];
     const L = this.lightAt();
     if (this.deathTime > 0) {
@@ -3558,6 +3646,8 @@ function selBox(id, meta) {
       return meta <= 2 ? [o[0] + 0.0, 0.2, 0.35, o[0] + 0.3, 0.8, 0.65] : [0.35, 0.2, o[1], 0.65, 0.8, o[1] + 0.3];
     }
     case SH.LAYER: return [0, 0, 0, 1, 0.125, 1];
+    case SH.SLAB: return [0, 0, 0, 1, BLK[id].height / 16, 1];
+    case SH.CROP: return [0, 0, 0, 1, 0.125 + (meta & 7) * 0.11, 1];
     case SH.CACTUS: return [0.0625, 0, 0.0625, 0.9375, 1, 0.9375];
   }
   return [0, 0, 0, 1, 1, 1];
@@ -4568,6 +4658,7 @@ class Audio {
       case 'baa': for (let i = 0; i < 5; i++) this.tone(dst, 'sawtooth', 340, 320, 0.08, 0.08, now + i * 0.07); break;
       case 'cluck': this.tone(dst, 'square', 900, 600, 0.05, 0.08); this.tone(dst, 'square', 1000, 700, 0.05, 0.07, now + 0.09); break;
       case 'groan': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 500; f2.connect(dst); this.tone(f2, 'sawtooth', 110, 70, 1.1, 0.35); break; }
+      case 'hiss': this.noiseHit(dst, 'highpass', 2500, 1, 0.35, 0.25); this.tone(dst, 'square', 120, 80, 0.2, 0.05); break;
       case 'zhurt': this.tone(dst, 'sawtooth', 160, 90, 0.25, 0.3); break;
       case 'zdeath': this.tone(dst, 'sawtooth', 140, 40, 0.8, 0.3); break;
       case 'explode': this.noiseHit(dst, 'lowpass', 500, 0.7, 1.6, 1.0); this.tone(dst, 'sine', 70, 30, 1.2, 0.8); break;
@@ -4632,7 +4723,7 @@ class Input {
   reset() { this.keys.clear(); this.mouse = [false, false, false]; }
 }
 const DEATH_MSG = { fall: 'hit the ground too hard', lava: 'tried to swim in lava', drown: 'drowned', zombie: 'was slain by Zombie', starve: 'starved to death',
-  cactus: 'was pricked to death', void: 'fell out of the world', explosion: 'blew up', fire: 'burned to death', kill: 'died', block: 'was squashed by a falling block' };
+  cactus: 'was pricked to death', spider: 'was slain by Spider', void: 'fell out of the world', explosion: 'blew up', fire: 'burned to death', kill: 'died', block: 'was squashed by a falling block' };
 const SPLASHES = ['100% one file!', 'Now with cherry trees!', 'Punch a tree!', 'Procedurally textured!', 'Made of blocks!', 'Also try the original!', 'Infinite terrain!',
   'Synthesized sounds!', 'WebGL2!', 'Mind the creepy zombies!', 'Mountains reach the clouds!', 'Deep caves!', 'Crafting included!', 'Look up at night!', 'Don\'t dig straight down!'];
 
@@ -5118,6 +5209,7 @@ class Game {
     w.runScheduled(this);
     this.randomTicks();
     this.tickFurnaces();
+    if (this.sleeping) { this.sleepTick(); this.input.reset(); }
     p.tick(this.input);
     for (const e of this.entities) if (!e.dead) e.tick();
     this.entities = this.entities.filter(e => !e.dead);
@@ -5164,6 +5256,17 @@ class Game {
       if (w.getBlock(x, y + 1, z) !== 0 || Math.random() > 0.08) return;
       let n = 1; while (w.getBlock(x, y - n, z) === id) n++;
       if (n < 3 && w.canStay(id, x, y + 1, z, 0)) w.setBlock(x, y + 1, z, id, 0);
+    } else if (id === B.WHEAT) {
+      const m = w.getMeta(x, y, z), l = w.getLightRaw(x, y + 1, z);
+      const moist = w.getMeta(x, y - 1, z) > 0;
+      if (m < 7 && Math.max(l >> 4, l & 15) >= 9 && Math.random() < (moist ? 0.35 : 0.15)) w.setBlock(x, y, z, B.WHEAT, m + 1, false);
+    } else if (id === B.FARMLAND) {
+      let wet = false;
+      for (let dz = -4; dz <= 4 && !wet; dz++) for (let dx = -4; dx <= 4 && !wet; dx++) for (let dy = 0; dy <= 1; dy++) if (w.getBlock(x + dx, y + dy, z + dz) === B.WATER) { wet = true; break; }
+      const m = w.getMeta(x, y, z);
+      if (wet || w.raining) { if (m !== 7) w.setBlock(x, y, z, B.FARMLAND, 7, false); }
+      else if (m > 0) w.setBlock(x, y, z, B.FARMLAND, m - 1, false);
+      else if (w.getBlock(x, y + 1, z) !== B.WHEAT && Math.random() < 0.2) w.setBlock(x, y, z, B.DIRT, 0);
     } else if (id === B.ICE) {
       const l = w.getLightRaw(x, y, z);
       if ((l & 15) > 11) w.setBlock(x, y, z, B.WATER, 0);
@@ -5258,7 +5361,9 @@ class Game {
         if (w.getBlock(x, y, z) !== 0 || w.getBlock(x, y + 1, z) !== 0 || !SOLID[w.getBlock(x, y - 1, z)] || !OPAQUE[w.getBlock(x, y - 1, z)]) continue;
         const l = w.getLightRaw(x, y, z);
         if ((l & 15) > 0 || (l >> 4) - dark > 7) continue;
-        this.entities.push(new Mob(this, 'zombie', x + 0.5, y, z + 0.5));
+        const t = Math.random() < 0.3 ? 'spider' : 'zombie';
+        if (t === 'spider' && (SOLID[w.getBlock(x + 1, y, z)] || SOLID[w.getBlock(x, y, z + 1)])) continue;
+        this.entities.push(new Mob(this, t, x + 0.5, y, z + 0.5));
         break;
       }
     }
@@ -5330,6 +5435,11 @@ class Game {
       return out;
     }
     if (id === B.GRAVEL && R() < 0.1) return [{ id: I.FLINT, count: 1 }];
+    if (id === B.SHORT_GRASS || id === B.FERN) return R() < 0.125 ? [{ id: I.WHEAT_SEEDS, count: 1 }] : out;
+    if (id === B.WHEAT) {
+      if ((meta & 7) === 7) return [{ id: I.WHEAT, count: 1 }, { id: I.WHEAT_SEEDS, count: Math.floor(R() * 4) }].filter(s => s.count);
+      return [{ id: I.WHEAT_SEEDS, count: 1 }];
+    }
     if (d.drop === null) return out;
     const drop = d.drop === undefined ? id : itemOf(d.drop);
     const mn = d.dropMin === undefined ? 1 : d.dropMin, mx = d.dropMax === undefined ? mn : d.dropMax;
@@ -5399,6 +5509,7 @@ class Game {
     // interact with blocks
     if (hit && BLK[hit.id].use && !p.sneaking) {
       const use = BLK[hit.id].use;
+      if (use === 'bed') { this.tryToSleep(p, hit); return true; }
       if (use === 'craft') this.ui.openInv('craft');
       else {
         let be = w.getBE(hit.x, hit.y, hit.z);
@@ -5410,6 +5521,24 @@ class Game {
       return true;
     }
     if (!it) return false;
+    if (it.tool && it.tool.type === 'hoe') {
+      if (hit && (hit.id === B.GRASS_BLOCK || hit.id === B.DIRT) && hit.face !== 3 && w.getBlock(hit.x, hit.y + 1, hit.z) === 0) {
+        w.setBlock(hit.x, hit.y, hit.z, B.FARMLAND, 0);
+        this.sound('step_gravel', hit.x + 0.5, hit.y + 1, hit.z + 0.5);
+        p.damageHeld(1); this.remeshNear(hit.x, hit.z); this.ui.refreshHotbar();
+        return true;
+      }
+      return false;
+    }
+    if (it.place) {
+      if (hit && hit.face === 2 && hit.id === B.FARMLAND && w.getBlock(hit.x, hit.y + 1, hit.z) === 0) {
+        w.setBlock(hit.x, hit.y + 1, hit.z, B[it.place.toUpperCase()], 0);
+        this.sound('place_grass', hit.x + 0.5, hit.y + 1, hit.z + 0.5);
+        p.consumeHeld(1); this.remeshNear(hit.x, hit.z); this.ui.refreshHotbar();
+        return true;
+      }
+      return false;
+    }
     if (held.id === I.FLINT_AND_STEEL) {
       if (hit && hit.id === B.TNT) { this.primeTNT(hit.x, hit.y, hit.z, 80); p.damageHeld(1); this.ui.refreshHotbar(); return true; }
       return false;
@@ -5474,6 +5603,28 @@ class Game {
     this.remeshNear(x, z);
     this.ui.refreshHotbar();
     return true;
+  }
+  tryToSleep(p, hit) {
+    const w = this.world, t = w.time % 24000;
+    p.spawn = [hit.x + 0.5, hit.y + 1, hit.z + 0.5];
+    if (t > 1000 && t < 12542 && !w.raining) { this.ui.chat('You can sleep only at night. Respawn point set.', '#ccc'); return; }
+    if (this.entities.some(e => e instanceof Mob && !e.T.passive && e.target && Math.hypot(e.x - p.x, e.z - p.z) < 10)) { this.ui.chat('You may not rest now; there are monsters nearby', '#f88'); return; }
+    this.sleeping = 1;
+    p.x = hit.x + 0.5; p.z = hit.z + 0.5; p.y = hit.y + 0.6; p.vx = p.vy = p.vz = 0; p.savePrev();
+    this.ui.chat('Respawn point set', '#ccc');
+  }
+  sleepTick() {
+    const f = $('fx-sleep');
+    this.sleeping++;
+    f.style.opacity = Math.min(1, this.sleeping / 60);
+    if (this.sleeping === 100) {
+      const w = this.world;
+      w.time = (Math.floor(w.time / 24000) + 1) * 24000;
+      w.raining = false; w.rainStrength = 0; w.rainTime = 12000 + Math.random() * 36000;
+      for (const e of this.entities) if (e instanceof Mob && !e.T.passive) e.dead = true;
+    }
+    if (this.sleeping > 100) f.style.opacity = Math.max(0, 1 - (this.sleeping - 100) / 20);
+    if (this.sleeping > 120) { this.sleeping = 0; f.style.opacity = 0; }
   }
   explode(x, y, z, power) {
     const w = this.world;
