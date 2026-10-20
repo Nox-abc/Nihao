@@ -49,6 +49,9 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 #fx-lava { position: fixed; inset: 0; pointer-events: none; background: rgba(220,90,10,.55); }
 #fx-hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 180px rgba(200,0,0,.0); transition: box-shadow .3s; }
 #fx-vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,.35) 100%); }
+#fx-spyglass { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(circle at center, rgba(0,0,0,0) 0, rgba(0,0,0,0) 33vmin, rgba(20,20,20,.9) 34vmin, #000 36vmin); }
+#fx-freeze { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(200,230,255,0) 45%, rgba(210,235,255,.85) 100%); }
+#fx-pumpkin { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse 48% 40% at 50% 46%, rgba(0,0,0,0) 70%, rgba(48,24,4,.94) 100%); }
 #fx-portal { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(170,70,255,.25) 0%, rgba(110,20,210,.8) 100%); animation: portalfx 2.4s ease-in-out infinite alternate; }
 @keyframes portalfx { from { filter: hue-rotate(0deg); } to { filter: hue-rotate(40deg); } }
 #bossbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 364px; text-align: center; font-size: 22px; text-shadow: 2px 2px 0 #3f3f3f; }
@@ -127,7 +130,14 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 #tooltip .tt0 { margin-bottom: 4px; }
 #offhand-slot { position: absolute; left: -58px; bottom: 0; width: 48px; height: 48px; background: rgba(0,0,0,.45); border: 2px solid rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; }
 #armorbar { position: absolute; left: 0; bottom: 20px; display: flex; width: 162px; }
-#cooldown { position: absolute; left: 50%; top: 50%; margin: 18px 0 0 -16px; width: 32px; height: 8px; background: #3a3a3a; display: none; }
+#cooldown { position: absolute; left: 50%; top: 50%; margin: 18px 0 0 -16px; width: 32px; height: 4px; background: #3a3a3a; display: none; }
+#effects { position: absolute; right: 4px; top: 4px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; max-width: 260px; }
+#effects .eff { width: 48px; height: 48px; background: rgba(0,0,0,.6); border: 2px solid #8b8b8b; box-shadow: inset 2px 2px 0 #fff2, inset -2px -2px 0 #0005; display: flex; align-items: center; justify-content: center; }
+#effects .eff.bad { border-color: #8b5b5b; }
+#effects .eff img { width: 36px; height: 36px; image-rendering: pixelated; }
+.totem { position: fixed; left: 50%; top: 50%; z-index: 40; pointer-events: none; animation: totem 1.6s ease-out forwards; }
+.totem img { width: 64px; height: 64px; image-rendering: pixelated; }
+@keyframes totem { 0% { transform: translate(-50%, -50%) scale(0.5) rotate(-20deg); opacity: 1; } 40% { transform: translate(-50%, -60%) scale(5) rotate(10deg); opacity: 1; } 100% { transform: translate(-50%, -80%) scale(7) rotate(0); opacity: 0; } }
 #cooldown i { display: block; height: 100%; background: #fff; }
 #touch { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
 #touch .tb { position: absolute; pointer-events: auto; width: 64px; height: 64px; border-radius: 12px; background: rgba(255,255,255,.18); border: 2px solid rgba(255,255,255,.35); color: #fff; font: inherit; font-size: 26px; display: flex; align-items: center; justify-content: center; touch-action: none; user-select: none; }
@@ -174,6 +184,9 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
 <div id="fx-vignette" class="hidden"></div>
 <div id="fx-hurt"></div>
 <div id="fx-portal"></div>
+<div id="fx-freeze"></div>
+<div id="fx-spyglass" class="hidden"></div>
+<div id="fx-pumpkin" class="hidden"></div>
 <div id="fx-sleep" style="position:fixed;inset:0;background:#000;opacity:0;pointer-events:none"></div>
 <div id="hud" class="hidden">
   <div id="crosshair"></div>
@@ -181,6 +194,7 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <div id="bossbar" class="hidden"><div>Ender Dragon</div><div class="bb"><i id="bossfill"></i></div></div>
   <div id="debug"></div>
   <div id="debugR"></div>
+  <div id="effects"></div>
   <div id="chat"></div>
   <div id="bottom">
     <div id="itemname"></div>
@@ -5925,12 +5939,20 @@ const SH_DYN_F = `#version 300 es
 precision highp float; precision highp sampler2DArray;
 ${SH_TEX_FN}
 uniform sampler2D uAtlas;
-uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright;
+uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright; uniform float uGlint; uniform float uTime;
 ${SH_LIGHT_FN}
 in vec3 vUV; in vec4 vCol; in vec2 vLight; in float vDist; out vec4 o;
 void main(){
   vec4 c = vUV.z < -0.5 ? texture(uAtlas, vUV.xy) : texArr(vUV);
   if (c.a < 0.1) discard;
+  if (uGlint > 0.5) {
+    // enchantment glint: two diagonal bands scrolling over the item, added on top
+    float a = fract(dot(vUV.xy, vec2(0.55, 1.0)) * 0.9 - uTime * 0.32);
+    float b = fract(dot(vUV.xy, vec2(-1.0, 0.45)) * 0.8 + uTime * 0.21);
+    float g = smoothstep(0.0, 0.25, a) * smoothstep(0.6, 0.25, a) + 0.7 * smoothstep(0.0, 0.2, b) * smoothstep(0.5, 0.2, b);
+    o = vec4(vec3(0.5, 0.2, 0.9) * (0.25 + g * 0.75) * vCol.a, 1.0);
+    return;
+  }
   vec3 L = uFullBright > 0.5 ? vec3(1.0) : lightCol(vLight);
   vec3 col = c.rgb * vCol.rgb * L;
   float f = clamp((vDist - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);
@@ -6305,6 +6327,8 @@ class Renderer {
     this.setLightUniforms(u, env);
     if (opts && opts.noFog) gl.uniform2f(u.uFog, 1e5, 2e5);
     gl.uniform1f(u.uFullBright, opts && opts.fullBright ? 1 : 0);
+    gl.uniform1f(u.uGlint, opts && opts.glint ? 1 : 0);
+    gl.uniform1f(u.uTime, (performance.now() / 1000) % 1000);
     this.bindTex(u);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.atlas); gl.uniform1i(u.uAtlas, 1);
     gl.activeTexture(gl.TEXTURE0);
@@ -6313,7 +6337,9 @@ class Renderer {
     gl.bufferData(gl.ARRAY_BUFFER, this.dyn.subarray(0, this.dynN * 12), gl.STREAM_DRAW);
     if (opts && opts.blend) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); }
     if (opts && opts.noCull) gl.disable(gl.CULL_FACE);
+    if (opts && opts.glint) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.depthFunc(gl.LEQUAL); gl.depthMask(false); }
     gl.drawElements(gl.TRIANGLES, (this.dynN >> 2) * 6, gl.UNSIGNED_INT, 0);
+    if (opts && opts.glint) { gl.depthFunc(gl.LESS); gl.depthMask(true); }
     gl.enable(gl.CULL_FACE); gl.disable(gl.BLEND);
     this.dynN = 0;
   }
@@ -6768,7 +6794,7 @@ class ItemEntity extends Entity {
     // merge with nearby equal stacks
     if (this.age % 10 === 0) {
       for (const e of this.game.entities) {
-        if (e === this || !(e instanceof ItemEntity) || e.dead || e.stack.id !== this.stack.id || e.stack.dmg || this.stack.dmg) continue;
+        if (e === this || !(e instanceof ItemEntity) || e.dead || !stackable(e.stack, this.stack)) continue;
         if (Math.abs(e.x - this.x) < 0.8 && Math.abs(e.y - this.y) < 0.8 && Math.abs(e.z - this.z) < 0.8 && e.stack.count + this.stack.count <= maxStack(this.stack.id)) {
           this.stack.count += e.stack.count; e.dead = true;
         }
@@ -6776,16 +6802,19 @@ class ItemEntity extends Entity {
     }
   }
   render(r, a) {
-    const p = this.ipos(a), t = (this.age + a) / 20;
+    const p = this.ipos(a), t = (this.age + a) / 20, g = this.game, st = this.stack;
     const bob = Math.sin(t * 2 + this.spin) * 0.08 + 0.15;
     const L = this.lightAt();
-    const n = this.stack.count > 32 ? 3 : this.stack.count > 1 ? 2 : 1;
+    const n = st.count > 32 ? 3 : st.count > 1 ? 2 : 1, style = itemStyle(st.id);
+    // far away or with a full vertex buffer, fall back to flat sprites
+    const near = (p[0] - r.org[0]) ** 2 + (p[1] - r.org[1]) ** 2 + (p[2] - r.org[2]) ** 2 < 24 * 24 && r.dynN < 50000;
     for (let i = 0; i < n; i++) {
       const ox = i * 0.06, oy = i * 0.04;
-      const bx = itemBoxes(this.stack.id);
-      if (isCubeItem(this.stack.id)) drawBlockCube(r, this.stack.id, p[0] + ox, p[1] + bob + 0.12 + oy, p[2] + ox * 0.5, 0.25, t + this.spin, [1, 1, 1, 1], L);
-      else if (bx) drawBlockBoxes(r, this.stack.id, bx, p[0] + ox, p[1] + bob + 0.12 + oy, p[2] + ox * 0.5, 0.25, t + this.spin, [1, 1, 1, 1], L);
-      else drawSprite(r, itemLayer(this.stack.id), p[0] + ox, p[1] + bob + 0.2 + oy, p[2], 0.45, t + this.spin, [1, 1, 1, 1], L);
+      if (style === 'sprite' && !near) { drawSprite(r, itemLayer(st.id), p[0] + ox, p[1] + bob + 0.2 + oy, p[2], 0.45, t + this.spin, [1, 1, 1, 1], L); continue; }
+      let m = M4.trans(M4.create(), p[0] + ox, p[1] + bob + (style === 'sprite' ? 0.2 : 0.12) + oy, p[2] + ox * 0.5);
+      m = M4.mul(M4.create(), m, M4.rotY(M4.create(), t + this.spin));
+      m = M4.mul(M4.create(), m, M4.scale(M4.create(), ...(style === 'sprite' ? [0.45, 0.45, 0.45] : [0.25, 0.25, 0.25])));
+      if (style === 'sprite') g.pushItemXform(r, m, st, L); else g.pushBlockItem(r, m, st.id, L);
     }
   }
 }
@@ -6806,7 +6835,13 @@ class FallingBlock extends Entity {
     // crush entities
     for (const e of this.game.mobsAndPlayer()) if (Math.abs(e.x - this.x) < 0.8 && Math.abs(e.z - this.z) < 0.8 && e.y < this.y && e.y + e.h > this.y && this.vy < -0.3) e.hurt && e.hurt(2, 'block');
   }
-  render(r, a) { const p = this.ipos(a); drawBlockCube(r, this.block, p[0], p[1] + 0.49, p[2], 0.98, 0, [1, 1, 1, 1], this.lightAt()); }
+  render(r, a) {
+    const p = this.ipos(a), L = this.lightAt();
+    if (itemStyle(this.block) === 'sprite') { for (const yaw of [Math.PI / 4, -Math.PI / 4]) drawSprite(r, FACETEX[this.block * 6], p[0], p[1] + 0.49, p[2], 0.98, yaw, [1, 1, 1, 1], L); return; }
+    let m = M4.trans(M4.create(), p[0], p[1] + 0.49, p[2]);
+    m = M4.mul(M4.create(), m, M4.scale(M4.create(), 0.98, 0.98, 0.98));
+    this.game.pushBlockItem(r, m, this.block, L);
+  }
 }
 
 class PrimedTNT extends Entity {
@@ -6879,15 +6914,18 @@ class Mob extends Entity {
       if (this.deathTime >= 20) {
         this.dead = true;
         g.particles.poof(this.x, this.y + this.h / 2, this.z);
+        const loot = this.killedByPlayer ? this.lootingLevel || 0 : 0;
         if (!this.noDrops) for (const [name, mn, mx] of this.T.drops) {
-          const n = mn + Math.floor(Math.random() * (mx - mn + 1));
+          const n = mn + Math.floor(Math.random() * (mx - mn + 1 + loot));
           if (n > 0) g.dropItem(this.x, this.y + 0.5, this.z, { id: itemOf(name), count: n });
         }
-        if (this.killedByPlayer) g.player.addXP(this.T.xp);
+        if (this.killedByPlayer && this.T.xp) g.spawnXP(this.x, this.y + 0.5, this.z, this.T.xp);
       }
       return;
     }
     this.updateFluids();
+    this.tickEffects();
+    if (this.dead || this.deathTime > 0) return;
     if (this.T.flying) { this.flyTick(); return; }
     if (this.T.teleports && Math.random() < 0.0015 && !this.target) this.teleportAway();
     // AI
@@ -7095,20 +7133,33 @@ class Projectile extends Entity {
   constructor(game, kind, x, y, z, vx, vy, vz, owner) {
     super(game, x, y, z);
     this.kind = kind; this.vx = vx; this.vy = vy; this.vz = vz; this.owner = owner; this.w = 0.3; this.h = 0.3;
-    this.life = kind === 'arrow' ? 1200 : 160;
-    this.grav = kind === 'arrow' || kind === 'potion' || kind === 'xp' ? 0.05 : kind === 'snow' || kind === 'pearl' || kind === 'egg' ? 0.03 : 0;
+    this.life = kind === 'arrow' || kind === 'trident' ? 1200 : 160;
+    this.grav = kind === 'arrow' || kind === 'trident' || kind === 'potion' || kind === 'xp' ? 0.05 : kind === 'snow' || kind === 'pearl' || kind === 'egg' ? 0.03 : 0;
+    this.hitList = null;
     this.stuck = false; this.dir = [vx, vy, vz];
   }
   tick() {
     this.savePrev(); this.age++;
     const g = this.game, w = g.world, pl = g.player;
     if (--this.life <= 0) { this.dead = true; return; }
+    if (this.returning) {
+      // loyal tridents fly back to their owner
+      const o = this.owner;
+      if (!o || o.dead) { this.returning = false; this.stuck = false; return; }
+      const dx = o.x - this.x, dy = o.y + 1.2 - this.y, dz = o.z - this.z, d = Math.hypot(dx, dy, dz) || 1, sp = 0.15 * (this.loyalty + 1);
+      this.vx = dx / d * sp * 3; this.vy = dy / d * sp * 3; this.vz = dz / d * sp * 3;
+      this.x += this.vx; this.y += this.vy; this.z += this.vz; this.dir = [this.vx, this.vy, this.vz];
+      if (d < 1.5) { this.dead = true; if (this.pickup && o.addItem) { o.addItem(this.stack); g.ui.refreshHotbar(); } g.sound('pop', this.x, this.y, this.z); }
+      return;
+    }
     if (this.stuck) {
-      // arrows stay in the block they hit until picked up
+      // arrows and tridents stay in the block they hit until picked up
       const d = this.dir, l = Math.hypot(d[0], d[1], d[2]) || 1;
+      if (this.kind === 'trident' && this.loyalty && this.age > 20) { this.returning = true; return; }
       if (!SOLID[w.getBlock(Math.floor(this.x + d[0] / l * 0.2), Math.floor(this.y + d[1] / l * 0.2), Math.floor(this.z + d[2] / l * 0.2))]) { this.stuck = false; return; }
       if (this.pickup && pl && !pl.dead && Math.abs(pl.x - this.x) < 1.2 && Math.abs(pl.z - this.z) < 1.2 && this.y > pl.y - 0.5 && this.y < pl.y + 2.3) {
-        if (!pl.addItem({ id: I.ARROW, count: 1 })) { this.dead = true; g.sound('pop', this.x, this.y, this.z); g.ui.refreshHotbar(); }
+        const st = this.kind === 'trident' ? this.stack : (this.arrowStack || { id: I.ARROW, count: 1 });
+        if (!pl.addItem(copyStack(st, 1))) { this.dead = true; g.sound('pop', this.x, this.y, this.z); g.ui.refreshHotbar(); }
       }
       return;
     }
@@ -7117,12 +7168,12 @@ class Projectile extends Entity {
     for (let s = 0; s < n; s++) {
       this.x += this.vx / n; this.y += this.vy / n; this.z += this.vz / n;
       if (SOLID[w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z))]) {
-        if (this.kind !== 'arrow') { this.x -= this.vx / n; this.y -= this.vy / n; this.z -= this.vz / n; }
+        if (this.kind !== 'arrow' && this.kind !== 'trident') { this.x -= this.vx / n; this.y -= this.vy / n; this.z -= this.vz / n; }
         this.impact(null); return;
       }
       if (byPlayer) {
         for (const e of g.entities) {
-          if (!(e instanceof Mob) || e.dead || e.deathTime > 0) continue;
+          if (!(e instanceof Mob) || e.dead || e.deathTime > 0 || (this.hitList && this.hitList.includes(e))) continue;
           const hw = e.w / 2 + 0.15;
           if (Math.abs(e.x - this.x) < hw && Math.abs(e.z - this.z) < hw && this.y > e.y - 0.15 && this.y < e.y + e.h + 0.15) { this.impact(e); return; }
         }
@@ -7137,19 +7188,31 @@ class Projectile extends Entity {
     if (this.kind === 'void' && this.age % 2 === 0) g.particles.poof(this.x, this.y, this.z, [0.6, 0.3, 0.9], 2);
     if (this.kind === 'pearl' && this.age % 2 === 0) g.particles.poof(this.x, this.y, this.z, [0.3, 0.8, 0.7], 1);
     if (this.kind === 'arrow' && this.crit) g.particles.crit(this.x, this.y, this.z);
+    if (this.flame && this.age % 2 === 0) g.particles.flame(this.x, this.y, this.z);
   }
   impact(e) {
     const g = this.game, w = g.world;
-    if (this.kind === 'arrow') {
+    if (this.kind === 'arrow' || this.kind === 'trident') {
       if (e) {
-        let dmg = Math.ceil(Math.hypot(this.vx, this.vy, this.vz) * 2);
-        if (this.crit) dmg += Math.floor(Math.random() * (dmg / 2 + 2));
-        if (e.hurt(dmg, 'arrow', this.owner)) {
-          if (this.owner === g.player) e.killedByPlayer = true;
-          const l = Math.hypot(this.vx, this.vz) || 1;
-          e.vx += this.vx / l * 0.4; e.vz += this.vz / l * 0.4;
+        let dmg;
+        if (this.kind === 'trident') dmg = 8 + (this.impaling && (e.inWater || g.world.raining) ? 2.5 * this.impaling : 0);
+        else {
+          dmg = Math.ceil(Math.hypot(this.vx, this.vy, this.vz) * (2 + (this.power ? 0.5 * this.power + 0.5 : 0)));
+          if (this.crit) dmg += Math.floor(Math.random() * (dmg / 2 + 2));
         }
-        g.sound('arrow_hit', this.x, this.y, this.z);
+        if (e.hurt(dmg, this.kind, this.owner)) {
+          if (this.owner === g.player) e.killedByPlayer = true;
+          const l = Math.hypot(this.vx, this.vz) || 1, kb = 0.4 + (this.punch || 0) * 0.6;
+          e.vx += this.vx / l * kb; e.vz += this.vz / l * kb;
+          if (this.flame && !(e.T && e.T.fireproof)) e.fireTicks = 100;
+          const a = this.arrowStack;
+          if (a && a.id === I.SPECTRAL_ARROW && e.addEffect) e.addEffect('glowing', 200, 0);
+          if (a && a.id === I.TIPPED_ARROW && a.tag && typeof POTION_BY_KEY !== 'undefined' && POTION_BY_KEY[a.tag.potion] && e.addEffect)
+            for (const [ef, t, amp] of POTION_BY_KEY[a.tag.potion].effects) { if (EFFECTS[ef][3]) e.instantEffect(ef, amp); else e.addEffect(ef, Math.max(1, Math.round(t / 8)), amp); }
+        }
+        g.sound(this.kind === 'trident' ? 'arrow_hit' : 'arrow_hit', this.x, this.y, this.z);
+        if (this.pierce && (this.hitList || (this.hitList = [])).length < this.pierce) { this.hitList.push(e); return; }
+        if (this.kind === 'trident') { this.vx *= -0.01; this.vy *= -0.1; this.vz *= -0.01; this.stuck = true; this.dir = [0, -1, 0]; if (this.loyalty) this.returning = true; return; }
         this.dead = true;
         return;
       }
@@ -7199,17 +7262,18 @@ class Projectile extends Entity {
   }
   render(r, a) {
     const p = this.ipos(a);
-    if (this.kind !== 'arrow') {
+    if (this.kind !== 'arrow' && this.kind !== 'trident') {
       const tex = { fire: 'fireball', void: 'void_orb', snow: 'snowball', pearl: 'ender_pearl', egg: 'egg', potion: 'splash_potion', xp: 'experience_bottle', wind: 'wind_charge' }[this.kind] || 'snowball';
       drawSprite(r, texL(tex), p[0], p[1], p[2], this.kind === 'fire' ? 0.5 : this.kind === 'void' ? 0.7 : 0.3, (this.game.camYaw || 0), [1, 1, 1, 1], this.kind === 'fire' || this.kind === 'void' ? [15, 15] : this.lightAt());
       return;
     }
-    // arrows: two crossed quads along the flight direction
+    // arrows and tridents: two crossed quads along the flight direction
     const d0 = this.dir, l = Math.hypot(d0[0], d0[1], d0[2]) || 1, d = [d0[0] / l, d0[1] / l, d0[2] / l];
+    const spear = this.kind === 'trident';
     let s1 = [d[2], 0, -d[0]]; const ls = Math.hypot(s1[0], s1[2]);
     s1 = ls < 1e-3 ? [1, 0, 0] : [s1[0] / ls, 0, s1[2] / ls];
     const s2 = [d[1] * s1[2] - d[2] * s1[1], d[2] * s1[0] - d[0] * s1[2], d[0] * s1[1] - d[1] * s1[0]];
-    const h = 0.35, L = this.lightAt(), layer = texL('arrow');
+    const h = spear ? 0.8 : 0.35, L = this.lightAt(), layer = spear ? itemLayer(I.TRIDENT) : itemLayer(this.arrowStack ? this.arrowStack.id : I.ARROW);
     const c = [p[0] - d[0] * 0.25, p[1] - d[1] * 0.25, p[2] - d[2] * 0.25];
     for (const sv of [s1, s2]) for (const flip of [1, -1]) {
       const pts = [[c[0] - d[0] * h, c[1] - d[1] * h, c[2] - d[2] * h, 0, 1], [c[0] + sv[0] * h * flip, c[1] + sv[1] * h * flip, c[2] + sv[2] * h * flip, 1, 1],
@@ -7666,22 +7730,30 @@ function raycast(world, ox, oy, oz, dx, dy, dz, maxD, fluids) {
   return null;
 }
 
+// enchantment level on a stack
+function enchLevel(st, k) { return st && st.tag && st.tag.ench ? st.tag.ench[k] || 0 : 0; }
+// damage that armor does not reduce
+const BYPASS_ARMOR = new Set(['fall', 'drown', 'starve', 'void', 'kill', 'magic', 'poison', 'wither', 'fire', 'freeze', 'sonic_boom', 'suffocate', 'dripstone', 'pearl', 'fly_into_wall']);
+const BLOCKABLE = new Set(['zombie', 'spider', 'skeleton', 'arrow', 'wither_skeleton', 'enderman', 'blaze', 'fireball', 'explosion', 'player', 'creeper', 'husk', 'stray', 'drowned', 'piglin', 'zombified_piglin', 'vindicator', 'pillager', 'witch', 'iron_golem', 'silverfish', 'cave_spider', 'slime', 'magma_cube', 'phantom', 'hoglin', 'warden', 'trident', 'wolf', 'polar_bear', 'bee', 'endermite', 'piglin_brute', 'zoglin', 'ravager', 'evoker', 'vex', 'guardian', 'ghast', 'shulker', 'breeze', 'goat', 'llama', 'dolphin', 'panda', 'fox', 'pufferfish', 'ender_dragon', 'void_orb']);
+const isUndeadType = t => ['zombie', 'skeleton', 'wither_skeleton', 'husk', 'stray', 'drowned', 'zombified_piglin', 'zombie_villager', 'phantom', 'wither', 'zoglin', 'skeleton_horse', 'zombie_horse', 'bogged'].includes(t);
+const isArthropodType = t => ['spider', 'cave_spider', 'bee', 'silverfish', 'endermite'].includes(t);
+
 class Player extends Entity {
   constructor(game, x, y, z) {
     super(game, x, y, z);
     this.w = 0.6; this.h = 1.8; this.eyeH = 1.62; this.eyeCur = 1.62; this.stepH = 0.6;
     this.pitch = 0; this.mode = 0; this.flying = false; this.sprinting = false; this.sneaking = false;
-    this.health = 20; this.maxHealth = 20; this.food = 20; this.sat = 5; this.exh = 0; this.air = 300;
+    this.health = 20; this.maxHealth = 20; this.baseMaxHealth = 20; this.food = 20; this.sat = 5; this.exh = 0; this.air = 300; this.absorb = 0;
     this.xpLevel = 0; this.xp = 0; this.score = 0;
     this.inv = new Array(36).fill(null); this.craft = new Array(4).fill(null); this.sel = 0;
     this.armor = [null, null, null, null]; this.offhand = [null];      // armor: head, chest, legs, feet
     this.spawn = null;
     this.mining = null; this.mineProgress = 0; this.mineCd = 0; this.useCd = 0; this.attackCd = 0;
-    this.swing = 0; this.swingT = 0; this.eat = 0; this.equip = 0; this.lastSel = -1;
+    this.swing = 0; this.swingT = 0; this.equip = 0; this.lastSel = -1;
     this.walkDist = 0; this.pwalkDist = 0; this.bob = 0; this.pbob = 0;
     this.jumpT = 0; this.lastSpace = -100; this.lastW = -100; this.regenT = 0; this.starveT = 0;
-    this.sprintJumpBoost = 0;
-    this.portalTime = 0; this.portalCd = false; this.drawT = 0; this.spawnDim = 'overworld';
+    this.portalTime = 0; this.portalCd = false; this.spawnDim = 'overworld';
+    this.lastAttack = -100; this.using = null; this.gliding = false; this.boost = 0; this.pearlCd = 0; this.freeze = 0;
   }
   get held() { return this.inv[this.sel]; }
   // what the held tool does to drops: silk touch, fortune, shears
@@ -7689,20 +7761,25 @@ class Player extends Entity {
     const h = this.inv[this.sel], o = { silk: false, fortune: 0, shears: false };
     if (!h) return o;
     o.shears = h.id === I.SHEARS;
-    const e = h.tag && h.tag.ench;
-    if (e) { o.silk = !!e.silk_touch; o.fortune = e.fortune || 0; }
+    o.silk = enchLevel(h, 'silk_touch') > 0; o.fortune = enchLevel(h, 'fortune');
     return o;
   }
   heldId() { const h = this.inv[this.sel]; return h ? h.id : 0; }
   look() { const cp = Math.cos(this.pitch); return [-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp]; }
   eye() { return [this.x, this.y + this.eyeCur, this.z]; }
+  // eating, drinking and drawing bows show these in the hand
+  get eat() { return this.using && (this.using.kind === 'eat' || this.using.kind === 'drink') ? this.using.t : 0; }
+  get drawT() { return this.using && (this.using.kind === 'bow' || this.using.kind === 'crossbow' || this.using.kind === 'trident') ? this.using.t : 0; }
   // ---------- inventory ----------
   addItem(stack) {
     let n = stack.count;
     const ms = maxStack(stack.id);
-    if (ms > 1) for (let i = 0; i < 36 && n > 0; i++) {
-      const s = this.inv[i];
-      if (s && stackable(s, stack) && s.count < ms) { const k = Math.min(n, ms - s.count); s.count += k; n -= k; }
+    if (ms > 1) {
+      if (this.offhand[0] && stackable(this.offhand[0], stack) && this.offhand[0].count < ms) { const k = Math.min(n, ms - this.offhand[0].count); this.offhand[0].count += k; n -= k; }
+      for (let i = 0; i < 36 && n > 0; i++) {
+        const s = this.inv[i];
+        if (s && stackable(s, stack) && s.count < ms) { const k = Math.min(n, ms - s.count); s.count += k; n -= k; }
+      }
     }
     for (let i = 0; i < 36 && n > 0; i++) {
       if (!this.inv[i]) { const k = Math.min(n, ms); this.inv[i] = copyStack(stack, k); n -= k; }
@@ -7716,46 +7793,140 @@ class Player extends Entity {
     h.count -= n || 1;
     if (h.count <= 0) this.inv[this.sel] = null;
   }
-  damageHeld(amount) {
-    if (this.mode === 1) return;
-    const h = this.inv[this.sel];
-    if (!h || !ITEMS[h.id].dur) return;
-    h.dmg = (h.dmg || 0) + amount;
-    if (h.dmg >= ITEMS[h.id].dur) { this.inv[this.sel] = null; this.game.sound('break_tool', this.x, this.y, this.z); }
+  // wear down a stack; returns the stack or null when it broke
+  wear(st, amount) {
+    const it = ITEMS[st.id];
+    if (!it.dur || this.mode === 1 || (st.tag && st.tag.unbreakable)) return st;
+    const ub = enchLevel(st, 'unbreaking');
+    for (let k = 0; k < amount; k++) if (!ub || Math.random() < (it.armor ? 0.6 + 0.4 / (ub + 1) : 1 / (ub + 1))) st.dmg = (st.dmg || 0) + 1;
+    if (st.dmg >= it.dur) { this.game.sound('break_tool', this.x, this.y, this.z); this.game.particles.blockBreak && this.game.particles.poof(this.x, this.y + 1.2, this.z, [0.6, 0.6, 0.6], 6); return null; }
+    return st;
   }
+  damageHeld(amount) { const h = this.inv[this.sel]; if (h && ITEMS[h.id].dur) { this.inv[this.sel] = this.wear(h, amount); this.game.ui.refreshHotbar(); } }
   addXP(n) {
+    // mending repairs worn gear first
+    const menders = [this.inv[this.sel], this.offhand[0], ...this.armor].filter(s => s && s.dmg && enchLevel(s, 'mending'));
+    if (menders.length && n > 0) { const s = menders[Math.floor(Math.random() * menders.length)], fix = Math.min(s.dmg, n * 2); s.dmg -= fix; n -= Math.ceil(fix / 2); }
+    if (n <= 0) { this.game.sound('xp', this.x, this.y, this.z); return; }
     this.xp += n;
     let need;
-    while (this.xp >= (need = this.xpLevel < 16 ? 2 * this.xpLevel + 7 : 5 * this.xpLevel - 38)) { this.xp -= need; this.xpLevel++; this.game.sound('levelup', this.x, this.y, this.z); }
+    while (this.xp >= (need = xpNeeded(this.xpLevel))) { this.xp -= need; this.xpLevel++; if (this.xpLevel % 5 === 0) this.game.sound('levelup', this.x, this.y, this.z); }
     this.game.sound('xp', this.x, this.y, this.z);
+  }
+  // spend levels (enchanting, anvils)
+  takeLevels(n) { this.xpLevel = Math.max(0, this.xpLevel - n); this.xp = Math.min(this.xp, xpNeeded(this.xpLevel) - 1); }
+  // ---------- armor ----------
+  armorPoints() { let a = 0; for (const s of this.armor) if (s && ITEMS[s.id].armor) a += ITEMS[s.id].armor.pts; return a; }
+  armorToughness() { let a = 0; for (const s of this.armor) if (s && ITEMS[s.id].armor) a += ITEMS[s.id].armor.tough; return a; }
+  protectionEPF(source) {
+    let e = 0;
+    for (const s of this.armor) {
+      if (!s) continue;
+      e += enchLevel(s, 'protection');
+      if (source === 'fire' || source === 'lava' || source === 'magma' || source === 'fireball') e += 2 * enchLevel(s, 'fire_protection');
+      if (source === 'explosion' || source === 'creeper') e += 2 * enchLevel(s, 'blast_protection');
+      if (source === 'arrow' || source === 'trident' || source === 'fireball') e += 2 * enchLevel(s, 'projectile_protection');
+      if (source === 'fall' || source === 'pearl') e += 3 * enchLevel(s, 'feather_falling');
+    }
+    return Math.min(20, e);
+  }
+  damageArmor(amount) {
+    const n = Math.max(1, Math.floor(amount / 4));
+    for (let k = 0; k < 4; k++) if (this.armor[k] && ITEMS[this.armor[k].id].armor) this.armor[k] = this.wear(this.armor[k], n);
+  }
+  shieldStack() { const m = this.inv[this.sel], o = this.offhand[0]; return m && m.id === I.SHIELD ? m : o && o.id === I.SHIELD ? o : null; }
+  blocking() { return !!(this.using && this.using.kind === 'shield' && this.using.t >= 5); }
+  tryTotem() {
+    let where = null;
+    if (this.offhand[0] && this.offhand[0].id === I.TOTEM_OF_UNDYING) where = 'off'; else if (this.held && this.held.id === I.TOTEM_OF_UNDYING) where = 'main';
+    if (!where) return false;
+    if (where === 'off') this.offhand[0] = null; else this.inv[this.sel] = null;
+    this.health = 1; this.clearEffects();
+    this.addEffect('regeneration', 900, 1); this.addEffect('absorption', 100, 1); this.addEffect('fire_resistance', 800, 0);
+    const g = this.game;
+    g.sound('totem', this.x, this.y + 1, this.z);
+    for (let k = 0; k < 60; k++) g.particles.add({ x: this.x, y: this.y + 1, z: this.z, vx: (Math.random() - 0.5) * 0.5, vy: Math.random() * 0.6, vz: (Math.random() - 0.5) * 0.5, life: 30 + Math.random() * 20, layer: texL('particle_generic_2'), u: 0, v: 0, us: 1, size: 0.1, g: 0.02, col: Math.random() < 0.5 ? [1, 0.9, 0.2] : [0.3, 0.9, 0.3], bright: true });
+    g.ui.totemFlash && g.ui.totemFlash();
+    g.ui.refreshHotbar();
+    return true;
   }
   // ---------- damage ----------
   hurt(amount, source, attacker) {
     if (this.dead || (this.mode === 1 && source !== 'void' && source !== 'kill')) return false;
-    if (this.invuln > 0 && source !== 'kill') return false;
-    this.health -= amount; this.invuln = 10; this.hurtTime = 10;
-    this.exh += 0.1;
-    this.game.sound('hurt', this.x, this.y, this.z);
-    this.game.flashHurt();
-    if (attacker) {
-      const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1;
-      this.vx += dx / l * 0.4; this.vz += dz / l * 0.4; this.vy = Math.max(this.vy, 0.36);
+    const fire = source === 'fire' || source === 'lava' || source === 'magma' || source === 'fireball' || source === 'in_fire';
+    if (fire && this.effectLevel('fire_resistance')) return false;
+    if (this.invuln > 0 && source !== 'kill' && source !== 'void') return false;
+    // shields stop attacks from the front
+    if (this.blocking() && attacker && BLOCKABLE.has(source)) {
+      const lk = this.look(), dx = attacker.x - this.x, dz = attacker.z - this.z, l = Math.hypot(dx, dz) || 1;
+      if ((lk[0] * dx + lk[2] * dz) / (Math.hypot(lk[0], lk[2]) || 1) / l > 0) {
+        const sh = this.shieldStack();
+        if (sh && amount >= 3) { const w = this.wear(sh, 1 + Math.floor(amount)); if (!w) { if (this.offhand[0] === sh) this.offhand[0] = null; else this.inv[this.sel] = null; this.using = null; } }
+        this.game.sound('shield_block', this.x, this.y + 1, this.z);
+        if (attacker.vx !== undefined && attacker !== this && source !== 'arrow' && source !== 'fireball') { attacker.vx += dx / l * 0.5; attacker.vz += dz / l * 0.5; }
+        this.invuln = 10;
+        return false;
+      }
     }
-    if (this.health <= 0) { this.health = 0; this.dead = true; this.game.onDeath(source); }
+    let dmg = amount;
+    if (!BYPASS_ARMOR.has(source)) {
+      const def = this.armorPoints(), tough = this.armorToughness();
+      dmg *= 1 - Math.min(20, Math.max(def / 5, def - dmg / (2 + tough / 4))) / 25;
+      this.damageArmor(amount);
+    }
+    const res = this.effectLevel('resistance');
+    if (res && source !== 'void' && source !== 'kill') dmg *= Math.max(0, 1 - 0.2 * res);
+    const epf = source === 'void' || source === 'kill' || source === 'starve' ? 0 : this.protectionEPF(source);
+    if (epf) dmg *= 1 - epf / 25;
+    if (this.absorb > 0) { const a = Math.min(this.absorb, dmg); this.absorb -= a; dmg -= a; }
+    if (attacker && attacker !== this && attacker.hurt && !BYPASS_ARMOR.has(source)) {
+      let th = 0; for (const s of this.armor) th = Math.max(th, enchLevel(s, 'thorns'));
+      if (th && Math.random() < 0.15 * th) attacker.hurt(1 + Math.floor(Math.random() * 4), 'thorns', this);
+    }
+    this.health -= dmg; this.invuln = 10; this.hurtTime = 10;
+    this.exh += 0.1;
+    if (dmg > 0 || amount > 0) { this.game.sound('hurt', this.x, this.y, this.z); this.game.flashHurt(); }
+    if (attacker && attacker !== this) {
+      let kb = 0; for (const s of this.armor) if (s && ITEMS[s.id].armor) kb += ITEMS[s.id].armor.kb || 0;
+      const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1, k = Math.max(0, 1 - kb);
+      this.vx += dx / l * 0.4 * k; this.vz += dz / l * 0.4 * k; this.vy = Math.max(this.vy, 0.36 * k);
+    }
+    if (this.health <= 0) {
+      if (source !== 'void' && source !== 'kill' && this.tryTotem()) return true;
+      this.health = 0; this.dead = true; this.game.onDeath(source);
+    }
+    this.game.ui.refreshBars();
     return true;
   }
   heal(n) { this.health = Math.min(this.maxHealth, this.health + n); }
+  landed(dist) {
+    const w = this.game.world, b = w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z));
+    if (BLK[b].bouncy && !this.sneaking) { this.bounce = true; return; }
+    if (this.effectLevel('slow_falling') || this.gliding) return;
+    let d = dist - 3 - this.effectLevel('jump_boost');
+    if (b === B.HAY_BLOCK || b === B.HONEY_BLOCK) d *= 0.2; else if (BLK[b].bed) d *= 0.5;
+    if (b === B.POWDER_SNOW || b === B.SCAFFOLDING || BLK[b].bouncy) return;
+    if (d > 0) this.hurt(Math.ceil(d), 'fall');
+  }
+  // ---------- mining ----------
   breakTicks(id) {
     const d = BLK[id];
     if (d.hard < 0) return Infinity;
     if (this.mode === 1) return 0;
     if (d.hard === 0) return 0;
-    const it = ITEMS[this.heldId()];
-    const tool = it && it.tool;
+    const h = this.inv[this.sel], it = h ? ITEMS[h.id] : null, tool = it && it.tool;
     let speed = 1;
-    if (tool && d.tool === tool.type) speed = tool.speed;
-    if (tool && tool.type === 'sword' && d.leaves) speed = 1.5;
-    if (this.headInWater) speed /= 5;
+    if (tool) {
+      if (tool.type === 'shears') speed = d.leaves || id === B.COBWEB ? 15 : d.sound === 'wool' ? 5 : id === B.VINE || id === B.GLOW_LICHEN ? 2 : 1;
+      else if (tool.type === 'sword') speed = id === B.COBWEB ? 15 : (d.leaves || id === B.BAMBOO || d.name.includes('pumpkin') || id === B.MELON || id === B.COCOA) ? 1.5 : 1;
+      else if (d.tool === tool.type) speed = tool.speed;
+    }
+    if (speed > 1) { const eff = enchLevel(h, 'efficiency'); if (eff) speed += eff * eff + 1; }
+    const haste = Math.max(this.effectLevel('haste'), this.effectLevel('conduit_power'));
+    if (haste) speed *= 1 + 0.2 * haste;
+    const fat = this.effectLevel('mining_fatigue');
+    if (fat) speed *= [1, 0.3, 0.09, 0.0027, 0.00081][Math.min(4, fat)];
+    if (this.headInWater && !enchLevel(this.armor[0], 'aqua_affinity') && !this.effectLevel('conduit_power')) speed /= 5;
     if (!this.onGround && !this.flying) speed /= 5;
     const dmg = speed / d.hard / (this.canHarvest(id) ? 30 : 100);
     return dmg >= 1 ? 0 : Math.ceil(1 / dmg);
@@ -7766,6 +7937,14 @@ class Player extends Entity {
     const it = ITEMS[this.heldId()];
     return !!(it && it.tool && it.tool.type === d.tool && it.tool.lvl >= d.lvl);
   }
+  // ---------- attack strength (1.9 combat) ----------
+  attackSpeed() {
+    const it = ITEMS[this.heldId()];
+    let s = it && it.aspd ? it.aspd : 4;
+    s *= 1 + 0.1 * this.effectLevel('haste') - 0.1 * this.effectLevel('mining_fatigue');
+    return Math.max(0.25, s);
+  }
+  attackStrength(partial) { return Math.max(0, Math.min(1, (this.age - this.lastAttack + (partial || 0) + 0.5) / (20 / this.attackSpeed()))); }
   // ---------- per-tick update ----------
   tick(inp) {
     this.savePrev();
@@ -7775,6 +7954,8 @@ class Player extends Entity {
     this.age++;
     if (this.invuln > 0) this.invuln--;
     if (this.hurtTime > 0) this.hurtTime--;
+    if (this.pearlCd > 0) this.pearlCd--;
+    this.tickEffects();
     this.updateFluids();
     const creative = this.mode === 1;
     if (!creative) this.flying = false;
@@ -7792,10 +7973,15 @@ class Player extends Entity {
       if (this.age - this.lastSpace < 7) { this.flying = !this.flying; this.lastSpace = -100; if (this.flying) this.vy = 0; }
       else this.lastSpace = this.age;
     }
+    // elytra: jump while falling to start gliding
+    const elytra = this.armor[1] && this.armor[1].id === I.ELYTRA && (this.armor[1].dmg || 0) < ITEMS[I.ELYTRA].dur - 1;
+    if (inp.pressed('Space') && elytra && !this.onGround && !this.flying && !this.inWater && !this.gliding && this.vy < 0.1) this.gliding = true;
+    if (this.gliding && (this.onGround || this.inWater || this.inLava || !elytra || this.flying)) this.gliding = false;
     if (inp.pressed('KeyW')) { if (this.age - this.lastW < 7) this.sprintReq = true; this.lastW = this.age; }
     if (inp.enabled && (inp.key('ControlLeft') || inp.key('ControlRight'))) this.sprintReq = true;
-    this.sneaking = sneakKey && !this.flying;
-    const canSprint = fwd > 0 && !this.sneaking && (this.food > 6 || creative) && !this.eat;
+    this.sneaking = sneakKey && !this.flying && !this.gliding;
+    const usingSlow = this.using && this.using.kind !== 'spyglass';
+    const canSprint = fwd > 0 && !this.sneaking && (this.food > 6 || creative) && !usingSlow && !this.effectLevel('blindness');
     if (this.sprintReq && canSprint) this.sprinting = true;
     if (!canSprint || (this.sprinting && fwd <= 0)) { this.sprinting = false; this.sprintReq = false; }
     if (fwd <= 0) this.sprintReq = false;
@@ -7804,14 +7990,18 @@ class Player extends Entity {
     const slipB = w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.5), Math.floor(this.z));
     const slip = (BLK[slipB].slip || 0.6);
     const fric = slip * 0.91;
+    const spd = Math.max(0, 1 + 0.2 * this.effectLevel('speed') - 0.15 * this.effectLevel('slowness'));
     if (this.flying) speed = this.sprinting ? 0.1 : 0.05;
-    else if (this.inWater || this.inLava) speed = 0.02 * (this.sprinting ? 1.4 : 1);
-    else if (this.onGround) speed = 0.1 * (this.sprinting ? 1.3 : 1) * (0.16277136 / (fric * fric * fric));
+    else if (this.inWater || this.inLava) {
+      speed = 0.02 * (this.sprinting ? 1.4 : 1);
+      if (this.inWater) { const ds = Math.min(3, enchLevel(this.armor[3], 'depth_strider')); if (ds) speed += (0.1 * spd - speed) * ds / 3; if (this.effectLevel('dolphins_grace')) speed *= 2.2; }
+    } else if (this.onGround) speed = 0.1 * spd * (this.sprinting ? 1.3 : 1) * (0.16277136 / (fric * fric * fric));
     else speed = this.sprinting ? 0.026 : 0.02;
-    if (this.sneaking) speed *= 0.3;
-    if (this.eat > 0 || this.drawT > 0) speed *= 0.2;
+    if (this.sneaking) speed *= 0.3 + 0.15 * Math.min(3, enchLevel(this.armor[2], 'swift_sneak'));
+    if (usingSlow) speed *= 0.2;
+    if (BLK[slipB].slow && this.onGround && !enchLevel(this.armor[3], 'soul_speed')) speed *= 1;
     let len = Math.hypot(fwd, str);
-    if (len > 0) {
+    if (len > 0 && !this.gliding) {
       fwd /= len; str /= len;
       const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
       // forward = (-sin, -cos), right = (cos, -sin)
@@ -7825,9 +8015,10 @@ class Player extends Entity {
     } else if (this.inWater || this.inLava) {
       this.vy -= 0.02;
       if (jump) this.vy += 0.04;
-    } else {
+    } else if (!this.gliding) {
       if (jump && this.onGround && this.jumpT <= 0) {
-        this.vy = 0.42; this.jumpT = 10;
+        this.vy = 0.42 + 0.1 * this.effectLevel('jump_boost'); this.jumpT = 10;
+        if (BLK[slipB].honey) this.vy *= 0.5;
         if (this.sprinting) { this.vx += -Math.sin(this.yaw) * 0.2; this.vz += -Math.cos(this.yaw) * 0.2; this.exh += 0.2; } else this.exh += 0.05;
       }
     }
@@ -7848,23 +8039,40 @@ class Player extends Entity {
       while (Math.abs(this.vx) > 0.001 && !supported(this.vx, 0)) this.vx = Math.abs(this.vx) < 0.05 ? 0 : this.vx * 0.5;
       while (Math.abs(this.vz) > 0.001 && !supported(0, this.vz)) this.vz = Math.abs(this.vz) < 0.05 ? 0 : this.vz * 0.5;
     }
+    // elytra flight (same model as the real game)
+    if (this.gliding) this.glideStep();
     const ox = this.x, oz = this.z;
-    const prevVy = this.vy;
-    // cobwebs: movement is slowed to a crawl and momentum is lost
+    const prevVy = this.vy, prevH = Math.hypot(this.vx, this.vz);
+    // cobwebs, sweet berry bushes and powder snow slow you down
     const whw = this.w / 2;
-    const inWeb = !this.flying && aabbHitsBlock(w, this.x - whw, this.y, this.z - whw, this.x + whw, this.y + this.h, this.z + whw, id => BLK[id].web === true);
-    if (inWeb) { this.vx *= 0.25; this.vy *= 0.05; this.vz *= 0.25; this.fallDist = 0; }
+    let web = 0;
+    if (!this.flying) aabbHitsBlock(w, this.x - whw, this.y, this.z - whw, this.x + whw, this.y + this.h, this.z + whw, id => { const d = BLK[id]; if (d.web) web = Math.max(web, 3); else if (id === B.SWEET_BERRY_BUSH) web = Math.max(web, 2); else if (d.powderSnow) web = Math.max(web, 1); return false; });
+    if (web === 3) { this.vx *= 0.25; this.vy *= 0.05; this.vz *= 0.25; this.fallDist = 0; }
+    else if (web === 2) { this.vx *= 0.8; this.vy *= 0.75; this.vz *= 0.8; this.fallDist = 0; }
+    else if (web === 1) { this.vx *= 0.9; this.vz *= 0.9; if (this.armor[3] && this.armor[3].id === I.LEATHER_BOOTS) { if (jump) this.vy = 0.15; } else this.vy = Math.max(this.vy, -0.05); this.fallDist = 0; }
     const res = this.physicsStep();
-    if (inWeb) { this.vx = 0; this.vz = 0; this.vy = 0; }
+    if (web === 3) { this.vx = 0; this.vz = 0; this.vy = 0; }
+    if (this.bounce) { this.vy = -prevVy * 0.98; this.bounce = false; this.onGround = false; }
     if ((res.hx || res.hz) && this.sprinting && !this.flying) { this.sprinting = false; this.sprintReq = false; }
+    // flying into a wall with an elytra hurts
+    if (this.gliding && (res.hx || res.hz)) { const loss = prevH - Math.hypot(this.vx, this.vz), d = loss * 10 - 3; if (d > 0) this.hurt(d, 'fly_into_wall'); }
     if (this.flying && this.onGround && !jump) this.flying = false;
     // drag
-    if (this.flying) { this.vx *= 0.91; this.vz *= 0.91; }
+    if (this.gliding) { /* handled in glideStep */ }
+    else if (this.flying) { this.vx *= 0.91; this.vz *= 0.91; }
     else if (this.inWater) { this.vx *= 0.8; this.vz *= 0.8; this.vy *= 0.8; }
     else if (this.inLava) { this.vx *= 0.5; this.vz *= 0.5; this.vy *= 0.5; }
-    else { const f = this.onGround ? fric : 0.91; this.vx *= f; this.vz *= f; this.vy = (this.vy - 0.08) * 0.98; }
-    // soul sand drags at your feet
-    if (this.onGround && !this.flying && BLK[slipB].slow) { this.vx *= BLK[slipB].slow; this.vz *= BLK[slipB].slow; }
+    else {
+      const f = this.onGround ? fric : 0.91; this.vx *= f; this.vz *= f;
+      const sf = this.effectLevel('slow_falling') && this.vy < 0;
+      if (!this.effectLevel('levitation')) this.vy = (this.vy - (sf ? 0.01 : 0.08)) * 0.98;
+      if (sf) this.fallDist = 0;
+    }
+    // soul sand and honey drag at your feet
+    if (this.onGround && !this.flying && BLK[slipB].slow && !enchLevel(this.armor[3], 'soul_speed')) { this.vx *= BLK[slipB].slow; this.vz *= BLK[slipB].slow; }
+    if (this.onGround && BLK[slipB].honey) { this.vx *= 0.4; this.vz *= 0.4; }
+    // sliding down the side of a honey block
+    if (!this.onGround && this.vy < -0.08 && (res.hx || res.hz) && [0, 1, 4, 5].some(f => w.getBlock(Math.floor(this.x + DX[f] * 0.4), Math.floor(this.y + 0.5), Math.floor(this.z + DZ[f] * 0.4)) === B.HONEY_BLOCK)) { this.vy = -0.05; this.fallDist = 0; }
     if ((this.inWater || this.inLava) && res.hx && jump) this.vy = 0.3; // climb out of water
     if (onLadder && (res.hx || res.hz || jump)) { this.vy = 0.2; this.fallDist = 0; }
     const moved = Math.hypot(this.x - ox, this.z - oz);
@@ -7879,8 +8087,9 @@ class Player extends Entity {
     }
     if (this.inWater && !this.wasInWater && prevVy < -0.3) { g.sound('splash', this.x, this.y, this.z); g.particles.splash(this.x, this.y + 0.5, this.z); }
     this.wasInWater = this.inWater;
-    // eye height smoothing
-    const targetEye = this.sneaking ? 1.27 : 1.62;
+    // eye height smoothing (lower while gliding or sneaking)
+    const targetEye = this.gliding ? 0.4 : this.sneaking ? 1.27 : 1.62;
+    this.h = this.gliding ? 0.6 : 1.8;
     this.eyeCur += (targetEye - this.eyeCur) * 0.5;
     // survival mechanics
     if (!creative) this.survivalTick();
@@ -7888,11 +8097,11 @@ class Player extends Entity {
     if (this.y < -64) this.hurt(4, 'void');
     // use / attack
     this.interactTick(inp);
-    // equip animation
-    if (this.sel !== this.lastSel) { this.equip = 1; this.lastSel = this.sel; }
+    // equip animation; switching items restarts the attack cooldown
+    if (this.sel !== this.lastSel) { this.equip = 1; this.lastSel = this.sel; this.lastAttack = this.age; if (this.using && this.using.hand === 'main') this.using = null; }
     if (this.equip > 0) this.equip = Math.max(0, this.equip - 0.25);
     if (this.swingT > 0) { this.swingT--; this.swing = 1 - this.swingT / 6; } else this.swing = 0;
-    // pick up items
+    // pick up items and experience
     for (const e of g.entities) {
       if (!(e instanceof ItemEntity) || e.dead || e.pickupDelay > 0) continue;
       const dx = e.x - this.x, dy = e.y - (this.y + 0.9), dz = e.z - this.z;
@@ -7903,41 +8112,82 @@ class Player extends Entity {
       }
     }
   }
+  glideStep() {
+    const lk = this.look(), pr = -this.pitch;
+    const hl = Math.hypot(lk[0], lk[2]), hv = Math.hypot(this.vx, this.vz), ll = Math.hypot(lk[0], lk[1], lk[2]);
+    let cp = Math.cos(pr); cp = cp * cp * Math.min(1, ll / 0.4);
+    this.vy += 0.08 * (-1 + cp * 0.75);
+    if (this.vy < 0 && hl > 0) { const d = this.vy * -0.1 * cp; this.vx += lk[0] * d / hl; this.vy += d; this.vz += lk[2] * d / hl; }
+    if (pr < 0 && hl > 0) { const d = hv * -Math.sin(pr) * 0.04; this.vx += -lk[0] * d / hl; this.vy += d * 3.2; this.vz += -lk[2] * d / hl; }
+    if (hl > 0) { this.vx += (lk[0] / hl * hv - this.vx) * 0.1; this.vz += (lk[2] / hl * hv - this.vz) * 0.1; }
+    if (this.boost > 0) {
+      this.boost--;
+      this.vx += lk[0] * 0.1 + (lk[0] * 1.5 - this.vx) * 0.5; this.vy += lk[1] * 0.1 + (lk[1] * 1.5 - this.vy) * 0.5; this.vz += lk[2] * 0.1 + (lk[2] * 1.5 - this.vz) * 0.5;
+      if (this.age % 2 === 0) this.game.particles.add({ x: this.x, y: this.y, z: this.z, vx: 0, vy: 0, vz: 0, life: 15, layer: texL('particle_generic_1'), u: 0, v: 0, us: 1, size: 0.08, g: 0, col: [1, 0.85, 0.5], bright: true });
+    }
+    this.vx *= 0.99; this.vy *= 0.98; this.vz *= 0.99;
+    this.fallDist = 0;
+    if (this.age % 20 === 0 && this.mode === 0) { this.armor[1] = this.wear(this.armor[1], 1); if (!this.armor[1]) this.gliding = false; }
+  }
   survivalTick() {
     const g = this.game, w = g.world;
-    // drowning
-    if (this.headInWater) {
-      this.air--;
+    // drowning (respiration delays it, water breathing stops it)
+    if (this.headInWater && !this.effectLevel('water_breathing') && !this.effectLevel('conduit_power')) {
+      const resp = enchLevel(this.armor[0], 'respiration');
+      if (!resp || Math.random() < 1 / (resp + 1)) this.air--;
       if (this.air <= -20) { this.air = 0; this.hurt(2, 'drown'); }
       if (Math.random() < 0.1) g.particles.bubble(this.x + (Math.random() - 0.5) * 0.4, this.y + this.eyeCur, this.z + (Math.random() - 0.5) * 0.4);
     } else this.air = Math.min(300, this.air + 4);
-    if (this.inLava) { this.hurt(4, 'lava'); this.fireTicks = 140; }
-    if (this.onGround && !this.sneaking && BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z))].magma) this.hurt(1, 'magma');
-    if (this.fireTicks > 0) { this.fireTicks--; if (this.inWater) this.fireTicks = 0; else if (this.fireTicks % 20 === 0) { this.hurt(1, 'fire'); this.invuln = 0; } }
-    // cactus
+    if (this.inLava) { this.hurt(4, 'lava'); if (!this.effectLevel('fire_resistance')) this.fireTicks = 140; }
+    if (this.onGround && !this.sneaking && BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z))].magma && !enchLevel(this.armor[3], 'frost_walker')) this.hurt(1, 'magma');
+    if (this.fireTicks > 0) {
+      if (this.effectLevel('fire_resistance')) this.fireTicks = 0;
+      this.fireTicks--; if (this.inWater) this.fireTicks = 0; else if (this.fireTicks % 20 === 0) { this.hurt(1, 'fire'); this.invuln = 0; }
+    }
+    // standing in fire
     const hw = this.w / 2 + 0.01;
-    if (aabbHitsBlock(w, this.x - hw, this.y, this.z - hw, this.x + hw, this.y + this.h, this.z + hw, id => id === B.CACTUS)) this.hurt(1, 'cactus');
+    let inFire = false, berry = false, cactus = false, rose = false, snow = false;
+    aabbHitsBlock(w, this.x - hw, this.y, this.z - hw, this.x + hw, this.y + this.h, this.z + hw, id => { if (BLK[id].fire) inFire = true; else if (id === B.CACTUS) cactus = true; else if (id === B.SWEET_BERRY_BUSH) berry = true; else if (id === B.WITHER_ROSE) rose = true; else if (id === B.POWDER_SNOW) snow = true; return false; });
+    if (inFire && !this.effectLevel('fire_resistance')) { this.hurt(1, 'in_fire'); this.fireTicks = Math.max(this.fireTicks, 160); }
+    if (cactus) this.hurt(1, 'cactus');
+    if (berry && Math.hypot(this.x - this.px, this.z - this.pz) > 0.003) this.hurt(1, 'berry');
+    if (rose) this.addEffect('wither', 40, 0);
+    // powder snow freezes you
+    if (snow && !(this.armor.some(s => s && ITEMS[s.id].armor && ITEMS[s.id].armor.mat === 'leather'))) { this.freeze = Math.min(160, this.freeze + 1); if (this.freeze >= 140 && this.age % 40 === 0) this.hurt(1, 'freeze'); }
+    else this.freeze = Math.max(0, this.freeze - 2);
     // hunger
     if (this.exh >= 4) { this.exh -= 4; if (this.sat > 0) this.sat = Math.max(0, this.sat - 1); else this.food = Math.max(0, this.food - 1); }
-    if (this.food >= 20 && this.sat > 0 && this.health < 20) {
+    if (this.food >= 20 && this.sat > 0 && this.health < this.maxHealth) {
       if (++this.regenT >= 10) { this.regenT = 0; const k = Math.min(this.sat, 6); this.heal(k / 6); this.exh += k; }
-    } else if (this.food >= 18 && this.health < 20) {
+    } else if (this.food >= 18 && this.health < this.maxHealth) {
       if (++this.regenT >= 80) { this.regenT = 0; this.heal(1); this.exh += 6; }
     } else if (this.food <= 0) {
-      if (++this.starveT >= 80) { this.starveT = 0; if (this.health > 1 || g.difficulty >= 3) this.hurt(1, 'starve'); }
+      if (++this.starveT >= 80) { this.starveT = 0; if (this.health > (g.difficulty >= 3 ? 0 : g.difficulty === 2 ? 1 : 10)) this.hurt(1, 'starve'); }
     } else this.regenT = 0;
+  }
+  // ---------- using items: eating, drinking, bows, shields ----------
+  // what holding right click with this stack does (null = a single use action)
+  useKind(st) {
+    const it = st && ITEMS[st.id];
+    if (!it) return null;
+    if (it.food && (this.food < 20 || it.always || this.mode === 1)) return 'eat';
+    if (it.drink || st.id === I.POTION) return 'drink';
+    if (st.id === I.BOW && (this.mode === 1 || enchLevel(st, 'infinity') || this.findArrow() >= 0)) return 'bow';
+    if (st.id === I.CROSSBOW && !(st.tag && st.tag.charged) && (this.mode === 1 || this.findArrow() >= 0)) return 'crossbow';
+    if (st.id === I.TRIDENT) return 'trident';
+    if (st.id === I.SHIELD) return 'shield';
+    if (st.id === I.SPYGLASS) return 'spyglass';
+    return null;
   }
   interactTick(inp) {
     const g = this.game, w = g.world;
     if (this.mineCd > 0) this.mineCd--;
     if (this.useCd > 0) this.useCd--;
-    if (this.attackCd > 0) this.attackCd--;
-    if (!inp.enabled) { this.mining = null; this.mineProgress = 0; this.eat = 0; this.drawT = 0; return; }
-    const hit = g.target;
-    const ent = g.targetEntity;
+    if (!inp.enabled) { this.mining = null; this.mineProgress = 0; if (this.using) this.releaseUse(); return; }
+    const hit = g.target, ent = g.targetEntity;
     // ---- left button: attack / mine ----
-    if (inp.mouse[0]) {
-      if (inp.mousePressed(0)) this.doSwing();
+    if (inp.mouse[0] && !this.using) {
+      if (inp.mousePressed(0)) { this.doSwing(); if (!ent && !hit) this.lastAttack = this.age; }
       if (ent && inp.mousePressed(0)) {
         this.attack(ent);
         this.mining = null;
@@ -7945,7 +8195,9 @@ class Player extends Entity {
         const key = hit.x + ',' + hit.y + ',' + hit.z;
         if (!this.mining || this.mining.key !== key) { this.mining = { key, x: hit.x, y: hit.y, z: hit.z, id: hit.id, ticks: this.breakTicks(hit.id) }; this.mineProgress = 0; }
         const m = this.mining;
-        if (m.ticks === Infinity) { /* unbreakable */ }
+        // swords can't break blocks in creative mode
+        const sword = this.mode === 1 && ITEMS[this.heldId()] && ITEMS[this.heldId()].tool && ITEMS[this.heldId()].tool.type === 'sword';
+        if (m.ticks === Infinity || sword) { /* unbreakable */ }
         else {
           this.mineProgress++;
           if (this.mineProgress % 4 === 1) { g.sound('hit_' + BLK[hit.id].sound, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); g.particles.hitBlock(hit.x, hit.y, hit.z, hit.id, hit.face); }
@@ -7958,64 +8210,200 @@ class Player extends Entity {
         }
       } else if (!hit) { this.mining = null; this.mineProgress = 0; }
     } else { this.mining = null; this.mineProgress = 0; }
-    // ---- right button: use / place / eat ----
-    const held = this.inv[this.sel];
-    const it = held ? ITEMS[held.id] : null;
-    // bows charge while the button is held and fire on release
-    if (held && held.id === I.BOW && !(hit && (BLK[hit.id].use || BLK[hit.id].door) && !this.sneaking)) {
-      if (inp.mouse[2] && (this.mode === 1 || this.findItem(I.ARROW) >= 0)) this.drawT++;
-      else if (this.drawT > 0) { this.shootBow(this.drawT); this.drawT = 0; }
+    // ---- right button: use / place ----
+    if (this.using) {
+      const u = this.using, st = u.hand === 'off' ? this.offhand[0] : this.inv[this.sel];
+      if (!inp.mouse[2] || !st || st.id !== u.id) { this.releaseUse(); return; }
+      u.t++;
+      this.useTick(u, st);
       return;
     }
-    this.drawT = 0;
-    if (inp.mouse[2]) {
-      if (it && it.food && (this.food < 20 || this.mode === 1 && false)) {
-        if (!this.eat) this.eat = 1;
-        this.eat++;
-        if (this.eat % 4 === 0) g.sound('eat', this.x, this.y, this.z);
-        if (this.eat >= 32) {
-          this.food = Math.min(20, this.food + it.food[0]);
-          this.sat = Math.min(this.food, this.sat + it.food[1]);
-          this.consumeHeld(1); this.eat = 0; g.sound('burp', this.x, this.y, this.z); g.ui.refreshHotbar();
-        }
-      } else if (this.useCd === 0) {
-        this.useCd = 4;
-        if (g.useItem(this, hit, ent)) this.doSwing();
+    if (inp.mouse[2] && this.useCd === 0) {
+      // the main hand goes first, then the offhand
+      for (const hand of ['main', 'off']) {
+        const st = hand === 'main' ? this.inv[this.sel] : this.offhand[0];
+        // clicking a usable block wins over eating or blocking
+        const blockUse = hit && !this.sneaking && (BLK[hit.id].use || BLK[hit.id].door || BLK[hit.id].trapdoor || BLK[hit.id].gate || SHAPE[hit.id] === SH.LEVER || SHAPE[hit.id] === SH.BUTTON || SHAPE[hit.id] === SH.DIODE);
+        const kind = blockUse ? null : this.useKind(st);
+        if (kind) { this.using = { kind, hand, id: st.id, t: 0 }; if (kind === 'trident' || kind === 'bow' || kind === 'crossbow' || kind === 'spyglass') this.useCd = 0; break; }
+        let ok;
+        if (hand === 'main') ok = g.useItem(this, hit, ent);
+        else { if (!st && !hit) break; const keep = this.inv[this.sel]; this.inv[this.sel] = st; ok = g.useItem(this, hit, ent); this.offhand[0] = this.inv[this.sel]; this.inv[this.sel] = keep; }
+        if (ok) { this.doSwing(); this.useCd = Math.max(this.useCd, 4); g.ui.refreshHotbar(); break; }
+        if (hand === 'main' && st && ITEMS[st.id].block !== undefined && hit) break;
       }
-    } else { this.eat = 0; if (!inp.mouse[2]) this.useCd = 0; }
+      if (!this.using) this.useCd = Math.max(this.useCd, 4);
+    } else if (!inp.mouse[2]) this.useCd = 0;
+  }
+  useTick(u, st) {
+    const g = this.game, it = ITEMS[st.id];
+    if (u.kind === 'eat' || u.kind === 'drink') {
+      const dur = it.eatTime || 32;
+      if (u.t % 4 === 0 && u.t > 6) { g.sound(u.kind === 'eat' ? 'eat' : 'drink', this.x, this.y + 1.5, this.z); if (u.kind === 'eat') g.particles.hitBlock && this.eatParticles(st); }
+      if (u.t >= dur) { this.finishUse(u, st); this.using = null; this.useCd = 4; }
+    } else if (u.kind === 'crossbow') {
+      const qc = enchLevel(st, 'quick_charge'), need = 25 - 5 * qc;
+      if (u.t === need) {
+        g.sound('click', this.x, this.y, this.z);
+        if (this.mode === 0) { const i = this.findArrow(); if (i >= 0) { const a = this.arrowStack(i); st.tag = Object.assign({}, st.tag || {}, { charged: { id: a.id, tag: a.tag } }); this.useArrow(i, st); } }
+        else st.tag = Object.assign({}, st.tag || {}, { charged: { id: I.ARROW } });
+        g.ui.refreshHotbar();
+      }
+    }
+  }
+  releaseUse() {
+    const u = this.using; this.using = null;
+    if (!u) return;
+    const st = u.hand === 'off' ? this.offhand[0] : this.inv[this.sel];
+    if (!st || st.id !== u.id) return;
+    if (u.kind === 'bow') this.shootBow(u.t, st, u.hand);
+    else if (u.kind === 'trident' && u.t >= 10) this.throwTrident(st, u.hand);
+  }
+  eatParticles(st) {
+    const lk = this.look(), e = this.eye(), layer = itemLayer(st.id);
+    for (let k = 0; k < 3; k++) this.game.particles.add({ x: e[0] + lk[0] * 0.5, y: e[1] - 0.3, z: e[2] + lk[2] * 0.5, vx: (Math.random() - 0.5) * 0.1, vy: Math.random() * 0.1, vz: (Math.random() - 0.5) * 0.1, life: 15, layer, u: Math.random() * 0.75, v: Math.random() * 0.75, us: 0.25, size: 0.06, g: 0.04, col: [1, 1, 1] });
+  }
+  finishUse(u, st) {
+    const g = this.game, it = ITEMS[st.id];
+    const take = () => { if (this.mode === 1) return; st.count--; if (st.count <= 0) { if (u.hand === 'off') this.offhand[0] = null; else this.inv[this.sel] = null; } };
+    const leftover = id => { if (this.mode === 1) return; const r = { id, count: 1 }; if (u.hand === 'off' && !this.offhand[0]) this.offhand[0] = r; else if (u.hand === 'main' && !this.inv[this.sel]) this.inv[this.sel] = r; else g.giveOrDrop(this, r); };
+    if (it.food) {
+      this.food = Math.min(20, this.food + it.food[0]);
+      this.sat = Math.min(this.food, this.sat + it.food[1]);
+      for (const [e, t, a, ch] of it.effects || []) if (ch === undefined || Math.random() < ch) this.addEffect(e, t, a);
+      if (st.id === I.SUSPICIOUS_STEW && st.tag && st.tag.effect) this.addEffect(st.tag.effect[0], st.tag.effect[1], 0);
+      if (it.chorus) this.chorusTeleport();
+      g.sound('burp', this.x, this.y, this.z);
+      take();
+      if (it.bowl) leftover(I.BOWL);
+      if (it.bottle) leftover(I.GLASS_BOTTLE);
+      if (st.id === I.HONEY_BOTTLE) this.removeEffect('poison');
+    } else if (st.id === I.MILK_BUCKET) { this.clearEffects(); take(); leftover(I.BUCKET); }
+    else if (st.id === I.POTION) { g.drinkPotion(this, st); take(); leftover(I.GLASS_BOTTLE); }
+    else if (st.id === I.OMINOUS_BOTTLE) { this.addEffect('bad_omen', 120000, 0); take(); }
+    g.ui.refreshHotbar(); g.ui.refreshBars();
+  }
+  chorusTeleport() {
+    const g = this.game, w = g.world;
+    for (let k = 0; k < 16; k++) {
+      const x = this.x + (Math.random() - 0.5) * 16, z = this.z + (Math.random() - 0.5) * 16;
+      for (let y = Math.floor(this.y) + 8; y > this.y - 8; y--) {
+        if (SOLID[w.getBlock(Math.floor(x), y - 1, Math.floor(z))] && !SOLID[w.getBlock(Math.floor(x), y, Math.floor(z))] && !SOLID[w.getBlock(Math.floor(x), y + 1, Math.floor(z))]) {
+          this.x = x; this.y = y; this.z = z; this.vx = this.vy = this.vz = 0; this.fallDist = 0; this.savePrev();
+          g.sound('teleport', x, y, z); return;
+        }
+      }
+    }
   }
   doSwing() { if (this.swingT <= 2) this.swingT = 6; }
   findItem(id) { for (let i = 0; i < 36; i++) if (this.inv[i] && this.inv[i].id === id) return i; return -1; }
-  shootBow(ticks) {
+  // arrows: offhand first, then the inventory (-2 = offhand)
+  findArrow() {
+    const isA = s => s && (s.id === I.ARROW || s.id === I.SPECTRAL_ARROW || s.id === I.TIPPED_ARROW);
+    if (isA(this.offhand[0])) return -2;
+    for (let i = 0; i < 36; i++) if (isA(this.inv[i])) return i;
+    return -1;
+  }
+  arrowStack(i) { return i === -2 ? this.offhand[0] : this.inv[i]; }
+  useArrow(i, bow) {
+    if (this.mode === 1 || (bow && bow.id === I.BOW && enchLevel(bow, 'infinity') && this.arrowStack(i).id === I.ARROW)) return;
+    const s = this.arrowStack(i);
+    if (--s.count <= 0) { if (i === -2) this.offhand[0] = null; else this.inv[i] = null; }
+  }
+  shootBow(ticks, bow, hand) {
     const g = this.game, t = ticks / 20;
     let f = (t * t + t * 2) / 3;
     if (f < 0.1) return;
     if (f > 1) f = 1;
+    const i = this.findArrow(), a = i >= 0 || i === -2 ? this.arrowStack(i) : { id: I.ARROW };
     const e = this.eye(), d = this.look(), v = f * 3;
     const pr = g.spawnProjectile('arrow', e[0], e[1] - 0.1, e[2], d[0] * v, d[1] * v, d[2] * v, this);
-    pr.crit = f >= 1; pr.pickup = this.mode === 0;
+    pr.crit = f >= 1; pr.pickup = this.mode === 0 && !(enchLevel(bow, 'infinity') && a.id === I.ARROW);
+    pr.power = enchLevel(bow, 'power'); pr.punch = enchLevel(bow, 'punch'); pr.flame = enchLevel(bow, 'flame') > 0;
+    pr.arrowStack = { id: a.id, count: 1, tag: a.tag };
     g.sound('bow', this.x, this.y + 1.5, this.z);
-    if (this.mode === 0) {
-      const i = this.findItem(I.ARROW);
-      if (i >= 0 && --this.inv[i].count <= 0) this.inv[i] = null;
-      this.damageHeld(1);
-    }
+    if (this.mode === 0) { if (i !== -1) this.useArrow(i, bow); this.damageHand(hand, 1); }
     g.ui.refreshHotbar();
   }
+  shootCrossbow(st, hand) {
+    const g = this.game, ch = st.tag.charged, e = this.eye(), d = this.look();
+    const shots = enchLevel(st, 'multishot') ? [0, -0.17, 0.17] : [0];
+    for (const off of shots) {
+      const c = Math.cos(off), s = Math.sin(off), dx = d[0] * c - d[2] * s, dz = d[0] * s + d[2] * c;
+      if (ch.id === I.FIREWORK_ROCKET) { const pr = g.spawnProjectile('fire', e[0], e[1] - 0.1, e[2], dx * 1.6, d[1] * 1.6, dz * 1.6, this); pr.firework = true; continue; }
+      const pr = g.spawnProjectile('arrow', e[0], e[1] - 0.1, e[2], dx * 3.15, d[1] * 3.15, dz * 3.15, this);
+      pr.crit = true; pr.pickup = this.mode === 0 && off === 0; pr.pierce = enchLevel(st, 'piercing'); pr.arrowStack = { id: ch.id, count: 1, tag: ch.tag };
+    }
+    delete st.tag.charged; if (!Object.keys(st.tag).length) delete st.tag;
+    g.sound('bow', this.x, this.y + 1.5, this.z);
+    this.damageHand(hand, shots.length === 3 ? 3 : 1);
+    g.ui.refreshHotbar();
+  }
+  throwTrident(st, hand) {
+    const g = this.game, e = this.eye(), d = this.look();
+    const rip = enchLevel(st, 'riptide');
+    if (rip) {
+      if (!this.inWater && !g.world.raining) return;
+      const k = 3 * (1 + rip) / 4;
+      this.vx += d[0] * k; this.vy += d[1] * k; this.vz += d[2] * k; this.fallDist = 0;
+      this.damageHand(hand, 1); g.sound('throw', this.x, this.y, this.z);
+      return;
+    }
+    const pr = g.spawnProjectile('trident', e[0], e[1] - 0.1, e[2], d[0] * 2.5, d[1] * 2.5, d[2] * 2.5, this);
+    pr.stack = copyStack(st, 1); pr.loyalty = enchLevel(st, 'loyalty'); pr.impaling = enchLevel(st, 'impaling'); pr.channeling = enchLevel(st, 'channeling') > 0;
+    if (this.mode === 0) { pr.stack = this.wear(pr.stack, 1) || pr.stack; if (hand === 'off') this.offhand[0] = null; else this.inv[this.sel] = null; }
+    pr.pickup = this.mode === 0;
+    g.sound('throw', this.x, this.y + 1.5, this.z);
+    g.ui.refreshHotbar();
+  }
+  damageHand(hand, n) { if (hand === 'off') { if (this.offhand[0]) this.offhand[0] = this.wear(this.offhand[0], n); } else this.damageHeld(n); }
+  // ---------- melee (attack cooldown, crits, sweeps) ----------
   attack(ent) {
-    const g = this.game;
-    const it = ITEMS[this.heldId()];
-    let dmg = it && it.dmg ? it.dmg : 1;
-    const crit = !this.onGround && this.vy < 0 && !this.inWater;
-    if (crit) { dmg *= 1.5; g.particles.crit(ent.x, ent.y + ent.h * 0.7, ent.z); }
+    const g = this.game, held = this.inv[this.sel], it = held ? ITEMS[held.id] : null;
+    // a loaded crossbow fires on left click too? no: left click always attacks
+    const k = this.attackStrength(0.5);
+    this.lastAttack = this.age;
+    let base = (it && it.dmg ? it.dmg : 1) + 3 * this.effectLevel('strength') - 4 * this.effectLevel('weakness');
+    let bonus = 0;
+    const sharp = enchLevel(held, 'sharpness');
+    if (sharp) bonus += 0.5 * sharp + 0.5;
+    if (ent.type && isUndeadType(ent.type)) bonus += 2.5 * enchLevel(held, 'smite');
+    if (ent.type && isArthropodType(ent.type)) { const b = enchLevel(held, 'bane_of_arthropods'); bonus += 2.5 * b; if (b) ent.addEffect && ent.addEffect('slowness', 20 + Math.floor(Math.random() * 10 * b), 3); }
+    let dmg = Math.max(0, base) * (0.2 + k * k * 0.8) + bonus * k;
+    const crit = k > 0.9 && this.fallDist > 0 && !this.onGround && !this.inWater && !this.effectLevel('blindness') && !this.sprinting;
+    if (crit) { dmg *= 1.5; g.particles.crit(ent.x, ent.y + ent.h * 0.7, ent.z); g.sound('crit', ent.x, ent.y, ent.z); }
+    // the mace hits harder the further you fell
+    if (held && held.id === I.MACE && this.fallDist > 1.5) {
+      const f = this.fallDist;
+      let extra = 4 * Math.min(3, f) + 2 * Math.max(0, Math.min(5, f - 3)) + Math.max(0, f - 8);
+      extra += (enchLevel(held, 'density') * 0.5) * f;
+      dmg += extra; this.fallDist = 0; this.vy = Math.max(this.vy, enchLevel(held, 'wind_burst') ? 0.6 + 0.35 * enchLevel(held, 'wind_burst') : 0.01);
+      g.sound('anvil', ent.x, ent.y, ent.z); g.particles.explosion && g.particles.poof(ent.x, ent.y, ent.z, [0.6, 0.6, 0.6], 12);
+    }
+    const knock = (this.sprinting && k > 0.9 ? 1 : 0) + enchLevel(held, 'knockback');
     if (ent.hurt(dmg, 'player', this)) {
-      ent.killedByPlayer = true;
-      if (this.sprinting) { ent.vx += -Math.sin(this.yaw) * 0.5; ent.vz += -Math.cos(this.yaw) * 0.5; this.sprinting = false; }
+      ent.killedByPlayer = true; ent.lootingLevel = enchLevel(held, 'looting');
+      if (knock) { ent.vx += -Math.sin(this.yaw) * 0.5 * knock; ent.vz += -Math.cos(this.yaw) * 0.5 * knock; ent.vy = Math.max(ent.vy, 0.1); if (this.sprinting) { this.sprinting = false; this.vx *= 0.6; this.vz *= 0.6; } }
+      const fa = enchLevel(held, 'fire_aspect');
+      if (fa && !(ent.T && ent.T.fireproof)) ent.fireTicks = 80 * fa;
+      // sweeping edge: a full strength sword hit standing still hits everything around
+      if (it && it.tool && it.tool.type === 'sword' && k > 0.9 && this.onGround && !this.sprinting && !crit && Math.hypot(this.x - this.px, this.z - this.pz) < 0.1) {
+        const sw = enchLevel(held, 'sweeping_edge'), sdmg = 1 + dmg * (sw ? sw / (sw + 1) : 0);
+        for (const m of g.entities) {
+          if (m === ent || !(m instanceof Mob) || m.dead || m.deathTime > 0 || (m.T && m.T.passive && m.type !== ent.type && false)) continue;
+          if (Math.hypot(m.x - ent.x, m.z - ent.z) < 1.2 && Math.abs(m.y - ent.y) < 0.6 && Math.hypot(m.x - this.x, m.z - this.z) < 3.5) { m.hurt(sdmg, 'player', this); m.vx += -Math.sin(this.yaw) * 0.2; m.vz += -Math.cos(this.yaw) * 0.2; }
+        }
+        g.sound('sweep', ent.x, ent.y + 1, ent.z);
+        g.particles.sweep && g.particles.sweep(this.x + this.look()[0] * 1.5, this.y + 1.1, this.z + this.look()[2] * 1.5, this.yaw);
+      }
       this.exh += 0.1;
       if (it && it.tool) this.damageHeld(it.tool.type === 'sword' ? 1 : 2);
+      else if (held && held.id === I.MACE) this.damageHeld(1);
     }
   }
 }
+// experience needed to go from one level to the next
+function xpNeeded(l) { return l < 16 ? 2 * l + 7 : l < 31 ? 5 * l - 38 : 9 * l - 158; }
 
 /* @file 70_ui.js */
 /* ===================================================================
@@ -8050,15 +8438,44 @@ function makeHudIcons() {
   const heart = ['.oo...oo.', 'ohho.ohho', 'ohhhohhho', 'ohhhhhhho', '.ohhhhho.', '..ohhho..', '...oho...', '....o....', '.........'];
   const half = heart.map(r => r.split('').map((ch, x) => (ch === 'h' && x > 4) ? 'e' : ch).join(''));
   const emp = heart.map(r => r.replace(/h/g, 'e'));
-  const hp = { o: '#1a0000', h: '#e01818', e: '#3a1010' };
-  HUD_ICONS.heart = pixelIcon(heart.map((r, y) => y === 1 ? r.replace(/^(\.oh)h/, '$1w') : r), Object.assign({ w: '#ffb0b0' }, hp));
-  HUD_ICONS.half = pixelIcon(half, hp); HUD_ICONS.empty = pixelIcon(emp, hp);
+  const shine = rows => rows.map((r, y) => y === 1 ? r.replace(/^(\.oh)h/, '$1w') : r);
+  const hearts = (name, h, w, o) => {
+    const pal = { o: o || '#1a0000', h, e: '#3a1010', w };
+    HUD_ICONS[name] = pixelIcon(shine(heart), pal); HUD_ICONS[name + 'Half'] = pixelIcon(half, pal);
+  };
+  hearts('heart', '#e01818', '#ffb0b0'); hearts('poison', '#8db030', '#d8f080'); hearts('wither', '#2c2c2c', '#7a7a7a', '#000'); hearts('absorb', '#e8c218', '#fff4a0', '#3a2a00');
+  HUD_ICONS.half = HUD_ICONS.heartHalf;
+  HUD_ICONS.empty = pixelIcon(emp, { o: '#1a0000', e: '#3a1010' });
   const food = ['....ooo..', '...ommmo.', '..ommmmmo', '..ommmmmo', '..ommmmo.', '.obooo...', 'obo......', '.o.......', '.........'];
-  const fp = { o: '#2a1400', m: '#b8642a', b: '#f0e6d0', e: '#3a2a20' };
+  const fp = { o: '#2a1400', m: '#b8642a', b: '#f0e6d0', e: '#3a2a20' }, hg = { o: '#152a00', m: '#6a8a2a', b: '#c8d8a0', e: '#2a3a20' };
   HUD_ICONS.food = pixelIcon(food, fp);
   HUD_ICONS.foodHalf = pixelIcon(food.map(r => r.split('').map((ch, x) => ch === 'm' && x < 5 ? 'e' : ch).join('')), fp);
   HUD_ICONS.foodEmpty = pixelIcon(food.map(r => r.replace(/[mb]/g, 'e')), fp);
+  HUD_ICONS.foodHunger = pixelIcon(food, hg);
+  HUD_ICONS.foodHungerHalf = pixelIcon(food.map(r => r.split('').map((ch, x) => ch === 'm' && x < 5 ? 'e' : ch).join('')), hg);
   HUD_ICONS.bubble = pixelIcon(['..ooo....', '.owwbo...', 'owbbbbo..', 'obbbbbo..', 'obbbbbo..', '.obbbo...', '..ooo....', '.........', '.........'], { o: '#203a80', w: '#ffffff', b: '#6aa0ff' });
+  // armor points: chestplate icons
+  const arm = ['.oo...oo.', 'ossoooaso', 'osssssaso', '.osssaso.', '.osssaso.', '.osssaso.', '.oooooo..', '.........', '.........'];
+  const ap = { o: '#262626', s: '#d4d4d4', a: '#9a9a9a', e: '#3a3a3a' };
+  HUD_ICONS.armor = pixelIcon(arm, ap);
+  HUD_ICONS.armorHalf = pixelIcon(arm.map(r => r.split('').map((ch, x) => (ch === 's' || ch === 'a') && x > 4 ? 'e' : ch).join('')), ap);
+  HUD_ICONS.armorEmpty = pixelIcon(arm.map(r => r.replace(/[sa]/g, 'e')), ap);
+}
+// a round effect badge in the effect's colour
+const EFFECT_ICONS = {};
+function effectIcon(k) {
+  if (EFFECT_ICONS[k]) return EFFECT_ICONS[k];
+  const c = document.createElement('canvas'); c.width = c.height = 18;
+  const g = c.getContext('2d'), col = rgbOf(EFFECTS[k][1]);
+  for (let y = 0; y < 18; y++) for (let x = 0; x < 18; x++) {
+    const d = Math.hypot(x - 8.5, y - 8.5);
+    if (d > 7.6) continue;
+    const edge = d > 6.4, lit = x + y < 13 && d < 5;
+    const f = edge ? 0.45 : lit ? 1.25 : 1;
+    g.fillStyle = `rgb(${Math.min(255, col[0] * f)},${Math.min(255, col[1] * f)},${Math.min(255, col[2] * f)})`; g.fillRect(x, y, 1, 1);
+  }
+  g.fillStyle = '#fff'; g.font = 'bold 9px monospace'; g.textAlign = 'center'; g.fillText(EFFECTS[k][0][0], 9, 12);
+  return EFFECT_ICONS[k] = c.toDataURL();
 }
 
 /* ---------------- UI manager ---------------- */
@@ -8089,23 +8506,54 @@ class UI {
     $('bars').style.visibility = surv ? 'visible' : 'hidden';
     $('xpbar').style.visibility = surv ? 'visible' : 'hidden';
     if (!surv) return;
-    const key = Math.ceil(p.health) + '|' + p.food + '|' + Math.ceil(p.air / 30) + '|' + (p.hurtTime > 0) + '|' + p.xpLevel + '|' + p.xp;
+    const poison = p.effectLevel('poison'), wither = p.effectLevel('wither'), hunger = p.effectLevel('hunger');
+    const key = Math.ceil(p.health) + '|' + p.maxHealth + '|' + Math.ceil(p.absorb) + '|' + p.food + '|' + Math.ceil(p.air / 30) + '|' + p.xpLevel + '|' + p.xp + '|' + p.armorPoints() + '|' + poison + wither + hunger;
     if (key === this._bk) return;
     this._bk = key;
-    const hp = Math.ceil(p.health);
+    const hp = Math.ceil(p.health), kind = wither ? 'wither' : poison ? 'poison' : 'heart';
     let h = '';
-    for (let i = 0; i < 10; i++) h += `<div class="icon18" style="background-image:url(${hp >= i * 2 + 2 ? HUD_ICONS.heart : hp === i * 2 + 1 ? HUD_ICONS.half : HUD_ICONS.empty})"></div>`;
+    for (let i = 0; i < Math.ceil(p.maxHealth / 2); i++) h += `<div class="icon18" style="background-image:url(${hp >= i * 2 + 2 ? HUD_ICONS[kind] : hp === i * 2 + 1 ? HUD_ICONS[kind + 'Half'] : HUD_ICONS.empty})"></div>`;
+    const ab = Math.ceil(p.absorb);
+    for (let i = 0; i < Math.ceil(ab / 2); i++) h += `<div class="icon18" style="background-image:url(${ab >= i * 2 + 2 ? HUD_ICONS.absorb : HUD_ICONS.absorbHalf})"></div>`;
     $('hearts').innerHTML = h;
     $('hearts').classList.toggle('shake', p.health <= 4);
     let f = '';
-    for (let i = 0; i < 10; i++) f += `<div class="icon18" style="background-image:url(${p.food >= i * 2 + 2 ? HUD_ICONS.food : p.food === i * 2 + 1 ? HUD_ICONS.foodHalf : HUD_ICONS.foodEmpty})"></div>`;
+    const fi = hunger ? 'foodHunger' : 'food';
+    for (let i = 0; i < 10; i++) f += `<div class="icon18" style="background-image:url(${p.food >= i * 2 + 2 ? HUD_ICONS[fi] : p.food === i * 2 + 1 ? HUD_ICONS[fi + 'Half'] || HUD_ICONS.foodHalf : HUD_ICONS.foodEmpty})"></div>`;
     $('food').innerHTML = f;
     let b = '';
     if (p.air < 300) { const n = Math.ceil(Math.max(0, p.air) / 30); for (let i = 0; i < 10; i++) b += `<div class="icon18" style="background-image:url(${i < n ? HUD_ICONS.bubble : ''})"></div>`; }
     $('bubbles').innerHTML = b;
-    const need = p.xpLevel < 16 ? 2 * p.xpLevel + 7 : 5 * p.xpLevel - 38;
-    $('xpfill').style.width = (p.xp / need * 100) + '%';
+    const ar = p.armorPoints();
+    let a = '';
+    if (ar > 0) for (let i = 0; i < 10; i++) a += `<div class="icon18" style="background-image:url(${ar >= i * 2 + 2 ? HUD_ICONS.armor : ar === i * 2 + 1 ? HUD_ICONS.armorHalf : HUD_ICONS.armorEmpty})"></div>`;
+    $('armorbar').innerHTML = a;
+    $('armorbar').style.bottom = (20 + (Math.ceil((Math.ceil(p.maxHealth / 2) + Math.ceil(ab / 2)) / 10) - 1) * 18) + 'px';
+    $('xpfill').style.width = (p.xp / xpNeeded(p.xpLevel) * 100) + '%';
     $('xplevel').textContent = p.xpLevel > 0 ? p.xpLevel : '';
+  }
+  // status effect badges in the top right corner
+  refreshEffects() {
+    const p = this.game.player, box = $('effects');
+    if (!p || !box) return;
+    const list = p.effects ? [...p.effects.entries()] : [];
+    const key = list.map(([k, e]) => k + e.amp + (e.ticks < 200 ? Math.floor(e.ticks / 10) % 2 : 2)).join(',');
+    if (key === this._ek) return;
+    this._ek = key;
+    box.innerHTML = list.sort((a, b) => (EFFECTS[a[0]][2] ? 1 : 0) - (EFFECTS[b[0]][2] ? 1 : 0)).map(([k, e]) =>
+      `<div class="eff${EFFECTS[k][2] ? ' bad' : ''}" title="${escapeHTML(effectLabel(k, e.amp, e.ticks))}" style="opacity:${e.ticks < 200 && Math.floor(e.ticks / 10) % 2 ? 0.4 : 1}"><img src="${effectIcon(k)}"></div>`).join('');
+  }
+  // the attack strength indicator under the crosshair
+  updateCooldown() {
+    const p = this.game.player, c = $('cooldown');
+    if (!p || p.dead || this.hudHidden) { c.style.display = 'none'; return; }
+    const k = p.attackStrength(0);
+    c.style.display = k < 1 && p.mode === 0 ? 'block' : 'none';
+    if (k < 1) c.firstChild.style.width = Math.round(k * 16) * 2 + 'px';
+  }
+  totemFlash() {
+    const d = el('div', 'totem'); d.innerHTML = `<img src="${iconFor(I.TOTEM_OF_UNDYING)}">`;
+    document.body.appendChild(d); setTimeout(() => d.remove(), 1600);
   }
   chat(msg, color) {
     const d = el('div'); d.textContent = msg; if (color) d.style.color = color;
@@ -8916,7 +9364,7 @@ const SCREENS = {
   grindstone: {
     size: [176, 166], title: 'Repair & Disenchant', pack: 'grindstone', labels: [['Inventory', 8, 72]],
     slots: [['local', 0, 49, 19], ['local', 1, 49, 40], ['out', 0, 129, 34], ...INV_ROWS(84)], local: 2,
-    deco(g) { guiArrow(g, 92, 34); g.fillStyle = '#6b6b6b'; g.fillRect(43, 9, 30, 6); },
+    deco(g) { guiArrow(g, 92, 34); g.fillStyle = GUIC.slot; g.fillRect(48, 36, 18, 3); g.fillRect(36, 27, 13, 2); g.fillRect(36, 27, 2, 21); g.fillRect(36, 46, 13, 2); },
   },
   stonecutter: {
     size: [176, 166], title: 'Stonecutter', pack: 'stonecutter', labels: [['Inventory', 8, 72]],
@@ -8926,7 +9374,7 @@ const SCREENS = {
   smithing: {
     size: [176, 166], title: 'Upgrade Gear', titleX: 44, pack: 'smithing', labels: [['Inventory', 8, 72]],
     slots: [['local', 0, 8, 48], ['local', 1, 26, 48], ['local', 2, 44, 48], ['out', 0, 98, 48], ...INV_ROWS(84)], local: 3,
-    deco(g) { guiArrow(g, 66, 49); guiInset(g, 140, 20, 30, 50, '#000'); },
+    deco(g) { guiArrow(g, 66, 49); },
   },
   loom: {
     size: [176, 166], title: 'Loom', pack: 'loom', labels: [['Inventory', 8, 72]],
@@ -9663,6 +10111,7 @@ SCREEN_LOGIC.stonecutter = {
   take(ui) { const s = ui.inv.local[0]; s.count--; if (s.count <= 0) { ui.inv.local[0] = null; ui.inv.pick = -1; } },
   changed(ui, c) { if (c === 'local') { if (!ui.inv.local[0]) ui.inv.pick = -1; this.refreshList(ui); } },
   open(ui) { ui.inv.pick = -1; this.refreshList(ui); },
+  update(ui) { const k = ui.inv.local[0] ? ui.inv.local[0].id : 0; if (ui._sck !== k || ui._sc && !ui._sc.parentNode) { ui._sck = k; if (!k) ui.inv.pick = -1; this.refreshList(ui); } },
   extra(ui, win) { const box = el('div', 'sclist'); box.style.cssText = `position:absolute;left:${52 * GS}px;top:${15 * GS}px;width:${64 * GS}px;height:${54 * GS}px;overflow-y:auto`; win.appendChild(box); ui._sc = box; },
   refreshList(ui) {
     const box = ui._sc; if (!box) return;
@@ -10366,11 +10815,132 @@ class Audio {
       case 'portal_ignite': this.noiseHit(dst, 'bandpass', 700, 1, 0.8, 0.4); this.tone(dst, 'sine', 200, 600, 0.8, 0.2); break;
       case 'travel': [196, 247, 294, 392].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.5, 1.6, 0.1, now + i * 0.05)); this.noiseHit(dst, 'bandpass', 900, 0.8, 1.5, 0.2); break;
       case 'eye_place': this.tone(dst, 'sine', 880, 1320, 0.25, 0.2); this.tone(dst, 'triangle', 1320, 1320, 0.4, 0.08, now + 0.08); break;
+      case 'drink': this.noiseHit(dst, 'lowpass', 500, 2, 0.12, 0.35); this.tone(dst, 'sine', 240, 180, 0.1, 0.1); break;
+      case 'shield_block': this.noiseHit(dst, 'bandpass', 600, 1.5, 0.15, 0.6); this.tone(dst, 'triangle', 150, 90, 0.15, 0.3); break;
+      case 'shield_break': this.noiseHit(dst, 'bandpass', 900, 1, 0.4, 0.6); this.tone(dst, 'square', 300, 80, 0.3, 0.15); break;
+      case 'totem': [392, 523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(dst, 'triangle', f, f * 1.01, 0.9, 0.12, now + i * 0.06)); this.noiseHit(dst, 'highpass', 3000, 0.7, 1.2, 0.12); break;
+      case 'crit': this.noiseHit(dst, 'bandpass', 1500, 2, 0.12, 0.35); this.tone(dst, 'square', 1000, 500, 0.06, 0.08); break;
+      case 'sweep': this.noiseHit(dst, 'highpass', 1800, 0.5, 0.28, 0.35); break;
+      case 'strong': this.noiseHit(dst, 'lowpass', 900, 1, 0.14, 0.4); break;
+      case 'weak': this.noiseHit(dst, 'lowpass', 1300, 1, 0.08, 0.15); break;
+      case 'knockback': this.noiseHit(dst, 'lowpass', 600, 1, 0.2, 0.45); break;
+      case 'brew': for (let i = 0; i < 4; i++) this.tone(dst, 'sine', 300 + Math.random() * 400, 900, 0.07, 0.1, now + i * 0.09); break;
+      case 'anvil': this.tone(dst, 'square', 1250, 1240, 0.35, 0.08); this.tone(dst, 'triangle', 2500, 2480, 0.4, 0.06); this.noiseHit(dst, 'bandpass', 2600, 6, 0.2, 0.3); break;
+      case 'anvil_land': this.tone(dst, 'square', 900, 880, 0.5, 0.1); this.noiseHit(dst, 'lowpass', 700, 1, 0.3, 0.5); break;
+      case 'anvil_break': this.noiseHit(dst, 'bandpass', 1200, 1, 0.5, 0.5); this.tone(dst, 'square', 700, 200, 0.4, 0.12); break;
+      case 'enchant': [880, 1175, 1397, 1760].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.5, 0.35, 0.07, now + i * 0.05)); break;
+      case 'grindstone': for (let i = 0; i < 4; i++) this.noiseHit(dst, 'bandpass', 2200, 3, 0.09, 0.22, now + i * 0.07); break;
+      case 'smithing': this.tone(dst, 'square', 1400, 1380, 0.25, 0.08); this.noiseHit(dst, 'bandpass', 3000, 5, 0.15, 0.25); break;
+      case 'cartography': this.noiseHit(dst, 'highpass', 2600, 1, 0.25, 0.2); break;
+      case 'loom': this.noiseHit(dst, 'bandpass', 1000, 2, 0.12, 0.25); this.noiseHit(dst, 'bandpass', 1000, 2, 0.12, 0.25, now + 0.15); break;
+      case 'stonecutter': this.noiseHit(dst, 'bandpass', 3500, 4, 0.25, 0.3); break;
+      case 'fireworks': this.noiseHit(dst, 'highpass', 2000, 0.7, 0.5, 0.3); break;
+      case 'blast': this.noiseHit(dst, 'lowpass', 800, 0.7, 0.9, 0.7); for (let i = 0; i < 8; i++) this.noiseHit(dst, 'highpass', 3000, 1, 0.05, 0.12, now + 0.4 + Math.random() * 0.6); break;
+      case 'bell': for (const [m, a] of [[1, 0.3], [2.76, 0.12], [5.4, 0.06]]) this.tone(dst, 'sine', 700 * m, 700 * m, 2.5, a); break;
+      case 'chain': this.noiseHit(dst, 'bandpass', 3800, 6, 0.12, 0.2); break;
+      case 'amethyst': [1568, 2093, 2637].forEach((f, i) => this.tone(dst, 'sine', f, f, 0.9, 0.05, now + i * 0.02)); break;
+      case 'sculk': this.noiseHit(dst, 'lowpass', 400, 3, 0.25, 0.35); this.tone(dst, 'sine', 90, 60, 0.3, 0.15); break;
+      case 'sculk_click': this.tone(dst, 'square', 300, 200, 0.05, 0.12); this.noiseHit(dst, 'lowpass', 600, 4, 0.15, 0.2); break;
+      case 'shriek': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 1400; f2.Q.value = 2; f2.connect(dst); this.tone(f2, 'sawtooth', 700, 1500, 1.6, 0.4); this.tone(f2, 'sawtooth', 730, 1450, 1.6, 0.3); break; }
+      case 'heartbeat': this.tone(dst, 'sine', 60, 40, 0.12, 0.6); this.tone(dst, 'sine', 55, 38, 0.12, 0.45, now + 0.22); break;
+      case 'warden': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 300; f2.connect(dst); this.tone(f2, 'sawtooth', 55, 40, 1.3, 0.7); this.noiseHit(dst, 'lowpass', 200, 1, 1.0, 0.4); break; }
+      case 'warden_roar': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 600; f2.connect(dst); this.tone(f2, 'sawtooth', 90, 45, 2.6, 0.9); this.tone(f2, 'square', 60, 35, 2.6, 0.4); this.noiseHit(dst, 'lowpass', 500, 0.7, 2.4, 0.6); break; }
+      case 'warden_sniff': for (let i = 0; i < 3; i++) this.noiseHit(dst, 'bandpass', 900, 3, 0.1, 0.35, now + i * 0.15); break;
+      case 'sonic_charge': this.tone(dst, 'sine', 120, 900, 1.6, 0.4); this.noiseHit(dst, 'bandpass', 700, 2, 1.6, 0.25); break;
+      case 'sonic_boom': this.noiseHit(dst, 'lowpass', 1500, 0.5, 1.1, 1.0); this.tone(dst, 'sawtooth', 200, 40, 0.9, 0.7); this.tone(dst, 'sine', 1200, 300, 0.6, 0.3); break;
+      case 'villager': { const f0 = 300 + Math.random() * 80; this.tone(dst, 'sawtooth', f0, f0 * 0.75, 0.22, 0.15); this.tone(dst, 'sawtooth', f0 * 0.9, f0 * 1.05, 0.2, 0.12, now + 0.2); break; }
+      case 'villager_yes': this.tone(dst, 'sawtooth', 330, 420, 0.25, 0.15); break;
+      case 'villager_no': this.tone(dst, 'sawtooth', 330, 220, 0.3, 0.15); break;
+      case 'villager_trade': this.tone(dst, 'sawtooth', 300, 360, 0.15, 0.12); this.tone(dst, 'sawtooth', 360, 300, 0.15, 0.12, now + 0.15); break;
+      case 'golem': this.tone(dst, 'square', 90, 70, 0.3, 0.2); this.noiseHit(dst, 'lowpass', 400, 1, 0.3, 0.3); break;
+      case 'golem_hit': this.tone(dst, 'square', 140, 80, 0.2, 0.25); this.noiseHit(dst, 'bandpass', 2400, 4, 0.15, 0.25); break;
+      case 'rattle': for (let i = 0; i < 4; i++) this.noiseHit(dst, 'bandpass', 2200, 4, 0.04, 0.2, now + i * 0.05); break;
+      case 'creeper': this.noiseHit(dst, 'highpass', 2000, 0.8, 1.4, 0.35); break;
+      case 'slime': this.noiseHit(dst, 'lowpass', 500, 2, 0.15, 0.35); this.tone(dst, 'sine', 200, 120, 0.12, 0.15); break;
+      case 'bat': this.tone(dst, 'square', 3500, 3000, 0.04, 0.05); break;
+      case 'wolf': this.tone(dst, 'sawtooth', 600, 400, 0.12, 0.15); this.tone(dst, 'sawtooth', 620, 420, 0.12, 0.13, now + 0.18); break;
+      case 'cat': this.tone(dst, 'sawtooth', 700, 1000, 0.15, 0.12); this.tone(dst, 'sawtooth', 1000, 650, 0.25, 0.12, now + 0.15); break;
+      case 'frog': this.tone(dst, 'square', 140, 180, 0.12, 0.15); break;
+      case 'bee': this.tone(dst, 'sawtooth', 220, 230, 0.6, 0.04); break;
+      case 'horse': for (let i = 0; i < 4; i++) this.tone(dst, 'sawtooth', 700 - i * 60, 500 - i * 60, 0.09, 0.1, now + i * 0.08); break;
+      case 'ghast': { const f2 = this.ctx.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 900; f2.connect(dst); this.tone(f2, 'sawtooth', 600, 300, 1.0, 0.25); break; }
+      case 'piglin': this.tone(dst, 'sawtooth', 240, 170, 0.25, 0.2); this.noiseHit(dst, 'lowpass', 700, 2, 0.2, 0.2); break;
+      case 'breeze': this.noiseHit(dst, 'bandpass', 1500, 1, 0.6, 0.3); this.tone(dst, 'sine', 800, 1400, 0.4, 0.08); break;
+      case 'wind': this.noiseHit(dst, 'bandpass', 700, 0.6, 0.6, 0.5); break;
+      case 'vault': [523, 784, 1047].forEach((f, i) => this.tone(dst, 'triangle', f, f, 0.5, 0.1, now + i * 0.1)); break;
+      case 'spawner': this.noiseHit(dst, 'bandpass', 1200, 2, 0.3, 0.25); this.tone(dst, 'sine', 400, 900, 0.4, 0.1); break;
       case 'end_portal_open': [262, 330, 392, 523, 659].forEach((f, i) => this.tone(dst, 'triangle', f, f, 3.5, 0.12, now + i * 0.12)); this.tone(dst, 'sine', 65, 60, 3.5, 0.4); break;
     }
   }
+  // note blocks: 25 semitones from F#3, the instrument comes from the block below
+  note(inst, n, x, y, z) {
+    if (!this.ctx) return;
+    const dst = this.out(x, y, z, 1); if (!dst) return;
+    const oct = { bass: -2, didgeridoo: -2, guitar: -1, flute: 1, bell: 2, chime: 2, xylophone: 2 }[inst] || 0;
+    const f = 185 * Math.pow(2, n / 12 + oct), t = this.ctx.currentTime;
+    switch (inst) {
+      case 'basedrum': this.tone(dst, 'sine', 120 * Math.pow(2, n / 24), 40, 0.25, 0.6); break;
+      case 'snare': this.noiseHit(dst, 'bandpass', 1500 * Math.pow(2, n / 24), 0.8, 0.15, 0.45); break;
+      case 'hat': this.noiseHit(dst, 'highpass', 6000 * Math.pow(2, n / 48), 1, 0.06, 0.3); break;
+      case 'bit': this.tone(dst, 'square', f, f, 0.3, 0.1); break;
+      case 'didgeridoo': this.tone(dst, 'sawtooth', f, f, 0.8, 0.2); break;
+      case 'banjo': case 'guitar': this.tone(dst, 'sawtooth', f, f * 0.995, 0.5, 0.15); this.tone(dst, 'triangle', f * 2, f * 2, 0.3, 0.08); break;
+      case 'flute': this.tone(dst, 'sine', f, f, 0.6, 0.2); break;
+      case 'cow_bell': this.tone(dst, 'square', f * 2, f * 2, 0.3, 0.08); this.tone(dst, 'square', f * 2.95, f * 2.95, 0.25, 0.05); break;
+      case 'iron_xylophone': case 'xylophone': this.tone(dst, 'sine', f, f, 0.35, 0.3); this.tone(dst, 'sine', f * 4, f * 4, 0.1, 0.06); break;
+      case 'bell': case 'chime': for (const [m, a] of [[1, 0.2], [2.76, 0.08], [5.4, 0.04]]) this.tone(dst, 'sine', f * m, f * m, 1.6, a); break;
+      case 'pling': this.tone(dst, 'triangle', f, f, 0.9, 0.2); this.tone(dst, 'sine', f * 2, f * 2, 0.6, 0.08); break;
+      default: this.tone(dst, 'triangle', f, f, 0.9, 0.22); this.tone(dst, 'sine', f * 2, f * 2, 0.5, 0.06);
+    }
+  }
+  horn(x, y, z) {
+    if (!this.ctx) return;
+    const dst = this.out(x, y, z, 1.4); if (!dst) return;
+    const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 1100; f2.connect(dst);
+    const f0 = 220 + Math.floor(Math.random() * 4) * 30;
+    this.tone(f2, 'sawtooth', f0, f0 * 1.12, 2.4, 0.4); this.tone(f2, 'sawtooth', f0 * 1.5, f0 * 1.6, 2.2, 0.15);
+  }
+  // music discs: a melody seeded by the disc name, played from the jukebox position
+  playDisc(name, x, y, z) {
+    if (!this.ctx) return;
+    this.stopDisc();
+    let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+    const R = mulberry32(h >>> 0), out = this.ctx.createGain(); out.connect(this.sfx);
+    this.disc = { out, x, y, z };
+    const sc = [[0, 2, 4, 7, 9], [0, 3, 5, 7, 10], [0, 2, 3, 7, 8], [0, 2, 4, 5, 7, 9, 11]][Math.floor(R() * 4)];
+    const root = 52 + Math.floor(R() * 10), bpm = 80 + R() * 70, beat = 60 / bpm, wave = ['triangle', 'square', 'sawtooth', 'sine'][Math.floor(R() * 4)];
+    const t0 = this.ctx.currentTime + 0.2, motif = [];
+    for (let i = 0; i < 8; i++) motif.push([Math.floor(R() * sc.length * 2), [0.5, 1, 1, 2][Math.floor(R() * 4)]]);
+    let t = t0;
+    for (let bar = 0; bar < 16; bar++) {
+      const shift = [0, 0, 3, 4, 0, 5, 3, 4][bar % 8];
+      for (const [d, len] of motif) {
+        const deg = d + shift, midi = root + sc[deg % sc.length] + 12 * Math.floor(deg / sc.length);
+        const f = 440 * Math.pow(2, (midi - 69) / 12);
+        const o = this.ctx.createOscillator(), e = this.ctx.createGain();
+        o.type = wave; o.frequency.value = f;
+        e.gain.setValueAtTime(0.0001, t); e.gain.exponentialRampToValueAtTime(0.09, t + 0.02); e.gain.exponentialRampToValueAtTime(0.0001, t + len * beat * 0.95);
+        o.connect(e); e.connect(out); o.start(t); o.stop(t + len * beat);
+        t += len * beat * 0.5;
+      }
+      const bass = this.ctx.createOscillator(), be = this.ctx.createGain();
+      bass.type = 'sine'; bass.frequency.value = 440 * Math.pow(2, (root - 12 + sc[shift % sc.length] - 69) / 12);
+      be.gain.setValueAtTime(0.0001, t - 2 * beat); be.gain.exponentialRampToValueAtTime(0.12, t - 2 * beat + 0.05); be.gain.exponentialRampToValueAtTime(0.0001, t);
+      bass.connect(be); be.connect(out); bass.start(t - 2 * beat); bass.stop(t + 0.05);
+    }
+    this.disc.end = t;
+  }
+  stopDisc() { if (this.disc) { try { this.disc.out.disconnect(); } catch (e) { } this.disc = null; } }
+  // fade the jukebox with distance
+  discTick() {
+    const d = this.disc; if (!d || !this.ctx) return;
+    if (this.ctx.currentTime > d.end + 1) { this.stopDisc(); return; }
+    const [lx, ly, lz] = this.listener, dist = Math.hypot(d.x - lx, d.y - ly, d.z - lz);
+    d.out.gain.value = Math.max(0, 1 - dist / 64);
+  }
   // generative ambient music: soft piano-like notes over a slow progression
   musicTick(dt, playing) {
+    this.discTick();
     if (!this.ctx || OPTIONS.music <= 0) return;
     this.musicT -= dt;
     if (this.musicT > 0) return;
@@ -10453,7 +11023,7 @@ class Game {
     this.particles = new Particles(this);
     this.entities = []; this.world = null; this.player = null;
     this.state = 'title'; this.thirdPerson = 0; this.fovCur = OPTIONS.fov;
-    this.lightQueue = []; this.inflight = 0; this.meshList = []; this.furnaces = new Map(); this.pendingSaves = []; this.memChunks = new Map();
+    this.lightQueue = []; this.inflight = 0; this.meshList = []; this.furnaces = new Map(); this.brewers = new Map(); this.pendingSaves = []; this.memChunks = new Map();
     this.acc = 0; this.last = performance.now(); this.fps = 0; this.frames = 0; this.fpsT = 0;
     this.itemModels = {};
     this.setupWorkers();
@@ -10523,6 +11093,7 @@ class Game {
       v.x = cx * 16 + (i & 15); v.y = i >> 8; v.z = cz * 16 + ((i >> 4) & 15);
       c.be.set(i, v);
       if (v.type === 'furnace') this.furnaces.set(this.beKey(cx * 16 + (i & 15), i >> 8, cz * 16 + ((i >> 4) & 15)), { x: cx * 16 + (i & 15), y: i >> 8, z: cz * 16 + ((i >> 4) & 15), be: v });
+      if (v.type === 'brewing') this.brewers.set(this.beKey(v.x, v.y, v.z), { x: v.x, y: v.y, z: v.z, be: v });
     }
     if (meta) c.modified = true;
     c.state = 1;
@@ -10556,7 +11127,7 @@ class Game {
         const dx = c.cx - pcx, dz = c.cz - pcz;
         if (dx * dx + dz * dz > (LR + 2.5) * (LR + 2.5)) {
           if (c.unsaved && c.state >= 1) this.pendingSaves.push([this.chunkKey(c.cx, c.cz), w.serializeChunk(c)]);
-          for (const [i, v] of c.be) if (v.type === 'furnace') this.furnaces.delete(this.beKey(c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15)));
+          for (const [i, v] of c.be) if (v.type === 'furnace' || v.type === 'brewing') { const k = this.beKey(c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15)); this.furnaces.delete(k); this.brewers.delete(k); }
           this.r.freeChunk(c);
           w.chunks.delete(k);
         }
@@ -10711,7 +11282,7 @@ class Game {
     this.dragon = null; this.arrival = null; this.traveling = false; this.sleeping = 0;
     $('bossbar').classList.add('hidden'); $('fx-portal').style.opacity = 0;
     this.world = null; this.player = null; this.entities = []; this.particles.list = [];
-    this.lightQueue = []; this.meshList = []; this.furnaces = new Map(); this.inflight = 0; this.localQueue = [];
+    this.lightQueue = []; this.meshList = []; this.furnaces = new Map(); this.brewers = new Map(); this.inflight = 0; this.localQueue = [];
     this.tok = (this.tok || 0) + 1; // stale worker/DB results are ignored
     this.memChunks = new Map();
   }
@@ -10771,7 +11342,7 @@ class Game {
     }
     if (this.dragon && !this.dragon.dead && meta.end) meta.end.hp = this.dragon.health;
     this.entities = []; this.particles.list = []; this.lightQueue = []; this.meshList = []; this.need = [];
-    this.furnaces = new Map(); this.inflight = 0; this.localQueue = []; this.dragon = null; this.sleeping = 0;
+    this.furnaces = new Map(); this.brewers = new Map(); this.inflight = 0; this.localQueue = []; this.dragon = null; this.sleeping = 0;
     $('fx-sleep').style.opacity = 0;
     this.tok = (this.tok || 0) + 1;
     this.world = this.newWorld(dest, old);
@@ -11219,6 +11790,7 @@ class Game {
     this.updateTarget();
     this.renderWorld(alpha, dt, false);
     this.updateHUD();
+    this.ui.updateCooldown();
     this.updateBossBar();
     AUDIO.musicTick(dt, true);
     if (this.pendingSaves.length > 8) this.saveAll();
@@ -11237,6 +11809,7 @@ class Game {
     w.runScheduled(this);
     this.randomTicks();
     this.tickFurnaces();
+    this.tickBrewers();
     if (this.sleeping) { this.sleepTick(); this.input.reset(); }
     p.tick(this.input);
     for (const e of this.entities) if (!e.dead) e.tick();
@@ -11247,6 +11820,7 @@ class Game {
     if (this.ui.inv && ['furnace', 'smoker', 'blast_furnace', 'brewing'].includes(this.ui.inv.type) && w.tick % 2 === 0) this.ui.renderInv();
     this.input.endTick();
     if (w.tick % 4 === 0) this.ui.refreshBars();
+    if (w.tick % 20 === 0 && p.effects && p.effects.size) this.ui.refreshEffects();
     $('fx-portal').style.opacity = Math.min(1, p.portalTime / 80) * 0.85;
     this.portalTick();
   }
@@ -11446,7 +12020,9 @@ class Game {
     this.ui.refreshHotbar();
   }
   dropItem(x, y, z, stack, thrown, fromPlayer) {
-    const e = new ItemEntity(this, x, y, z, { id: stack.id, count: stack.count, dmg: stack.dmg || 0 }, thrown ? 40 : 10);
+    const st = { id: stack.id, count: stack.count, dmg: stack.dmg || 0 };
+    if (stack.tag) st.tag = JSON.parse(JSON.stringify(stack.tag));
+    const e = new ItemEntity(this, x, y, z, st, thrown ? 40 : 10);
     if (thrown) {
       const d = this.player.look();
       e.vx = d[0] * 0.3 + (Math.random() - 0.5) * 0.02; e.vy = d[1] * 0.3 + 0.1; e.vz = d[2] * 0.3 + (Math.random() - 0.5) * 0.02;
@@ -11523,7 +12099,7 @@ class Game {
       if (id === B.TNT) { w.setBlock(bx, by, bz, 0, 0); this.entities.push(new PrimedTNT(this, bx, by, bz, 10 + Math.floor(Math.random() * 20))); continue; }
       const be = w.getBE(bx, by, bz);
       if (be && be.items) for (const st of be.items) if (st) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
-      if (be && be.type === 'furnace') this.furnaces.delete(this.beKey(bx, by, bz));
+      if (be) { this.furnaces.delete(this.beKey(bx, by, bz)); this.brewers.delete(this.beKey(bx, by, bz)); }
       if (Math.random() < 0.25) for (const st of this.dropsFor(id, 0)) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
       w.setBlock(bx, by, bz, 0, 0, false);
       changed.push([bx, by, bz]);
@@ -11546,9 +12122,15 @@ class Game {
     const p = this.player;
     p.dead = true;
     if (!silent && !this.keepInventory) {
-      for (let i = 0; i < 36; i++) if (p.inv[i]) { this.dropItem(p.x, p.y + 1, p.z, p.inv[i]); p.inv[i] = null; }
+      const drop = (arr, i) => { const st = arr[i]; if (!st) return; arr[i] = null; if (!enchLevel(st, 'vanishing_curse')) this.dropItem(p.x, p.y + 1, p.z, st, false, true); };
+      for (let i = 0; i < 36; i++) drop(p.inv, i);
+      for (let i = 0; i < 4; i++) drop(p.armor, i);
+      drop(p.offhand, 0);
+      const xp = Math.min(100, p.xpLevel * 7);
+      if (xp > 0 && p.mode === 0) this.spawnXP(p.x, p.y + 0.5, p.z, xp);
       p.xpLevel = 0; p.xp = 0;
     }
+    p.clearEffects(); p.fireTicks = 0; p.freeze = 0;
     $('death-msg').textContent = 'Player ' + (DEATH_MSG[source] || 'died');
     this.ui.closeInv(); this.releasePointer(); this.ui.show('scr-death');
     this.ui.refreshHotbar();
@@ -11557,7 +12139,7 @@ class Game {
     const p = this.player, w = this.world;
     const dest = p.spawn ? (p.spawnDim || 'overworld') : 'overworld';
     if (w.dim !== dest) {
-      p.health = 20; p.food = 20; p.sat = 5; p.air = 300; p.fallDist = 0; p.dead = false; p.fireTicks = 0;
+      p.maxHealth = p.baseMaxHealth || 20; p.health = p.maxHealth; p.food = 20; p.sat = 5; p.air = 300; p.fallDist = 0; p.dead = false; p.fireTicks = 0; p.absorb = 0;
       this.ui.show(null);
       this.state = 'playing';
       this.travel(dest, { kind: 'spawn', respawn: true });
@@ -11567,7 +12149,7 @@ class Game {
     p.x = sp[0]; p.z = sp[2]; p.y = sp[1];
     const x = Math.floor(p.x), z = Math.floor(p.z);
     if (!p.spawn && w.isLoadedAt(x, z)) { const s = this.safeSpot(x, z); p.x = s[0]; p.y = s[1]; p.z = s[2]; }
-    p.vx = p.vy = p.vz = 0; p.health = 20; p.food = 20; p.sat = 5; p.air = 300; p.fallDist = 0; p.dead = false; p.fireTicks = 0;
+    p.vx = p.vy = p.vz = 0; p.maxHealth = p.baseMaxHealth || 20; p.health = p.maxHealth; p.food = 20; p.sat = 5; p.air = 300; p.fallDist = 0; p.dead = false; p.fireTicks = 0; p.absorb = 0;
     p.savePrev();
     this.ui.show(null); this.lockPointer(); this.ui.refreshBars(); this.ui.refreshHotbar();
   }
@@ -11694,6 +12276,23 @@ class Game {
     };
     env.fogStart = env.fogEnd * (0.72 - rain * 0.2);
     this.underFluid(env, eye, Math.max(0.12, env.day));
+    return this.statusEnv(env);
+  }
+  // potion effects that change what the player sees
+  statusEnv(env) {
+    const p = this.player, fx = p.effects;
+    if (!fx || !fx.size) return env;
+    const nv = fx.get('night_vision');
+    if (nv) env.nightVision = nv.ticks > 200 ? 1 : 0.7 + 0.2 * Math.sin(nv.ticks * Math.PI * 0.2);
+    if (env.under === 'water' && (fx.get('water_breathing') || fx.get('conduit_power'))) { env.fogStart = 4; env.fogEnd = 64; }
+    const bl = fx.get('blindness'), dk = fx.get('darkness');
+    if (bl || dk) {
+      const k = bl ? Math.min(1, bl.ticks / 20) : 0.5 + 0.5 * Math.sin(p.age * 0.1);
+      const far = bl ? 5 : 14 + 14 * (1 - k);
+      env.fogEnd = env.fogEnd + (far - env.fogEnd) * Math.min(1, bl ? k : 1); env.fogStart = bl ? 0 : env.fogEnd * 0.25;
+      env.fogCol = [0, 0, 0]; env.skyTop = [0, 0, 0]; env.stars = 0; env.sunset = 0;
+      if (dk) { env.day *= 0.35 + 0.35 * (1 - k); env.ambient = [0, 0, 0]; env.nightVision = 0; }
+    }
     return env;
   }
   underFluid(env, eye, k) {
@@ -11721,7 +12320,7 @@ class Game {
     };
     env.fogStart = env.fogEnd * (nether ? 0.1 : 0.5);
     this.underFluid(env, eye, 1);
-    return env;
+    return this.statusEnv(env);
   }
   renderWorld(alpha, dt, panorama) {
     const r = this.r, gl = r.gl, w = this.world, p = this.player;
@@ -11738,6 +12337,8 @@ class Game {
       roll = Math.sin(wd * Math.PI) * ba * 0.05;
     }
     if (p.hurtTime > 0 && !panorama) roll += Math.sin((p.hurtTime - alpha) / 10 * Math.PI) * 0.12;
+    const nausea = !panorama && p.effects && p.effects.get('nausea');
+    if (nausea) { const k = Math.min(1, nausea.ticks / 60), t = (p.age + alpha) * 0.07; roll += Math.sin(t) * 0.16 * k; bobX += Math.sin(t * 1.3) * 0.05 * k; }
     const look = p.look();
     if (this.thirdPerson && !panorama) {
       const back = this.thirdPerson === 1 ? -1 : 1;
@@ -11749,8 +12350,12 @@ class Game {
     }
     const env = this.computeEnv(eye, look);
     // fov
-    let fovT = OPTIONS.fov * (p.sprinting ? 1.12 : 1) * (p.flying && p.sprinting ? 1.05 : 1) * (env.under === 'water' ? 0.88 : 1) * (p.drawT > 0 ? 1 - Math.min(1, p.drawT / 20) * 0.15 : 1);
-    this.fovCur += (fovT - this.fovCur) * Math.min(1, dt * 10);
+    const scoped = !panorama && !this.thirdPerson && p.using && p.using.kind === 'spyglass';
+    const spd = p.effects && p.effects.get('speed'), slw = p.effects && p.effects.get('slowness');
+    let fovT = OPTIONS.fov * (p.sprinting ? 1.12 : 1) * (p.flying && p.sprinting ? 1.05 : 1) * (env.under === 'water' ? 0.88 : 1) * (p.drawT > 0 ? 1 - Math.min(1, p.drawT / 20) * 0.15 : 1)
+      * (spd ? 1 + 0.05 * (spd.amp + 1) : 1) * (slw ? Math.max(0.85, 1 - 0.04 * (slw.amp + 1)) : 1) * (nausea ? 1 + 0.08 * Math.sin((p.age + alpha) * 0.05) : 1);
+    if (scoped) fovT = OPTIONS.fov * 0.1;
+    this.fovCur += (fovT - this.fovCur) * Math.min(1, scoped ? 1 : dt * 10);
     const far = Math.max(64, OPTIONS.renderDist * 16 + 64) + 400;
     r.setCamera(this.fovCur, camYaw, camPitch, roll, far, bobX, bobY);
     gl.clearColor(env.fogCol[0], env.fogCol[1], env.fogCol[2], 1);
@@ -11766,6 +12371,7 @@ class Game {
     for (const e of this.entities) { const dx = e.x - eye[0], dz = e.z - eye[2]; if (dx * dx + dz * dz < maxD2) e.render(r, alpha); }
     if (this.thirdPerson && !panorama && !p.dead) this.renderPlayerModel(r, p, alpha);
     r.dynFlush(r.vp, env);
+    this.flushGlint(r.vp, env);
     // block selection + cracks
     if (!panorama && this.target && !this.ui.hudHidden) this.renderSelection(eye, env);
     // translucent
@@ -11781,6 +12387,9 @@ class Game {
     if (!panorama && !this.thirdPerson && !this.ui.hudHidden && !p.dead) { gl.clear(gl.DEPTH_BUFFER_BIT); this.renderHand(alpha, env); }
     // overlays
     $('fx-water').classList.toggle('hidden', env.under !== 'water' || panorama);
+    $('fx-spyglass').classList.toggle('hidden', !scoped);
+    $('fx-pumpkin').classList.toggle('hidden', panorama || this.thirdPerson || !p.armor[0] || p.armor[0].id !== B.CARVED_PUMPKIN);
+    $('fx-freeze').style.opacity = panorama ? 0 : Math.min(1, (p.freeze || 0) / 140);
     $('fx-lava').classList.toggle('hidden', env.under !== 'lava' || panorama);
     AUDIO.setListener(eye[0], eye[1], eye[2], yaw);
     AUDIO.setRain(panorama ? 0 : env.rain * (this.topY(Math.floor(p.x), Math.floor(p.z)) <= p.y + 2 ? 1 : 0.25));
@@ -11886,63 +12495,66 @@ class Game {
     const L = p.lightAt();
     drawModel(r, MODELS.player, [pp[0], pp[1] - (p.sneaking ? 0.15 : 0), pp[2]], by, anims, p.hurtTime > 0 ? [1, 0.5, 0.5, 1] : [1, 1, 1, 1], L, 0.92);
   }
-  // first-person hand / held item
+  // first-person hands: main hand on the right, offhand on the left
   renderHand(alpha, env) {
-    const r = this.r, gl = r.gl, p = this.player;
+    const r = this.r, p = this.player;
+    if (p.using && p.using.kind === 'spyglass') return;
     const asp = this.canvas.width / this.canvas.height;
     const proj = M4.persp(M4.create(), 70 * Math.PI / 180, asp, 0.01, 10);
     r.org = [0, 0, 0];
-    const held = p.held;
-    const swingT = p.swingT > 0 ? 1 - (p.swingT - alpha) / 6 : 0;
+    const l = p.lightAt();
+    this.renderHandSide(p.held, 1, alpha, l);
+    if (p.offhand[0]) this.renderHandSide(p.offhand[0], -1, alpha, l);
+    r.dynFlush(proj, env, { noFog: true });
+    this.flushGlint(proj, env);
+  }
+  renderHandSide(held, s, alpha, l) {
+    const r = this.r, p = this.player, main = s > 0;
+    const use = p.using && (p.using.hand === 'main') === main ? p.using : null;
+    const swingT = main && p.swingT > 0 ? 1 - (p.swingT - alpha) / 6 : 0;
     const sw = Math.max(0, Math.min(1, swingT));
     const s1 = Math.sin(sw * sw * Math.PI), s2 = Math.sin(Math.sqrt(sw) * Math.PI);
     const wd = p.pwalkDist + (p.walkDist - p.pwalkDist) * alpha, ba = OPTIONS.bobbing ? p.pbob + (p.bob - p.pbob) * alpha : 0;
     const bx = Math.sin(wd * Math.PI) * ba * 0.5, by = -Math.abs(Math.cos(wd * Math.PI) * ba) * 1.0;
-    const eq = p.equip;
-    const l = p.lightAt();
+    const eq = main ? p.equip : 0;
     const T = (a, b) => M4.mul(M4.create(), a, b);
-    const tr = (x, y, z) => M4.trans(M4.create(), x, y, z), rx = a => M4.rotX(M4.create(), a), ry = a => M4.rotY(M4.create(), a), rz = a => M4.rotZ(M4.create(), a), sc = s => M4.scale(M4.create(), s, s, s);
-    let m = tr(bx, by, 0);
-    const eatBob = p.eat > 0 ? Math.abs(Math.sin(p.eat * 0.6)) * 0.05 : 0;
+    const tr = (x, y, z) => M4.trans(M4.create(), x * s, y, z), rx = a => M4.rotX(M4.create(), a), ry = a => M4.rotY(M4.create(), a * s), rz = a => M4.rotZ(M4.create(), a * s), sc = k => M4.scale(M4.create(), k, k, k);
+    let m = M4.trans(M4.create(), bx * s, by, 0);
+    const eat = use && (use.kind === 'eat' || use.kind === 'drink') ? use.t + alpha : 0;
+    const eatBob = eat > 0 ? Math.abs(Math.sin(eat * 0.6)) * 0.05 : 0;
     if (!held) {
+      if (!main) return;
       // bare arm
       m = T(m, tr(0.67 - s2 * 0.3, -0.67 - eq * 0.6 + Math.sin(Math.sqrt(sw) * Math.PI * 2) * 0.1, -0.17 - s2 * 0.25));
       m = T(m, ry(0.4 - s1 * 0.3)); m = T(m, rz(s2 * 0.2)); m = T(m, rx(2.04 - s2 * 0.5));
       m = T(m, sc(1 / 16 * 0.95));
       if (VMODELS.player) this.pushVArm(r, m, l);
       else this.pushPartXform(r, m, MODELS.player.parts[2], [-2, -12, -2], l);
-    } else {
-      m = T(m, tr(0.54 - s2 * 0.4, -0.46 - eq * 0.6 + Math.sin(Math.sqrt(sw) * Math.PI * 2) * 0.2 + eatBob, -0.8 - s1 * 0.2));
-      if (p.eat > 0) m = T(m, tr(-0.3, 0.15, 0.1));
-      m = T(m, ry(-s1 * 0.35)); m = T(m, rz(-s2 * 0.35)); m = T(m, rx(-s2 * 1.2));
-      const boxes = itemBoxes(held.id);
-      if (isCubeItem(held.id) || boxes) {
-        m = T(m, tr(0.02, -0.03, -0.05)); m = T(m, ry(Math.PI / 4)); m = T(m, sc(0.25));
-        if (boxes) this.pushBoxesXform(r, m, held.id, boxes, l); else this.pushCubeXform(r, m, held.id, l);
-      } else if (held.id === I.BOW && p.drawT > 0) {
-        const k = Math.min(1, p.drawT / 20), shake = k >= 1 ? Math.sin(p.age * 1.7) * 0.004 : 0;
-        m = T(m, tr(-0.34, 0.2 + shake, -0.04 + k * 0.08)); m = T(m, ry(0.3)); m = T(m, rz(Math.PI / 4 + 0.08)); m = T(m, sc(0.48));
-        this.pushItemXform(r, m, held.id, l, texL('bow_pulling_' + (k >= 0.9 ? 2 : k >= 0.65 ? 1 : 0)));
-      } else {
-        m = T(m, ry(-Math.PI / 2 + 0.25)); m = T(m, rz(0.3)); m = T(m, sc(0.5));
-        if (ITEMS[held.id].tool) m = T(m, T(rz(0.25), tr(0.05, 0.15, 0)));
-        this.pushItemXform(r, m, held.id, l);
-      }
+      return;
     }
-    r.dynFlush(T(proj, M4.create()), env, { noFog: true });
-  }
-  pushCubeXform(r, m, id, l) {
-    for (let f = 0; f < 6; f++) {
-      const layer = id === B.GRASS_BLOCK ? (f === 2 ? TEX_GRASS_TOP : f === 3 ? TEX_DIRT : texL('grass_block_side_item')) : faceLayer(id, 0, f);
-      let tr = 1, tg = 1, tb = 1;
-      if (id === B.GRASS_BLOCK && f === 2) { tr = 145 / 255; tg = 189 / 255; tb = 89 / 255; }
-      else if (TINT[id] === 2) { tr = 119 / 255; tg = 171 / 255; tb = 47 / 255; } else if (TINT[id] === 3) { tr = 128 / 255; tg = 167 / 255; tb = 85 / 255; } else if (TINT[id] === 4) { tr = 97 / 255; tg = 153 / 255; tb = 97 / 255; }
-      const fs = FSHADE[f];
-      for (let k = 0; k < 4; k++) {
-        const v = FV[f][k];
-        const q = M4.xform(m, v[0] - 0.5, v[1] - 0.5, v[2] - 0.5);
-        r.dv(q[0], q[1], q[2], v[3] / 16, v[4] / 16, layer, tr * fs, tg * fs, tb * fs, 1, l[0], l[1]);
+    m = T(m, tr(0.54 - s2 * 0.4, -0.46 - eq * 0.6 + Math.sin(Math.sqrt(sw) * Math.PI * 2) * 0.2 + eatBob, -0.8 - s1 * 0.2));
+    if (eat > 0) m = T(m, tr(-0.3, 0.15, 0.1));
+    m = T(m, ry(-s1 * 0.35)); m = T(m, rz(-s2 * 0.35)); m = T(m, rx(-s2 * 1.2));
+    const style = itemStyle(held.id), it = ITEMS[held.id];
+    if (held.id === I.SHIELD) {
+      const blk = use && use.kind === 'shield' ? Math.min(1, (use.t + alpha) / 5) : 0;
+      m = T(m, tr(-0.02 - blk * 0.22, -0.08 + blk * 0.16, 0.05 + blk * 0.1)); m = T(m, ry(0.3 + blk * 0.25)); m = T(m, sc(0.6));
+      this.pushItemXform(r, m, held, l);
+    } else if (style !== 'sprite') {
+      m = T(m, tr(0.02, -0.03, -0.05)); m = T(m, ry(Math.PI / 4)); m = T(m, sc(0.25));
+      this.pushBlockItem(r, m, held.id, l);
+    } else if ((held.id === I.BOW || held.id === I.CROSSBOW || held.id === I.TRIDENT) && use && use.kind !== 'eat') {
+      const k = Math.min(1, (use.t + alpha) / (held.id === I.CROSSBOW ? 25 : 20)), shake = k >= 1 ? Math.sin(p.age * 1.7) * 0.004 : 0;
+      if (held.id === I.TRIDENT) { m = T(m, tr(-0.1, 0.25 + k * 0.1, 0.1 + k * 0.15)); m = T(m, rx(-Math.PI / 2 + 0.3)); m = T(m, rz(Math.PI / 4)); m = T(m, sc(0.6)); this.pushItemXform(r, m, held, l); }
+      else {
+        m = T(m, tr(-0.34, 0.2 + shake, -0.04 + k * 0.08)); m = T(m, ry(0.3)); m = T(m, rz(Math.PI / 4 + 0.08)); m = T(m, sc(0.48));
+        this.pushItemXform(r, m, held, l, held.id === I.BOW ? texLayer('bow_pulling_' + (k >= 0.9 ? 2 : k >= 0.65 ? 1 : 0), itemLayer(I.BOW)) : texLayer('crossbow_pulling_' + (k >= 0.9 ? 2 : k >= 0.5 ? 1 : 0), itemLayer(I.CROSSBOW)));
       }
+    } else {
+      m = T(m, ry(-Math.PI / 2 + 0.25)); m = T(m, rz(0.3)); m = T(m, sc(0.5));
+      if (it.tool || held.id === I.MACE || held.id === I.TRIDENT) m = T(m, T(rz(0.25), tr(0.05, 0.15, 0)));
+      const charged = held.id === I.CROSSBOW && held.tag && held.tag.charged;
+      this.pushItemXform(r, m, held, l, charged ? texLayer(held.tag.charged.id === I.FIREWORK_ROCKET ? 'crossbow_firework' : 'crossbow_arrow', itemLayer(I.CROSSBOW)) : undefined);
     }
   }
   // first-person arm from a resource pack skin (classic right arm and sleeve)
@@ -11951,17 +12563,6 @@ class Game {
     const uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
     const cubes = vm.legacy ? vm.def.legacy.right_arm : vm.def.parts.find(p => p.n === 'right_arm').c;
     for (const c of cubes) emitVCube(r, c, q => M4.xform(m, q[0] + 1, -(q[1] + 2), -q[2]), uvx, [1, 1, 1, 1], l);
-  }
-  pushBoxesXform(r, m, id, boxes, l) {
-    for (const b of boxes) for (let f = 0; f < 6; f++) {
-      const layer = FACETEX[id * 6 + f], fs = FSHADE[f];
-      for (let k = 0; k < 4; k++) {
-        const v = FV[f][k], px = v[0] ? b[3] : b[0], py = v[1] ? b[4] : b[1], pz = v[2] ? b[5] : b[2];
-        const uv = boxUV(f, px, py, pz);
-        const q = M4.xform(m, px / 16 - 0.5, py / 16 - 0.5, pz / 16 - 0.5);
-        r.dv(q[0], q[1], q[2], uv[0], uv[1], layer, fs, fs, fs, 1, l[0], l[1]);
-      }
-    }
   }
   pushPartXform(r, m, part, off, l) {
     const [w, h, d] = part.size, A = ATLAS.S;
@@ -11998,13 +12599,64 @@ class Game {
     }
     return this.itemModels[key] = { layer, q };
   }
-  pushItemXform(r, m, id, l, layerOverride) {
+  pushItemXform(r, m, st, l, layerOverride) {
+    const id = st.id === undefined ? st : st.id;
     const mdl = this.itemModel(id, layerOverride);
     let tint = [1, 1, 1];
     if (isBlockId(id) && ITEM_SPRITE_LAYER[id] === undefined && TINT[id]) tint = TINT[id] === 1 ? [0.5, 0.75, 0.35] : TINT[id] === 2 ? [0.47, 0.67, 0.18] : TINT[id] === 6 ? [0.13, 0.5, 0.19] : [1, 1, 1];
+    const stT = st.id !== undefined ? stackTint(st) : null;
+    if (stT && ITEMS[id].potionItem && id !== I.TIPPED_ARROW) {
+      // bottle first, then the tinted liquid on top
+      for (const quad of mdl.q) for (const v of quad) { const p = M4.xform(m, v[0], v[1], v[2]); r.dv(p[0], p[1], p[2], v[3], v[4], mdl.layer, v[5], v[5], v[5], 1, l[0], l[1]); }
+      const ov = this.itemModel(id, texLayer('potion_overlay', mdl.layer)), k = 1.001;
+      for (const quad of ov.q) for (const v of quad) { const p = M4.xform(m, v[0] * k, v[1] * k, v[2] * k); r.dv(p[0], p[1], p[2], v[3], v[4], ov.layer, stT[0] / 255 * v[5], stT[1] / 255 * v[5], stT[2] / 255 * v[5], 1, l[0], l[1]); }
+      return;
+    }
+    if (stT) tint = stT.map(c => c / 255);
     for (const quad of mdl.q) for (const v of quad) {
       const p = M4.xform(m, v[0], v[1], v[2]);
       r.dv(p[0], p[1], p[2], v[3], v[4], mdl.layer, tint[0] * v[5], tint[1] * v[5], tint[2] * v[5], 1, l[0], l[1]);
+    }
+    if (st.id !== undefined && hasGlint(st)) this.queueGlint(m, mdl);
+  }
+  // enchanted items get a moving purple sheen: the same quads drawn again additively
+  queueGlint(m, mdl) {
+    if (!this.glintQ) this.glintQ = [];
+    for (const quad of mdl.q) for (const v of quad) { const p = M4.xform(m, v[0], v[1], v[2]); this.glintQ.push([p[0], p[1], p[2], v[3], v[4], mdl.layer, 1, 1, 1, 1, 15, 15]); }
+  }
+  flushGlint(vp, env) {
+    if (!this.glintQ || !this.glintQ.length) return;
+    const r = this.r;
+    for (const q of this.glintQ) r.dv(...q);
+    this.glintQ.length = 0;
+    r.dynFlush(vp, env, { noFog: true, glint: true });
+  }
+  // a block item drawn with its block model (cubes, stairs, walls, chests, anvils ...)
+  pushBlockItem(r, m, id, l) {
+    const style = itemStyle(id);
+    const parts = style === 'cube' ? [BX(0, 0, 0, 16, 16, 16)] : itemParts(id);
+    const tf = blockTintFor(id);
+    for (const p of parts) {
+      const tk = tf(p.tint), tint = tk ? tk.map(c => c / 255) : [1, 1, 1];
+      if (p.q) {
+        const L = p.t ? texLayer(p.t, FACETEX[id * 6]) : FACETEX[id * 6];
+        for (const order of [[0, 1, 2, 3], [1, 0, 3, 2]]) for (const k of order) { const v = p.q[k], q = M4.xform(m, v[0] / 16 - 0.5, v[1] / 16 - 0.5, v[2] / 16 - 0.5); r.dv(q[0], q[1], q[2], v[3] / 16, v[4] / 16, L, tint[0] * 0.9, tint[1] * 0.9, tint[2] * 0.9, 1, l[0], l[1]); }
+        continue;
+      }
+      const b = p.b;
+      for (let f = 0; f < 6; f++) {
+        let layer;
+        if (id === B.GRASS_BLOCK && style === 'cube') layer = f === 2 ? TEX_GRASS_TOP : f === 3 ? TEX_DIRT : texL('grass_block_side_item');
+        else if (p.t) { if (!p.t[f]) continue; layer = texLayer(p.t[f], FACETEX[id * 6 + f]); } else layer = faceLayer(id, 0, f);
+        const fs = FSHADE[f], gt = id === B.GRASS_BLOCK && f === 2 ? [145 / 255, 189 / 255, 89 / 255] : id === B.GRASS_BLOCK ? [1, 1, 1] : tint;
+        const rr = p.uv && p.uv[f];
+        for (let k = 0; k < 4; k++) {
+          const v = FV[f][k], px = v[0] ? b[3] : b[0], py = v[1] ? b[4] : b[1], pz = v[2] ? b[5] : b[2];
+          const uv = rr ? [(rr[0] + (v[3] / 16) * (rr[2] - rr[0])) / 16, (rr[1] + (v[4] / 16) * (rr[3] - rr[1])) / 16] : boxUV(f, px, py, pz);
+          const q = M4.xform(m, px / 16 - 0.5, py / 16 - 0.5, pz / 16 - 0.5);
+          r.dv(q[0], q[1], q[2], uv[0], uv[1], layer, gt[0] * fs, gt[1] * fs, gt[2] * fs, 1, l[0], l[1]);
+        }
+      }
     }
   }
   // ---------------- HUD ----------------
@@ -12333,7 +12985,7 @@ Object.assign(Game.prototype, {
       if (it && it.disc) {
         if (!be) { be = { type: 'jukebox' }; w.setBE(x, y, z, be); }
         be.disc = copyStack(held, 1); p.consumeHeld(1);
-        this.ui.chat('Now Playing: ' + titleCase('C418 - ' + it.disc), '#ff55ff');
+        this.ui.chat('Now Playing: Music Disc - ' + titleCase(it.disc), '#ff55ff');
         if (AUDIO.playDisc) AUDIO.playDisc(it.disc, x, y, z);
         this.markBEDirty(be);
         return done();
@@ -12540,6 +13192,7 @@ Object.assign(Game.prototype, {
       if (!hit) return false;
       if (this.launchFirework) this.launchFirework(x, y, z, held); p.consumeHeld(1); return done();
     }
+    if (held.id === I.CROSSBOW && held.tag && held.tag.charged) { p.shootCrossbow(held, 'main'); p.useCd = 6; return done(); }
     if (held.id === I.GOAT_HORN) { if (AUDIO.horn) AUDIO.horn(p.x, p.y, p.z); p.useCd = 140; return true; }
     if (held.id === I.END_CRYSTAL && hit && (hid === B.OBSIDIAN || hid === B.BEDROCK) && w.getBlock(hit.x, hit.y + 1, hit.z) === 0) {
       const c = new EndCrystal(this, hit.x + 0.5, hit.y + 1, hit.z + 0.5, -1); this.entities.push(c); p.consumeHeld(1); return done();
@@ -12873,6 +13526,571 @@ for (let id = 1; id < BLOCK_NAMES.length; id++) {
     d.name.endsWith('_carpet') || d.name === 'scaffolding' || d.name === 'bamboo' || d.name === 'coal_block' || d.name === 'target' || d.name === 'lectern' || d.name === 'composter' || d.name === 'beehive' || d.name === 'bee_nest')
     if (!STEMS.some(s => d.name.startsWith(s) || d.name.startsWith('stripped_' + s))) d.flammable = true;
 }
+
+/* @file 92_effects.js */
+/* ===================================================================
+   STATUS EFFECTS, POTIONS AND BREWING
+   =================================================================== */
+// key: [display name, colour, harmful, instant]
+const EFFECTS = {
+  speed: ['Speed', 0x33ebff], slowness: ['Slowness', 0x8bafe0, 1], haste: ['Haste', 0xd9c043], mining_fatigue: ['Mining Fatigue', 0x4a4217, 1],
+  strength: ['Strength', 0xffc700], instant_health: ['Instant Health', 0xf82423, 0, 1], instant_damage: ['Instant Damage', 0xa9656a, 1, 1],
+  jump_boost: ['Jump Boost', 0xfdff84], nausea: ['Nausea', 0x551d4a, 1], regeneration: ['Regeneration', 0xcd5cab], resistance: ['Resistance', 0x9146f0],
+  fire_resistance: ['Fire Resistance', 0xff9900], water_breathing: ['Water Breathing', 0x98dac0], invisibility: ['Invisibility', 0xf6f6f6],
+  blindness: ['Blindness', 0x1f1f23, 1], night_vision: ['Night Vision', 0xc2ff66], hunger: ['Hunger', 0x587653, 1], weakness: ['Weakness', 0x484d48, 1],
+  poison: ['Poison', 0x87a363, 1], wither: ['Wither', 0x736156, 1], health_boost: ['Health Boost', 0xf87d23], absorption: ['Absorption', 0x2552a5],
+  saturation: ['Saturation', 0xf82423, 0, 1], glowing: ['Glowing', 0x94a061], levitation: ['Levitation', 0xceffff, 1], luck: ['Luck', 0x59c106],
+  unluck: ['Bad Luck', 0xc0a44d, 1], slow_falling: ['Slow Falling', 0xf3cfb9], conduit_power: ['Conduit Power', 0x1dc2d1], dolphins_grace: ["Dolphin's Grace", 0x88a3be],
+  bad_omen: ['Bad Omen', 0x0b6138, 1], hero_of_the_village: ['Hero of the Village', 0x44ff44], darkness: ['Darkness', 0x292721, 1],
+  trial_omen: ['Trial Omen', 0x16a6a6, 1], raid_omen: ['Raid Omen', 0xde4058, 1], wind_charged: ['Wind Charged', 0xbdc9ff, 1], weaving: ['Weaving', 0x78695a, 1],
+  oozing: ['Oozing', 0x99ffa3, 1], infested: ['Infested', 0x8c9b8c, 1],
+};
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+const rgbOf = c => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+// potions: key, effects [[effect, ticks, amplifier]]
+const P = (key, effects, o) => Object.assign({ key, effects }, o || {});
+const POTION_TYPES = [
+  P('water', []), P('mundane', []), P('thick', []), P('awkward', []),
+  P('night_vision', [['night_vision', 3600, 0]]), P('long_night_vision', [['night_vision', 9600, 0]]),
+  P('invisibility', [['invisibility', 3600, 0]]), P('long_invisibility', [['invisibility', 9600, 0]]),
+  P('leaping', [['jump_boost', 3600, 0]]), P('long_leaping', [['jump_boost', 9600, 0]]), P('strong_leaping', [['jump_boost', 1800, 1]]),
+  P('fire_resistance', [['fire_resistance', 3600, 0]]), P('long_fire_resistance', [['fire_resistance', 9600, 0]]),
+  P('swiftness', [['speed', 3600, 0]]), P('long_swiftness', [['speed', 9600, 0]]), P('strong_swiftness', [['speed', 1800, 1]]),
+  P('slowness', [['slowness', 1800, 0]]), P('long_slowness', [['slowness', 4800, 0]]), P('strong_slowness', [['slowness', 400, 3]]),
+  P('turtle_master', [['slowness', 400, 3], ['resistance', 400, 2]]), P('long_turtle_master', [['slowness', 800, 3], ['resistance', 800, 2]]),
+  P('strong_turtle_master', [['slowness', 400, 5], ['resistance', 400, 3]]),
+  P('water_breathing', [['water_breathing', 3600, 0]]), P('long_water_breathing', [['water_breathing', 9600, 0]]),
+  P('healing', [['instant_health', 1, 0]]), P('strong_healing', [['instant_health', 1, 1]]),
+  P('harming', [['instant_damage', 1, 0]]), P('strong_harming', [['instant_damage', 1, 1]]),
+  P('poison', [['poison', 900, 0]]), P('long_poison', [['poison', 1800, 0]]), P('strong_poison', [['poison', 432, 1]]),
+  P('regeneration', [['regeneration', 900, 0]]), P('long_regeneration', [['regeneration', 1800, 0]]), P('strong_regeneration', [['regeneration', 450, 1]]),
+  P('strength', [['strength', 3600, 0]]), P('long_strength', [['strength', 9600, 0]]), P('strong_strength', [['strength', 1800, 1]]),
+  P('weakness', [['weakness', 1800, 0]]), P('long_weakness', [['weakness', 4800, 0]]),
+  P('luck', [['luck', 6000, 0]]),
+  P('slow_falling', [['slow_falling', 1800, 0]]), P('long_slow_falling', [['slow_falling', 4800, 0]]),
+  P('wind_charged', [['wind_charged', 3600, 0]]), P('weaving', [['weaving', 3600, 0]]), P('oozing', [['oozing', 3600, 0]]), P('infested', [['infested', 3600, 0]]),
+];
+const POTION_BY_KEY = {};
+for (const p of POTION_TYPES) POTION_BY_KEY[p.key] = p;
+function potionColor(key) {
+  const p = POTION_BY_KEY[key];
+  if (!p || !p.effects.length) return key === 'water' || !p ? [56, 93, 198] : [56, 93, 198];
+  let r = 0, g = 0, b = 0;
+  for (const [e, , a] of p.effects) { const c = rgbOf(EFFECTS[e][1]); r += c[0] * (a + 1); g += c[1] * (a + 1); b += c[2] * (a + 1); }
+  const n = p.effects.reduce((s, e) => s + e[2] + 1, 0);
+  return [r / n, g / n, b / n];
+}
+const POTION_WORDS = { night_vision: 'Night Vision', invisibility: 'Invisibility', leaping: 'Leaping', fire_resistance: 'Fire Resistance', swiftness: 'Swiftness',
+  slowness: 'Slowness', turtle_master: 'the Turtle Master', water_breathing: 'Water Breathing', healing: 'Healing', harming: 'Harming', poison: 'Poison',
+  regeneration: 'Regeneration', strength: 'Strength', weakness: 'Weakness', luck: 'Luck', slow_falling: 'Slow Falling', wind_charged: 'Wind Charging',
+  weaving: 'Weaving', oozing: 'Oozing', infested: 'Infestation' };
+function potionName(itemId, key) {
+  const base = key.replace(/^(long|strong)_/, '');
+  const kind = itemId === I.SPLASH_POTION ? 'Splash ' : itemId === I.LINGERING_POTION ? 'Lingering ' : '';
+  if (itemId === I.TIPPED_ARROW) return base === 'water' ? 'Arrow of Splashing' : 'Arrow of ' + (POTION_WORDS[base] || titleCase(base));
+  if (base === 'water') return kind ? kind + 'Water Bottle' : 'Water Bottle';
+  if (base === 'mundane' || base === 'thick' || base === 'awkward') return (kind ? kind : '') + titleCase(base) + ' ' + (kind ? 'Potion' : 'Potion');
+  return kind + 'Potion of ' + (POTION_WORDS[base] || titleCase(base));
+}
+const fmtTicks = t => { const s = Math.floor(t / 20); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function effectLabel(e, amp, ticks) { const d = EFFECTS[e]; return d[0] + (amp ? ' ' + ROMAN[amp + 1] : '') + (d[3] ? '' : ' (' + fmtTicks(ticks) + ')'); }
+function potionLines(st) {
+  const p = POTION_BY_KEY[st.tag.potion];
+  if (!p) return [];
+  if (!p.effects.length) return [['No Effects', '#aaaaaa']];
+  const k = st.id === I.LINGERING_POTION ? 0.25 : st.id === I.TIPPED_ARROW ? 0.125 : 1;
+  const out = p.effects.map(([e, t, a]) => [effectLabel(e, a, Math.round(t * k)), EFFECTS[e][2] ? '#ff5555' : '#5555ff']);
+  const mods = { speed: ['Speed', 20], slowness: ['Speed', -15], strength: ['Attack Damage', 3], weakness: ['Attack Damage', -4], jump_boost: ['Safe Fall Distance', 1] };
+  const lines = p.effects.filter(([e]) => mods[e]);
+  if (lines.length) {
+    out.push(['', '#aaaaaa'], ['When Applied:', '#aa00aa']);
+    for (const [e, , a] of lines) { const [n, v] = mods[e]; const val = v * (a + 1); out.push([(val > 0 ? '+' : '') + val + (n === 'Speed' ? '% ' : ' ') + n, val > 0 ? '#5555ff' : '#ff5555']); }
+  }
+  return out;
+}
+
+/* ---------------- brewing ---------------- */
+const BREW_INGREDIENT = {};   // item id -> true
+const BREW_MIX = {};          // 'base|ingredient' -> result key
+function mix(base, ing, out) { const id = ITEM_BY_NAME[ing] ? ITEM_BY_NAME[ing].id : B[ing.toUpperCase()]; BREW_INGREDIENT[id] = true; BREW_MIX[base + '|' + id] = out; }
+mix('water', 'nether_wart', 'awkward'); mix('water', 'redstone', 'mundane'); mix('water', 'glowstone_dust', 'thick'); mix('water', 'fermented_spider_eye', 'weakness');
+for (const [ing, out] of [['sugar', 'swiftness'], ['rabbit_foot', 'leaping'], ['glistering_melon_slice', 'healing'], ['spider_eye', 'poison'], ['pufferfish', 'water_breathing'],
+  ['magma_cream', 'fire_resistance'], ['golden_carrot', 'night_vision'], ['blaze_powder', 'strength'], ['ghast_tear', 'regeneration'], ['turtle_helmet', 'turtle_master'],
+  ['phantom_membrane', 'slow_falling'], ['breeze_rod', 'wind_charged'], ['cobweb', 'weaving'], ['slime_block', 'oozing'], ['stone', 'infested']]) mix('awkward', ing, out);
+for (const p of POTION_TYPES) {
+  if (POTION_BY_KEY['long_' + p.key]) mix(p.key, 'redstone', 'long_' + p.key);
+  if (POTION_BY_KEY['strong_' + p.key]) mix(p.key, 'glowstone_dust', 'strong_' + p.key);
+}
+for (const [a, b] of [['night_vision', 'invisibility'], ['long_night_vision', 'long_invisibility'], ['swiftness', 'slowness'], ['leaping', 'slowness'], ['long_swiftness', 'long_slowness'],
+  ['long_leaping', 'long_slowness'], ['healing', 'harming'], ['strong_healing', 'strong_harming'], ['poison', 'harming'], ['long_poison', 'harming'], ['strong_poison', 'strong_harming']]) mix(a, 'fermented_spider_eye', b);
+// result of brewing one bottle with an ingredient (null = nothing happens)
+function brewResult(bottle, ing) {
+  if (!bottle || !ing) return null;
+  if (bottle.id === I.POTION && ing.id === I.GUNPOWDER) return { id: I.SPLASH_POTION, count: 1, tag: { potion: bottle.tag.potion } };
+  if (bottle.id === I.SPLASH_POTION && ing.id === I.DRAGON_BREATH) return { id: I.LINGERING_POTION, count: 1, tag: { potion: bottle.tag.potion } };
+  if (!ITEMS[bottle.id].potionItem || !bottle.tag) return null;
+  const out = BREW_MIX[bottle.tag.potion + '|' + ing.id];
+  return out ? { id: bottle.id, count: 1, tag: { potion: out } } : null;
+}
+BREW_INGREDIENT[I.GUNPOWDER] = BREW_INGREDIENT[I.DRAGON_BREATH] = true;
+
+/* ---------------- effects on entities ---------------- */
+Object.assign(Entity.prototype, {
+  addEffect(key, ticks, amp, ambient) {
+    const d = EFFECTS[key];
+    if (!d) return;
+    amp = amp || 0;
+    if (d[3]) { this.instantEffect(key, amp); return; }
+    if (this.effectImmune && this.effectImmune(key)) return;
+    if (!this.effects) this.effects = new Map();
+    const cur = this.effects.get(key);
+    if (cur && (cur.amp > amp || (cur.amp === amp && cur.ticks >= ticks))) return;
+    this.effects.set(key, { amp, ticks, max: ticks, ambient: !!ambient });
+    if (key === 'health_boost') this.maxHealth = (this.baseMaxHealth || 20) + 4 * (amp + 1);
+    if (key === 'absorption') this.absorb = Math.max(this.absorb || 0, 4 * (amp + 1));
+    if (this === this.game.player) this.game.ui.refreshEffects && this.game.ui.refreshEffects();
+  },
+  effectLevel(key) { const e = this.effects && this.effects.get(key); return e ? e.amp + 1 : 0; },
+  removeEffect(key) {
+    if (!this.effects || !this.effects.delete(key)) return;
+    if (key === 'health_boost') { this.maxHealth = this.baseMaxHealth || 20; this.health = Math.min(this.health, this.maxHealth); }
+    if (key === 'absorption') this.absorb = 0;
+    if (this === this.game.player && this.game.ui.refreshEffects) this.game.ui.refreshEffects();
+  },
+  clearEffects() { if (this.effects) for (const k of [...this.effects.keys()]) this.removeEffect(k); },
+  instantEffect(key, amp) {
+    const undead = this.T && this.T.undead;
+    const heal = (key === 'instant_health') !== !!undead;
+    if (heal) { if (this.heal) this.heal(4 << amp); else this.health = Math.min(this.maxHealth, this.health + (4 << amp)); }
+    else if (this.hurt) { this.invuln = 0; this.hurt(6 << amp, 'magic'); }
+    if (key === 'saturation' && this.food !== undefined) { this.food = Math.min(20, this.food + amp + 1); this.sat = Math.min(this.food, this.sat + (amp + 1) * 2); }
+  },
+  tickEffects() {
+    if (!this.effects || !this.effects.size) return;
+    for (const [k, e] of this.effects) {
+      const a = e.amp;
+      switch (k) {
+        case 'regeneration': if (this.age % Math.max(1, 50 >> a) === 0 && this.health < this.maxHealth) { if (this.heal) this.heal(1); else this.health = Math.min(this.maxHealth, this.health + 1); } break;
+        case 'poison': if (this.age % Math.max(1, 25 >> a) === 0 && this.health > 1 && !(this.T && this.T.undead)) { this.invuln = 0; this.hurt(1, 'poison'); } break;
+        case 'wither': if (this.age % Math.max(1, 40 >> a) === 0) { this.invuln = 0; this.hurt(1, 'wither'); } break;
+        case 'hunger': if (this.exh !== undefined) this.exh += 0.005 * (a + 1); break;
+        case 'saturation': this.instantEffect('saturation', a); break;
+        case 'levitation': this.vy += (0.05 * (a + 1) - this.vy) * 0.2; this.fallDist = 0; break;
+      }
+      if (this.age % 6 === 0 && !e.ambient && k !== 'invisibility' && this.game.particles && Math.random() < 0.7) {
+        const c = rgbOf(EFFECTS[k][1]);
+        this.game.particles.add({ x: this.x + (Math.random() - 0.5) * this.w, y: this.y + Math.random() * this.h, z: this.z + (Math.random() - 0.5) * this.w, vx: 0, vy: 0.02, vz: 0, life: 18, layer: texL('particle_generic_' + (4 + Math.floor(Math.random() * 3))), u: 0, v: 0, us: 1, size: 0.08, g: -0.001, col: [c[0] / 255, c[1] / 255, c[2] / 255], bright: false });
+      }
+      if (--e.ticks <= 0) this.removeEffect(k);
+    }
+  },
+});
+
+/* ---------------- potions in the world ---------------- */
+Object.assign(Game.prototype, {
+  drinkPotion(p, st) {
+    const pt = st.tag && POTION_BY_KEY[st.tag.potion];
+    if (pt) for (const [e, t, a] of pt.effects) p.addEffect(e, t, a);
+  },
+  splashPotion(x, y, z, st, owner) {
+    const pt = st && st.tag && POTION_BY_KEY[st.tag.potion], col = st ? potionColor(st.tag ? st.tag.potion : 'water') : [56, 93, 198];
+    for (let k = 0; k < 30; k++) {
+      const a = Math.random() * Math.PI * 2, s = Math.random() * 0.25;
+      this.particles.add({ x, y, z, vx: Math.cos(a) * s, vy: Math.random() * 0.15, vz: Math.sin(a) * s, life: 20 + Math.random() * 10, layer: texL('particle_generic_' + Math.floor(Math.random() * 4)), u: 0, v: 0, us: 1, size: 0.1, g: 0.004, col: col.map(v => v / 255), bright: true });
+    }
+    if (!pt) {
+      // water puts out fire and hurts endermen and blazes
+      for (const m of this.mobsAndPlayer()) if (Math.hypot(m.x - x, m.y - y, m.z - z) < 4) { m.fireTicks = 0; if (m.T && (m.type === 'enderman' || m.type === 'blaze')) m.hurt(1, 'magic', owner); }
+      return;
+    }
+    if (st.id === I.LINGERING_POTION) { this.entities.push(new EffectCloud(this, x, y, z, pt, owner)); return; }
+    for (const m of this.mobsAndPlayer()) {
+      const d = Math.hypot(m.x - x, m.y + m.h / 2 - y, m.z - z);
+      if (d > 4) continue;
+      const k = 1 - d / 4;
+      for (const [e, t, a] of pt.effects) {
+        if (EFFECTS[e][3]) { if (m.instantEffect) m.instantEffect(e, a); }
+        else if (t * k > 20) m.addEffect(e, Math.round(t * k), a);
+      }
+      if (owner && EFFECTS[pt.effects[0] && pt.effects[0][0]] && EFFECTS[pt.effects[0][0]][2] && m !== owner && m.T && !m.T.passive) m.target = owner;
+    }
+  },
+  // brewing stands: [0..2] bottles, [3] ingredient, [4] blaze powder
+  tickBrewers() {
+    if (!this.brewers) return;
+    for (const b of this.brewers.values()) {
+      const be = b.be, it = be.items;
+      if ((be.fuel || 0) <= 0 && it[4] && it[4].id === I.BLAZE_POWDER) { be.fuel = 20; it[4].count--; if (it[4].count <= 0) it[4] = null; this.markBEDirty(be); }
+      const ing = it[3], ok = ing && BREW_INGREDIENT[ing.id] && [0, 1, 2].some(k => brewResult(it[k], ing));
+      if (be.brew > 0) {
+        if (!ok || be.brewing !== ing.id) { be.brew = 0; continue; }
+        if (--be.brew === 0) {
+          for (let k = 0; k < 3; k++) { const r = brewResult(it[k], ing); if (r) it[k] = r; }
+          ing.count--; if (ing.count <= 0) it[3] = null;
+          this.sound('brew', b.x + 0.5, b.y + 0.5, b.z + 0.5);
+          this.markBEDirty(be);
+        }
+      } else if (ok && be.fuel > 0) { be.fuel--; be.brew = 400; be.brewing = ing.id; this.markBEDirty(be); }
+    }
+  },
+});
+// lingering potions leave a cloud that applies a quarter of the effect
+class EffectCloud extends Entity {
+  constructor(game, x, y, z, pt, owner) { super(game, x, y, z); this.pt = pt; this.owner = owner; this.r = 3; this.life = 600; this.w = 6; this.h = 0.5; this.col = potionColor(pt.key); this.applied = new Map(); }
+  tick() {
+    this.age++;
+    if (--this.life <= 0) { this.dead = true; return; }
+    this.r = 3 - 2.5 * (this.age / 600);
+    const g = this.game;
+    for (let k = 0; k < 3; k++) {
+      const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * this.r;
+      g.particles.add({ x: this.x + Math.cos(a) * d, y: this.y + 0.1, z: this.z + Math.sin(a) * d, vx: 0, vy: 0.01, vz: 0, life: 20, layer: texL('particle_generic_3'), u: 0, v: 0, us: 1, size: 0.08, g: 0, col: this.col.map(v => v / 255), bright: true });
+    }
+    if (this.age % 5) return;
+    for (const m of g.mobsAndPlayer()) {
+      if (Math.hypot(m.x - this.x, m.z - this.z) > this.r || Math.abs(m.y - this.y) > 2) continue;
+      if ((this.applied.get(m) || 0) > this.age) continue;
+      this.applied.set(m, this.age + 20);
+      for (const [e, t, a] of this.pt.effects) { if (EFFECTS[e][3]) m.instantEffect(e, a); else m.addEffect(e, Math.round(t / 4), a); }
+    }
+  }
+  render() { }
+}
+// brewing stand window: progress arrow, bubbles and fuel gauge
+SCREEN_LOGIC.brewing = {
+  open(ui) { const g = ui.game, d = ui.inv.data; if (!g.brewers) g.brewers = new Map(); g.brewers.set(g.beKey(d.x, d.y, d.z), { x: d.x, y: d.y, z: d.z, be: d }); },
+  accept(ui, c, i, st) { if (c === 'be' && i === 3) return !!BREW_INGREDIENT[st.id]; return true; },
+  update(ui) {
+    const be = ui.inv.data, win = ui.winEl;
+    if (!win) return;
+    if (!ui._br) { ui._br = el('div', 'vsp'); ui._bf = el('div', 'vsp'); ui._bb = el('div', 'vsp'); }
+    for (const e of [ui._br, ui._bf, ui._bb]) if (e.parentNode !== win) win.appendChild(e);
+    const k = be.brew > 0 ? 1 - be.brew / 400 : 0;
+    Object.assign(ui._br.style, { left: 97 * GS + 'px', top: 16 * GS + 'px', width: 9 * GS + 'px', height: Math.round(28 * k) * GS + 'px', background: '#fff' });
+    Object.assign(ui._bf.style, { left: 18 * GS + 'px', top: 37 * GS + 'px', width: Math.round(18 * (be.fuel || 0) / 20) * GS + 'px', height: 4 * GS + 'px', background: '#c83c1e' });
+    const bh = be.brew > 0 ? Math.round(29 * ((be.age = (be.age || 0) + 1) % 20) / 20) : 0;
+    Object.assign(ui._bb.style, { left: 63 * GS + 'px', top: (14 + 29 - bh) * GS + 'px', width: 12 * GS + 'px', height: bh * GS + 'px', background: 'repeating-linear-gradient(0deg,#fff 0 4px,transparent 4px 8px)', opacity: 0.8 });
+  },
+};
+
+/* @file 93_enchant.js */
+/* ===================================================================
+   ENCHANTMENTS — enchanting table, anvil, grindstone, books, experience
+   =================================================================== */
+// [key, name, max level, weight, applies to, min cost base, min cost per level, cost span, flags]
+const ENCHANT_DEFS = [
+  ['protection', 'Protection', 4, 10, 'armor', 1, 11, 11], ['fire_protection', 'Fire Protection', 4, 5, 'armor', 10, 8, 8],
+  ['feather_falling', 'Feather Falling', 4, 5, 'feet', 5, 6, 6], ['blast_protection', 'Blast Protection', 4, 2, 'armor', 5, 8, 8],
+  ['projectile_protection', 'Projectile Protection', 4, 5, 'armor', 3, 6, 6], ['respiration', 'Respiration', 3, 2, 'head', 10, 10, 30],
+  ['aqua_affinity', 'Aqua Affinity', 1, 2, 'head', 1, 0, 40], ['thorns', 'Thorns', 3, 1, 'chest', 10, 20, 50],
+  ['depth_strider', 'Depth Strider', 3, 2, 'feet', 10, 10, 15], ['frost_walker', 'Frost Walker', 2, 2, 'feet', 10, 10, 15, 't'],
+  ['binding_curse', 'Curse of Binding', 1, 1, 'wearable', 25, 0, 25, 'tc'], ['soul_speed', 'Soul Speed', 3, 1, 'feet', 10, 10, 15, 't'],
+  ['swift_sneak', 'Swift Sneak', 3, 1, 'legs', 25, 25, 50, 't'],
+  ['sharpness', 'Sharpness', 5, 10, 'sword|axe', 1, 11, 20], ['smite', 'Smite', 5, 5, 'sword|axe|mace', 5, 8, 20],
+  ['bane_of_arthropods', 'Bane of Arthropods', 5, 5, 'sword|axe|mace', 5, 8, 20], ['knockback', 'Knockback', 2, 5, 'sword', 5, 20, 50],
+  ['fire_aspect', 'Fire Aspect', 2, 2, 'sword|mace', 10, 20, 50], ['looting', 'Looting', 3, 2, 'sword', 15, 9, 50], ['sweeping_edge', 'Sweeping Edge', 3, 2, 'sword', 5, 9, 15],
+  ['efficiency', 'Efficiency', 5, 10, 'tool', 1, 10, 50], ['silk_touch', 'Silk Touch', 1, 1, 'tool', 15, 0, 50], ['unbreaking', 'Unbreaking', 3, 5, 'durable', 5, 8, 50],
+  ['fortune', 'Fortune', 3, 2, 'tool', 15, 9, 50], ['power', 'Power', 5, 10, 'bow', 1, 10, 15], ['punch', 'Punch', 2, 2, 'bow', 12, 20, 25],
+  ['flame', 'Flame', 1, 2, 'bow', 20, 0, 30], ['infinity', 'Infinity', 1, 1, 'bow', 20, 0, 30], ['luck_of_the_sea', 'Luck of the Sea', 3, 2, 'fishing_rod', 15, 9, 50],
+  ['lure', 'Lure', 3, 2, 'fishing_rod', 15, 9, 50], ['loyalty', 'Loyalty', 3, 5, 'trident', 12, 7, 38], ['impaling', 'Impaling', 5, 2, 'trident', 1, 8, 20],
+  ['riptide', 'Riptide', 3, 2, 'trident', 17, 7, 33], ['channeling', 'Channeling', 1, 1, 'trident', 25, 0, 25], ['multishot', 'Multishot', 1, 2, 'crossbow', 20, 0, 30],
+  ['quick_charge', 'Quick Charge', 3, 5, 'crossbow', 12, 20, 38], ['piercing', 'Piercing', 4, 10, 'crossbow', 1, 10, 49],
+  ['density', 'Density', 5, 5, 'mace', 5, 8, 20], ['breach', 'Breach', 4, 2, 'mace', 15, 9, 50], ['wind_burst', 'Wind Burst', 3, 2, 'mace', 15, 9, 50, 't'],
+  ['mending', 'Mending', 1, 2, 'durable', 25, 0, 50, 't'], ['vanishing_curse', 'Curse of Vanishing', 1, 1, 'vanishable', 25, 0, 25, 'tc'],
+];
+const ENCHANTS = ENCHANT_DEFS.map(([key, name, max, weight, on, base, per, span, f]) => ({ key, name, max, weight, on: on.split('|'), base, per, span, treasure: !!(f && f.includes('t')), curse: !!(f && f.includes('c')) }));
+const ENCHANT_BY_KEY = {};
+for (const e of ENCHANTS) ENCHANT_BY_KEY[e.key] = e;
+// groups that exclude each other
+const ENCHANT_EXCLUSIVE = [['protection', 'fire_protection', 'blast_protection', 'projectile_protection'], ['sharpness', 'smite', 'bane_of_arthropods', 'density', 'breach'],
+  ['silk_touch', 'fortune'], ['infinity', 'mending'], ['depth_strider', 'frost_walker'], ['loyalty', 'riptide'], ['channeling', 'riptide'], ['multishot', 'piercing']];
+function enchantsCompatible(a, b) { if (a === b) return false; for (const g of ENCHANT_EXCLUSIVE) if (g.includes(a) && g.includes(b)) return false; return true; }
+function enchantName(k, l) { const e = ENCHANT_BY_KEY[k]; return (e ? e.name : titleCase(k)) + (e && e.max === 1 ? '' : ' ' + (ROMAN[l] || l)); }
+// categories an item belongs to
+function enchantCats(id) {
+  const it = ITEMS[id], c = new Set();
+  if (!it) return c;
+  if (it.dur) { c.add('durable'); c.add('vanishable'); }
+  if (it.armor) { c.add('armor'); c.add('wearable'); c.add(['head', 'chest', 'legs', 'feet'][it.armor.slot]); if (id === I.ELYTRA) c.delete('armor'); }
+  if (it.wearable) { c.add('wearable'); c.add('vanishable'); }
+  if (it.tool) { if (it.tool.type === 'sword') c.add('sword'); else if (it.tool.type === 'shears') c.add('shears'); else { c.add('tool'); if (it.tool.type === 'axe') c.add('axe'); } }
+  if (id === I.BOW) c.add('bow'); if (id === I.CROSSBOW) c.add('crossbow'); if (id === I.TRIDENT) c.add('trident');
+  if (id === I.FISHING_ROD) c.add('fishing_rod'); if (id === I.MACE) c.add('mace');
+  if (id === I.COMPASS || id === I.RECOVERY_COMPASS) c.add('vanishable');
+  return c;
+}
+function canEnchant(id, e) { if (id === I.BOOK || id === I.ENCHANTED_BOOK) return true; const c = enchantCats(id); return e.on.some(o => c.has(o)) || (e.key === 'thorns' && c.has('armor')) || (e.key === 'unbreaking' && c.has('durable')); }
+const enchMin = (e, l) => e.base + (l - 1) * e.per, enchMax = (e, l) => enchMin(e, l) + e.span;
+// rarity multipliers used by the anvil [from item, from book]
+const anvilMult = e => e.weight >= 10 ? [1, 1] : e.weight >= 5 ? [2, 1] : e.weight >= 2 ? [4, 2] : [8, 4];
+
+/* ---------------- enchanting table ---------------- */
+function seededRand(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function countBookshelves(w, x, y, z) {
+  let n = 0;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    if ((dx || dz) && w.getBlock(x + dx, y, z + dz) === 0 && w.getBlock(x + dx, y + 1, z + dz) === 0) {
+      if (w.getBlock(x + dx * 2, y, z + dz * 2) === B.BOOKSHELF) n++;
+      if (w.getBlock(x + dx * 2, y + 1, z + dz * 2) === B.BOOKSHELF) n++;
+      if (dx && dz) {
+        if (w.getBlock(x + dx * 2, y, z + dz) === B.BOOKSHELF) n++; if (w.getBlock(x + dx * 2, y + 1, z + dz) === B.BOOKSHELF) n++;
+        if (w.getBlock(x + dx, y, z + dz * 2) === B.BOOKSHELF) n++; if (w.getBlock(x + dx, y + 1, z + dz * 2) === B.BOOKSHELF) n++;
+      }
+    }
+  }
+  return Math.min(15, n);
+}
+function enchantOptions(id, shelves, seed) {
+  const it = ITEMS[id], ench = id === I.BOOK ? 1 : it.ench || 0;
+  if (!ench) return null;
+  const R = seededRand(seed), ri = n => Math.floor(R() * (n + 1));
+  const base = 1 + ri(7) + (shelves >> 1) + ri(shelves);
+  const lv = [Math.max(Math.floor(base / 3), 1), Math.floor(base * 2 / 3) + 1, Math.max(base, shelves * 2)];
+  return lv.map((L, slot) => ({ level: L, list: rollEnchants(id, ench, L, seededRand(seed + slot * 7919)) }));
+}
+function rollEnchants(id, ench, L, R) {
+  const ri = n => Math.floor(R() * (n + 1));
+  let mod = L + 1 + ri(Math.floor(ench / 4)) + ri(Math.floor(ench / 4));
+  mod = Math.max(1, Math.round(mod * (1 + (R() + R() - 1) * 0.15)));
+  const avail = () => {
+    const out = [];
+    for (const e of ENCHANTS) {
+      if (e.treasure || !canEnchant(id, e) || (e.key === 'thorns' && id !== I.BOOK && !enchantCats(id).has('chest'))) continue;
+      for (let l = e.max; l >= 1; l--) if (mod >= enchMin(e, l) && mod <= enchMax(e, l)) { out.push([e, l]); break; }
+    }
+    return out;
+  };
+  const pick = list => { const tot = list.reduce((s, [e]) => s + e.weight, 0); let r = R() * tot; for (const x of list) { r -= x[0].weight; if (r < 0) return x; } return list[list.length - 1]; };
+  let list = avail();
+  if (!list.length) return [];
+  const chosen = [pick(list)];
+  while (R() < (mod + 1) / 50) {
+    list = list.filter(([e]) => chosen.every(([c]) => enchantsCompatible(c.key, e.key)));
+    if (!list.length) break;
+    chosen.push(pick(list));
+    mod = Math.floor(mod / 2);
+  }
+  if (id === I.BOOK && chosen.length > 1) chosen.splice(Math.floor(R() * chosen.length), 1);
+  return chosen.map(([e, l]) => [e.key, l]);
+}
+const RUNE_CHARS = 'abcdefghijklmnopqrstuvwxyz';
+function runeText(seed) { const R = seededRand(seed); let s = ''; for (let i = 0, n = 2 + Math.floor(R() * 3); i < n; i++) { if (i) s += ' '; for (let j = 0, m = 3 + Math.floor(R() * 4); j < m; j++) s += RUNE_CHARS[Math.floor(R() * 26)]; } return s; }
+SCREEN_LOGIC.enchant = {
+  accept(ui, c, i, st) { if (c === 'local' && i === 0) return !!(ITEMS[st.id].ench || st.id === I.BOOK) && !(st.tag && st.tag.ench && Object.keys(st.tag.ench).length) && st.count >= 1; return true; },
+  extra(ui, win) {
+    ui._eb = [];
+    for (let k = 0; k < 3; k++) {
+      const b = el('div', 'ebtn off');
+      b.style.cssText = `left:${60 * GS}px;top:${(14 + k * 19) * GS}px;width:${108 * GS}px;height:${19 * GS}px`;
+      b.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); this.choose(ui, k); });
+      b.addEventListener('mouseenter', () => { ui._ehover = k; this.tip(ui, k); });
+      b.addEventListener('mouseleave', () => { ui._ehover = -1; $('tooltip').classList.add('hidden'); });
+      win.appendChild(b); ui._eb.push(b);
+    }
+  },
+  options(ui) {
+    const st = ui.inv.local[0], p = ui.game.player, d = ui.inv.data;
+    if (!st) return null;
+    if (p.enchSeed === undefined) p.enchSeed = (Math.random() * 1e9) | 0;
+    const shelves = countBookshelves(ui.game.world, d.x, d.y, d.z);
+    const key = st.id + ':' + shelves + ':' + p.enchSeed;
+    if (ui._ekey !== key) { ui._ekey = key; ui._eopt = enchantOptions(st.id, shelves, p.enchSeed); }
+    return ui._eopt;
+  },
+  update(ui) {
+    const opt = this.options(ui), p = ui.game.player, lapis = ui.inv.local[1] ? ui.inv.local[1].count : 0;
+    ui._eb.forEach((b, k) => {
+      const o = opt && opt[k];
+      const can = o && o.list.length && (p.mode === 1 || (p.xpLevel >= o.level && lapis >= k + 1));
+      b.className = 'ebtn ' + (o && o.list.length ? (can ? 'on' : 'off') : 'off');
+      b.innerHTML = o && o.list.length ? `<span class="rune">${runeText(p.enchSeed + k * 31)}</span><span class="lv">${o.level}</span>` : '';
+    });
+  },
+  tip(ui, k) {
+    const opt = this.options(ui), o = opt && opt[k], t = $('tooltip');
+    if (!o || !o.list.length) { t.classList.add('hidden'); return; }
+    const p = ui.game.player, lapis = ui.inv.local[1] ? ui.inv.local[1].count : 0;
+    const [ek, el2] = o.list[0];
+    let h = `<div class="tt0" style="color:#fff">${escapeHTML(enchantName(ek, el2))} . . . ?</div>`;
+    if (p.mode === 0) {
+      h += `<div style="color:${lapis >= k + 1 ? '#aaaaaa' : '#ff5555'}">${k + 1} Lapis Lazuli</div>`;
+      h += `<div style="color:${p.xpLevel >= o.level ? '#aaaaaa' : '#ff5555'}">${k + 1} Enchantment Level${k ? 's' : ''}</div>`;
+      if (p.xpLevel < o.level) h += `<div style="color:#ff5555">Level Requirement: ${o.level}</div>`;
+    }
+    t.innerHTML = h; t.classList.remove('hidden'); ui.posCursor();
+  },
+  choose(ui, k) {
+    const opt = this.options(ui), o = opt && opt[k], p = ui.game.player, st = ui.inv.local[0], lap = ui.inv.local[1];
+    if (!o || !o.list.length || !st) return;
+    if (p.mode === 0 && (p.xpLevel < o.level || !lap || lap.count < k + 1)) return;
+    const ench = {};
+    for (const [ek, l] of o.list) ench[ek] = l;
+    if (st.id === I.BOOK) { ui.inv.local[0] = { id: I.ENCHANTED_BOOK, count: 1, tag: { stored: ench } }; }
+    else st.tag = Object.assign({}, st.tag || {}, { ench });
+    if (p.mode === 0) { p.takeLevels(k + 1); lap.count -= k + 1; if (lap.count <= 0) ui.inv.local[1] = null; }
+    p.enchSeed = (Math.random() * 1e9) | 0;
+    ui.game.sound('enchant', p.x, p.y + 1, p.z);
+    ui.game.ui.refreshBars();
+    ui.renderInv();
+  },
+};
+
+/* ---------------- anvil ---------------- */
+function repairMaterial(id) {
+  const it = ITEMS[id];
+  if (!it || !it.repair) return null;
+  if (it.repair[0] === '#') return it.repair === '#planks' ? TAGS.planks : TAGS.stone_tool;
+  return [itemOf(it.repair)];
+}
+function anvilResult(left, right, name, creative) {
+  if (!left) return null;
+  const it = ITEMS[left.id];
+  const out = copyStack(left, 1), penalty = (left.tag && left.tag.repairCost || 0) + (right && right.tag && right.tag.repairCost || 0);
+  let cost = 0, used = 1;
+  if (right) {
+    const mat = repairMaterial(left.id);
+    if (it.dur && left.dmg && mat && mat.includes(right.id)) {
+      // material repair: a quarter of the durability per item
+      let d = left.dmg, n = 0;
+      while (d > 0 && n < right.count) { d = Math.max(0, d - Math.floor(it.dur / 4)); n++; }
+      out.dmg = d; cost += n; used = n;
+    } else {
+      const book = right.id === I.ENCHANTED_BOOK;
+      if (right.id !== left.id && !book) return null;
+      if (it.dur && right.id === left.id && left.dmg) {
+        out.dmg = Math.max(0, left.dmg - (it.dur - (right.dmg || 0)) - Math.floor(it.dur * 0.12));
+        cost += 2;
+      }
+      const src = book ? right.tag && right.tag.stored : right.tag && right.tag.ench;
+      const targetKey = left.id === I.ENCHANTED_BOOK ? 'stored' : 'ench';
+      const cur = Object.assign({}, left.tag && left.tag[targetKey] || {});
+      let any = false;
+      for (const k in src || {}) {
+        const e = ENCHANT_BY_KEY[k];
+        if (!e) continue;
+        if (left.id !== I.ENCHANTED_BOOK && !canEnchant(left.id, e) && !creative) { cost += 1; continue; }
+        if (Object.keys(cur).some(c => c !== k && !enchantsCompatible(c, k))) { cost += 1; continue; }
+        const l = cur[k] === src[k] ? Math.min(e.max, src[k] + 1) : Math.max(cur[k] || 0, src[k]);
+        cur[k] = l; any = true;
+        cost += l * anvilMult(e)[book ? 1 : 0];
+      }
+      if (!any && !(it.dur && right.id === left.id && left.dmg)) return null;
+      out.tag = Object.assign({}, out.tag || {}, { [targetKey]: cur });
+    }
+  }
+  const curName = left.tag && left.tag.name || '';
+  if (name !== undefined && name !== null && name !== curName && name !== (curName ? curName : ITEMS[left.id].display)) {
+    if (name && name !== ITEMS[left.id].display) out.tag = Object.assign({}, out.tag || {}, { name }); else if (out.tag) { delete out.tag.name; }
+    cost += 1;
+  }
+  if (!cost) return null;
+  cost += penalty;
+  out.tag = Object.assign({}, out.tag || {}, { repairCost: Math.max(left.tag && left.tag.repairCost || 0, right && right.tag && right.tag.repairCost || 0) * 2 + 1 });
+  if (out.tag && !Object.keys(out.tag).length) delete out.tag;
+  return { out, cost, used };
+}
+SCREEN_LOGIC.anvil = {
+  extra(ui, win) {
+    const inp = el('input', 'vinput'); inp.maxLength = 50;
+    inp.style.cssText = `left:${62 * GS}px;top:${24 * GS}px;width:${103 * GS}px;height:${10 * GS}px`;
+    inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') ui.closeInv(); });
+    inp.addEventListener('input', () => { ui.inv.name = inp.value; ui.renderInv(); });
+    win.appendChild(inp); ui._an = inp;
+    const c = el('div', 'vl'); c.style.left = 60 * GS + 'px'; c.style.top = 67 * GS + 'px'; win.appendChild(c); ui._ac = c;
+  },
+  changed(ui, c, i) { if (c === 'local' && i === 0) { const st = ui.inv.local[0]; ui.inv.name = st ? (st.tag && st.tag.name || ITEMS[st.id].display) : ''; if (ui._an) ui._an.value = ui.inv.name; } },
+  calc(ui) { const [l, r] = ui.inv.local; return anvilResult(l, r, ui.inv.name, ui.game.player.mode === 1); },
+  result(ui) { const r = this.calc(ui), p = ui.game.player; if (!r) return null; if (p.mode === 0 && (r.cost >= 40 || p.xpLevel < r.cost)) return null; return r.out; },
+  take(ui) {
+    const r = this.calc(ui), p = ui.game.player, d = ui.inv.data;
+    if (p.mode === 0) p.takeLevels(r.cost);
+    ui.inv.local[0] = null;
+    const rr = ui.inv.local[1];
+    if (rr) { rr.count -= r.used; if (rr.count <= 0) ui.inv.local[1] = null; }
+    // anvils wear out
+    const w = ui.game.world, cur = w.getBlock(d.x, d.y, d.z);
+    if (p.mode === 0 && Math.random() < 0.12) {
+      const next = cur === B.ANVIL ? B.CHIPPED_ANVIL : cur === B.CHIPPED_ANVIL ? B.DAMAGED_ANVIL : 0;
+      w.setBlock(d.x, d.y, d.z, next, next ? w.getMeta(d.x, d.y, d.z) : 0);
+      ui.game.remeshNear(d.x, d.z);
+      if (!next) { ui.game.sound('anvil_break', d.x + 0.5, d.y + 0.5, d.z + 0.5); setTimeout(() => ui.closeInv(), 0); }
+    }
+    ui.game.ui.refreshBars();
+  },
+  update(ui) {
+    const r = this.calc(ui), p = ui.game.player, c = ui._ac;
+    if (!c) return;
+    if (!r) { c.textContent = ''; return; }
+    if (p.mode === 0 && r.cost >= 40) { c.textContent = 'Too Expensive!'; c.style.color = '#ff6060'; }
+    else { c.textContent = 'Enchantment Cost: ' + r.cost; c.style.color = p.mode === 1 || p.xpLevel >= r.cost ? '#80ff20' : '#ff6060'; }
+    c.style.textShadow = '2px 2px 0 #3f3f3f';
+  },
+  single: true,
+};
+
+/* ---------------- grindstone ---------------- */
+function grindResult(a, b) {
+  if (!a && !b) return null;
+  if (a && b && a.id !== b.id) return null;
+  const src = a || b, it = ITEMS[src.id];
+  if (a && b && !it.dur) return null;
+  const out = copyStack(src, 1);
+  let xp = 0;
+  const strip = st => { if (!st || !st.tag) return; for (const key of ['ench', 'stored']) for (const k in st.tag[key] || {}) { const e = ENCHANT_BY_KEY[k]; if (e && !e.curse) xp += enchMin(e, st.tag[key][k]); } };
+  strip(a); strip(b);
+  if (a && b) out.dmg = Math.max(0, it.dur - ((it.dur - (a.dmg || 0)) + (it.dur - (b.dmg || 0)) + Math.floor(it.dur * 0.05)));
+  if (out.tag) {
+    for (const key of ['ench', 'stored']) if (out.tag[key]) { for (const k in out.tag[key]) if (!ENCHANT_BY_KEY[k] || !ENCHANT_BY_KEY[k].curse) delete out.tag[key][k]; if (!Object.keys(out.tag[key]).length) delete out.tag[key]; }
+    delete out.tag.repairCost;
+    if (!Object.keys(out.tag).length) delete out.tag;
+  }
+  if (out.id === I.ENCHANTED_BOOK && !(out.tag && out.tag.stored)) { out.id = I.BOOK; delete out.tag; }
+  if (!(a && b) && xp === 0) return null;
+  return { out, xp: Math.ceil(xp * (0.5 + Math.random() * 0.5)) };
+}
+SCREEN_LOGIC.grindstone = {
+  accept(ui, c, i, st) { const it = ITEMS[st.id]; return c !== 'local' || !!(it.dur || st.id === I.ENCHANTED_BOOK || (st.tag && st.tag.ench)); },
+  result(ui) { const r = grindResult(ui.inv.local[0], ui.inv.local[1]); return r ? r.out : null; },
+  take(ui) { const r = grindResult(ui.inv.local[0], ui.inv.local[1]); ui.inv.local[0] = ui.inv.local[1] = null; if (r && r.xp) ui.game.spawnXP(ui.game.player.x, ui.game.player.y + 1, ui.game.player.z, r.xp); ui.game.sound('grindstone', ui.game.player.x, ui.game.player.y, ui.game.player.z); },
+  single: true,
+};
+
+/* ---------------- experience orbs ---------------- */
+class XPOrb extends Entity {
+  constructor(game, x, y, z, value) {
+    super(game, x, y, z);
+    this.value = value; this.w = 0.3; this.h = 0.3;
+    this.vx = (Math.random() - 0.5) * 0.2; this.vy = Math.random() * 0.2 + 0.1; this.vz = (Math.random() - 0.5) * 0.2;
+    this.size = value >= 17 ? 0.35 : value >= 7 ? 0.28 : value >= 3 ? 0.22 : 0.16;
+  }
+  tick() {
+    this.savePrev(); this.age++;
+    const g = this.game, p = g.player;
+    this.updateFluids();
+    if (p && !p.dead) {
+      const dx = p.x - this.x, dy = p.y + 0.9 - this.y, dz = p.z - this.z, d = Math.hypot(dx, dy, dz);
+      if (d < 8) { const k = (1 - d / 8) ** 2 * 0.1; this.vx += dx / d * k; this.vy += dy / d * k; this.vz += dz / d * k; }
+      if (d < 1.2 && this.age > 8 && (p.orbCd || 0) <= p.age) { p.orbCd = p.age + 2; this.dead = true; p.addXP(this.value); g.ui.refreshBars(); return; }
+    }
+    if (this.inWater) this.vy += 0.002; else this.vy -= 0.03;
+    this.physicsStep();
+    this.vx *= this.onGround ? 0.6 : 0.98; this.vz *= this.onGround ? 0.6 : 0.98; this.vy *= 0.98;
+    if (this.age > 6000 || this.inLava) this.dead = true;
+  }
+  render(r, a) {
+    const p = this.ipos(a), t = (this.age + a) * 0.3, k = (Math.sin(t) + 1) / 2;
+    drawSprite(r, texL('particle_generic_1'), p[0], p[1] + this.size, p[2], this.size * 1.6, this.game.camYaw || 0, [0.5 + k * 0.5, 1, 0.1 + k * 0.2, 1], [15, 15]);
+  }
+}
+Object.assign(Game.prototype, {
+  spawnXP(x, y, z, n) {
+    while (n > 0) {
+      const v = n >= 37 ? 37 : n >= 17 ? 17 : n >= 7 ? 7 : n >= 3 ? 3 : 1;
+      n -= v;
+      this.entities.push(new XPOrb(this, x + (Math.random() - 0.5) * 0.4, y, z + (Math.random() - 0.5) * 0.4, v));
+    }
+  },
+});
 
 </script>
 </body>
