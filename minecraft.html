@@ -14635,6 +14635,8 @@ class Audio {
     switch (name) {
       case 'pop': this.tone(dst, 'sine', 500 + Math.random() * 300, 1400, 0.08, 0.25); break;
       case 'click': this.tone(dst, 'square', 1800, 1200, 0.03, 0.12); break;
+      case 'piston_out': this.noiseHit(dst, 'bandpass', 900, 1.2, 0.12, 0.35); this.tone(dst, 'square', 160, 90, 0.08, 0.12); break;
+      case 'piston_in': this.noiseHit(dst, 'bandpass', 700, 1.2, 0.1, 0.3); this.tone(dst, 'square', 120, 180, 0.08, 0.1); break;
       case 'hurt': this.tone(dst, 'sawtooth', 300, 110, 0.18, 0.35); this.noiseHit(dst, 'lowpass', 600, 1, 0.12, 0.3); break;
       case 'hurt_animal': this.tone(dst, 'square', 520, 300, 0.12, 0.12); break;
       case 'oink': this.tone(dst, 'sawtooth', 200, 150, 0.12, 0.12); this.tone(dst, 'sawtooth', 230, 160, 0.12, 0.1, now + 0.15); break;
@@ -19567,6 +19569,513 @@ Game.prototype.renderSpawnerMobs = function (r, a) {
     const sc = 0.45 / Math.max(m.T.w, m.T.h, 0.6);
     drawMob(r, md, m.skins(), [x + 0.5, y + 0.2, z + 0.5], t * 0.08, st, [1, 1, 1, 1], [this.world.getLightRaw(x, y, z) & 15, (this.world.getLightRaw(x, y, z) >> 4)], sc, 0);
   }
+};
+
+/* @file 99_redstone.js */
+/* ===================================================================
+   REDSTONE — power from levers, buttons, pressure plates, torches,
+   blocks of redstone, detectors, targets and observers; dust, repeaters
+   and comparators carry it; lamps, doors, trapdoors, gates, pistons, TNT,
+   dispensers, droppers, note blocks, bells, copper bulbs, rails and
+   hoppers answer. Hoppers also move items between containers.
+   =================================================================== */
+const FACE_OF_LOOK = [5, 0, 4, 1];            // horizontal facing meta (N, E, S, W) -> block face index
+const TORCH_ATT = [3, 1, 0, 5, 4];            // redstone torch meta -> face toward the block it is fixed to
+const WIRE_DIR = [0, 1, 4, 5];                // wire mask bits -> faces (E, W, S, N)
+// what a block does for redstone: power sources, and things that respond
+const RS_SRC = new Uint8Array(MAXB), RS_CON = new Uint8Array(MAXB);
+const S_BLOCK = 1, S_TORCH = 2, S_LEVER = 3, S_BUTTON = 4, S_PLATE = 5, S_REPEATER = 6, S_COMPARATOR = 7, S_OBSERVER = 8, S_DAYLIGHT = 9, S_TARGET = 10, S_SENSOR = 11, S_WIRE = 12, S_WPLATE = 13;
+const C_LAMP = 1, C_DOOR = 2, C_TRAPDOOR = 3, C_GATE = 4, C_TNT = 5, C_PISTON = 6, C_DISPENSER = 7, C_NOTE = 8, C_BELL = 9, C_BULB = 10, C_RAIL = 11, C_HOPPER = 12, C_TORCH = 13, C_REPEATER = 14, C_COMPARATOR = 15;
+RS_SRC[B.REDSTONE_BLOCK] = S_BLOCK; RS_SRC[B.REDSTONE_TORCH] = S_TORCH; RS_SRC[B.LEVER] = S_LEVER; RS_SRC[B.REPEATER] = S_REPEATER; RS_SRC[B.COMPARATOR] = S_COMPARATOR;
+RS_SRC[B.OBSERVER] = S_OBSERVER; RS_SRC[B.DAYLIGHT_DETECTOR] = S_DAYLIGHT; RS_SRC[B.TARGET] = S_TARGET; RS_SRC[B.SCULK_SENSOR] = S_SENSOR; RS_SRC[B.CALIBRATED_SCULK_SENSOR] = S_SENSOR; RS_SRC[B.REDSTONE_WIRE] = S_WIRE;
+RS_CON[B.REDSTONE_LAMP] = C_LAMP; RS_CON[B.TNT] = C_TNT; RS_CON[B.PISTON] = C_PISTON; RS_CON[B.STICKY_PISTON] = C_PISTON; RS_CON[B.DISPENSER] = C_DISPENSER; RS_CON[B.DROPPER] = C_DISPENSER;
+RS_CON[B.NOTE_BLOCK] = C_NOTE; RS_CON[B.BELL] = C_BELL; RS_CON[B.POWERED_RAIL] = C_RAIL; RS_CON[B.ACTIVATOR_RAIL] = C_RAIL; RS_CON[B.HOPPER] = C_HOPPER;
+RS_CON[B.REDSTONE_TORCH] = C_TORCH; RS_CON[B.REPEATER] = C_REPEATER; RS_CON[B.COMPARATOR] = C_COMPARATOR;
+for (const n of BLOCK_NAMES) {
+  const id = B[n.toUpperCase()], d = BLK[id];
+  if (!d) continue;
+  if (n.endsWith('_button')) RS_SRC[id] = S_BUTTON;
+  if (n.endsWith('_pressure_plate')) RS_SRC[id] = n.includes('weighted') ? S_WPLATE : S_PLATE;
+  if (d.door) RS_CON[id] = C_DOOR;
+  if (SHAPE[id] === SH.TRAPDOOR) RS_CON[id] = C_TRAPDOOR;
+  if (d.gate) RS_CON[id] = C_GATE;
+  if (d.bulb) RS_CON[id] = C_BULB;
+}
+const RS_ANY = new Uint8Array(MAXB);
+for (let i = 0; i < MAXB; i++) if (RS_SRC[i] || RS_CON[i]) RS_ANY[i] = 1;
+const conductive = id => OPAQUE[id] === 1 && SHAPE[id] === SH.CUBE;
+const IMMOVABLE = new Set([B.OBSIDIAN, B.CRYING_OBSIDIAN, B.BEDROCK, B.END_PORTAL_FRAME, B.REINFORCED_DEEPSLATE, B.END_GATEWAY, B.END_PORTAL, B.NETHER_PORTAL,
+  B.RESPAWN_ANCHOR, B.ENCHANTING_TABLE, B.ENDER_CHEST, B.SPAWNER, B.TRIAL_SPAWNER, B.VAULT, B.BEACON, B.PISTON_HEAD, B.JUKEBOX, B.LODESTONE]);
+
+const RS = {
+  queue: [], running: false,
+  // power the block at (x,y,z) sends to its neighbour on face f; strong: only power that charges a solid block
+  emit(w, x, y, z, f, strong) {
+    const id = w.getBlock(x, y, z), kind = RS_SRC[id];
+    if (!kind) return 0;
+    const m = w.getMeta(x, y, z);
+    switch (kind) {
+      case S_BLOCK: return strong ? 0 : 15;
+      case S_TORCH: if (m & 8) return 0; return strong ? (f === 2 ? 15 : 0) : (f === TORCH_ATT[m & 7] ? 0 : 15);
+      case S_LEVER: case S_BUTTON: if (!(m & 8)) return 0; return strong ? (f === (m & 7) ? 15 : 0) : 15;
+      case S_PLATE: if (!(m & 1)) return 0; return strong ? (f === 3 ? 15 : 0) : 15;
+      case S_WPLATE: if (!(m & 1)) return 0; return strong ? (f === 3 ? m >> 4 : 0) : m >> 4;
+      case S_REPEATER: return (m & 8) && f === FACE_OF_LOOK[m & 3] ? 15 : 0;
+      case S_COMPARATOR: return f === FACE_OF_LOOK[m & 3] ? m >> 4 : 0;
+      case S_OBSERVER: return (m & 8) && f === ((m & 7) ^ 1) ? 15 : 0;
+      case S_DAYLIGHT: return strong ? 0 : m >> 4;
+      case S_TARGET: return strong ? 0 : m & 15;
+      case S_SENSOR: return strong ? 0 : ((m & 1) ? 15 : 0);
+      case S_WIRE: {
+        const p = m & 15;
+        if (strong || !p || f === 2) return 0;
+        if (f === 3) return p;
+        const k = (wireMask((dx, dy, dz) => w.getBlock(x + dx, y + dy, z + dz)) & 15) || 15;
+        return (k & (1 << WIRE_DIR.indexOf(f))) ? p : 0;
+      }
+    }
+    return 0;
+  },
+  // power level of a solid block: strong charge only (what dust can draw from) or any charge
+  blockPower(w, x, y, z, strongOnly) {
+    let p = 0;
+    for (let g = 0; g < 6; g++) {
+      const nx = x + DX[g], ny = y + DY[g], nz = z + DZ[g], id = w.getBlock(nx, ny, nz);
+      if (!RS_SRC[id]) continue;
+      let v = this.emit(w, nx, ny, nz, g ^ 1, true);
+      if (!strongOnly && id === B.REDSTONE_WIRE) v = Math.max(v, this.emit(w, nx, ny, nz, g ^ 1, false));
+      if (v > p) p = v;
+    }
+    return p;
+  },
+  // power coming into (x,y,z) from its neighbour on face g
+  inputFrom(w, x, y, z, g) {
+    const nx = x + DX[g], ny = y + DY[g], nz = z + DZ[g], id = w.getBlock(nx, ny, nz);
+    if (RS_SRC[id]) return this.emit(w, nx, ny, nz, g ^ 1, false);
+    if (conductive(id)) return this.blockPower(w, nx, ny, nz, false);
+    return 0;
+  },
+  powered(w, x, y, z, skip) { for (let g = 0; g < 6; g++) if (g !== skip && this.inputFrom(w, x, y, z, g) > 0) return true; return false; },
+  // dust connected to the dust at (x,y,z): same level, or one up or down a block's side
+  wireLinks(w, x, y, z) {
+    const out = [], upOpaque = OPAQUE[w.getBlock(x, y + 1, z)];
+    for (const f of WIRE_DIR) {
+      const nx = x + DX[f], nz = z + DZ[f], n = w.getBlock(nx, y, nz);
+      if (n === B.REDSTONE_WIRE) out.push([nx, y, nz]);
+      else if (OPAQUE[n]) { if (!upOpaque && w.getBlock(nx, y + 1, nz) === B.REDSTONE_WIRE) out.push([nx, y + 1, nz]); }
+      else if (w.getBlock(nx, y - 1, nz) === B.REDSTONE_WIRE) out.push([nx, y - 1, nz]);
+    }
+    return out;
+  },
+  // recompute a whole dust network: every dust is the strongest of its inputs, or a neighbour minus one
+  updateWire(w, x, y, z, done) {
+    const idx = new Map(), list = [], key = (a, b, c) => a + ',' + b + ',' + c, stack = [[x, y, z]];
+    while (stack.length && list.length < 1024) {
+      const [a, b, c] = stack.pop(), k = key(a, b, c);
+      if (idx.has(k) || w.getBlock(a, b, c) !== B.REDSTONE_WIRE) continue;
+      idx.set(k, list.length); list.push([a, b, c]); done.add(k);
+      for (const q of this.wireLinks(w, a, b, c)) stack.push(q);
+    }
+    const lvl = new Int8Array(list.length), buckets = Array.from({ length: 16 }, () => []), links = [];
+    for (let i = 0; i < list.length; i++) {
+      const [a, b, c] = list[i];
+      let p = 0;
+      for (let g = 0; g < 6; g++) {
+        const nx = a + DX[g], ny = b + DY[g], nz = c + DZ[g], id = w.getBlock(nx, ny, nz);
+        if (id === B.REDSTONE_WIRE) continue;
+        if (RS_SRC[id]) p = Math.max(p, this.emit(w, nx, ny, nz, g ^ 1, false));
+        else if (conductive(id)) p = Math.max(p, this.blockPower(w, nx, ny, nz, true));
+      }
+      lvl[i] = p; if (p) buckets[p].push(i);
+      links.push(this.wireLinks(w, a, b, c).map(q => idx.get(key(...q))).filter(v => v !== undefined));
+    }
+    for (let L = 15; L > 1; L--) for (const i of buckets[L]) { if (lvl[i] !== L) continue; for (const j of links[i]) if (lvl[j] < L - 1) { lvl[j] = L - 1; buckets[L - 1].push(j); } }
+    const changed = [];
+    for (let i = 0; i < list.length; i++) {
+      const [a, b, c] = list[i], m = w.getMeta(a, b, c);
+      if ((m & 15) !== lvl[i]) { w.setBlock(a, b, c, B.REDSTONE_WIRE, (m & ~15) | lvl[i], false); changed.push(list[i]); }
+    }
+    return changed;
+  },
+  // something changed at (x,y,z): settle the dust and let the components nearby react
+  changed(w, x, y, z) {
+    if (!w) return;
+    this.queue.push([w, x, y, z]);
+    if (this.running) return;
+    this.running = true;
+    try {
+      let n = 0;
+      while (this.queue.length && n++ < 4000) {
+        const [ww, a, b, c] = this.queue.shift();
+        this.process(ww, a, b, c);
+      }
+      this.queue.length = 0;
+    } finally { this.running = false; }
+  },
+  process(w, x, y, z) {
+    // anything redstone close by? (a cheap test keeps ordinary block changes cheap)
+    let any = false;
+    for (let dy = -2; dy <= 2 && !any; dy++) for (let dz = -2; dz <= 2 && !any; dz++) for (let dx = -2; dx <= 2; dx++) {
+      if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 2) continue;
+      if (RS_ANY[w.getBlock(x + dx, y + dy, z + dz)]) { any = true; break; }
+    }
+    if (!any) { this.observe(w, x, y, z); return; }
+    const done = new Set(), touched = [];
+    for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+      if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 2) continue;
+      const a = x + dx, b = y + dy, c = z + dz;
+      if (w.getBlock(a, b, c) === B.REDSTONE_WIRE && !done.has(a + ',' + b + ',' + c)) for (const q of this.updateWire(w, a, b, c, done)) touched.push(q);
+    }
+    const seen = new Set();
+    const around = (a, b, c) => {
+      for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 2) continue;
+        const k = (a + dx) + ',' + (b + dy) + ',' + (c + dz);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        this.react(w, a + dx, b + dy, c + dz);
+      }
+    };
+    around(x, y, z);
+    for (const [a, b, c] of touched) around(a, b, c);
+    this.observe(w, x, y, z);
+    for (const [a, b, c] of touched) this.observe(w, a, b, c);
+  },
+  // observers watching (x,y,z) send a pulse
+  observe(w, x, y, z) {
+    for (let g = 0; g < 6; g++) {
+      const ox = x + DX[g], oy = y + DY[g], oz = z + DZ[g];
+      if (w.getBlock(ox, oy, oz) !== B.OBSERVER) continue;
+      const m = w.getMeta(ox, oy, oz);
+      if ((m & 7) === (g ^ 1) && !(m & 8)) w.schedule(ox, oy, oz, 2, 'rs_obs_on');
+    }
+  },
+  // remember the last power state of things that react to edges
+  last: new Map(),
+  edge(x, y, z, on) { const k = x + ',' + y + ',' + z, was = !!this.last.get(k); if (on) this.last.set(k, 1); else this.last.delete(k); return on !== was ? (on ? 1 : -1) : 0; },
+  set(w, x, y, z, id, m) { if (w.setBlock(x, y, z, id, m, false)) this.queue.push([w, x, y, z]); },
+  react(w, x, y, z) {
+    const id = w.getBlock(x, y, z), kind = RS_CON[id];
+    if (!kind) return;
+    const m = w.getMeta(x, y, z), g = window.game;
+    switch (kind) {
+      case C_LAMP: { const on = this.powered(w, x, y, z); if (on && !(m & 1)) this.set(w, x, y, z, id, m | 1); else if (!on && (m & 1)) w.schedule(x, y, z, 4, 'rs_lamp'); break; }
+      case C_DOOR: {
+        const by = (m & 8) ? y - 1 : y;
+        if (w.getBlock(x, by, z) !== id) return;
+        const on = this.powered(w, x, by, z) || this.powered(w, x, by + 1, z), e = this.edge(x, by, z, on);
+        if (e && g) g.setDoorOpen(x, by, z, e > 0);
+        break;
+      }
+      case C_TRAPDOOR: case C_GATE: {
+        const e = this.edge(x, y, z, this.powered(w, x, y, z));
+        if (e && !!(m & 4) !== (e > 0)) { this.set(w, x, y, z, id, e > 0 ? m | 4 : m & ~4); if (g) g.sound(e > 0 ? 'door_open' : 'door_close', x + 0.5, y + 0.5, z + 0.5); }
+        break;
+      }
+      case C_TNT: if (this.powered(w, x, y, z) && g) g.primeTNT(x, y, z, 80); break;
+      case C_PISTON: { const want = this.powered(w, x, y, z, m & 7); if (want !== !!(m & 8)) w.schedule(x, y, z, 1, 'rs_piston'); break; }
+      case C_DISPENSER: if (this.edge(x, y, z, this.powered(w, x, y, z)) > 0) w.schedule(x, y, z, 4, 'rs_dispense'); break;
+      case C_NOTE: if (this.edge(x, y, z, this.powered(w, x, y, z)) > 0 && g) g.playNote(x, y, z); break;
+      case C_BELL: if (this.edge(x, y, z, this.powered(w, x, y, z)) > 0 && g) g.sound('bell', x + 0.5, y + 0.5, z + 0.5); break;
+      case C_BULB: { const on = this.powered(w, x, y, z); if (on !== !!(m & 2)) this.set(w, x, y, z, id, on ? (m ^ 1) | 2 : m & ~2); break; }
+      case C_RAIL: { const on = this.powered(w, x, y, z); if (on !== !!(m & 8)) this.set(w, x, y, z, id, on ? m | 8 : m & ~8); break; }
+      case C_HOPPER: { const on = this.powered(w, x, y, z); if (on !== !!(m & 8)) w.setBlock(x, y, z, id, on ? m | 8 : m & ~8, false); break; }
+      case C_TORCH: { const off = this.torchOff(w, x, y, z, m); if (off !== !!(m & 8)) w.schedule(x, y, z, 2, 'rs_torch'); break; }
+      case C_REPEATER: { const on = this.repeaterIn(w, x, y, z, m); if (on !== !!(m & 8)) w.schedule(x, y, z, (((m >> 4) & 3) + 1) * 2, 'rs_repeater'); break; }
+      case C_COMPARATOR: if (this.comparatorOut(w, x, y, z, m) !== m >> 4) w.schedule(x, y, z, 2, 'rs_comparator'); break;
+    }
+  },
+  torchOff(w, x, y, z, m) { const f = TORCH_ATT[m & 7], ax = x + DX[f], ay = y + DY[f], az = z + DZ[f]; return conductive(w.getBlock(ax, ay, az)) && this.blockPower(w, ax, ay, az, false) > 0; },
+  repeaterIn(w, x, y, z, m) { return this.inputFrom(w, x, y, z, FACE_OF_LOOK[m & 3] ^ 1) > 0; },
+  // comparators: the rear signal (or how full a container behind is), against the stronger side
+  comparatorOut(w, x, y, z, m) {
+    const out = FACE_OF_LOOK[m & 3], back = out ^ 1;
+    let rear = this.inputFrom(w, x, y, z, back);
+    const bx = x + DX[back], by = y + DY[back], bz = z + DZ[back];
+    const fill = this.containerSignal(w, bx, by, bz);
+    if (fill >= 0) rear = Math.max(rear, fill);
+    else if (conductive(w.getBlock(bx, by, bz))) { const f2 = this.containerSignal(w, bx + DX[back], by, bz + DZ[back]); if (f2 >= 0) rear = Math.max(rear, f2); }
+    let side = 0;
+    for (const g of [FACE_OF_LOOK[(m + 1) & 3], FACE_OF_LOOK[(m + 3) & 3]]) {
+      const nx = x + DX[g], ny = y + DY[g], nz = z + DZ[g], id = w.getBlock(nx, ny, nz);
+      if (id === B.REDSTONE_WIRE || id === B.REPEATER || id === B.COMPARATOR || id === B.REDSTONE_BLOCK) side = Math.max(side, this.emit(w, nx, ny, nz, g ^ 1, false));
+    }
+    return (m & 4) ? Math.max(0, rear - side) : (rear >= side ? rear : 0);
+  },
+  containerSignal(w, x, y, z) {
+    const id = w.getBlock(x, y, z);
+    if (id === B.CAKE) return (7 - (w.getMeta(x, y, z) & 7)) * 2;
+    if (id === B.COMPOSTER) return Math.min(8, w.getMeta(x, y, z) & 15);
+    if (id === B.CAULDRON) return w.getMeta(x, y, z) & 3;
+    if (id === B.JUKEBOX) { const be = w.getBE(x, y, z); return be && be.disc ? 1 + (DISCS.indexOf(ITEMS[be.disc.id].disc) % 15) : 0; }
+    if (!BLK[id].use || !['chest', 'barrel', 'shulker', 'furnace', 'smoker', 'blast_furnace', 'dispenser', 'dropper', 'hopper', 'brewing'].includes(BLK[id].use) && !BLK[id].shulker) return -1;
+    const be = w.getBE(x, y, z);
+    if (!be || !be.items) return 0;
+    let sum = 0, any = false;
+    for (const s of be.items) if (s) { any = true; sum += s.count / (ITEMS[s.id].stack || 64); }
+    return any ? Math.floor(1 + sum / be.items.length * 14) : 0;
+  },
+};
+
+/* ---------------- delayed reactions ---------------- */
+const _onScheduledRS = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  const w = this.world;
+  if (!kind.startsWith('rs_')) return _onScheduledRS.call(this, kind, x, y, z);
+  const id = w.getBlock(x, y, z), m = w.getMeta(x, y, z);
+  switch (kind) {
+    case 'rs_torch': if (id === B.REDSTONE_TORCH) { const off = RS.torchOff(w, x, y, z, m); if (off !== !!(m & 8)) RS.set(w, x, y, z, id, off ? m | 8 : m & ~8); } break;
+    case 'rs_repeater': if (id === B.REPEATER) { const on = RS.repeaterIn(w, x, y, z, m); if (on !== !!(m & 8)) { RS.set(w, x, y, z, id, on ? m | 8 : m & ~8); const f = FACE_OF_LOOK[m & 3]; RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); } } break;
+    case 'rs_comparator': if (id === B.COMPARATOR) { const o = RS.comparatorOut(w, x, y, z, m); if (o !== m >> 4) { RS.set(w, x, y, z, id, (m & 7) | (o ? 8 : 0) | (o << 4)); const f = FACE_OF_LOOK[m & 3]; RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); } } break;
+    case 'rs_lamp': if (id === B.REDSTONE_LAMP && (m & 1) && !RS.powered(w, x, y, z)) RS.set(w, x, y, z, id, m & ~1); break;
+    case 'rs_obs_on': if (id === B.OBSERVER && !(m & 8)) { RS.set(w, x, y, z, id, m | 8); const f = (m & 7) ^ 1; RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); w.schedule(x, y, z, 2, 'rs_obs_off'); } break;
+    case 'rs_obs_off': if (id === B.OBSERVER && (m & 8)) { RS.set(w, x, y, z, id, m & ~8); const f = (m & 7) ^ 1; RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); } break;
+    case 'rs_target': if (id === B.TARGET && (m & 15)) RS.set(w, x, y, z, id, 0); break;
+    case 'rs_piston': if (RS_CON[id] === C_PISTON) { const want = RS.powered(w, x, y, z, m & 7); if (want !== !!(m & 8)) this.movePiston(x, y, z, want); } break;
+    case 'rs_dispense': if (RS_CON[id] === C_DISPENSER) this.dispense(x, y, z); break;
+    case 'rs_plate': this.checkPlate(x, y, z); break;
+  }
+  RS.changed(w, x, y, z);
+};
+// block changes anywhere tell redstone around them
+const _notifyRS = World.prototype.notify;
+World.prototype.notify = function (x, y, z) { _notifyRS.call(this, x, y, z); if (window.game && window.game.world === this) RS.changed(this, x, y, z); };
+World.prototype.redstoneChanged = function (x, y, z) { RS.changed(this, x, y, z); };
+Game.prototype.redstoneChanged = function (x, y, z) { RS.changed(this.world, x, y, z); };
+
+/* ---------------- pistons ---------------- */
+Game.prototype.movePiston = function (x, y, z, extend) {
+  const w = this.world, id = w.getBlock(x, y, z), m = w.getMeta(x, y, z), d = m & 7, sticky = id === B.STICKY_PISTON;
+  const dx = DX[d], dy = DY[d], dz = DZ[d], hx = x + dx, hy = y + dy, hz = z + dz;
+  const movable = b => !IMMOVABLE.has(b) && BLK[b].hard >= 0 && !(BLK[b].piston && false);
+  if (extend) {
+    const line = [];
+    let cx = hx, cy = hy, cz = hz;
+    for (;;) {
+      if (cy < 0 || cy > 255) return;
+      const b = w.getBlock(cx, cy, cz);
+      if (b === 0 || BLK[b].liquid || REPL[b] || (BLK[b].needs && !SOLID[b])) break;
+      if (line.length >= 12 || !movable(b) || w.getBE(cx, cy, cz) || (BLK[b].piston && (w.getMeta(cx, cy, cz) & 8))) return;
+      line.push([cx, cy, cz, b, w.getMeta(cx, cy, cz)]);
+      cx += dx; cy += dy; cz += dz;
+    }
+    const end = w.getBlock(cx, cy, cz);
+    if (end && !BLK[end].liquid) this.breakBlock(cx, cy, cz, null, true);
+    for (let i = line.length - 1; i >= 0; i--) { const [bx, by, bz, b, bm] = line[i]; w.setBlock(bx + dx, by + dy, bz + dz, b, bm, false); }
+    w.setBlock(hx, hy, hz, B.PISTON_HEAD, d | (sticky ? 16 : 0), false);
+    w.setBlock(x, y, z, id, m | 8, false);
+    // entities in the way ride along
+    for (const e of this.mobsAndPlayer()) {
+      for (const [bx, by, bz] of [[hx - dx, hy - dy, hz - dz], ...line]) {
+        if (e.x + e.w / 2 > bx + dx && e.x - e.w / 2 < bx + dx + 1 && e.z + e.w / 2 > bz + dz && e.z - e.w / 2 < bz + dz + 1 && e.y < by + dy + 1 && e.y + e.h > by + dy) { e.x += dx; e.y += Math.max(0, dy); e.z += dz; break; }
+      }
+    }
+    this.sound('piston_out', x + 0.5, y + 0.5, z + 0.5);
+    for (const [bx, by, bz] of line) { w.notify(bx, by, bz); w.notify(bx + dx, by + dy, bz + dz); }
+    w.notify(hx, hy, hz);
+  } else {
+    if (w.getBlock(hx, hy, hz) === B.PISTON_HEAD) w.setBlock(hx, hy, hz, 0, 0, false);
+    w.setBlock(x, y, z, id, m & ~8, false);
+    if (sticky) {
+      const fx = hx + dx, fy = hy + dy, fz = hz + dz, b = w.getBlock(fx, fy, fz);
+      if (b && movable(b) && !BLK[b].liquid && !REPL[b] && !w.getBE(fx, fy, fz) && !(BLK[b].needs && !SOLID[b]) && !(BLK[b].piston && (w.getMeta(fx, fy, fz) & 8))) {
+        w.setBlock(hx, hy, hz, b, w.getMeta(fx, fy, fz), false); w.setBlock(fx, fy, fz, 0, 0, false); w.notify(fx, fy, fz);
+      }
+    }
+    this.sound('piston_in', x + 0.5, y + 0.5, z + 0.5);
+    w.notify(hx, hy, hz);
+  }
+  this.remeshNear(x, z);
+};
+
+/* ---------------- dispensers and droppers ---------------- */
+Game.prototype.dispense = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z), d = w.getMeta(x, y, z) & 7, be = w.getBE(x, y, z);
+  const slots = be && be.items ? be.items.map((s, i) => s ? i : -1).filter(i => i >= 0) : [];
+  if (!slots.length) { this.sound('click', x + 0.5, y + 0.5, z + 0.5); return; }
+  const i = slots[Math.floor(Math.random() * slots.length)], st = be.items[i], it = ITEMS[st.id];
+  const fx = x + DX[d], fy = y + DY[d], fz = z + DZ[d], px = x + 0.5 + DX[d] * 0.7, py = y + 0.5 + DY[d] * 0.7 - (DY[d] ? 0 : 0.15), pz = z + 0.5 + DZ[d] * 0.7;
+  const take = () => { st.count--; if (st.count <= 0) be.items[i] = null; w.setBE(x, y, z, be); };
+  const front = w.getBlock(fx, fy, fz);
+  const giveBack = (nid) => { if (st.count === 1) be.items[i] = { id: nid, count: 1 }; else { take(); const left = this.insertItem(be, { id: nid, count: 1 }); if (left) this.dropItem(px, py, pz, left); } w.setBE(x, y, z, be); };
+  if (id === B.DROPPER) {
+    const target = w.getBE(fx, fy, fz);
+    if (target && target.items) { if (!this.insertItem(target, { id: st.id, count: 1, tag: st.tag })) { take(); w.setBE(fx, fy, fz, target); } return; }
+  } else {
+    const shoot = (kind, sp) => { const pr = this.spawnProjectile(kind, px, py, pz, DX[d] * sp, DY[d] * sp + 0.1, DZ[d] * sp, null); return pr; };
+    if (st.id === I.ARROW || st.id === I.SPECTRAL_ARROW || st.id === I.TIPPED_ARROW) { const pr = shoot('arrow', 1.1); if (pr) { pr.arrowStack = { id: st.id, count: 1, tag: st.tag }; pr.pickup = true; } take(); this.sound('shoot', px, py, pz); return; }
+    if (st.id === I.SNOWBALL) { shoot('snow', 1.1); take(); return; }
+    if (st.id === I.EGG) { shoot('egg', 1.1); take(); return; }
+    if (st.id === I.FIRE_CHARGE) { shoot('fire', 1.0); take(); this.sound('blast', px, py, pz); return; }
+    if (st.id === I.SPLASH_POTION || st.id === I.LINGERING_POTION) { const pr = shoot('potion', 0.8); if (pr) pr.potion = st; take(); return; }
+    if (st.id === I.TNT) { if (!front || REPL[front]) { w.setBlock(fx, fy, fz, B.TNT, 0, false); this.primeTNT(fx, fy, fz, 80); take(); } return; }
+    if (st.id === I.WATER_BUCKET || st.id === I.LAVA_BUCKET) { if (!front || REPL[front]) { w.setBlock(fx, fy, fz, st.id === I.WATER_BUCKET ? B.WATER : B.LAVA, 0); giveBack(I.BUCKET); } return; }
+    if (st.id === I.BUCKET) { if ((front === B.WATER || front === B.LAVA) && w.getMeta(fx, fy, fz) === 0) { w.setBlock(fx, fy, fz, 0, 0); giveBack(front === B.WATER ? I.WATER_BUCKET : I.LAVA_BUCKET); } return; }
+    if (st.id === I.FLINT_AND_STEEL) { if (!front) { w.setBlock(fx, fy, fz, B.FIRE, 0); this.sound('click', px, py, pz); } else if (front === B.TNT) this.primeTNT(fx, fy, fz, 80); return; }
+    if (st.id === I.BONE_MEAL && this.boneMeal) { if (this.boneMeal(fx, fy, fz)) take(); return; }
+    if (it.armor) { const p = this.player, slot = it.armor.slot; if (p && Math.floor(p.x) === fx && Math.floor(p.z) === fz && Math.abs(p.y - fy) < 2 && !p.armor[slot]) { p.armor[slot] = { id: st.id, count: 1, tag: st.tag, dmg: st.dmg }; take(); return; } }
+  }
+  // anything else just drops out
+  const one = { id: st.id, count: 1 }; if (st.tag) one.tag = st.tag; if (st.dmg) one.dmg = st.dmg;
+  take();
+  const e = this.dropItem(px, py, pz, one);
+  if (e) { e.vx = DX[d] * 0.25 + (Math.random() - 0.5) * 0.05; e.vy = DY[d] * 0.25 + 0.1; e.vz = DZ[d] * 0.25 + (Math.random() - 0.5) * 0.05; }
+  this.sound('click', px, py, pz);
+};
+// put a stack into a container; returns what didn't fit
+Game.prototype.insertItem = function (be, st, slots) {
+  const items = be.items, it = ITEMS[st.id], max = it.stack || 64;
+  let left = st.count;
+  const list = slots || items.map((s, i) => i);
+  for (const i of list) { const s = items[i]; if (s && s.id === st.id && !s.dmg && JSON.stringify(s.tag || null) === JSON.stringify(st.tag || null) && s.count < max) { const n = Math.min(left, max - s.count); s.count += n; left -= n; if (!left) return null; } }
+  for (const i of list) if (!items[i]) { const n = Math.min(left, max); items[i] = Object.assign({}, st, { count: n }); left -= n; if (!left) return null; }
+  return Object.assign({}, st, { count: left });
+};
+
+// a hopper feeding a composter
+Game.prototype.compost = function (x, y, z, st) {
+  const w = this.world, lv = w.getMeta(x, y, z) & 15;
+  if (COMPOST[st.id] === undefined || lv >= 7) return false;
+  if (Math.random() < COMPOST[st.id] || lv === 0) w.setMeta(x, y, z, lv + 1 >= 7 ? 8 : lv + 1);
+  return true;
+};
+
+/* ---------------- ticking: hoppers, pressure plates, daylight detectors ---------------- */
+// redstone blocks that need a look every few ticks, listed per chunk the first time it is needed
+function rsTickers(c) {
+  if (c._rsT) return c._rsT;
+  const out = [], bl = c.blocks;
+  for (let i = 0; i < 65536; i++) { const b = bl[i]; if (b === B.HOPPER || b === B.DAYLIGHT_DETECTOR) out.push(i); }
+  return c._rsT = out;
+}
+const _setBlockRS = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  const r = _setBlockRS.call(this, x, y, z, id, meta, notify);
+  if (r && (id === B.HOPPER || id === B.DAYLIGHT_DETECTOR)) { const c = this.getChunk(x >> 4, z >> 4); if (c && c._rsT) { const i = (y << 8) | ((z & 15) << 4) | (x & 15); if (!c._rsT.includes(i)) c._rsT.push(i); } }
+  return r;
+};
+Game.prototype.tickRedstone = function () {
+  const w = this.world, p = this.player;
+  if (!p) return;
+  // pressure plates under anything standing on them
+  for (const e of this.entities) this.pressPlate(e);
+  this.pressPlate(p);
+  const t = w.tick, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+  if (t % 4 !== 0) return;
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2) continue;
+    for (const i of rsTickers(c)) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), id = c.blocks[i];
+      if (id === B.HOPPER) { if (t % 8 === 0) this.tickHopper(x, y, z); }
+      else if (id === B.DAYLIGHT_DETECTOR && t % 20 === 0) this.tickDaylight(x, y, z);
+    }
+  }
+};
+Game.prototype.pressPlate = function (e) {
+  if (!e || e.dead || (e.flying && e === this.player)) return;
+  const w = this.world, x = Math.floor(e.x), y = Math.floor(e.y + 0.01), z = Math.floor(e.z), id = w.getBlock(x, y, z);
+  if (SHAPE[id] !== SH.PLATE) return;
+  if (id === B.STONE_PRESSURE_PLATE || id === B.POLISHED_BLACKSTONE_PRESSURE_PLATE) { if (!(e instanceof Mob) && e !== this.player) return; }
+  if (!(w.getMeta(x, y, z) & 1)) this.checkPlate(x, y, z);
+};
+Game.prototype.checkPlate = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  if (SHAPE[id] !== SH.PLATE) return;
+  const mobsOnly = id === B.STONE_PRESSURE_PLATE || id === B.POLISHED_BLACKSTONE_PRESSURE_PLATE;
+  let n = 0;
+  for (const e of [this.player, ...this.entities]) {
+    if (!e || e.dead || (mobsOnly && !(e instanceof Mob) && e !== this.player)) continue;
+    if (e === this.player && e.flying) continue;
+    if (e.x + (e.w || 0.3) / 2 > x && e.x - (e.w || 0.3) / 2 < x + 1 && e.z + (e.w || 0.3) / 2 > z && e.z - (e.w || 0.3) / 2 < z + 1 && e.y >= y - 0.1 && e.y < y + 0.6) n += e instanceof ItemEntity ? e.stack.count : 1;
+  }
+  const weighted = RS_SRC[id] === S_WPLATE, level = !n ? 0 : weighted ? (id === B.LIGHT_WEIGHTED_PRESSURE_PLATE ? Math.min(15, n) : Math.min(15, Math.ceil(n / 10))) : 15;
+  const m = w.getMeta(x, y, z), cur = (m & 1) ? (weighted ? m >> 4 : 15) : 0;
+  if (level !== cur) {
+    RS.set(w, x, y, z, id, level ? (1 | (weighted ? level << 4 : 0)) : 0);
+    this.sound('click', x + 0.5, y + 0.1, z + 0.5);
+    RS.changed(w, x, y, z); RS.changed(w, x, y - 1, z);
+  }
+  if (level) w.schedule(x, y, z, 10, 'rs_plate');
+};
+Game.prototype.tickDaylight = function (x, y, z) {
+  const w = this.world, m = w.getMeta(x, y, z), sky = w.getLightRaw(x, y, z) >> 4;
+  // brightest at noon, nothing at night
+  let lvl = Math.round(sky * Math.min(1, Math.max(0, Math.cos(((w.time % 24000) - 6000) / 12000 * Math.PI) * 1.3)));
+  if (w.dim !== 'overworld') lvl = 0;
+  if (m & 2) lvl = 15 - lvl;
+  lvl = Math.max(0, Math.min(15, lvl));
+  if (lvl !== m >> 4) { RS.set(w, x, y, z, B.DAYLIGHT_DETECTOR, (m & 15) | (lvl << 4)); RS.changed(w, x, y, z); }
+};
+// hoppers: pull from the container above (or items lying on top), push into the container below
+Game.prototype.tickHopper = function (x, y, z) {
+  const w = this.world;
+  if (w.getMeta(x, y, z) & 8) return;
+  let be = w.getBE(x, y, z);
+  if (!be || !be.items) { be = { type: 'hopper', kind: 'hopper', items: new Array(5).fill(null) }; }
+  let moved = false;
+  // push down first
+  const below = w.getBE(x, y - 1, z), bid = w.getBlock(x, y - 1, z);
+  if (below && below.items) {
+    for (let i = 0; i < be.items.length && !moved; i++) {
+      const s = be.items[i];
+      if (!s) continue;
+      const slots = below.type === 'furnace' ? [0] : below.type === 'brewing' ? (ITEMS[s.id].name === 'blaze_powder' ? [4] : [3]) : null;
+      if (!this.insertItem(below, { id: s.id, count: 1, tag: s.tag, dmg: s.dmg }, slots)) { s.count--; if (!s.count) be.items[i] = null; moved = true; w.setBE(x, y - 1, z, below); if (below.type === 'furnace') this.furnaces.set(this.beKey(x, y - 1, z), { x, y: y - 1, z, be: below }); }
+    }
+  } else if (bid === B.COMPOSTER) {
+    for (let i = 0; i < be.items.length && !moved; i++) { const s = be.items[i]; if (s && this.compost && this.compost(x, y - 1, z, s)) { s.count--; if (!s.count) be.items[i] = null; moved = true; } }
+  }
+  // then pull from above
+  const above = w.getBE(x, y + 1, z);
+  if (above && above.items) {
+    const from = above.type === 'furnace' ? [2] : above.items.map((s, i) => i);
+    for (const i of from) {
+      const s = above.items[i];
+      if (!s) continue;
+      if (!this.insertItem(be, { id: s.id, count: 1, tag: s.tag, dmg: s.dmg })) { s.count--; if (!s.count) above.items[i] = null; w.setBE(x, y + 1, z, above); moved = true; break; }
+    }
+  } else if (!OPAQUE[w.getBlock(x, y + 1, z)]) {
+    for (const e of this.entities) {
+      if (!(e instanceof ItemEntity) || e.dead || e.x < x || e.x > x + 1 || e.z < z || e.z > z + 1 || e.y < y + 0.6 || e.y > y + 1.8) continue;
+      const left = this.insertItem(be, e.stack);
+      if (!left) e.dead = true; else e.stack = left;
+      moved = true;
+      break;
+    }
+  }
+  if (moved) w.setBE(x, y, z, be);
+};
+const _gameTickRS = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickRS.call(this); if (this.world && this.player) this.tickRedstone(); };
+
+/* ---------------- targets ---------------- */
+const _impactRS = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (!e) {
+    const w = this.game.world, l = Math.hypot(this.vx, this.vy, this.vz) || 1;
+    for (let k = 0; k <= 4; k++) {
+      const x = Math.floor(this.x + this.vx / l * k * 0.3), y = Math.floor(this.y + this.vy / l * k * 0.3), z = Math.floor(this.z + this.vz / l * k * 0.3);
+      if (w.getBlock(x, y, z) !== B.TARGET) continue;
+      // the closer to the centre of the face, the stronger the signal
+      const off = Math.max(Math.abs(this.x - x - 0.5), Math.abs(this.y - y - 0.5), Math.abs(this.z - z - 0.5)), lvl = Math.max(1, Math.min(15, Math.round(15 - Math.max(0, off - 0.05) * 30)));
+      RS.set(w, x, y, z, B.TARGET, lvl); RS.changed(w, x, y, z);
+      w.schedule(x, y, z, this.kind === 'arrow' || this.kind === 'trident' ? 20 : 8, 'rs_target');
+      break;
+    }
+  }
+  return _impactRS.call(this, e);
+};
+// right click toggles a daylight detector between day and night mode, and cycles a repeater's delay / a comparator's mode
+const _useBlockRS = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const w = this.world, { x, y, z } = hit, id = hit.id, m = w.getMeta(x, y, z);
+  if (!(p.sneaking && held)) {
+    if (id === B.DAYLIGHT_DETECTOR) { RS.set(w, x, y, z, id, m ^ 2); this.tickDaylight(x, y, z); this.sound('click', x + 0.5, y + 0.5, z + 0.5); return true; }
+    if (id === B.REPEATER) { RS.set(w, x, y, z, id, (m & ~48) | ((((m >> 4) & 3) + 1) & 3) << 4); this.sound('click', x + 0.5, y + 0.5, z + 0.5); RS.changed(w, x, y, z); return true; }
+    if (id === B.COMPARATOR) { RS.set(w, x, y, z, id, m ^ 4); this.sound('click', x + 0.5, y + 0.5, z + 0.5); w.schedule(x, y, z, 2, 'rs_comparator'); return true; }
+  }
+  return _useBlockRS.call(this, p, hit, held);
 };
 
 </script>
