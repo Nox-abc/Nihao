@@ -20078,6 +20078,484 @@ Game.prototype.useBlock = function (p, hit, held) {
   return _useBlockRS.call(this, p, hit, held);
 };
 
+/* @file 100_vehicles.js */
+/* ===================================================================
+   VEHICLES — boats, bamboo rafts and chest boats that float and are
+   rowed with W A S D; minecarts (plain, chest, hopper, furnace, TNT)
+   that follow rails over slopes and curves, sped up by powered rails,
+   sensed by detector rails and set off by activator rails
+   =================================================================== */
+const BOAT_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo'];
+const WOOD_COL = { oak: [168, 135, 84], spruce: [114, 84, 50], birch: [200, 182, 124], jungle: [164, 118, 82], acacia: [172, 94, 54], dark_oak: [70, 46, 24], mangrove: [120, 56, 50], cherry: [228, 182, 174], bamboo: [196, 176, 84] };
+const CHEST_PARTS = (y) => [
+  P_('chest_bottom', [-2, -5 + y, -6], [[0, 76, 0, 0, 0, 12, 8, 12]], [0, -HPI, 0], 'root'),
+  P_('chest_lid', [-2, -9 + y, -6], [[0, 59, 0, 0, 0, 12, 4, 12]], [0, -HPI, 0], 'root'),
+  P_('chest_lock', [-1, -6 + y, -1], [[0, 59, 0, 0, 0, 2, 4, 1]], [0, -HPI, 0], 'root')];
+const BOAT_PARTS = [
+  P_('root', [0, 18, 0], [], [0, HPI, 0]),
+  P_('bottom', [0, 3, 1], [[0, 0, -14, -9, -3, 28, 16, 3]], [HPI, 0, 0], 'root'),
+  P_('back', [-15, 4, 4], [[0, 19, -13, -7, -1, 18, 6, 2]], [0, PI * 1.5, 0], 'root'),
+  P_('front', [15, 4, 0], [[0, 27, -8, -7, -1, 16, 6, 2]], [0, HPI, 0], 'root'),
+  P_('right', [0, 4, -9], [[0, 35, -14, -7, -1, 28, 6, 2]], [0, PI, 0], 'root'),
+  P_('left', [0, 4, 9], [[0, 43, -14, -7, -1, 28, 6, 2]], null, 'root'),
+  P_('left_paddle', [3, -5, 9], [[62, 0, -1, 0, -5, 2, 2, 18], [62, 0, -1.001, -3, 8, 1, 6, 7]], [0, 0, 0.19634955], 'root'),
+  P_('right_paddle', [3, -5, -9], [[62, 20, -1, 0, -5, 2, 2, 18], [62, 20, 0.001, -3, 8, 1, 6, 7]], [0, PI, 0.19634955], 'root')];
+const RAFT_PARTS = [
+  P_('root', [0, 18, 0], [], [0, HPI, 0]),
+  P_('bottom', [0, -2.1, 1], [[0, 0, -14, -11, -4, 28, 20, 4], [0, 0, -14, -9, -8, 28, 16, 4]], [HPI, 0, 0], 'root'),
+  P_('left_paddle', [3, -4, 9], [[0, 24, -1, 0, -5, 2, 2, 18], [0, 24, -1.001, -3, 8, 1, 6, 7]], [0, 0, 0.19634955], 'root'),
+  P_('right_paddle', [3, -4, -9], [[40, 24, -1, 0, -5, 2, 2, 18], [40, 24, 0.001, -3, 8, 1, 6, 7]], [0, PI, 0.19634955], 'root')];
+// paddles swing while rowing (the same curve as the real game)
+const clampLerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
+function animBoat(P, st) {
+  for (const [side, n] of [[0, 'left_paddle'], [1, 'right_paddle']]) {
+    const t = st.row ? st.row[side] : 0;
+    const rx = clampLerp(-PI / 3, -0.2617994, (Math.sin(-t) + 1) / 2), ry = clampLerp(-PI / 4, PI / 4, (Math.sin(-t + 1) + 1) / 2);
+    P[n] = [rx, side ? PI - ry : ry, 0.19634955];
+  }
+}
+Object.assign(MOB_MODELS, {
+  boat: { tw: 128, th: 64, anim: animBoat, parts: BOAT_PARTS },
+  chest_boat: { tw: 128, th: 128, anim: animBoat, parts: [...BOAT_PARTS, ...CHEST_PARTS(0)] },
+  raft: { tw: 128, th: 64, anim: animBoat, parts: RAFT_PARTS },
+  chest_raft: { tw: 128, th: 128, anim: animBoat, parts: [...RAFT_PARTS, ...CHEST_PARTS(-5.1)] },
+  minecart: { tw: 64, th: 32, anim: (P, st) => { P.tilt = [st.pitch || 0, 0, st.wobble || 0]; }, parts: [
+    P_('tilt', [0, 18, 0], [], null), P_('root', [0, 0, 0], [], [0, HPI, 0], 'tilt'),
+    P_('bottom', [0, 4, 0], [[0, 10, -10, -8, -1, 20, 16, 2]], [HPI, 0, 0], 'root'),
+    P_('front', [-9, 4, 0], [[0, 0, -8, -9, -1, 16, 8, 2]], [0, PI * 1.5, 0], 'root'),
+    P_('back', [9, 4, 0], [[0, 0, -8, -9, -1, 16, 8, 2]], [0, HPI, 0], 'root'),
+    P_('left', [0, 4, -7], [[0, 0, -8, -9, -1, 16, 8, 2]], [0, PI, 0], 'root'),
+    P_('right', [0, 4, 7], [[0, 0, -8, -9, -1, 16, 8, 2]], null, 'root')] },
+});
+// procedural planks for the boats, iron for the minecart
+function boatPainter(wood) {
+  const c = WOOD_COL[wood], bam = wood === 'bamboo';
+  const plank = (f, x, y, W, H, R) => {
+    const inner = f === 'front' || f === 'top';
+    let col = inner ? shd(c, 0.82) : c;
+    if (bam ? x % 3 === 2 : (y % 4 === 3)) col = shd(col, 0.78);
+    if (!bam && y % 4 !== 3 && (x + Math.floor(y / 4) * 7) % 13 === 0) col = shd(col, 0.85);
+    return nz(col, R, 0.06);
+  };
+  const chest = (f, x, y, W, H, R, ci) => {
+    const edge = x === 0 || y === 0 || x === W - 1 || y === H - 1;
+    return nz(edge ? [74, 50, 24] : [162, 112, 48], R, 0.06);
+  };
+  return {
+    bottom: plank, back: plank, front: plank, right: plank, left: plank,
+    left_paddle: (f, x, y, W, H, R, ci) => nz(ci === 0 ? shd(c, 1.1) : c, R, 0.05), right_paddle: (f, x, y, W, H, R, ci) => nz(ci === 0 ? shd(c, 1.1) : c, R, 0.05),
+    chest_bottom: chest, chest_lid: chest, chest_lock: (f, x, y, W, H, R) => nz([170, 170, 176], R),
+  };
+}
+for (const wood of BOAT_WOODS) {
+  const raft = wood === 'bamboo';
+  defSkin('entity/boat/' + wood, 128, 64, () => skinParts(128, 64, (raft ? RAFT_PARTS : BOAT_PARTS), boatPainter(wood), 501));
+  defSkin('entity/chest_boat/' + wood, 128, 128, () => skinParts(128, 128, raft ? MOB_MODELS.chest_raft.parts : MOB_MODELS.chest_boat.parts, boatPainter(wood), 502));
+}
+defSkin('entity/minecart', 64, 32, () => skinParts(64, 32, MOB_MODELS.minecart.parts, {
+  '*': (f, x, y, W, H, R) => {
+    const edge = x === 0 || y === 0 || x === W - 1 || y === H - 1, rivet = !edge && (x === 1 || x === W - 2) && (y === 1 || y === H - 2);
+    return nz(rivet ? [176, 178, 182] : edge ? [70, 72, 76] : (f === 'top' || f === 'front') ? [92, 94, 98] : [124, 126, 130], R, 0.05);
+  },
+}, 503));
+
+defMob('boat', { w: 1.375, h: 0.5625, hp: 1000, walk: 0, run: 0, cat: 'misc', ai: [], vehicle: true, persistent: true, sounds: null });
+defMob('chest_boat', { w: 1.375, h: 0.5625, hp: 1000, walk: 0, run: 0, cat: 'misc', ai: [], vehicle: true, persistent: true, sounds: null });
+defMob('minecart', { w: 0.98, h: 0.7, hp: 1000, walk: 0, run: 0, cat: 'misc', ai: [], vehicle: true, persistent: true, sounds: null });
+
+/* ---------------- shared vehicle behaviour ---------------- */
+class Vehicle extends Mob {
+  constructor(game, type, x, y, z, opts) { super(game, type, x, y, z, opts); this.persistent = true; this.damage = 0; this.wobble = 0; this.stepH = 0; }
+  keepWhenUnloaded() { return true; }
+  envDamage() { }
+  landed() { }
+  // hitting a vehicle knocks it about; enough hits break it into its item
+  hurt(amount, source, attacker) {
+    if (this.dead) return false;
+    const p = this.game.player;
+    if (source === 'fire' || source === 'lava' || source === 'drown' || source === 'fall') return false;
+    this.wobble = 10; this.wobbleSide = -(this.wobbleSide || 1);
+    this.damage += amount * 10;
+    this.hurtTime = 10;
+    if (this.damage > 40 || (attacker === p && p.mode === 1)) this.breakApart(attacker === p && p.mode === 1);
+    return true;
+  }
+  breakApart(creative) {
+    const g = this.game;
+    this.dead = true;
+    if (this.rider) g.dismount(this.rider);
+    if (!creative) { const it = this.itemOf(); if (it) g.dropItem(this.x, this.y + 0.3, this.z, { id: it, count: 1 }); }
+    for (const st of this.data.items || []) if (st) g.dropItem(this.x, this.y + 0.3, this.z, st);
+    g.sound('break_wood', this.x, this.y, this.z);
+  }
+  die() { this.breakApart(false); }
+}
+
+/* ---------------- boats ---------------- */
+class Boat extends Vehicle {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    const o = opts || {};
+    if (!o.loading) { this.data.wood = o.wood || 'oak'; if (type === 'chest_boat') this.data.items = new Array(27).fill(null); }
+    this.row = [0, 0]; this.turnV = 0;
+  }
+  itemOf() { const wd = this.data.wood, raft = wd === 'bamboo'; const n = this.type === 'chest_boat' ? (raft ? 'bamboo_chest_raft' : wd + '_chest_boat') : (raft ? 'bamboo_raft' : wd + '_boat'); return ITEM_BY_NAME[n] ? ITEM_BY_NAME[n].id : null; }
+  interact(p, held) {
+    if (this.type === 'chest_boat' && p.sneaking) { this.game.ui.openInv('chest', { items: this.data.items }); this.game.sound('chest', this.x, this.y, this.z); return true; }
+    if (!this.rider) { this.game.mount(p, this); return true; }
+    return false;
+  }
+  // top of the water under the boat, or null on land
+  waterTop() {
+    const w = this.game.world, hw = this.w / 2 - 0.05;
+    let top = null;
+    for (const [dx, dz] of [[0, 0], [-hw, -hw], [hw, -hw], [-hw, hw], [hw, hw]]) {
+      const x = Math.floor(this.x + dx), z = Math.floor(this.z + dz);
+      for (let y = Math.floor(this.y - 0.3); y <= Math.floor(this.y + 0.6); y++) {
+        const id = w.getBlock(x, y, z);
+        if (id === B.WATER || WATERY[id] === 1) { const t = y + (w.getBlock(x, y + 1, z) === B.WATER ? 1 : 0.9); if (top === null || t > top) top = t; }
+      }
+    }
+    return top;
+  }
+  tick() {
+    this.savePrev(); this.age++;
+    const g = this.game, w = g.world;
+    if (this.hurtTime > 0) this.hurtTime--;
+    if (this.wobble > 0) this.wobble--;
+    if (this.damage > 0) this.damage = Math.max(0, this.damage - 0.25);
+    if (this.rider && this.rider.dead) this.rider = null;
+    // rowing
+    let fwd = 0, turn = 0;
+    if (this.rider === g.player && g.input) { const k = g.input.keys; fwd = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0); turn = (k.has('KeyA') ? 1 : 0) - (k.has('KeyD') ? 1 : 0); }
+    this.turnV = (this.turnV + turn * 0.0175) * 0.9;
+    this.yaw += this.turnV; this.bodyYaw = this.yaw;
+    if (this.rider) this.rider.yaw += this.turnV;
+    const top = this.waterTop(), fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+    const under = top !== null && top > this.y + this.h, onIce = !top && BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.1), Math.floor(this.z))].slip;
+    if (fwd > 0) { this.vx += fx * 0.04; this.vz += fz * 0.04; } else if (fwd < 0) { this.vx -= fx * 0.005; this.vz -= fz * 0.005; }
+    for (let s = 0; s < 2; s++) { const rowing = fwd !== 0 || (turn !== 0 && (s === 0 ? turn < 0 : turn > 0)); if (rowing) this.row[s] += 0.3927; }
+    // floating
+    if (top !== null) {
+      const target = top - 0.12;
+      if (under) this.vy += 0.06;
+      else this.vy += (target - this.y) * 0.25 - this.vy * 0.4 - 0.005;
+      this.vy = Math.max(-0.3, Math.min(0.2, this.vy));
+    } else this.vy -= 0.04;
+    const res = this.physicsStep();
+    const fr = top !== null ? (under ? 0.45 : 0.9) : onIce ? 0.98 : this.onGround ? 0.45 : 0.98;
+    this.vx *= fr; this.vz *= fr;
+    if (top === null && this.onGround) this.vy = 0;
+    // ramming a wall at speed breaks the boat on land only in old versions; here it just stops
+    if (res.hx || res.hz) { this.vx *= 0.3; this.vz *= 0.3; }
+    this.updateFluids();
+    if (this.y < -64) this.dead = true;
+    if (this.inLava) this.breakApart(false);
+  }
+  animState(a) { return { row: this.row, age: this.age + a }; }
+  skins() { const wd = this.data.wood || 'oak'; return [{ key: (this.type === 'chest_boat' ? 'entity/chest_boat/' : 'entity/boat/') + wd }]; }
+  customRender(r, a, p, st) {
+    const md = MOB_MODELS[this.data.wood === 'bamboo' ? (this.type === 'chest_boat' ? 'chest_raft' : 'raft') : this.type];
+    const yaw = this.pyaw + (this.bodyYaw - this.pyaw) * a, tilt = this.wobble > 0 ? Math.sin(this.wobble * 0.9) * this.wobble / 10 * 0.18 * (this.wobbleSide || 1) : 0;
+    drawMob(r, md, this.skins(), p, yaw, st, this.hurtTime > 0 ? [1, 0.75, 0.75, 1] : [1, 1, 1, 1], this.lightAt(), 1, tilt);
+    return true;
+  }
+}
+MOB_CLASSES.boat = Boat; MOB_CLASSES.chest_boat = Boat;
+
+/* ---------------- rails ---------------- */
+// the two ends of each rail shape: [dx, dy, dz]; dy -1 marks the low end of a slope
+const RAIL_EXITS = [[[0, 0, -1], [0, 0, 1]], [[-1, 0, 0], [1, 0, 0]], [[-1, -1, 0], [1, 0, 0]], [[-1, 0, 0], [1, -1, 0]], [[0, 0, -1], [0, -1, 1]], [[0, -1, -1], [0, 0, 1]],
+  [[0, 0, 1], [1, 0, 0]], [[0, 0, 1], [-1, 0, 0]], [[0, 0, -1], [-1, 0, 0]], [[0, 0, -1], [1, 0, 0]]];
+const isRail = id => SHAPE[id] === SH.RAIL;
+const railShape = (id, m) => BLK[id].rail === 'rail' ? (m & 15) : (m & 7);
+// choose the shape of a freshly placed rail from the rails around it (curves only for plain rails)
+function shapeRail(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (!isRail(id)) return;
+  const m = w.getMeta(x, y, z), cur = railShape(id, m), plain = BLK[id].rail === 'rail';
+  const link = (dx, dz) => isRail(w.getBlock(x + dx, y, z + dz)) ? 1 : isRail(w.getBlock(x + dx, y + 1, z + dz)) ? 2 : isRail(w.getBlock(x + dx, y - 1, z + dz)) ? 1 : 0;
+  const N = link(0, -1), S = link(0, 1), E = link(1, 0), W = link(-1, 0);
+  let s = cur;
+  if ((N || S) && !(E || W) || (N && S)) s = N === 2 ? 4 : S === 2 ? 5 : 0;
+  else if ((E || W) && !(N || S) || (E && W)) s = E === 2 ? 2 : W === 2 ? 3 : 1;
+  else if (plain && S && E) s = 6; else if (plain && S && W) s = 7; else if (plain && N && W) s = 8; else if (plain && N && E) s = 9;
+  else if (N || S) s = 0; else if (E || W) s = 1;
+  if (s !== cur) w.setBlock(x, y, z, id, plain ? s : (m & 8) | s, false);
+}
+const _placeBlockV = Game.prototype.placeBlock;
+Game.prototype.placeBlock = function (p, hit, id) {
+  const ok = _placeBlockV.call(this, p, hit, id);
+  if (ok && isRail(id)) {
+    const w = this.world, x = hit.x + (REPL[hit.id] ? 0 : DX[hit.face]), y = hit.y + (REPL[hit.id] ? 0 : DY[hit.face]), z = hit.z + (REPL[hit.id] ? 0 : DZ[hit.face]);
+    if (isRail(w.getBlock(x, y, z))) {
+      shapeRail(w, x, y, z);
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const dy of [-1, 0, 1]) if (isRail(w.getBlock(x + dx, y + dy, z + dz))) shapeRail(w, x + dx, y + dy, z + dz);
+      shapeRail(w, x, y, z);
+      this.remeshNear(x, z);
+    }
+  }
+  return ok;
+};
+
+/* ---------------- minecarts ---------------- */
+const CART_KINDS = { minecart: null, chest_minecart: B.CHEST, hopper_minecart: B.HOPPER, furnace_minecart: B.FURNACE, tnt_minecart: B.TNT };
+class Minecart extends Vehicle {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    const o = opts || {};
+    if (!o.loading) {
+      this.data.kind = o.kind || 'minecart';
+      if (this.data.kind === 'chest_minecart') this.data.items = new Array(27).fill(null);
+      if (this.data.kind === 'hopper_minecart') this.data.items = new Array(5).fill(null);
+    }
+    this.pitch = 0;
+  }
+  itemOf() { const it = ITEM_BY_NAME[this.data.kind || 'minecart']; return it ? it.id : null; }
+  interact(p, held) {
+    const g = this.game, k = this.data.kind;
+    if (k === 'chest_minecart') { g.ui.openInv('chest', { items: this.data.items }); g.sound('chest', this.x, this.y, this.z); return true; }
+    if (k === 'hopper_minecart') { g.ui.openInv('hopper', { items: this.data.items }); return true; }
+    if (k === 'furnace_minecart') {
+      if (held && (held.id === I.COAL || held.id === I.CHARCOAL)) { this.data.fuel = (this.data.fuel || 0) + 3600; p.consumeHeld(1); }
+      // push away from the player
+      const dx = this.x - p.x, dz = this.z - p.z, l = Math.hypot(dx, dz) || 1; this.data.push = [dx / l, dz / l];
+      return true;
+    }
+    if (k === 'tnt_minecart') { if (held && (held.id === I.FLINT_AND_STEEL || held.id === I.FIRE_CHARGE)) { this.prime(); p.damageHeld && p.damageHeld(1); return true; } return false; }
+    if (!this.rider) { g.mount(p, this); return true; }
+    return false;
+  }
+  prime() { if (!this.data.fuse) { this.data.fuse = 80; this.game.sound('fuse', this.x, this.y, this.z); } }
+  railAt() {
+    const w = this.game.world, x = Math.floor(this.x), z = Math.floor(this.z);
+    let y = Math.floor(this.y + 0.1);
+    if (!isRail(w.getBlock(x, y, z)) && isRail(w.getBlock(x, y - 1, z))) y--;
+    const id = w.getBlock(x, y, z);
+    return isRail(id) ? [x, y, z, id, w.getMeta(x, y, z)] : null;
+  }
+  tick() {
+    this.savePrev(); this.age++;
+    const g = this.game, w = g.world;
+    if (this.hurtTime > 0) this.hurtTime--;
+    if (this.wobble > 0) this.wobble--;
+    if (this.damage > 0) this.damage = Math.max(0, this.damage - 0.25);
+    if (this.rider && this.rider.dead) this.rider = null;
+    if (this.data.fuse > 0 && --this.data.fuse <= 0) { this.dead = true; g.explode(this.x, this.y + 0.5, this.z, 4 + Math.min(1.5, Math.hypot(this.vx, this.vz) * 3), false, 'tnt'); return; }
+    if (this.data.fuse > 0 && this.age % 4 === 0) g.particles.smoke(this.x, this.y + 1.1, this.z, 1);
+    const rail = this.railAt();
+    if (rail) this.followRail(rail);
+    else {
+      // off the rails: an ordinary heavy object
+      this.vy -= 0.04;
+      this.physicsStep();
+      const fr = this.onGround ? 0.5 : 0.95;
+      this.vx *= fr; this.vz *= fr; this.vy *= 0.98;
+      this.pitch *= 0.8;
+    }
+    if (this.data.kind === 'hopper_minecart' && !this.data.locked && this.age % 4 === 0) this.suck();
+    this.updateFluids();
+    if (this.y < -64) this.dead = true;
+  }
+  followRail([bx, by, bz, id, m]) {
+    const g = this.game, w = g.world, d = BLK[id], shape = railShape(id, m), ex = RAIL_EXITS[shape] || RAIL_EXITS[0], [a, b] = ex;
+    const ax = bx + 0.5 + a[0] * 0.5, az = bz + 0.5 + a[2] * 0.5, cx = bx + 0.5 + b[0] * 0.5, cz = bz + 0.5 + b[2] * 0.5;
+    const ay = by + (a[1] < 0 ? 0 : b[1] < 0 ? 1 : 0), cy = by + (b[1] < 0 ? 0 : a[1] < 0 ? 1 : 0);
+    const L = Math.hypot(cx - ax, cz - az), tx = (cx - ax) / L, tz = (cz - az) / L;
+    // speed along the track, keeping its size when the track turns
+    let sp = Math.hypot(this.vx, this.vz), dot = this.vx * tx + this.vz * tz;
+    let s = sp < 1e-4 ? 0 : (dot === 0 ? sp : Math.sign(dot) * sp);
+    // slopes pull the cart down
+    if (cy > ay) s -= 0.0078125; else if (cy < ay) s += 0.0078125;
+    // the rider leans the cart forward
+    const p = this.rider;
+    if (p === g.player && g.input && g.input.keys.has('KeyW')) { const lx = -Math.sin(p.yaw), lz = -Math.cos(p.yaw), k = lx * tx + lz * tz; if (Math.abs(s) < 0.1) s += Math.sign(k || 1) * 0.004 * Math.abs(k || 1); }
+    // furnace minecarts push themselves while they have fuel
+    if (this.data.kind === 'furnace_minecart' && this.data.fuel > 0) {
+      this.data.fuel--;
+      const pu = this.data.push || [tx, tz], k = pu[0] * tx + pu[1] * tz;
+      if (Math.abs(s) < 0.2) s += (k >= 0 ? 1 : -1) * 0.01;
+      if (this.age % 6 === 0) g.particles.smoke(this.x, this.y + 1, this.z, 1);
+    }
+    // powered rails
+    if (d.rail === 'powered_rail') {
+      if (m & 8) {
+        if (Math.abs(s) > 0.01) s += Math.sign(s) * 0.06;
+        else {
+          // start moving away from a solid block at one end
+          const solidA = SOLID[w.getBlock(Math.floor(ax - tx * 0.6), by, Math.floor(az - tz * 0.6))], solidB = SOLID[w.getBlock(Math.floor(cx + tx * 0.6), by, Math.floor(cz + tz * 0.6))];
+          if (solidA && !solidB) s = 0.02; else if (solidB && !solidA) s = -0.02;
+        }
+      } else s *= 0.5;
+    }
+    if (d.rail === 'activator_rail' && (m & 8)) {
+      if (this.data.kind === 'tnt_minecart') this.prime();
+      if (this.rider) g.dismount(this.rider);
+      this.data.locked = true;
+    } else if (this.data.kind === 'hopper_minecart') this.data.locked = false;
+    if (d.rail === 'detector_rail' && !(m & 8)) { w.setBlock(bx, by, bz, id, m | 8, false); RS.changed(w, bx, by, bz); RS.changed(w, bx, by - 1, bz); w.schedule(bx, by, bz, 20, 'rs_detector'); }
+    // friction
+    s *= this.rider ? 0.997 : 0.996;
+    const maxS = this.inWater ? 0.2 : 0.4;
+    s = Math.max(-maxS, Math.min(maxS, s));
+    // position along this piece of track
+    let u = ((this.x - ax) * tx + (this.z - az) * tz) / L;
+    u += s / L;
+    if (u > 1 || u < 0) {
+      // is there more track beyond this end?
+      const e = u > 1 ? b : a, endY = u > 1 ? cy : ay;
+      const nx = bx + e[0], nz = bz + e[2];
+      const more = isRail(w.getBlock(nx, endY, nz)) || isRail(w.getBlock(nx, endY - 1, nz));
+      if (!more) { u = Math.max(0, Math.min(1, u)); s = 0; }
+    }
+    this.x = ax + (cx - ax) * u; this.z = az + (cz - az) * u; this.y = ay + (cy - ay) * Math.max(0, Math.min(1, u));
+    this.vx = s * tx; this.vz = s * tz; this.vy = 0;
+    this.onGround = true; this.fallDist = 0;
+    // face along the track; tilt on slopes
+    if (Math.abs(s) > 0.001) { const yaw = Math.atan2(tx * Math.sign(s), tz * Math.sign(s)); let dyw = yaw - this.yaw; while (dyw > PI) dyw -= 2 * PI; while (dyw < -PI) dyw += 2 * PI; if (Math.abs(dyw) > HPI * 1.05) this.yaw = yaw; else this.yaw += dyw * 0.5; }
+    this.bodyYaw = this.yaw;
+    const slope = cy === ay ? 0 : Math.atan2(cy - ay, L);
+    const along = Math.cos(this.yaw) * tz + Math.sin(this.yaw) * tx;
+    this.pitch += ((along >= 0 ? -slope : slope) - this.pitch) * 0.5;
+    if (Math.abs(s) > 0.05 && this.age % 2 === 0 && Math.random() < 0.08) g.sound('step_metal', this.x, this.y, this.z);
+  }
+  // hopper minecarts pull items from the container above and from the ground
+  suck() {
+    const g = this.game, w = g.world, x = Math.floor(this.x), y = Math.floor(this.y), z = Math.floor(this.z);
+    const above = w.getBE(x, y + 1, z), host = { items: this.data.items };
+    if (above && above.items) {
+      for (let i = 0; i < above.items.length; i++) { const s = above.items[i]; if (!s) continue; if (!g.insertItem(host, { id: s.id, count: 1, tag: s.tag, dmg: s.dmg })) { s.count--; if (!s.count) above.items[i] = null; w.setBE(x, y + 1, z, above); } break; }
+      return;
+    }
+    for (const e of g.entities) {
+      if (!(e instanceof ItemEntity) || e.dead || Math.abs(e.x - this.x) > 1 || Math.abs(e.z - this.z) > 1 || e.y < this.y - 0.5 || e.y > this.y + 1.5) continue;
+      const left = g.insertItem(host, e.stack);
+      if (!left) e.dead = true; else e.stack = left;
+      break;
+    }
+  }
+  animState(a) { return { pitch: this.pitch, wobble: this.wobble > 0 ? Math.sin(this.wobble * 0.9) * this.wobble / 10 * 0.25 : 0, age: this.age + a }; }
+  skins() { return [{ key: 'entity/minecart' }]; }
+  renderExtra(r, a, p, yaw, st, light) {
+    const blk = CART_KINDS[this.data.kind];
+    if (!blk) return;
+    let m = M4.trans(M4.create(), p[0], p[1] + 0.27, p[2]);
+    m = M4.mul(M4.create(), m, M4.rotY(M4.create(), yaw));
+    m = M4.mul(M4.create(), m, M4.scale(M4.create(), 0.75, 0.75, 0.75));
+    m = M4.mul(M4.create(), m, M4.trans(M4.create(), 0, 0.5, 0));
+    if (this.data.fuse > 0 && (this.data.fuse >> 2) & 1) m = M4.mul(M4.create(), m, M4.scale(M4.create(), 1.06, 1.06, 1.06));
+    this.game.pushBlockItem(r, m, blk, light);
+  }
+}
+MOB_CLASSES.minecart = Minecart;
+// rider seats
+const _rideTickV = Player.prototype.rideTick;
+Player.prototype.rideTick = function (inp) {
+  const m = this.riding;
+  if (m && (m.type === 'boat' || m.type === 'chest_boat' || m.type === 'minecart')) {
+    const g = this.game;
+    if (m.dead) { g.dismount(this); return false; }
+    if (inp.enabled && (inp.pressed('ShiftLeft') || inp.pressed('ShiftRight'))) { g.dismount(this); return false; }
+    const seat = m.type === 'minecart' ? 0.05 : (m.data.wood === 'bamboo' ? 0.25 : 0.12), back = m.type === 'chest_boat' ? 0.2 : 0;
+    this.x = m.x + Math.sin(m.yaw) * back; this.y = m.y + seat; this.z = m.z + Math.cos(m.yaw) * back;
+    this.vx = this.vy = this.vz = 0; this.fallDist = 0; this.onGround = false; this.sprinting = false; this.sneaking = false;
+    this.interactTick(inp);
+    if (this.swingT > 0) { this.swingT--; this.swing = 1 - this.swingT / 6; } else this.swing = 0;
+    return true;
+  }
+  return _rideTickV.call(this, inp);
+};
+// getting out of a boat or a cart puts the player beside it
+const _dismountV = Game.prototype.dismount;
+Game.prototype.dismount = function (p, thrown) {
+  const m = p.riding;
+  _dismountV.call(this, p, thrown);
+  if (m && m.T && m.T.vehicle) {
+    const w = this.world;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]]) {
+      const x = m.x + dx * 1.2, z = m.z + dz * 1.2;
+      if (!aabbHitsBlock(w, x - 0.3, m.y + 0.2, z - 0.3, x + 0.3, m.y + 2, z + 0.3, id => SOLID[id] === 1) && aabbHitsBlock(w, x - 0.3, m.y - 1.2, z - 0.3, x + 0.3, m.y + 0.2, z + 0.3, id => SOLID[id] === 1 || id === B.WATER)) { p.x = x; p.z = z; p.y = m.y + 0.3; break; }
+    }
+    p.savePrev();
+  }
+};
+// detector rails switch off once no cart is on them
+const _onScheduledV = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind !== 'rs_detector') return _onScheduledV.call(this, kind, x, y, z);
+  const w = this.world, id = w.getBlock(x, y, z), m = w.getMeta(x, y, z);
+  if (id !== B.DETECTOR_RAIL || !(m & 8)) return;
+  const busy = this.entities.some(e => e instanceof Minecart && !e.dead && Math.floor(e.x) === x && Math.floor(e.z) === z && Math.abs(e.y - y) < 1);
+  if (busy) w.schedule(x, y, z, 20, 'rs_detector');
+  else { w.setBlock(x, y, z, id, m & ~8, false); RS.changed(w, x, y, z); RS.changed(w, x, y - 1, z); }
+};
+// detector rails are a power source
+RS_SRC[B.DETECTOR_RAIL] = 20;
+const _emitV = RS.emit;
+RS.emit = function (w, x, y, z, f, strong) {
+  if (RS_SRC[w.getBlock(x, y, z)] === 20) { const m = w.getMeta(x, y, z); return (m & 8) ? (strong ? (f === 3 ? 15 : 0) : 15) : 0; }
+  return _emitV.call(this, w, x, y, z, f, strong);
+};
+RS_ANY[B.DETECTOR_RAIL] = 1;
+// powered and activator rails pass power along up to 8 rails
+const _reactV = RS.react;
+RS.react = function (w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (id !== B.POWERED_RAIL && id !== B.ACTIVATOR_RAIL) return _reactV.call(this, w, x, y, z);
+  // the run of rails of this kind along its axis
+  const m = w.getMeta(x, y, z), sh = m & 7, alongX = sh === 1 || sh === 2 || sh === 3, dx = alongX ? 1 : 0, dz = alongX ? 0 : 1;
+  const run = [[x, y, z]];
+  for (const sgn of [1, -1]) {
+    let cx = x, cy = y, cz = z;
+    for (let k = 0; k < 8; k++) {
+      cx += dx * sgn; cz += dz * sgn;
+      let ny = [cy, cy + 1, cy - 1].find(yy => w.getBlock(cx, yy, cz) === id);
+      if (ny === undefined) break;
+      cy = ny; run.push([cx, cy, cz]);
+    }
+  }
+  // power spreads from directly powered rails, losing one step per rail
+  const lvl = run.map(([a, b, c]) => this.powered(w, a, b, c) ? 9 : 0);
+  const order = run.map((q, i) => i).sort((i, j) => (alongX ? run[i][0] - run[j][0] : run[i][2] - run[j][2]));
+  for (let pass = 0; pass < 2; pass++) for (let k = 1; k < order.length; k++) {
+    const i = pass ? order[order.length - 1 - k] : order[k], j = pass ? order[order.length - k] : order[k - 1];
+    lvl[i] = Math.max(lvl[i], lvl[j] - 1);
+  }
+  run.forEach(([a, b, c], i) => { const mm = w.getMeta(a, b, c), on = lvl[i] > 0; if (on !== !!(mm & 8)) this.set(w, a, b, c, id, on ? mm | 8 : mm & ~8); });
+};
+
+/* ---------------- placing vehicles ---------------- */
+const _useItemSpecialV = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  const w = this.world;
+  if (it.boat) {
+    const e = p.eye(), d = p.look(), h = raycast(w, e[0], e[1], e[2], d[0], d[1], d[2], 5, true);
+    if (!h) return false;
+    const water = h.id === B.WATER || WATERY[h.id] === 1;
+    if (!water && h.face !== 2) return false;
+    const x = e[0] + d[0] * h.t, z = e[2] + d[2] * h.t, y = water ? h.y + 0.78 : h.y + 1;
+    if (aabbHitsBlock(w, x - 0.6, y + 0.1, z - 0.6, x + 0.6, y + 0.5, z + 0.6, id => SOLID[id] === 1)) return false;
+    const b = createMob(this, it.chest ? 'chest_boat' : 'boat', x, y, z, { wood: it.boat });
+    b.yaw = b.bodyYaw = p.yaw + PI; b.savePrev();
+    this.entities.push(b);
+    if (p.mode !== 1) p.consumeHeld(1);
+    this.sound('place_wood', x, y, z);
+    return true;
+  }
+  if (it.cart) {
+    if (!hit || !isRail(hit.id)) return false;
+    const kind = { empty: 'minecart', chest: 'chest_minecart', hopper: 'hopper_minecart', furnace: 'furnace_minecart', tnt: 'tnt_minecart' }[it.cart] || 'minecart';
+    const c = createMob(this, 'minecart', hit.x + 0.5, hit.y + 0.0625, hit.z + 0.5, { kind });
+    const sh = railShape(hit.id, w.getMeta(hit.x, hit.y, hit.z)), alongX = sh === 1 || sh === 2 || sh === 3;
+    c.yaw = c.bodyYaw = alongX ? HPI : 0; c.savePrev();
+    this.entities.push(c);
+    if (p.mode !== 1) p.consumeHeld(1);
+    this.sound('place_metal', hit.x + 0.5, hit.y, hit.z + 0.5);
+    return true;
+  }
+  return _useItemSpecialV.call(this, p, hit, held, it);
+};
+
 </script>
 </body>
 </html>
