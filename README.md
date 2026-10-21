@@ -66,6 +66,7 @@ place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots
 | --- | --- |
 | `/gamemode survival\|creative\|adventure\|spectator` | Switch game mode |
 | `/defaultgamemode <mode>` | The world's default game mode |
+| `/recipe give\|take @s <item\|*>` | Unlock or lock recipes in the recipe book |
 | `/time set day\|noon\|night\|midnight\|<n>`, `/time add <n>` | Change the time |
 | `/weather clear\|rain\|thunder` | Change the weather |
 | `/tp <x> <y> <z>` | Teleport (`~` means relative) |
@@ -154,6 +155,14 @@ block-for-block like Java Edition, and worlds made before this version keep thei
   blast furnace and campfire cooking; stonecutter; smithing table with netherite upgrades and
   armor trims; loom with banner patterns; cartography table; grindstone; anvil; brewing stand;
   enchanting table; and the crafter.
+- **The recipe book**: the green book by the crafting grid in the inventory, on the crafting table
+  and on the furnace, smoker and blast furnace opens Java Edition's recipe book, with its tabs
+  (equipment, building blocks, miscellaneous and redstone; food, blocks and miscellaneous for the
+  furnaces), a search box, the craftable filter and pages. Click a recipe to move its ingredients
+  into the grid (shift-click for as many as you can make, click again for one more); if something
+  is missing, a ghost of the recipe shows what goes where. Recipes unlock the first time you get
+  one of their ingredients, with a **New Recipes Unlocked!** toast. `doLimitedCrafting` and
+  `/recipe` work like Java's.
 
 ### Survival and combat
 

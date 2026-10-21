@@ -31420,6 +31420,542 @@ Game.prototype.startWorld = function (meta, saved) {
   return r;
 };
 
+/* @file 125_recipe_book.js */
+/* ===================================================================
+   RECIPE BOOK — the green book in the inventory, the crafting table
+   and the furnaces: the recipes you have unlocked by tab, a search,
+   the craftable filter, pages; a click puts the ingredients in the
+   grid (shift for as many as you can make), a ghost recipe shows what
+   is missing. Recipes unlock when you get one of their ingredients,
+   with a toast; doLimitedCrafting and /recipe
+   =================================================================== */
+const RBOOK = { built: false, craft: [], cook: { furnace: [], smoker: [], blast_furnace: [] }, byIng: new Map(), byKey: new Map() };
+// the tabs of each book: [category, icons]
+const RB_TABS = {
+  crafting: [['search', ['compass']], ['equipment', ['iron_axe', 'golden_sword']], ['building', ['bricks']], ['misc', ['lava_bucket', 'apple']], ['redstone', ['redstone']]],
+  furnace: [['search', ['compass']], ['food', ['porkchop']], ['blocks', ['stone']], ['misc', ['lava_bucket', 'emerald']]],
+  smoker: [['search', ['compass']], ['food', ['porkchop']]],
+  blast_furnace: [['search', ['compass']], ['blocks', ['redstone_ore']], ['misc', ['iron_shovel', 'golden_leggings']]],
+};
+const RB_FILTER_TIP = { crafting: ['Showing Craftable', 'Showing All'], furnace: ['Showing Smeltable', 'Showing All'], smoker: ['Showing Smokable', 'Showing All'], blast_furnace: ['Showing Blastable', 'Showing All'] };
+const rbBookOf = type => type === 'inventory' || type === 'craft' ? 'crafting' : RB_TABS[type] ? type : null;
+
+// a recipe's name in the save: what it makes and from what
+function rbRecipeKey(out, alts) { return ITEMS[out].name + '<' + [...new Set(alts.map(a => ITEMS[a[0]] ? ITEMS[a[0]].name : a[0]))].sort().join(','); }
+function rbBuild() {
+  if (RBOOK.built) return;
+  RBOOK.built = true;
+  if (!CREATIVE.search) buildCreativeTabs();
+  const tabOf = new Map();
+  for (const t of CREATIVE_TABS) for (const e of CREATIVE[t.key] || []) { if (!tabOf.has(e.id)) tabOf.set(e.id, new Set()); tabOf.get(e.id).add(t.key); }
+  const craftCat = id => {
+    const t = tabOf.get(id) || new Set(), it = ITEMS[id];
+    if (t.has('combat') || t.has('tools') || it.tool || it.armor) return 'equipment';
+    if (t.has('redstone')) return 'redstone';
+    if ((t.has('building') || t.has('colored') || t.has('natural')) && it.block !== undefined) return 'building';
+    return 'misc';
+  };
+  // the same thing in another colour or wood shares a button, like vanilla's recipe groups
+  const colorRe = new RegExp('^(' + [...COLORS].sort((a, b) => b.length - a.length).join('|') + ')_'), woodRe = new RegExp('^(' + [...WOODS, 'bamboo', ...STEMS].sort((a, b) => b.length - a.length).join('|') + ')_');
+  const groupOf = id => ITEMS[id].name.replace(colorRe, '*_').replace(woodRe, '*_');
+  const groups = new Map(), add = (list, key, e, cat) => { const k = list.book + ':' + key; let g = groups.get(k); if (!g) { g = { key: k, cat, list: [] }; groups.set(k, g); list.push(g); } g.list.push(e); e.group = g; };
+  RBOOK.craft.book = 'crafting';
+  for (const r of RECIPES) {
+    if (r.fn && r.out !== I.DECORATED_POT) continue;
+    let cells, w, h;
+    if (r.type === 'shaped') { cells = []; for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) { const ch = r.pattern[y][x]; cells.push(ch === ' ' ? null : r.key[ch]); } w = r.w; h = r.h; }
+    else { cells = r.ings.slice(); w = Math.min(3, cells.length); h = Math.ceil(cells.length / 3); }
+    const alts = cells.filter(Boolean);
+    if (!alts.length || alts.some(a => !a || !a.length)) continue;
+    const e = { r, kind: 'craft', out: r.out, count: r.count, tag: r.tag, cells, w, h, shaped: r.type === 'shaped', fits2: r.type === 'shaped' ? r.w <= 2 && r.h <= 2 : alts.length <= 4, key: rbRecipeKey(r.out, alts) };
+    if (RBOOK.byKey.has(e.key)) e.key += '#' + RBOOK.craft.length;
+    RBOOK.byKey.set(e.key, e);
+    add(RBOOK.craft, groupOf(r.out), e, craftCat(r.out));
+    for (const a of alts) for (const id of a) { let l = RBOOK.byIng.get(id); if (!l) RBOOK.byIng.set(id, l = []); if (!l.includes(e)) l.push(e); }
+  }
+  const byName = (a, b) => { const na = a.list.map(e => ITEMS[e.out].name).sort()[0], nb = b.list.map(e => ITEMS[e.out].name).sort()[0]; return na < nb ? -1 : na > nb ? 1 : 0; };
+  for (const [type, map] of [['furnace', SMELT], ['smoker', SMOKE], ['blast_furnace', BLAST]]) {
+    const list = RBOOK.cook[type]; list.book = type;
+    for (const k in map) {
+      const inp = +k, out = map[k], it = ITEMS[out];
+      if (!ITEMS[inp] || !it) continue;
+      const cat = type === 'smoker' ? 'food' : it.food ? 'food' : it.block !== undefined ? 'blocks' : 'misc';
+      if (type === 'blast_furnace' && cat === 'food') continue;
+      const e = { kind: 'cook', type, out, count: 1, cells: [[inp]], w: 1, h: 1, fits2: true, key: type + ':' + rbRecipeKey(out, [[inp]]) };
+      RBOOK.byKey.set(e.key, e);
+      add(list, ITEMS[out].name, e, cat);
+      let l = RBOOK.byIng.get(inp); if (!l) RBOOK.byIng.set(inp, l = []); l.push(e);
+    }
+  }
+  // (the recipe manager reads the recipes in the order of their ids)
+  for (const list of [RBOOK.craft, ...Object.values(RBOOK.cook)]) { const book = list.book, sorted = list.slice().sort(byName); list.length = 0; list.push(...sorted); list.book = book; }
+}
+
+/* ---------------- what the player has ---------------- */
+// StackedContents: the main inventory and what is already in the grid
+function rbCounts(p, extra) {
+  const c = new Map(), add = s => { if (s && !s.dmg && !(s.tag && (s.tag.ench || s.tag.name))) c.set(s.id, (c.get(s.id) || 0) + s.count); };
+  for (let i = 0; i < 36; i++) add(p.inv[i]);
+  for (const s of extra || []) add(s);
+  return c;
+}
+// an id for each ingredient cell when n sets are made, or null
+function rbAssign(e, counts, n) {
+  const cells = e.cells.map((a, i) => [a, i]).filter(x => x[0]), left = new Map(counts), pick = new Array(e.cells.length).fill(0);
+  const go = k => {
+    if (k === cells.length) return true;
+    const [alts, i] = cells[k];
+    // the most plentiful choice first, so the same item tends to fill every cell
+    const order = alts.filter(id => (left.get(id) || 0) >= n).sort((a, b) => (left.get(b) || 0) - (left.get(a) || 0));
+    for (const id of order) { left.set(id, left.get(id) - n); pick[i] = id; if (go(k + 1)) return true; left.set(id, left.get(id) + n); }
+    return false;
+  };
+  return go(0) ? pick : null;
+}
+function rbMaxSets(e, counts) {
+  if (!rbAssign(e, counts, 1)) return 0;
+  let lo = 1, hi = 64;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (rbAssign(e, counts, m)) lo = m; else hi = m - 1; }
+  return lo;
+}
+
+/* ---------------- unlocking ---------------- */
+Player.prototype.knowsRecipe = function (e) { return !!(this.recipes && this.recipes.has(e.key)); };
+Game.prototype.unlockRecipes = function (list, quiet) {
+  const p = this.player;
+  if (!p) return 0;
+  if (!p.recipes) p.recipes = new Set();
+  const fresh = list.filter(e => !p.recipes.has(e.key));
+  for (const e of fresh) p.recipes.add(e.key);
+  if (fresh.length && !quiet) {
+    this.ui.recipeToast(fresh.map(e => e.out));
+    if (this.ui.inv && this.ui.rbState) this.ui.rbRefresh();
+  }
+  return fresh.length;
+};
+// inventory_changed: anything you hold unlocks the recipes it goes into
+Game.prototype.recipeScan = function () {
+  const p = this.player;
+  if (!p || p.dead) return;
+  rbBuild();
+  const first = !p.recipes;
+  if (first) p.recipes = new Set();
+  if (!p._rbSeen) p._rbSeen = new Set();
+  const found = [];
+  for (const s of [...p.inv, ...p.armor, ...p.offhand]) {
+    if (!s || p._rbSeen.has(s.id)) continue;
+    p._rbSeen.add(s.id);
+    for (const e of RBOOK.byIng.get(s.id) || []) found.push(e);
+  }
+  if (found.length) this.unlockRecipes(found, first);
+};
+const _gameTickRB = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const r = _gameTickRB.call(this);
+  if (this.world && this.world.tick % 5 === 0) this.recipeScan();
+  return r;
+};
+
+/* ---------------- toasts ---------------- */
+// ToastComponent: up to five in the top right corner, sliding in and out
+UI.prototype.toast = function (o) {
+  let box = $('toasts');
+  if (!box) { box = el('div'); box.id = 'toasts'; box.style.cssText = 'position:fixed;right:0;top:0;z-index:45;pointer-events:none;display:flex;flex-direction:column;align-items:flex-end'; document.body.appendChild(box); }
+  const t = el('div');
+  t.style.cssText = `width:${160 * GS}px;height:${32 * GS}px;position:relative;transform:translateX(100%);transition:transform .6s;box-sizing:border-box;` +
+    `background:${PACK_GUI_STATE.rbook && PACK_GUI_STATE.rbook.toast ? `url(${PACK_GUI_STATE.rbook.toast}) 0 0/100% 100%` : '#fff'};image-rendering:pixelated;` +
+    (PACK_GUI_STATE.rbook && PACK_GUI_STATE.rbook.toast ? '' : 'border:2px solid #000;box-shadow:inset 0 0 0 2px #c6c6c6, inset 0 0 0 4px #555;');
+  t.innerHTML = `<img style="position:absolute;left:${8 * GS}px;top:${8 * GS}px;width:${16 * GS}px;height:${16 * GS}px;image-rendering:pixelated">` +
+    `<div style="position:absolute;left:${30 * GS}px;top:${7 * GS - 3}px;font-size:16px;color:${o.color || '#500050'};white-space:nowrap">${escapeHTML(o.title)}</div>` +
+    `<div style="position:absolute;left:${30 * GS}px;top:${18 * GS - 3}px;font-size:16px;color:#000;white-space:nowrap">${escapeHTML(o.text || '')}</div>`;
+  box.appendChild(t);
+  t._icons = o.icons || []; t._kind = o.kind; t._born = performance.now(); t._ms = o.ms || 5000;
+  const img = t.firstChild, step = () => {
+    if (!t.parentNode) return;
+    const age = performance.now() - t._born, ic = t._icons;
+    if (ic.length) { const id = ic[Math.floor(age / Math.max(1, t._ms / ic.length)) % ic.length]; if (img._id !== id) { img._id = id; img.src = iconFor(id); } }
+    if (age > t._ms && !t._out) { t._out = true; t.style.transform = 'translateX(100%)'; setTimeout(() => t.remove(), 650); }
+    if (!t._out) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(() => { t.style.transform = 'translateX(0)'; step(); });
+  while (box.children.length > 5) box.firstChild.remove();
+  return t;
+};
+// RecipeToast.addOrUpdate: new unlocks join a recipe toast that is still showing
+UI.prototype.recipeToast = function (ids) {
+  const box = $('toasts'), cur = box && [...box.children].find(t => t._kind === 'recipe' && !t._out);
+  if (cur) { for (const id of ids) if (!cur._icons.includes(id)) cur._icons.push(id); cur._born = performance.now(); return; }
+  this.toast({ kind: 'recipe', icons: [...new Set(ids)], title: 'New Recipes Unlocked!', text: 'Check your recipe book' });
+};
+
+/* ---------------- the look of it ---------------- */
+const RB_ART = {};
+function rbArt() {
+  if (RB_ART.panel) return RB_ART;
+  const url = c => c.toDataURL();
+  {
+    const [c, g] = guiCanvas(147, 166);
+    guiPanel(g, 0, 0, 147, 166);
+    guiInset(g, 25, 14, 81, 14, '#000');
+    RB_ART.panel = url(c);
+  }
+  const slot = (bg, many) => {
+    const [c, g] = guiCanvas(25, 25);
+    if (many) { g.fillStyle = '#373737'; g.fillRect(2, 2, 23, 23); }
+    g.fillStyle = '#000'; g.fillRect(0, 0, many ? 23 : 25, many ? 23 : 25);
+    g.fillStyle = bg; g.fillRect(1, 1, (many ? 23 : 25) - 2, (many ? 23 : 25) - 2);
+    g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(1, 1, (many ? 23 : 25) - 3, 1); g.fillRect(1, 1, 1, (many ? 23 : 25) - 3);
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(2, (many ? 23 : 25) - 2, (many ? 23 : 25) - 3, 1); g.fillRect((many ? 23 : 25) - 2, 2, 1, (many ? 23 : 25) - 3);
+    return url(c);
+  };
+  RB_ART.ok = slot('#a0a0a0'); RB_ART.okMany = slot('#a0a0a0', true); RB_ART.bad = slot('#c86464'); RB_ART.badMany = slot('#c86464', true);
+  // the button: a green book with its pages showing
+  const book = (hi) => {
+    const [c, g] = guiCanvas(20, 18);
+    const px = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
+    px(3, 1, 14, 16, '#1d1d1d'); px(4, 2, 12, 14, hi ? '#4fb84f' : '#3a963a'); px(4, 2, 2, 14, hi ? '#2f7f2f' : '#246b24');
+    px(15, 3, 2, 12, '#e8e0c8'); px(14, 15, 3, 2, '#e8e0c8'); px(8, 5, 6, 1, hi ? '#9ee49e' : '#7ccc7c'); px(8, 7, 5, 1, hi ? '#9ee49e' : '#7ccc7c');
+    return url(c);
+  };
+  RB_ART.button = book(false); RB_ART.buttonHi = book(true);
+  const tab = sel => { const [c, g] = guiCanvas(35, 27); guiPanel(g, 0, 0, sel ? 35 : 33, 27); if (sel) { g.fillStyle = GUIC.bg; g.fillRect(31, 2, 4, 23); } return url(c); };
+  RB_ART.tab = tab(false); RB_ART.tabSel = tab(true);
+  const arrow = dir => { const [c, g] = guiCanvas(12, 17); g.fillStyle = '#fff'; for (let i = 0; i < 6; i++) { const x = dir > 0 ? 3 + i : 8 - i; g.fillRect(x, 2 + i, 1, 13 - 2 * i); } return url(c); };
+  RB_ART.next = arrow(1); RB_ART.prev = arrow(-1);
+  const filt = on => { const [c, g] = guiCanvas(26, 16); guiPanel(g, 0, 0, 26, 16, on ? '#8bd08b' : GUIC.bg); g.fillStyle = '#3a3a3a'; g.fillRect(9, 4, 8, 1); g.fillRect(9, 7, 8, 1); g.fillRect(9, 10, 8, 1); return url(c); };
+  RB_ART.filterOn = filt(true); RB_ART.filterOff = filt(false);
+  return RB_ART;
+}
+// resource packs: the book's background, button, slots, tabs and the recipe toast
+const _applyPackGUIRB = applyPackGUI;
+applyPackGUI = function (img, first) {
+  const r = _applyPackGUIRB.call(this, img, first);
+  const whole = im => { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const q = c.getContext('2d'); q.imageSmoothingEnabled = false; q.drawImage(im, 0, 0); return c.toDataURL(); };
+  const cut = (im, x, y, w, h) => { const s = im.width / 256, c = document.createElement('canvas'); c.width = Math.round(w * s); c.height = Math.round(h * s); const q = c.getContext('2d'); q.imageSmoothingEnabled = false; q.drawImage(im, x * s, y * s, w * s, h * s, 0, 0, c.width, c.height); return c.toDataURL(); };
+  const spr = n => { const im = img('gui/sprites/' + n); return im ? whole(im) : null; };
+  const st = PACK_GUI_STATE.rbook = {};
+  const bg = img('gui/recipe_book'), oldBtn = img('gui/recipe_button');
+  if (bg) st.panel = cut(bg, 1, 1, 147, 166);
+  st.button = spr('recipe_book/button') || (oldBtn ? cut(oldBtn, 0, 0, 20, 18) : null);
+  st.buttonHi = spr('recipe_book/button_highlighted') || (oldBtn ? cut(oldBtn, 0, 19, 20, 18) : null);
+  for (const [k, n] of [['ok', 'slot_craftable'], ['okMany', 'slot_many_craftable'], ['bad', 'slot_uncraftable'], ['badMany', 'slot_many_uncraftable'], ['tab', 'tab'], ['tabSel', 'tab_selected'],
+    ['next', 'page_forward'], ['prev', 'page_backward'], ['filterOn', 'filter_enabled'], ['filterOff', 'filter_disabled']]) st[k] = spr('recipe_book/' + n);
+  st.toast = spr('toast/recipe');
+  return r;
+};
+const rbImg = k => (PACK_GUI_STATE.rbook && PACK_GUI_STATE.rbook[k]) || rbArt()[k];
+
+/* ---------------- the panel ---------------- */
+const RB_BTN_POS = { inventory: [104, 61], craft: [5, 34], furnace: [20, 34], smoker: [20, 34], blast_furnace: [20, 34] };
+UI.prototype.rbSettings = function (book) {
+  const p = this.game.player;
+  if (!p.rbook) p.rbook = {};
+  return p.rbook[book] || (p.rbook[book] = { open: false, filter: false });
+};
+const _buildWindowRB = UI.prototype.buildWindow;
+UI.prototype.buildWindow = function () {
+  _buildWindowRB.call(this);
+  const inv = this.inv, book = inv && rbBookOf(inv.type), win = this.winEl;
+  this.rbState = null; this.rbGhost = null;
+  if (!book || !win || !this.game.player) return;
+  rbBuild();
+  const set = this.rbSettings(book), [bx, by] = RB_BTN_POS[inv.type];
+  const btn = el('div', 'rbbtn');
+  btn.style.cssText = `position:absolute;left:${bx * GS}px;top:${by * GS}px;width:${20 * GS}px;height:${18 * GS}px;background:url(${rbImg('button')}) 0 0/100% 100%;image-rendering:pixelated;cursor:pointer`;
+  btn.addEventListener('mouseenter', () => { btn.style.backgroundImage = `url(${rbImg('buttonHi')})`; });
+  btn.addEventListener('mouseleave', () => { btn.style.backgroundImage = `url(${rbImg('button')})`; });
+  btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); AUDIO.play('click'); set.open = !set.open; this.buildWindow(); this.renderInv(); });
+  win.appendChild(btn);
+  if (!set.open) return;
+  // the book sits to the left and the window moves over
+  const root = $('scr-inv'), row = el('div');
+  row.style.cssText = `display:flex;align-items:flex-start;gap:${2 * GS}px`;
+  const panel = el('div', 'vwin rbook');
+  panel.style.cssText = `position:relative;width:${147 * GS}px;height:${166 * GS}px;background:url(${rbImg('panel')}) 0 0/100% 100% no-repeat;image-rendering:pixelated;flex:none`;
+  root.insertBefore(row, win); row.appendChild(panel); row.appendChild(win);
+  const S = this.rbState = { book, type: inv.type, tab: 0, page: 0, search: '', panel, set, buttons: [], overlay: null };
+  // search
+  const sIn = document.createElement('input');
+  sIn.placeholder = 'Search...';
+  sIn.style.cssText = `position:absolute;left:${27 * GS}px;top:${15 * GS}px;width:${78 * GS}px;height:${12 * GS}px;background:transparent;border:0;outline:0;color:#fff;font:inherit;font-size:16px;padding:0;margin:0`;
+  sIn.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
+  sIn.addEventListener('input', () => { S.search = sIn.value.toLowerCase(); S.page = 0; this.rbRefresh(); });
+  sIn.addEventListener('mousedown', e => e.stopPropagation());
+  panel.appendChild(sIn); S.searchEl = sIn;
+  // Showing Craftable / Showing All
+  const fb = el('div');
+  fb.style.cssText = `position:absolute;left:${110 * GS}px;top:${12 * GS}px;width:${26 * GS}px;height:${16 * GS}px;background:url(${rbImg(set.filter ? 'filterOn' : 'filterOff')}) 0 0/100% 100%;image-rendering:pixelated;cursor:pointer`;
+  fb.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); AUDIO.play('click'); set.filter = !set.filter; S.page = 0; fb.style.backgroundImage = `url(${rbImg(set.filter ? 'filterOn' : 'filterOff')})`; this.rbTip(RB_FILTER_TIP[book][set.filter ? 0 : 1]); this.rbRefresh(); });
+  fb.addEventListener('mouseenter', () => this.rbTip(RB_FILTER_TIP[book][set.filter ? 0 : 1]));
+  fb.addEventListener('mouseleave', () => this.rbTip(null));
+  panel.appendChild(fb);
+  // tabs down the left side
+  RB_TABS[book].forEach(([cat, icons], k) => {
+    const t = el('div');
+    t.style.cssText = `position:absolute;left:${-30 * GS}px;top:${(3 + 27 * k) * GS}px;width:${35 * GS}px;height:${27 * GS}px;cursor:pointer;image-rendering:pixelated`;
+    t.innerHTML = icons.map((n, j) => `<img src="${iconFor(itemOf(n))}" style="position:absolute;left:${(icons.length > 1 ? 3 + j * 14 : 10) * GS}px;top:${5 * GS}px;width:${16 * GS}px;height:${16 * GS}px;image-rendering:pixelated">`).join('');
+    t.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); if (S.tab !== k) { AUDIO.play('click'); S.tab = k; S.page = 0; this.rbRefresh(); } });
+    panel.insertBefore(t, panel.firstChild); (S.tabs || (S.tabs = [])).push(t);
+  });
+  // 5 x 4 recipe buttons
+  for (let k = 0; k < 20; k++) {
+    const b = el('div');
+    b.style.cssText = `position:absolute;left:${(11 + (k % 5) * 25) * GS}px;top:${(31 + Math.floor(k / 5) * 25) * GS}px;width:${25 * GS}px;height:${25 * GS}px;background-size:100% 100%;image-rendering:pixelated;cursor:pointer;display:none`;
+    b.innerHTML = `<img style="position:absolute;left:${4 * GS}px;top:${4 * GS}px;width:${16 * GS}px;height:${16 * GS}px;image-rendering:pixelated">`;
+    b.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); if (b._g) this.rbClick(b._g, e.shiftKey, b); });
+    b.addEventListener('mouseenter', () => { b._hover = true; if (b._g) this.rbTip(this.rbShown(b._g)); b.style.filter = 'brightness(1.15)'; });
+    b.addEventListener('mouseleave', () => { b._hover = false; this.rbTip(null); b.style.filter = ''; });
+    panel.appendChild(b); S.buttons.push(b);
+  }
+  // pages
+  const pg = (dir, x) => {
+    const a = el('div');
+    a.style.cssText = `position:absolute;left:${x * GS}px;top:${137 * GS}px;width:${12 * GS}px;height:${17 * GS}px;background:url(${rbImg(dir > 0 ? 'next' : 'prev')}) 0 0/100% 100%;image-rendering:pixelated;cursor:pointer;display:none`;
+    a.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); AUDIO.play('click'); S.page += dir; this.rbRefresh(); });
+    panel.appendChild(a); return a;
+  };
+  S.prev = pg(-1, 38); S.next = pg(1, 93);
+  S.pageText = el('div', 'vl'); S.pageText.style.cssText += `;left:${48 * GS}px;width:${45 * GS}px;top:${141 * GS}px;text-align:center;color:#fff;text-shadow:2px 2px 0 #3f3f3f`;
+  panel.appendChild(S.pageText);
+  this.rbRefresh();
+};
+// the result a group button shows (the first it can make, else the first)
+UI.prototype.rbShown = function (g) { const e = g._show || g.list[0]; return { id: e.out, count: e.count, tag: e.tag }; };
+UI.prototype.rbTip = function (what) {
+  const t = $('tooltip');
+  if (!what) { t.classList.add('hidden'); return; }
+  const lines = typeof what === 'string' ? [[what, '#fff']] : tooltipLines(what);
+  t.innerHTML = lines.map(([s, col], k) => `<div style="color:${col}"${k === 0 ? ' class="tt0"' : ''}>${s ? escapeHTML(s) : '&nbsp;'}</div>`).join('');
+  t.classList.remove('hidden'); this.posCursor();
+};
+// the groups on the current tab, filtered
+UI.prototype.rbGroups = function () {
+  const S = this.rbState, p = this.game.player, list = S.book === 'crafting' ? RBOOK.craft : RBOOK.cook[S.book];
+  const cat = RB_TABS[S.book][S.tab][0], small = S.type === 'inventory';
+  const counts = rbCounts(p, S.book === 'crafting' ? this.craftGrid() : []);
+  const out = [];
+  for (const g of list) {
+    if (cat !== 'search' && g.cat !== cat) continue;
+    const known = g.list.filter(e => p.knowsRecipe(e) && (!small || e.fits2));
+    if (!known.length) continue;
+    if (S.search && !known.some(e => stackName({ id: e.out, tag: e.tag }).toLowerCase().includes(S.search) || ITEMS[e.out].name.includes(S.search.replace(/ /g, '_')))) continue;
+    const can = known.filter(e => rbAssign(e, counts, 1));
+    if (S.set.filter && !can.length) continue;
+    out.push({ g, known, can });
+  }
+  return out;
+};
+UI.prototype.rbRefresh = function () {
+  const S = this.rbState;
+  if (!S || !S.panel.parentNode) return;
+  // RecipeBookTabButton.updateVisibility: a tab shows once it has a recipe you know
+  const p = this.game.player, list = S.book === 'crafting' ? RBOOK.craft : RBOOK.cook[S.book], small = S.type === 'inventory';
+  const vis = RB_TABS[S.book].map(([cat], k) => k === 0 || list.some(g => g.cat === cat && g.list.some(e => p.knowsRecipe(e) && (!small || e.fits2))));
+  if (!vis[S.tab]) S.tab = 0;
+  let row = 0;
+  S.tabs.forEach((t, k) => {
+    t.style.display = vis[k] ? '' : 'none';
+    if (!vis[k]) return;
+    t.style.backgroundImage = `url(${rbImg(k === S.tab ? 'tabSel' : 'tab')})`; t.style.backgroundSize = '100% 100%';
+    t.style.left = (k === S.tab ? -32 : -30) * GS + 'px'; t.style.top = (3 + 27 * row++) * GS + 'px';
+  });
+  const groups = this.rbGroups(), pages = Math.max(1, Math.ceil(groups.length / 20));
+  S.page = Math.max(0, Math.min(pages - 1, S.page));
+  S.buttons.forEach((b, k) => {
+    const x = groups[S.page * 20 + k];
+    if (!x) { b.style.display = 'none'; b._g = null; return; }
+    b.style.display = '';
+    const g = x.g; g._show = x.can[0] || x.known[0]; g._known = x.known; g._can = x.can;
+    const many = x.known.length > 1, ok = x.can.length > 0;
+    b.style.backgroundImage = `url(${rbImg(ok ? (many ? 'okMany' : 'ok') : (many ? 'badMany' : 'bad'))})`;
+    const img = b.firstChild, id = g._show.out;
+    if (img._id !== id) { img._id = id; img.src = iconFor(id, g._show.tag); }
+    b._g = g;
+    if (b._hover) this.rbTip(this.rbShown(g));
+  });
+  S.prev.style.display = S.page > 0 ? '' : 'none'; S.next.style.display = S.page < pages - 1 ? '' : 'none';
+  S.pageText.textContent = pages > 1 ? (S.page + 1) + '/' + pages : '';
+  S.sig = this.rbSig();
+};
+// rebuild the buttons when what the player holds changes
+UI.prototype.rbSig = function () { const p = this.game.player, g = this.rbState && this.rbState.book === 'crafting' ? this.craftGrid() : []; return [...p.inv, ...g].map(s => s ? s.id + 'x' + s.count : '').join(',') + '|' + (p.recipes ? p.recipes.size : 0); };
+const _renderInvRB = UI.prototype.renderInv;
+UI.prototype.renderInv = function () {
+  _renderInvRB.call(this);
+  const S = this.rbState;
+  if (S && this.inv) { if (S.sig !== this.rbSig()) this.rbRefresh(); }
+  if (this.rbGhost) this.rbDrawGhost();
+};
+// clicking a button: one recipe goes straight in, a group opens to choose
+UI.prototype.rbClick = function (g, shift, b) {
+  const S = this.rbState;
+  this.rbCloseOverlay();
+  const known = g._known || g.list;
+  if (known.length > 1) return this.rbOverlay(g, known, b);
+  this.rbPlace(known[0], shift);
+};
+UI.prototype.rbCloseOverlay = function () { const S = this.rbState; if (S && S.overlay) { S.overlay.remove(); S.overlay = null; } };
+UI.prototype.rbOverlay = function (g, known, b) {
+  const S = this.rbState, p = this.game.player, counts = rbCounts(p, S.book === 'crafting' ? this.craftGrid() : []);
+  const ov = el('div'), cols = Math.min(4, known.length), rows = Math.ceil(known.length / cols);
+  ov.style.cssText = `position:absolute;z-index:5;left:${parseInt(b.style.left) - 4 * GS}px;top:${parseInt(b.style.top) + 24 * GS}px;width:${(cols * 25 + 8) * GS}px;height:${(rows * 25 + 8) * GS}px;background:#c6c6c6;border:${GS}px solid #000;box-shadow:inset ${GS}px ${GS}px 0 #fff, inset -${GS}px -${GS}px 0 #555`;
+  known.forEach((e, k) => {
+    const ok = !!rbAssign(e, counts, 1), d = el('div');
+    d.style.cssText = `position:absolute;left:${(4 + (k % cols) * 25) * GS}px;top:${(4 + Math.floor(k / cols) * 25) * GS}px;width:${25 * GS}px;height:${25 * GS}px;background:url(${rbImg(ok ? 'ok' : 'bad')}) 0 0/100% 100%;image-rendering:pixelated;cursor:pointer`;
+    d.innerHTML = `<img src="${iconFor(e.out, e.tag)}" style="position:absolute;left:${4 * GS}px;top:${4 * GS}px;width:${16 * GS}px;height:${16 * GS}px;image-rendering:pixelated">`;
+    d.addEventListener('mousedown', ev => { ev.preventDefault(); ev.stopPropagation(); this.rbCloseOverlay(); this.rbPlace(e, ev.shiftKey); });
+    d.addEventListener('mouseenter', () => this.rbTip({ id: e.out, count: e.count, tag: e.tag }));
+    d.addEventListener('mouseleave', () => this.rbTip(null));
+    ov.appendChild(d);
+  });
+  S.panel.appendChild(ov); S.overlay = ov;
+};
+// ServerPlaceRecipe: back into the inventory goes the grid, in come the ingredients
+UI.prototype.rbPlace = function (e, shift) {
+  const S = this.rbState, g = this.game, p = g.player;
+  if (!S) return;
+  this.rbGhost = null;
+  if (e.kind === 'cook') return this.rbPlaceCook(e, shift);
+  const grid = this.craftGrid(), gw = grid.length === 9 ? 3 : 2;
+  if (gw === 2 && !e.fits2) return;
+  const counts = rbCounts(p, grid), best = rbMaxSets(e, counts);
+  if (!best) { this.rbClearGrid(); this.rbGhost = { e }; this.renderInv(); this.refreshHotbar(); return; }
+  // the same recipe in the grid already: one more of each
+  const lay = this.rbLayout(e, gw), same = lay.every((cell, k) => cell ? grid[k] && cell.includes(grid[k].id) : !grid[k]);
+  let n = shift ? best : same ? Math.min(best, Math.min(...grid.filter(Boolean).map(s => s.count)) + 1) : 1;
+  let pick = rbAssign(e, counts, n);
+  if (!pick) return;
+  n = Math.min(n, ...pick.filter(Boolean).map(id => maxStack(id)));
+  pick = rbAssign(e, counts, n);
+  if (!pick) return;
+  this.rbClearGrid();
+  const cellIds = this.rbLayout(e, gw, pick);
+  for (let k = 0; k < grid.length; k++) {
+    const id = cellIds[k];
+    if (!id) continue;
+    const st = this.rbTake(id, n);
+    if (st) this.setSlot('grid', k, st);
+  }
+  AUDIO.play('click');
+  this.renderInv(); this.refreshHotbar();
+};
+// where each ingredient goes: shaped recipes from the top left corner, shapeless ones in reading order
+UI.prototype.rbLayout = function (e, gw, pick) {
+  const out = new Array(gw * gw).fill(null);
+  if (e.shaped) { for (let y = 0; y < e.h; y++) for (let x = 0; x < e.w; x++) { const i = y * e.w + x; if (e.cells[i]) out[y * gw + x] = pick ? pick[i] : e.cells[i]; } }
+  else e.cells.forEach((c, i) => { out[i] = pick ? pick[i] : c; });
+  return out;
+};
+UI.prototype.rbClearGrid = function () {
+  const grid = this.craftGrid(), p = this.game.player;
+  for (let k = 0; k < grid.length; k++) if (grid[k]) { const st = grid[k]; grid[k] = null; this.game.giveOrDrop(p, st); }
+};
+// n of one item out of the inventory (plain stacks only)
+UI.prototype.rbTake = function (id, n) {
+  const p = this.game.player;
+  let got = null;
+  for (let i = 0; i < 36 && n > 0; i++) {
+    const s = p.inv[i];
+    if (!s || s.id !== id || s.dmg || (s.tag && (s.tag.ench || s.tag.name))) continue;
+    const k = Math.min(n, s.count);
+    if (!got) got = copyStack(s, 0);
+    got.count += k; s.count -= k; n -= k;
+    if (s.count <= 0) p.inv[i] = null;
+  }
+  return got;
+};
+UI.prototype.rbPlaceCook = function (e, shift) {
+  const p = this.game.player, be = this.inv.data, cur = be.items[0], id = e.cells[0][0], have = rbCounts(p, cur ? [cur] : []).get(id) || 0;
+  if (!have) { this.rbGhost = { e }; this.renderInv(); return; }
+  const same = cur && cur.id === id;
+  const n = Math.min(maxStack(id), have, shift ? 64 : same ? cur.count + 1 : 1);
+  if (cur) { be.items[0] = null; this.game.giveOrDrop(p, cur); }
+  const st = this.rbTake(id, n);
+  if (st) be.items[0] = st;
+  AUDIO.play('click');
+  this.renderInv(); this.refreshHotbar();
+};
+// GhostSlots: see-through ingredients on red over the slots, until something goes in
+UI.prototype.rbDrawGhost = function () {
+  const G = this.rbGhost, win = this.winEl;
+  if (!G || !win) return;
+  const S = SCREENS[this.inv.type], e = G.e, slots = [];
+  if (e.kind === 'cook') {
+    const s0 = S.slots.find(s => s[0] === 'be' && s[1] === 0), so = S.slots.find(s => s[0] === 'be' && s[1] === 2);
+    if (this.inv.data.items[0]) { this.rbGhost = null; win.querySelectorAll('.rbghost').forEach(x => x.remove()); return; }
+    slots.push([s0, e.cells[0]], [so, [e.out], true]);
+  } else {
+    const grid = this.craftGrid(), gw = grid.length === 9 ? 3 : 2, lay = this.rbLayout(e, gw);
+    if (grid.some(Boolean)) { this.rbGhost = null; win.querySelectorAll('.rbghost').forEach(x => x.remove()); return; }
+    S.slots.filter(s => s[0] === 'grid').forEach(s => { if (lay[s[1]]) slots.push([s, lay[s[1]]]); });
+    const so = S.slots.find(s => s[0] === 'out');
+    if (so) slots.push([so, [e.out], true]);
+  }
+  const t = Math.floor(performance.now() / 1500);
+  win.querySelectorAll('.rbghost').forEach(x => x.remove());
+  for (const [s, alts, isOut] of slots) {
+    const big = s[4] === 'big', d = el('div', 'rbghost'), id = alts[t % alts.length];
+    d.style.cssText = `position:absolute;pointer-events:none;left:${(s[2] - (big ? 4 : 0)) * GS}px;top:${(s[3] - (big ? 4 : 0)) * GS}px;width:${(big ? 24 : 16) * GS}px;height:${(big ? 24 : 16) * GS}px;background:${isOut ? 'transparent' : 'rgba(255,0,0,.19)'};display:flex;align-items:center;justify-content:center`;
+    d.innerHTML = `<img src="${iconFor(id)}" style="width:${16 * GS}px;height:${16 * GS}px;opacity:.5;image-rendering:pixelated">`;
+    win.appendChild(d);
+  }
+};
+const _closeInvRB = UI.prototype.closeInv;
+UI.prototype.closeInv = function () { this.rbGhost = null; this.rbState = null; this.rbTip(null); return _closeInvRB.call(this); };
+
+/* ---------------- doLimitedCrafting ---------------- */
+const _craftResultRB = UI.prototype.craftResult;
+UI.prototype.craftResult = function () {
+  const g = this.game;
+  if (g && g.rule && g.rule('doLimitedCrafting') && g.player) {
+    rbBuild();
+    const grid = this.craftGrid(), r = matchRecipe(grid.map(s => s ? s.id : 0), grid.length === 9 ? 3 : 2);
+    if (r) { const e = [...RBOOK.byKey.values()].find(x => x.r === r); if (e && !g.player.knowsRecipe(e)) return null; }
+  }
+  return _craftResultRB.call(this);
+};
+
+/* ---------------- /recipe ---------------- */
+COMMAND_NAMES.push('recipe'); COMMAND_NAMES.sort();
+const _onChatRB = Game.prototype.onChat;
+Game.prototype.onChat = function (msg) {
+  const m = typeof msg === 'string' && /^\/recipe(?:\s+(\S+))?(?:\s+(\S+))?(?:\s+(\S+))?\s*$/i.exec(msg.trim());
+  if (!m || !this.world || !this.player || (this.cheatsOn && !this.cheatsOn())) return _onChatRB.call(this, msg);
+  const sub = (m[1] || '').toLowerCase(), target = m[3] === undefined ? m[2] : m[3], which = (target || '').replace(/^minecraft:/, '');
+  const bad = t => this.ui.chat(t, '#ff5555');
+  if ((sub !== 'give' && sub !== 'take') || !which) return bad('Usage: /recipe <give|take> [@s] <recipe|*>');
+  rbBuild();
+  const all = [...RBOOK.byKey.values()], list = which === '*' ? all : all.filter(e => ITEMS[e.out].name === which);
+  if (!list.length) return bad('Unknown recipe: ' + which);
+  const p = this.player;
+  if (!p.recipes) p.recipes = new Set();
+  let n = 0;
+  if (sub === 'give') n = this.unlockRecipes(list);
+  else for (const e of list) if (p.recipes.delete(e.key)) n++;
+  if (!n) return bad(sub === 'give' ? 'Couldn\'t give recipes' : 'Couldn\'t take recipes');
+  if (this.ui.inv && this.ui.rbState) this.ui.rbRefresh();
+  this.ui.chat(sub === 'give' ? 'Unlocked ' + n + ' recipes for Player' : 'Took ' + n + ' recipes from Player', '#ccc');
+};
+
+/* ---------------- the save ---------------- */
+const _playerDataRB = Game.prototype.playerData;
+Game.prototype.playerData = function () {
+  const d = _playerDataRB.call(this), p = this.player;
+  if (p.recipes) d.recipes = [...p.recipes];
+  if (p.rbook) d.rbook = p.rbook;
+  return d;
+};
+const _startWorldRB = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) {
+  const r = _startWorldRB.call(this, meta, saved), s = meta.player, p = this.player;
+  if (p) {
+    p._rbSeen = null;
+    if (s && s.recipes) p.recipes = new Set(s.recipes);
+    if (s && s.rbook) p.rbook = s.rbook;
+  }
+  return r;
+};
+
 </script>
 </body>
 </html>
