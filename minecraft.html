@@ -10042,8 +10042,8 @@ for (const mat in ARMOR_SKIN_COL) for (const layer of [1, 2]) {
   defSkin('models/armor/' + mat + '_layer_' + layer, 64, 32, () => skinParts(64, 32, ARMOR_PARTS_UV, layer === 1 ? {
     // helmet: covers the head except the face, chestplate: torso and shoulders, boots: the feet
     head: (f, x, y, W, H, R) => f === 'bottom' || (f === 'front' && y >= 2 && x >= 1 && x <= 6) ? null : f === 'front' && y === 1 && mat === 'turtle' ? [40, 100, 40] : metal(f, x, y, R),
-    body: (f, x, y, W, H, R) => y < 10 || f === 'top' ? metal(f, x, y, R) : null,
-    right_arm: (f, x, y, W, H, R) => y < 4 || f === 'top' ? metal(f, x, y, R) : null,
+    body: (f, x, y, W, H, R) => (y < 10 && f !== 'bottom') || f === 'top' ? metal(f, x, y, R) : null,
+    right_arm: (f, x, y, W, H, R) => (y < 4 && f !== 'bottom') || f === 'top' ? metal(f, x, y, R) : null,
     right_leg: (f, x, y, W, H, R) => y >= 8 || f === 'bottom' ? metal(f, x, y, R) : null,
   } : {
     body: (f, x, y, W, H, R) => f !== 'top' && y >= 9 ? metal(f, x, y, R) : null,
@@ -21359,6 +21359,11 @@ function mapDecorations(g, map) {
     const fx = (mk.x - map.x) / s, fz = (mk.z - map.z) / s;
     if (Math.abs(fx) < 64 && Math.abs(fz) < 64) out.push({ k: mk.k, x: 64 + fx, y: 64 + fz, rot: mk.rot || 0 });
   }
+  // item frames holding this map show as green arrows pointing the way they face
+  if (map.dim === g.world.dim) for (const fr of map.frames || []) {
+    const fx = (fr.x + 0.5 - map.x) / s, fz = (fr.z + 0.5 - map.z) / s;
+    if (Math.abs(fx) < 64 && Math.abs(fz) < 64) out.push({ k: 'frame', x: 64 + fx, y: 64 + fz, rot: fr.f === 4 ? Math.PI : fr.f === 0 ? Math.PI / 2 : fr.f === 1 ? -Math.PI / 2 : 0 });
+  }
   if (p && !p.dead && map.dim === g.world.dim) {
     const fx = (p.x - map.x) / s, fz = (p.z - map.z) / s, cl = v => Math.max(-64, Math.min(63.5, v));
     if (Math.abs(fx) < 63 && Math.abs(fz) < 63) {
@@ -21372,7 +21377,7 @@ function mapDecorations(g, map) {
   return out;
 }
 // draws a map through m, which maps map space (x right 0..128, y down, z away from the viewer) to the scene
-function drawMap3D(g, r, m, id, l) {
+function drawMap3D(g, r, m, id, l, inFrame) {
   const map = g.mapById(id), A = ATLAS.S;
   const quad = (pts, reg, z, both) => {
     const u0 = reg.x / A, v0 = reg.y / A, u1 = (reg.x + reg.w) / A, v1 = (reg.y + reg.h) / A, uv = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
@@ -21380,12 +21385,13 @@ function drawMap3D(g, r, m, id, l) {
     for (const order of both ? [[0, 1, 2, 3], [1, 0, 3, 2]] : [[0, 1, 2, 3]]) for (const k of order) r.dv(P[k][0], P[k][1], P[k][2], uv[k][0], uv[k][1], -1, 1, 1, 1, 1, l[0], l[1]);
   };
   const bg = VTEX[map ? 'map/map_background' : 'map/map_background_checkerboard'];
-  if (bg) quad([[-7, 135], [135, 135], [135, -7], [-7, -7]], bg.reg, 0, true);
+  if (bg && !inFrame) quad([[-7, 135], [135, 135], [135, -7], [-7, -7]], bg.reg, 0, true);
   if (!map) return;
   const vt = mapTexture(g, id);
   if (vt) quad([[0, 128], [128, 128], [128, 0], [0, 0]], vt.reg, -0.4);
   let z = -0.8;
   for (const d of mapDecorations(g, map)) {
+    if (inFrame && (d.k === 'frame' || d.k.startsWith('player'))) continue;
     const dt = VTEX['map/decorations/' + d.k];
     if (!dt) continue;
     const c = Math.cos(d.rot), s = Math.sin(d.rot), P = (x, y) => [d.x + x * c - y * s, d.y + x * s + y * c];
@@ -21599,6 +21605,817 @@ packTexMap = function () {
   }
   return m;
 };
+
+/* @file 102_decor.js */
+/* ===================================================================
+   DECORATIONS — item frames (and glow item frames) that show items and
+   maps, paintings in the vanilla sizes with original procedural art,
+   armor stands that wear armor
+   =================================================================== */
+
+/* ---------------- textures ---------------- */
+TEXGEN.push(function texFrames() {
+  const leather = (base, dots) => (d, r) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) sp(d, x, y, mul(base, 0.86 + r() * 0.14 + ((x + y) % 5 === 0 ? 0.05 : 0)));
+    for (let k = 3; k < 13; k += 2) { sp(d, k, 3, mul(base, 0.6)); sp(d, k, 12, mul(base, 0.6)); sp(d, 3, k, mul(base, 0.6)); sp(d, 12, k, mul(base, 0.6)); }
+    if (dots) for (let k = 0; k < 7; k++) sp(d, 4 + Math.floor(r() * 8), 4 + Math.floor(r() * 8), dots);
+  };
+  T('item_frame_back', leather([150, 100, 62]));
+  T('glow_item_frame_back', leather([64, 128, 120], [200, 255, 220]));
+});
+// a box in a local frame: u right, v up, w out of the wall (pixels / 16); uv from the box like a block model
+function emitLocalBox(r, o, R, U, N, b, layer, l, faces, tint) {
+  const [u0, v0, w0, u1, v1, w1] = b, P = (u, v, w) => [o[0] + (R[0] * u + U[0] * v + N[0] * w) / 16, o[1] + (R[1] * u + U[1] * v + N[1] * w) / 16, o[2] + (R[2] * u + U[2] * v + N[2] * w) / 16];
+  const t = tint || [1, 1, 1], q = (pts, uv, s) => { for (let k = 0; k < 4; k++) { const p = pts[k]; r.dv(p[0], p[1], p[2], uv[k][0] / 16, uv[k][1] / 16, layer, t[0] * s, t[1] * s, t[2] * s, 1, l[0], l[1]); } };
+  const tu = (u) => u + 8, tv = (v) => 8 - v;    // texture pixels for local coordinates centred on 0
+  if (faces.includes('f')) q([P(u0, v0, w1), P(u1, v0, w1), P(u1, v1, w1), P(u0, v1, w1)], [[tu(u0), tv(v0)], [tu(u1), tv(v0)], [tu(u1), tv(v1)], [tu(u0), tv(v1)]], 1);
+  if (faces.includes('b')) q([P(u1, v0, w0), P(u0, v0, w0), P(u0, v1, w0), P(u1, v1, w0)], [[tu(u1), tv(v0)], [tu(u0), tv(v0)], [tu(u0), tv(v1)], [tu(u1), tv(v1)]], 0.7);
+  if (faces.includes('t')) q([P(u0, v1, w1), P(u1, v1, w1), P(u1, v1, w0), P(u0, v1, w0)], [[tu(u0), 16 - w1 * 16], [tu(u1), 16 - w1 * 16], [tu(u1), 16 - w0 * 16], [tu(u0), 16 - w0 * 16]].map(([a, c]) => [a, Math.max(0, Math.min(16, c))]), 0.95);
+  if (faces.includes('d')) q([P(u0, v0, w0), P(u1, v0, w0), P(u1, v0, w1), P(u0, v0, w1)], [[tu(u0), 0], [tu(u1), 0], [tu(u1), 1], [tu(u0), 1]], 0.6);
+  if (faces.includes('l')) q([P(u0, v0, w0), P(u0, v0, w1), P(u0, v1, w1), P(u0, v1, w0)], [[0, tv(v0)], [1, tv(v0)], [1, tv(v1)], [0, tv(v1)]], 0.8);
+  if (faces.includes('r')) q([P(u1, v0, w1), P(u1, v0, w0), P(u1, v1, w0), P(u1, v1, w1)], [[0, tv(v0)], [1, tv(v0)], [1, tv(v1)], [0, tv(v1)]], 0.8);
+}
+// the frame of reference of something hanging on face f of a block: right, up and out (unit vectors)
+const HANG_DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+function hangBasis(f, rot) {
+  const N = HANG_DIRS[f];
+  let R, U;
+  if (f === 2) { R = [1, 0, 0]; U = [0, 0, -1]; }          // on the floor the top points north
+  else if (f === 3) { R = [1, 0, 0]; U = [0, 0, 1]; }
+  else { R = [N[2], 0, -N[0]]; U = [0, 1, 0]; }            // on a wall: right as seen from the front
+  if (rot) { const a = -rot * Math.PI / 4, c = Math.cos(a), s = Math.sin(a), R2 = R.map((v, i) => v * c + U[i] * s), U2 = U.map((v, i) => v * c - R[i] * s); R = R2; U = U2; }
+  return [R, U, N];
+}
+
+/* ---------------- shared behaviour of things hanging on blocks ---------------- */
+class Hanging extends Mob {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    this.persistent = true; this.stepH = 0; this.yaw = this.bodyYaw = 0;
+    const o = opts || {};
+    Object.assign(this.data, o.loading ? o.data || {} : { bx: o.bx, by: o.by, bz: o.bz, f: o.f });
+  }
+  keepWhenUnloaded() { return true; }
+  envDamage() { }
+  landed() { }
+  afterLoad() { this.place(); }
+  // the block it hangs on
+  wallPos() { const d = HANG_DIRS[this.data.f]; return [this.data.bx - d[0], this.data.by - d[1], this.data.bz - d[2]]; }
+  tick() {
+    this.savePrev(); this.age++;
+    if (this.hurtTime > 0) this.hurtTime--;
+    if (this.age % 100 === 0 && !this.survives()) this.breakOff(false);
+  }
+  hitBox() {
+    const [R, U, N] = hangBasis(this.data.f), hw = this.halfW(), hh = this.halfH(), th = this.thick(), c = this.center();
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (const su of [-1, 1]) for (const sv of [-1, 1]) for (const sw of [-0.5, 0.5]) {
+      const p = [c[0] + R[0] * su * hw + U[0] * sv * hh + N[0] * sw * th, c[1] + R[1] * su * hw + U[1] * sv * hh + N[1] * sw * th, c[2] + R[2] * su * hw + U[2] * sv * hh + N[2] * sw * th];
+      x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); z0 = Math.min(z0, p[2]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); z1 = Math.max(z1, p[2]);
+    }
+    return [x0, y0, z0, x1, y1, z1];
+  }
+  thick() { return 1 / 16; }
+  lightAt() { const d = HANG_DIRS[this.data.f], c = this.center(), l = this.game.world.getLightRaw(Math.floor(c[0] + d[0] * 0.1), Math.floor(c[1] + d[1] * 0.1), Math.floor(c[2] + d[2] * 0.1)); return [l >> 4, l & 15]; }
+  breakOff(creative) {
+    if (this.dead) return;
+    this.dead = true;
+    const g = this.game;
+    if (!creative) this.dropSelf();
+    g.sound(this.breakSound || 'break_wood', this.x, this.y, this.z);
+  }
+}
+
+/* ---------------- item frames ---------------- */
+defMob('item_frame', { w: 0.75, h: 0.75, hp: 1, walk: 0, run: 0, cat: 'misc', ai: [], persistent: true, sounds: null, noPush: true });
+defMob('glow_item_frame', { w: 0.75, h: 0.75, hp: 1, walk: 0, run: 0, cat: 'misc', ai: [], persistent: true, sounds: null, noPush: true });
+class ItemFrame extends Hanging {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    if (!(opts && opts.loading)) { this.data.item = null; this.data.rot = 0; }
+    this.place();
+  }
+  place() {
+    const d = HANG_DIRS[this.data.f] || HANG_DIRS[4];
+    this.x = this.data.bx + 0.5 - d[0] * 0.46875; this.y = this.data.by + 0.5 - d[1] * 0.46875 - 0.375; this.z = this.data.bz + 0.5 - d[2] * 0.46875;
+    if (d[1] === 1) this.y = this.data.by;
+    if (d[1] === -1) this.y = this.data.by + 1 - 0.0625;
+    this.yaw = this.bodyYaw = Math.atan2(d[0], d[2]) - (this.data.rot || 0) * Math.PI / 4;
+    this.savePrev();
+  }
+  center() { const d = HANG_DIRS[this.data.f]; return [this.data.bx + 0.5 - d[0] * 0.46875, this.data.by + 0.5 - d[1] * 0.46875, this.data.bz + 0.5 - d[2] * 0.46875]; }
+  isMap() { const it = this.data.item; return !!(it && it.id === I.FILLED_MAP); }
+  halfW() { return this.isMap() ? 0.5 : 0.375; }
+  halfH() { return this.halfW(); }
+  survives() { const [x, y, z] = this.wallPos(), id = this.game.world.getBlock(x, y, z); return !!(SOLID[id] || SHAPE[id] === SH.DIODE); }
+  dropSelf() {
+    const g = this.game, c = this.center();
+    g.dropItem(c[0], c[1], c[2], { id: this.type === 'glow_item_frame' ? I.GLOW_ITEM_FRAME : I.ITEM_FRAME, count: 1 });
+    if (this.data.item) { this.forgetMap(); g.dropItem(c[0], c[1], c[2], this.data.item); this.data.item = null; }
+  }
+  // the frame's spot on its map, for the green marker
+  forgetMap() { const it = this.data.item; if (!it || it.id !== I.FILLED_MAP || !it.tag) return; const m = this.game.mapById(it.tag.map); if (m && m.frames) m.frames = m.frames.filter(q => !(q.x === this.data.bx && q.y === this.data.by && q.z === this.data.bz)); }
+  noteMap() {
+    const it = this.data.item; if (!it || it.id !== I.FILLED_MAP || !it.tag) return;
+    const m = this.game.mapById(it.tag.map); if (!m) return;
+    this.forgetMap(); (m.frames || (m.frames = [])).push({ x: this.data.bx, y: this.data.by, z: this.data.bz, f: this.data.f });
+    m.ver = (m.ver || 0) + 1;
+  }
+  interact(p, held) {
+    const g = this.game, c = this.center();
+    if (!this.data.item) {
+      if (!held) return false;
+      this.data.item = copyStack(held, 1); this.data.rot = 0;
+      if (p.mode !== 1) p.consumeHeld(1);
+      this.noteMap();
+      g.sound('frame_add', c[0], c[1], c[2]);
+      if (g.world.redstoneChanged) g.world.redstoneChanged(...this.wallPos());
+      return true;
+    }
+    this.data.rot = (this.data.rot + 1) & 7;
+    this.place();
+    if (this.isMap()) this.noteMap();
+    g.sound('frame_rotate', c[0], c[1], c[2]);
+    if (g.world.redstoneChanged) g.world.redstoneChanged(...this.wallPos());
+    return true;
+  }
+  hurt(amount, source, attacker) {
+    if (this.dead) return false;
+    const g = this.game, p = g.player, c = this.center(), creative = attacker === p && p.mode === 1;
+    if (source === 'fire' || source === 'lava' || source === 'drown' || source === 'fall' || source === 'in_fire') return false;
+    if (this.data.item) {
+      this.forgetMap();
+      if (!creative) g.dropItem(c[0], c[1], c[2], this.data.item);
+      this.data.item = null; this.data.rot = 0;
+      g.sound('frame_remove', c[0], c[1], c[2]);
+      if (g.world.redstoneChanged) g.world.redstoneChanged(...this.wallPos());
+      return true;
+    }
+    this.breakOff(creative);
+    return true;
+  }
+  die() { this.breakOff(false); }
+  render(r, a) {
+    const g = this.game, f = this.data.f, map = this.isMap(), [R, U, N] = hangBasis(f), o = this.center();
+    const glow = this.type === 'glow_item_frame', l = this.lightAt(), wood = texL('birch_planks'), back = texL(glow ? 'glow_item_frame_back' : 'item_frame_back');
+    // o is the middle of the frame's back plane; w runs out of the wall from -0.5 (wall) to +0.5
+    const W = (b, layer, faces) => emitLocalBox(r, o, R, U, N, b, layer, l, faces);
+    if (map) {
+      W([-7, -7, -0.5, 7, 7, 0.49], back, 'f');
+      W([-8, -8, -0.5, 8, -7, 0.5], wood, 'ftdlr'); W([-8, 7, -0.5, 8, 8, 0.5], wood, 'ftdlr');
+      W([-8, -7, -0.5, -7, 7, 0.5], wood, 'flr'); W([7, -7, -0.5, 8, 7, 0.5], wood, 'flr');
+    } else {
+      W([-5, -5, -0.5, 5, 5, 0], back, 'f');
+      W([-6, -6, -0.5, 6, -5, 0.5], wood, 'ftdlr'); W([-6, 5, -0.5, 6, 6, 0.5], wood, 'ftdlr');
+      W([-6, -5, -0.5, -5, 5, 0.5], wood, 'flr'); W([5, -5, -0.5, 6, 5, 0.5], wood, 'flr');
+    }
+    const it = this.data.item;
+    if (!it) return;
+    const li = glow ? [15, 15] : l;
+    if (map) {
+      // the map fills the frame, turned in quarter steps
+      // map space: x right, y down from the top-left corner, z into the wall
+      const [R2, U2] = hangBasis(f, (this.data.rot & 3) * 2), s = 1 / 128, k = 0.5 / 16 + 0.003;
+      const tl = [o[0] + N[0] * k - R2[0] * 0.5 + U2[0] * 0.5, o[1] + N[1] * k - R2[1] * 0.5 + U2[1] * 0.5, o[2] + N[2] * k - R2[2] * 0.5 + U2[2] * 0.5];
+      const m = new Float32Array([R2[0] * s, R2[1] * s, R2[2] * s, 0, -U2[0] * s, -U2[1] * s, -U2[2] * s, 0, -N[0] * s, -N[1] * s, -N[2] * s, 0, tl[0], tl[1], tl[2], 1]);
+      drawMap3D(g, r, m, it.tag ? it.tag.map : undefined, li, true);
+      return;
+    }
+    // other items lie flat at half size, turned in eighths
+    const [R2, U2] = hangBasis(f, this.data.rot), style = itemStyle(it.id);
+    const c1 = [o[0] + N[0] * 0.05, o[1] + N[1] * 0.05, o[2] + N[2] * 0.05];
+    g._xformHolder = this;
+    if (style === 'sprite') {
+      const k = 0.5, m = new Float32Array([R2[0] * k, R2[1] * k, R2[2] * k, 0, U2[0] * k, U2[1] * k, U2[2] * k, 0, N[0] * k, N[1] * k, N[2] * k, 0, c1[0], c1[1], c1[2], 1]);
+      g.pushItemXform(r, m, it, li);
+    } else {
+      const k = 0.25, c2 = [o[0] + N[0] * 0.16, o[1] + N[1] * 0.16, o[2] + N[2] * 0.16];
+      const m = new Float32Array([R2[0] * k, R2[1] * k, R2[2] * k, 0, U2[0] * k, U2[1] * k, U2[2] * k, 0, N[0] * k, N[1] * k, N[2] * k, 0, c2[0], c2[1], c2[2], 1]);
+      g.pushBlockItem(r, m, it.id, li);
+    }
+    g._xformHolder = null;
+  }
+}
+MOB_CLASSES.item_frame = ItemFrame; MOB_CLASSES.glow_item_frame = ItemFrame;
+
+/* ---------------- paintings ---------------- */
+// vanilla's variant names and sizes (so resource pack art fits); the built-in art is generated
+const PAINTINGS = [['kebab', 1, 1], ['aztec', 1, 1], ['alban', 1, 1], ['aztec2', 1, 1], ['bomb', 1, 1], ['plant', 1, 1], ['wasteland', 1, 1], ['meditative', 1, 1],
+  ['pool', 2, 1], ['courbet', 2, 1], ['sea', 2, 1], ['sunset', 2, 1], ['creebet', 2, 1], ['wanderer', 1, 2], ['graham', 1, 2], ['prairie_ride', 1, 2],
+  ['match', 2, 2], ['bust', 2, 2], ['stage', 2, 2], ['void', 2, 2], ['skull_and_roses', 2, 2], ['wither', 2, 2], ['baroque', 2, 2], ['humble', 2, 2],
+  ['earth', 2, 2, 1], ['wind', 2, 2, 1], ['water', 2, 2, 1], ['fire', 2, 2, 1],
+  ['fighters', 4, 2], ['changing', 4, 2], ['finding', 4, 2], ['lowmist', 4, 2], ['passage', 4, 2],
+  ['bouquet', 3, 3], ['cavebird', 3, 3], ['cotan', 3, 3], ['endboss', 3, 3], ['fern', 3, 3], ['owlemons', 3, 3], ['sunflowers', 3, 3], ['tides', 3, 3],
+  ['backyard', 3, 4], ['pond', 3, 4], ['skeleton', 4, 3], ['donkey_kong', 4, 3], ['pointer', 4, 4], ['pigscene', 4, 4], ['burning_skull', 4, 4], ['orb', 4, 4], ['unpacked', 4, 4]];
+const PAINTING_BY = {};
+for (const p of PAINTINGS) PAINTING_BY[p[0]] = p;
+// original pixel art: landscapes, seas, night skies, flowers, figures and abstract shapes
+function paintingArt(id, w, h) {
+  const W = w * 16, H = h * 16, R = mulberry32(strHash('painting:' + id)), c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), img = g.createImageData(W, H), d = img.data;
+  const set = (x, y, col) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const o = (y * W + x) * 4; d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = 255; };
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const jit = (col, k) => { const f = 1 + (R() - 0.5) * k; return [col[0] * f, col[1] * f, col[2] * f]; };
+  const noise1 = (n, oct) => { const pts = []; for (let i = 0; i <= n; i++) pts.push(R()); return x => { const t = x * n, i = Math.floor(t), f = t - i, s = f * f * (3 - 2 * f); return pts[Math.min(n, i)] * (1 - s) + pts[Math.min(n, i + 1)] * s; }; };
+  const style = strHash(id) % 6, skies = [[[96, 150, 220], [190, 220, 240]], [[240, 140, 80], [255, 220, 150]], [[70, 60, 120], [220, 120, 110]], [[120, 180, 230], [230, 240, 250]]];
+  const sky = skies[Math.floor(R() * skies.length)];
+  if (style === 0 || style === 1) {
+    // landscape (0) or sea (1): sky, sun, hills or waves
+    const hor = Math.floor(H * (0.45 + R() * 0.2)), sunX = R() * W, sunY = hor * (0.2 + R() * 0.5), sunR = 2 + R() * Math.min(W, H) * 0.12;
+    const ridges = [noise1(3 + Math.floor(R() * 4)), noise1(5 + Math.floor(R() * 5)), noise1(8)];
+    const greens = [[[86, 120, 150], [120, 150, 170]], [[70, 120, 60], [96, 140, 70]], [[40, 90, 40], [60, 110, 46]]];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let col = jit(lerp(sky[0], sky[1], y / hor), 0.04);
+      if (Math.hypot(x - sunX, y - sunY) < sunR) col = jit([255, 236, 170], 0.05);
+      if (style === 0) {
+        for (let k = 0; k < 3; k++) { const top = hor - (2 - k) * H * 0.1 - ridges[k](x / W) * H * 0.18 * (1.5 - k * 0.4); if (y >= top) col = jit(lerp(greens[k][0], greens[k][1], R()), 0.08); }
+        if (y >= hor + H * 0.12) col = jit(lerp([96, 150, 64], [70, 120, 50], (y - hor) / H), 0.1);
+      } else if (y >= hor) {
+        const t = (y - hor) / (H - hor);
+        col = jit(lerp([60, 110, 170], [24, 56, 110], t), 0.06);
+        if ((y + Math.floor(Math.sin(x * 0.7 + y) * 2)) % 4 === 0) col = lerp(col, [200, 220, 240], 0.35);
+        if (Math.abs(x - sunX) < sunR * (1 - t) * 0.8 && R() < 0.5) col = lerp(col, [255, 230, 160], 0.6);
+      }
+      set(x, y, col);
+    }
+    if (style === 0 && R() < 0.8) {
+      // a tree
+      const tx = Math.floor(W * (0.15 + R() * 0.7)), ty = Math.floor(hor + H * 0.2), th = Math.floor(H * 0.25);
+      for (let y = ty - th; y < ty; y++) set(tx, y, [80, 56, 34]);
+      for (let y = -6; y <= 6; y++) for (let x = -6; x <= 6; x++) if (x * x + y * y < 20 + R() * 12) set(tx + x, ty - th + y, jit([40, 100, 40], 0.2));
+    } else if (style === 1) {
+      // a little sail on the horizon
+      const bx = Math.floor(W * (0.2 + R() * 0.6)), by = hor;
+      for (let x = -3; x <= 3; x++) set(bx + x, by, [70, 46, 30]);
+      for (let y = 1; y <= 5; y++) for (let x = 0; x < 6 - y; x++) set(bx + x - 1, by - y, [240, 236, 220]);
+    }
+  } else if (style === 2) {
+    // night: stars, moon and a dark hill with a lit window
+    const hill = noise1(4);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let col = jit(lerp([10, 14, 40], [40, 50, 100], y / H), 0.05);
+      if (R() < 0.012) col = [240, 240, 255];
+      if (y > H * 0.7 - hill(x / W) * H * 0.25) col = jit([16, 24, 22], 0.2);
+      set(x, y, col);
+    }
+    const mx = Math.floor(W * (0.2 + R() * 0.6)), my = Math.floor(H * 0.25), mr = 2 + Math.floor(Math.min(W, H) * 0.08);
+    for (let y = -mr; y <= mr; y++) for (let x = -mr; x <= mr; x++) if (x * x + y * y <= mr * mr && (x - mr * 0.5) ** 2 + y * y > mr * mr * 0.6) set(mx + x, my + y, [250, 240, 200]);
+    const hx = Math.floor(W * (0.2 + R() * 0.6)), hy = Math.floor(H * 0.8);
+    for (let y = -3; y <= 0; y++) for (let x = -3; x <= 3; x++) set(hx + x, hy + y, [40, 30, 26]);
+    set(hx, hy - 2, [255, 210, 90]);
+  } else if (style === 3) {
+    // still life: a vase of flowers on a table
+    const wall = jit([150 + R() * 60, 120 + R() * 50, 90 + R() * 40], 0.1), table = Math.floor(H * 0.72);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) set(x, y, y < table ? jit(wall, 0.06) : jit([110, 70, 40], 0.1));
+    const vx = Math.floor(W / 2), vh = Math.floor(H * 0.22), vw = Math.max(2, Math.floor(W * 0.12));
+    for (let y = table - vh; y < table; y++) for (let x = -vw; x <= vw; x++) if (Math.abs(x) <= vw * (0.6 + 0.4 * Math.sin((y - table + vh) / vh * Math.PI))) set(vx + x, y, jit([70, 100, 160], 0.1));
+    const pal = [[220, 60, 60], [240, 200, 60], [240, 240, 240], [200, 90, 200], [255, 140, 60]];
+    for (let k = 0; k < 6 + w * h * 3; k++) {
+      const a = -Math.PI / 2 + (R() - 0.5) * 2.2, len = vh * (0.8 + R() * 1.2), fx = Math.round(vx + Math.cos(a) * len), fy = Math.round(table - vh + Math.sin(a) * len), col = pal[Math.floor(R() * pal.length)];
+      for (let t = 0; t < 1; t += 0.08) set(Math.round(vx + (fx - vx) * t), Math.round(table - vh + (fy - table + vh) * t), [50, 110, 40]);
+      for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) if (x * x + y * y < 2 || R() < 0.4) set(fx + x, fy + y, jit(col, 0.15));
+    }
+  } else if (style === 4) {
+    // a figure: a bust against a coloured ground
+    const bg = jit([[120, 40, 40], [40, 70, 110], [60, 90, 50], [130, 110, 60]][Math.floor(R() * 4)], 0.1);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) set(x, y, jit(lerp(bg, [20, 20, 24], (Math.hypot(x - W / 2, y - H / 2) / Math.max(W, H))), 0.06));
+    const cx = W / 2, hy = H * 0.38, hr = Math.min(W, H) * 0.18, cloth = jit([[60, 40, 30], [30, 30, 50], [90, 20, 30]][Math.floor(R() * 3)], 0.1);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if ((x - cx) ** 2 / (hr * 0.8) ** 2 + (y - hy) ** 2 / hr ** 2 < 1) set(x, y, jit(lerp([230, 190, 160], [160, 120, 100], (x - cx + hr) / (2 * hr)), 0.05));
+      else if (y > hy + hr * 0.8 && Math.abs(x - cx) < hr * 1.6 + (y - hy - hr) * 0.6) set(x, y, jit(cloth, 0.1));
+    }
+  } else {
+    // abstract: overlapping blocks and rings of colour
+    const pal = [[220, 50, 40], [240, 200, 40], [40, 80, 180], [240, 236, 224], [30, 30, 30], [60, 160, 120]];
+    const bg = pal[3];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) set(x, y, jit(bg, 0.04));
+    for (let k = 0; k < 4 + w * h * 2; k++) {
+      const col = pal[Math.floor(R() * pal.length)], x0 = Math.floor(R() * W), y0 = Math.floor(R() * H), sw = 2 + Math.floor(R() * W * 0.4), sh = 2 + Math.floor(R() * H * 0.4);
+      if (R() < 0.5) { for (let y = y0; y < y0 + sh; y++) for (let x = x0; x < x0 + sw; x++) set(x, y, jit(col, 0.05)); }
+      else { const rr = Math.min(sw, sh) / 2; for (let y = -rr; y <= rr; y++) for (let x = -rr; x <= rr; x++) { const q = x * x + y * y; if (q <= rr * rr && q >= (rr - 2) * (rr - 2)) set(Math.round(x0 + x), Math.round(y0 + y), col); } }
+    }
+    for (let k = 0; k < 3; k++) { const x = Math.floor(R() * W); for (let y = 0; y < H; y++) set(x, y, [24, 24, 24]); }
+  }
+  // a dark rim like the edge of a canvas
+  for (let x = 0; x < W; x++) { set(x, 0, lerp([d[0], d[1], d[2]], [20, 16, 12], 0.5)); set(x, H - 1, [30, 24, 18]); }
+  for (let y = 0; y < H; y++) { set(0, y, [36, 28, 20]); set(W - 1, y, [30, 24, 18]); }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+for (const [n, w, h] of PAINTINGS) defSkin('painting/' + n, w * 16, h * 16, () => paintingArt(n, w, h));
+defSkin('painting/back', 16, 16, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 16;
+  const g = c.getContext('2d'), img = g.createImageData(16, 16), R = mulberry32(99);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const o = (y * 16 + x) * 4, k = (y % 4 === 3 ? 0.75 : 1) * (0.88 + R() * 0.12); img.data[o] = 150 * k; img.data[o + 1] = 112 * k; img.data[o + 2] = 70 * k; img.data[o + 3] = 255; }
+  g.putImageData(img, 0, 0); return c;
+});
+defMob('painting', { w: 1, h: 1, hp: 1, walk: 0, run: 0, cat: 'misc', ai: [], persistent: true, sounds: null, noPush: true });
+class Painting extends Hanging {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    if (!(opts && opts.loading)) this.data.v = (opts && opts.variant) || 'kebab';
+    this.place();
+  }
+  variant() { return PAINTING_BY[this.data.v] || PAINTINGS[0]; }
+  halfW() { return this.variant()[1] / 2; }
+  halfH() { return this.variant()[2] / 2; }
+  // vanilla shifts even sizes half a block to the left and up
+  center() {
+    const v = this.variant(), d = HANG_DIRS[this.data.f], [R] = hangBasis(this.data.f), ow = v[1] % 2 === 0 ? 0.5 : 0, oh = v[2] % 2 === 0 ? 0.5 : 0;
+    return [this.data.bx + 0.5 - d[0] * 0.46875 + R[0] * ow, this.data.by + 0.5 + oh, this.data.bz + 0.5 - d[2] * 0.46875 + R[2] * ow];
+  }
+  place() { const c = this.center(); this.x = c[0]; this.y = c[1] - this.halfH(); this.z = c[2]; this.w = Math.max(this.halfW(), 0.5) * 2; this.h = this.halfH() * 2; this.savePrev(); }
+  // every block behind it must be solid and no other hanging thing in the way
+  survives(ignore) {
+    const v = this.variant(), [R] = hangBasis(this.data.f), d = HANG_DIRS[this.data.f], c = this.center(), w = this.game.world;
+    for (let i = 0; i < v[1]; i++) for (let j = 0; j < v[2]; j++) {
+      const x = Math.floor(c[0] + d[0] * 0.1 + R[0] * (i - v[1] / 2 + 0.5)), y = Math.floor(c[1] + (j - v[2] / 2 + 0.5)), z = Math.floor(c[2] + d[2] * 0.1 + R[2] * (i - v[1] / 2 + 0.5));
+      if (!SOLID[w.getBlock(x - d[0], y, z - d[2])]) return false;
+      if (SOLID[w.getBlock(x, y, z)]) return false;
+    }
+    if (ignore) {
+      const b = this.hitBox();
+      for (const e of this.game.entities) {
+        if (e === this || e.dead || !(e instanceof Hanging)) continue;
+        const o = e.hitBox();
+        if (o[0] < b[3] - 0.01 && o[3] > b[0] + 0.01 && o[1] < b[4] - 0.01 && o[4] > b[1] + 0.01 && o[2] < b[5] - 0.01 && o[5] > b[2] + 0.01) return false;
+      }
+    }
+    return true;
+  }
+  dropSelf() { const c = this.center(); this.game.dropItem(c[0], c[1], c[2], { id: I.PAINTING, count: 1 }); }
+  interact() { return false; }
+  hurt(amount, source, attacker) {
+    if (this.dead || source === 'fire' || source === 'lava' || source === 'drown' || source === 'fall' || source === 'in_fire') return false;
+    const p = this.game.player;
+    this.breakOff(attacker === p && p.mode === 1);
+    return true;
+  }
+  die() { this.breakOff(false); }
+  render(r, a) {
+    const v = this.variant(), [R, U, N] = hangBasis(this.data.f), c = this.center(), l = this.lightAt();
+    const art = VTEX['painting/' + v[0]], back = VTEX['painting/back'];
+    if (!art || !back) return;
+    const A = ATLAS.S, hw = v[1] / 2, hh = v[2] / 2, P = (u, vv, w) => [c[0] + R[0] * u + U[0] * vv + N[0] * w, c[1] + R[1] * u + U[1] * vv + N[1] * w, c[2] + R[2] * u + U[2] * vv + N[2] * w];
+    const quad = (pts, reg, uvs, s) => { for (let k = 0; k < 4; k++) { const p = pts[k]; r.dv(p[0], p[1], p[2], (reg.x + uvs[k][0] * reg.w) / A, (reg.y + uvs[k][1] * reg.h) / A, -1, s, s, s, 1, l[0], l[1]); } };
+    const f = 1 / 32, b = -1 / 32;
+    quad([P(-hw, -hh, f), P(hw, -hh, f), P(hw, hh, f), P(-hw, hh, f)], art.reg, [[0, 1], [1, 1], [1, 0], [0, 0]], 1);
+    quad([P(hw, -hh, b), P(-hw, -hh, b), P(-hw, hh, b), P(hw, hh, b)], back.reg, [[0, v[2]], [v[1], v[2]], [v[1], 0], [0, 0]].map(q => [q[0] % 1.0001, q[1] % 1.0001]), 0.7);
+    const e = 1 / 16;
+    quad([P(-hw, hh, f), P(hw, hh, f), P(hw, hh, b), P(-hw, hh, b)], back.reg, [[0, 0], [1, 0], [1, e], [0, e]], 0.95);
+    quad([P(-hw, -hh, b), P(hw, -hh, b), P(hw, -hh, f), P(-hw, -hh, f)], back.reg, [[0, 0], [1, 0], [1, e], [0, e]], 0.6);
+    quad([P(-hw, -hh, b), P(-hw, -hh, f), P(-hw, hh, f), P(-hw, hh, b)], back.reg, [[0, 1], [e, 1], [e, 0], [0, 0]], 0.8);
+    quad([P(hw, -hh, f), P(hw, -hh, b), P(hw, hh, b), P(hw, hh, f)], back.reg, [[0, 1], [e, 1], [e, 0], [0, 0]], 0.8);
+  }
+}
+MOB_CLASSES.painting = Painting;
+
+/* ---------------- armor stands ---------------- */
+// a renderer that emits every quad from both sides
+function twoSided(r) {
+  const buf = [];
+  return { dv(...a) { buf.push(a); if (buf.length === 4) { for (const k of [0, 1, 2, 3]) r.dv(...buf[k]); for (const k of [1, 0, 3, 2]) r.dv(...buf[k]); buf.length = 0; } } };
+}
+// translucent model layers (the slime's outer jelly) are queued while drawing; they go out with the blended pass
+const _renderBeamsT = Game.prototype.renderBeams;
+Game.prototype.renderBeams = function (r, alpha) { _renderBeamsT.call(this, r, alpha); for (const q of TRANS_Q) r.dv(...q); TRANS_Q.length = 0; };
+const DEG = Math.PI / 180;
+MOB_MODELS.armor_stand = { tw: 64, th: 64, parts: [
+  P_('head', [0, 1, 0], [[0, 0, -1, -7, -1, 2, 7, 2]]),
+  P_('body', [0, 0, 0], [[0, 26, -6, 0, -1.5, 12, 3, 3]]),
+  P_('right_arm', [-5, 2, 0], [], [-15 * DEG, 0, 10 * DEG]),
+  P_('left_arm', [5, 2, 0], [], [-10 * DEG, 0, -10 * DEG]),
+  P_('right_leg', [-1.9, 12, 0], [[8, 0, -1, 0, -1, 2, 11, 2]], [1 * DEG, 0, 1 * DEG]),
+  P_('left_leg', [1.9, 12, 0], [[40, 16, -1, 0, -1, 2, 11, 2, 0, 1]], [-1 * DEG, 0, -1 * DEG]),
+  P_('right_body_stick', [0, 0, 0], [[16, 0, -3, 3, -1, 2, 7, 2]]),
+  P_('left_body_stick', [0, 0, 0], [[48, 16, 1, 3, -1, 2, 7, 2]]),
+  P_('shoulder_stick', [0, 0, 0], [[0, 48, -4, 10, -1, 8, 2, 2]]),
+  P_('base_plate', [0, 12, 0], [[0, 32, -6, 11, -6, 12, 1, 12]])],
+  anim() { } };
+defSkin('entity/armorstand/wood', 64, 64, () => skinParts(64, 64, MOB_MODELS.armor_stand.parts, {
+  base_plate: (f, x, y, W, H, R) => nz([150, 150, 150], R, 0.06),
+  '*': (f, x, y, W, H, R) => nz(f === 'top' || f === 'bottom' ? [176, 138, 84] : [164, 126, 74], R, 0.08),
+}, 31));
+MOB_SKINS.armor_stand = () => [{ key: 'entity/armorstand/wood' }];
+defMob('armor_stand', { w: 0.5, h: 1.975, hp: 20, walk: 0, run: 0, cat: 'misc', ai: [], persistent: true, sounds: null, noPush: true });
+class ArmorStand extends Mob {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    this.persistent = true; this.stepH = 0;
+    if (!(opts && opts.loading)) { this.data.armor = [null, null, null, null]; this.yaw = this.bodyYaw = (opts && opts.yaw) || 0; }
+    this.lastPunch = -100;
+  }
+  keepWhenUnloaded() { return true; }
+  envDamage() { }
+  skins() { return [{ key: 'entity/armorstand/wood' }]; }
+  animState() { return {}; }
+  afterLoad() { this.bodyYaw = this.yaw; if (!this.data.armor) this.data.armor = [null, null, null, null]; }
+  tick() {
+    this.savePrev(); this.age++;
+    if (this.hurtTime > 0) this.hurtTime--;
+    this.updateFluids();
+    this.vy -= 0.08;
+    this.physicsStep();
+    this.vx *= 0.6; this.vz *= 0.6; this.vy *= 0.98;
+    if (this.y < -64) this.dead = true;
+  }
+  landed() { }
+  // the slot under the clicked height: boots, leggings, chestplate or helmet
+  slotAt(p) {
+    const e = p.eye(), d = p.look(), hw = 0.35;
+    const hit = rayBox(e[0], e[1], e[2], d[0], d[1], d[2], [this.x - hw, this.y, this.z - hw, this.x + hw, this.y + this.h, this.z + hw]);
+    const y = hit ? e[1] + d[1] * hit.t - this.y : 1;
+    return y >= 1.6 ? 0 : y >= 0.9 ? 1 : y >= 0.4 ? 2 : 3;
+  }
+  interact(p, held) {
+    const g = this.game, A = this.data.armor;
+    const it = held ? ITEMS[held.id] : null;
+    let slot = it && it.armor ? it.armor.slot : it && (it.wearable === 'head' || it.block === B.CARVED_PUMPKIN) ? 0 : -1;
+    if (slot < 0) {
+      if (held) return false;
+      slot = this.slotAt(p);
+      if (!A[slot]) { for (const s of [1, 0, 2, 3]) if (A[s]) { slot = s; break; } }
+      if (!A[slot]) return false;
+      p.inv[p.sel] = A[slot]; A[slot] = null;
+    } else {
+      const cur = A[slot];
+      A[slot] = copyStack(held, 1);
+      if (p.mode !== 1) { if (held.count > 1) { held.count--; if (cur) g.giveOrDrop(p, cur); } else p.inv[p.sel] = cur; }
+    }
+    g.sound('equip', this.x, this.y + 1, this.z);
+    return true;
+  }
+  hurt(amount, source, attacker) {
+    if (this.dead) return false;
+    const g = this.game, p = g.player;
+    if (source === 'fall' || source === 'drown') return false;
+    if (attacker === p && p.mode === 1) { this.breakApart(true); return true; }
+    if (source === 'fire' || source === 'lava' || source === 'in_fire') { this.health -= amount; if (this.health <= 0) this.breakApart(false); return true; }
+    // two quick punches break it; one makes it wobble
+    if (this.age - this.lastPunch < 5 || source === 'explosion') { this.breakApart(false); return true; }
+    this.lastPunch = this.age; this.hurtTime = 10;
+    g.sound('hit_wood', this.x, this.y + 1, this.z);
+    return true;
+  }
+  // armor is drawn from both sides like vanilla's, so a helmet around the thin head shows its inside; punches make it rock
+  render(r, a) {
+    const md = MOB_MODELS.armor_stand, p = this.ipos(a), light = this.lightAt();
+    const yaw = this.pyaw + (this.bodyYaw - this.pyaw) * a + (this.hurtTime > 0 ? Math.sin((this.hurtTime - a) * 1.5) * 0.1 : 0);
+    drawMob(r, md, this.skins(), p, yaw, {}, [1, 1, 1, 1], light, 1, 0);
+    const ap = armorPasses(this.data.armor, md);
+    if (ap.length) drawMob(twoSided(r), md, ap, p, yaw, {}, [1, 1, 1, 1], light, 1, 0);
+  }
+  breakApart(creative) {
+    const g = this.game;
+    this.dead = true;
+    if (!creative) g.dropItem(this.x, this.y + 0.5, this.z, { id: I.ARMOR_STAND, count: 1 });
+    for (const st of this.data.armor || []) if (st) g.dropItem(this.x, this.y + 0.5, this.z, st);
+    g.sound('break_wood', this.x, this.y + 0.5, this.z);
+    g.particles.blockBreak(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z), B.OAK_PLANKS);
+  }
+  die() { this.breakApart(false); }
+}
+MOB_CLASSES.armor_stand = ArmorStand;
+
+/* ---------------- placing them ---------------- */
+const _useItemSpecialD = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (hit && held && (held.id === I.ITEM_FRAME || held.id === I.GLOW_ITEM_FRAME || held.id === I.PAINTING || held.id === I.ARMOR_STAND)) return this.placeHanging(p, hit, held);
+  return _useItemSpecialD.call(this, p, hit, held, it);
+};
+Game.prototype.placeHanging = function (p, hit, held) {
+  const w = this.world, f = hit.face, d = HANG_DIRS[f], bx = hit.x + d[0], by = hit.y + d[1], bz = hit.z + d[2];
+  if (held.id === I.ARMOR_STAND) {
+    if (f === 3 || SOLID[w.getBlock(bx, by, bz)] || SOLID[w.getBlock(bx, by + 1, bz)]) return false;
+    const dx = p.x - (bx + 0.5), dz = p.z - (bz + 0.5), yaw = Math.round(Math.atan2(dx, dz) / (Math.PI / 4)) * (Math.PI / 4);
+    const m = this.spawnMob('armor_stand', bx + 0.5, by, bz + 0.5, { yaw });
+    if (!m) return false;
+    if (held.tag && held.tag.name) m.customName = held.tag.name;
+    if (p.mode !== 1) p.consumeHeld(1);
+    this.sound('place_wood', bx + 0.5, by, bz + 0.5);
+    return true;
+  }
+  if (!SOLID[hit.id] || SOLID[w.getBlock(bx, by, bz)]) return false;
+  if (held.id === I.PAINTING) {
+    if (f === 2 || f === 3) return false;
+    // the biggest paintings that fit, picked at random
+    const fits = [];
+    for (const v of PAINTINGS) {
+      if (v[3]) continue;
+      const e = new Painting(this, 'painting', bx, by, bz, { bx, by, bz, f, variant: v[0] });
+      if (e.survives(true)) fits.push([v, e]);
+    }
+    if (!fits.length) return false;
+    const best = Math.max(...fits.map(q => q[0][1] * q[0][2])), pool = fits.filter(q => q[0][1] * q[0][2] === best), pick = pool[Math.floor(Math.random() * pool.length)][1];
+    this.entities.push(pick);
+    if (p.mode !== 1) p.consumeHeld(1);
+    this.sound('place_wood', bx + 0.5, by + 0.5, bz + 0.5);
+    return true;
+  }
+  const type = held.id === I.GLOW_ITEM_FRAME ? 'glow_item_frame' : 'item_frame';
+  for (const e of this.entities) if (e instanceof ItemFrame && !e.dead && e.data.bx === bx && e.data.by === by && e.data.bz === bz && e.data.f === f) return false;
+  const m = this.spawnMob(type, bx + 0.5, by + 0.5, bz + 0.5, { bx, by, bz, f });
+  if (!m) return false;
+  if (p.mode !== 1) p.consumeHeld(1);
+  this.sound('frame_place', bx + 0.5, by + 0.5, bz + 0.5);
+  return true;
+};
+
+/* ---------------- aiming at thin things ---------------- */
+Game.prototype.updateTarget = function () {
+  const p = this.player;
+  this.target = null; this.targetEntity = null;
+  if (!p || p.dead) return;
+  const e = p.eye(), d = p.look(), reach = p.mode === 1 ? 5 : 4.5;
+  const hit = raycast(this.world, e[0], e[1], e[2], d[0], d[1], d[2], reach, false);
+  let best = hit ? hit.t : reach;
+  for (const m of this.entities) {
+    if (!(m instanceof Mob || m instanceof Projectile && (m.kind === 'ghast' || m.kind === 'skull')) || m.deathTime > 0 || m === p.riding) continue;
+    const hw = m.w / 2, box = m.hitBox ? m.hitBox() : [m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw];
+    const rr = rayBox(e[0], e[1], e[2], d[0], d[1], d[2], box);
+    // a frame on the face of the targeted block wins over the block
+    const lim = Math.min(best + (m instanceof Hanging ? 0.07 : 0), p.mode === 1 ? 5 : 3.2);
+    if (rr && rr.t < lim) { best = rr.t; this.targetEntity = m; }
+  }
+  this.target = this.targetEntity ? null : hit;
+};
+
+/* ---------------- sounds and pack names ---------------- */
+const _audioPlayD = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  const S = { frame_place: 1, frame_add: 1, frame_rotate: 1, frame_remove: 1, equip: 1 };
+  if (!S[name]) return _audioPlayD.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  if (name === 'frame_rotate') this.tone(dst, 'square', 900, 700, 0.05, 0.08);
+  else if (name === 'equip') { this.noiseHit(dst, 'bandpass', 1800, 2, 0.12, 0.25); this.tone(dst, 'triangle', 500, 650, 0.08, 0.06); }
+  else this.noiseHit(dst, 'bandpass', name === 'frame_remove' ? 1200 : 700, 1.5, 0.12, 0.3);
+};
+const _packTexMapD = packTexMap;
+packTexMap = function () {
+  const fresh = !PACKS.texMap, m = _packTexMapD();
+  if (fresh) { m.item_frame_back = ['block/item_frame']; m.glow_item_frame_back = ['block/glow_item_frame']; }
+  return m;
+};
+
+/* ---------------- comparators read item frames ---------------- */
+// through a solid block, a comparator reads a frame hanging on its far side: rotation + 1 when it holds something
+function frameSignal(x, y, z, f) {
+  const g = window.game;
+  if (!g) return -1;
+  for (const e of g.entities) if (e instanceof ItemFrame && !e.dead && e.data.f === f && e.data.bx === x && e.data.by === y && e.data.bz === z) return e.data.item ? (e.data.rot & 7) + 1 : 0;
+  return -1;
+}
+RS.comparatorOut = function (w, x, y, z, m) {
+  const out = FACE_OF_LOOK[m & 3], back = out ^ 1;
+  let rear = this.inputFrom(w, x, y, z, back);
+  const bx = x + DX[back], by = y + DY[back], bz = z + DZ[back];
+  const fill = this.containerSignal(w, bx, by, bz);
+  if (fill >= 0) rear = Math.max(rear, fill);
+  else if (conductive(w.getBlock(bx, by, bz))) {
+    const f2 = this.containerSignal(w, bx + DX[back], by, bz + DZ[back]); if (f2 >= 0) rear = Math.max(rear, f2);
+    const fr = frameSignal(bx + DX[back], by, bz + DZ[back], back); if (fr >= 0) rear = Math.max(rear, fr);
+  }
+  let side = 0;
+  for (const g of [FACE_OF_LOOK[(m + 1) & 3], FACE_OF_LOOK[(m + 3) & 3]]) {
+    const nx = x + DX[g], ny = y + DY[g], nz = z + DZ[g], id = w.getBlock(nx, ny, nz);
+    if (id === B.REDSTONE_WIRE || id === B.REPEATER || id === B.COMPARATOR || id === B.REDSTONE_BLOCK) side = Math.max(side, this.emit(w, nx, ny, nz, g ^ 1, false));
+  }
+  return (m & 4) ? Math.max(0, rear - side) : (rear >= side ? rear : 0);
+};
+
+/* @file 103_beacon.js */
+/* ===================================================================
+   BEACONS — a pyramid of mineral blocks powers a beacon; its beam climbs
+   to the sky (tinted by stained glass on the way) and gives the powers
+   picked in the beacon screen to players in range
+   =================================================================== */
+TEXGEN.push(function texBeam() {
+  T('beacon_beam', (d) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = 0.78 + 0.22 * Math.abs(Math.sin(x * 0.9 + 0.6 * Math.sin(y * 0.4))); sp(d, x, y, [255 * k, 255 * k, 255 * k]); } });
+});
+const BEACON_POWERS = [['speed', 'haste'], ['resistance', 'jump_boost'], ['strength'], ['regeneration']];
+const BEACON_PAY = ['netherite_ingot', 'emerald', 'diamond', 'gold_ingot', 'iron_ingot'];
+let GLASS_TINT = null;
+function glassTint(id) {
+  if (!GLASS_TINT) {
+    GLASS_TINT = {};
+    // stained glass tints the beam with its dye colour
+    for (const c in DYE_RGB) for (const n of [c + '_stained_glass', c + '_stained_glass_pane']) { const id = B[n.toUpperCase()]; if (id !== undefined) GLASS_TINT[id] = dyeTint(c); }
+  }
+  return GLASS_TINT[id];
+}
+// beacons are listed per chunk the first time a chunk is looked at
+function beaconList(c) {
+  if (c._bcn) return c._bcn;
+  const out = [], bl = c.blocks;
+  if (bl) for (let i = 0; i < 65536; i++) if (bl[i] === B.BEACON) out.push(i);
+  return c._bcn = out;
+}
+const _setBlockBC = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  const old = this.getBlock(x, y, z), r = _setBlockBC.call(this, x, y, z, id, meta, notify);
+  if (r && (id === B.BEACON || old === B.BEACON)) {
+    const c = this.getChunk(x >> 4, z >> 4);
+    if (c && c._bcn) { const i = (y << 8) | ((z & 15) << 4) | (x & 15), k = c._bcn.indexOf(i); if (id === B.BEACON && k < 0) c._bcn.push(i); else if (id !== B.BEACON && k >= 0) c._bcn.splice(k, 1); }
+  }
+  return r;
+};
+// the pyramid under a beacon: 0 to 4 complete layers
+function beaconLevels(w, x, y, z) {
+  let lv = 0;
+  for (let i = 1; i <= 4; i++) {
+    const yy = y - i;
+    if (yy < 0) break;
+    for (let xx = x - i; xx <= x + i; xx++) for (let zz = z - i; zz <= z + i; zz++) if (!BLK[w.getBlock(xx, yy, zz)].beacon) return lv;
+    lv = i;
+  }
+  return lv;
+}
+// the beam: sections [y, height, rgb] from the beacon up, or null when something opaque blocks the sky
+function beaconBeam(w, x, y, z) {
+  const secs = [[y, 1, [1, 1, 1]]];
+  for (let yy = y + 1; yy < 256; yy++) {
+    const id = w.getBlock(x, yy, z), t = glassTint(id), last = secs[secs.length - 1];
+    if (t) {
+      if (secs.length <= 1) secs.push([yy, 1, t]);
+      else if (last[2][0] === t[0] && last[2][1] === t[1] && last[2][2] === t[2]) last[1]++;
+      else secs.push([yy, 1, [(last[2][0] + t[0]) / 2, (last[2][1] + t[1]) / 2, (last[2][2] + t[2]) / 2]]);
+    } else if (OPACITY[id] >= 15 && id !== B.BEDROCK) return null;
+    else last[1]++;
+  }
+  secs[secs.length - 1][1] += 1024 - 256;
+  return secs;
+}
+Game.prototype.beaconBE = function (x, y, z) {
+  const w = this.world;
+  let be = w.getBE(x, y, z);
+  if (!be || be.type !== 'beacon') { be = { type: 'beacon', levels: 0, primary: null, secondary: null }; w.setBE(x, y, z, be); }
+  return be;
+};
+let BEACON_RING = null;
+// every 80 ticks (spread by position) a beacon checks its pyramid and sky, then hands out its powers
+Game.prototype.tickBeacons = function () {
+  const w = this.world, p = this.player;
+  if (!p) return;
+  const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, R = Math.min(8, OPTIONS.renderDist || 8);
+  let budget = 8;
+  this.beacons = this.beacons || new Map();
+  const seen = new Set();
+  // nearest chunks first, so beacons close by show up at once
+  if (!BEACON_RING || BEACON_RING.R !== R) { BEACON_RING = []; for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) BEACON_RING.push([dx, dz]); BEACON_RING.sort((a, b) => a[0] * a[0] + a[1] * a[1] - b[0] * b[0] - b[1] * b[1]); BEACON_RING.R = R; }
+  for (const [dx, dz] of BEACON_RING) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2) continue;
+    if (!c._bcn) { if (budget-- <= 0) continue; beaconList(c); }
+    for (const i of c._bcn) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), key = x + ',' + y + ',' + z;
+      seen.add(key);
+      let s = this.beacons.get(key);
+      if (!s) { s = { x, y, z, beam: null, levels: 0, t: (x * 7 + z * 13 + y) % 80 }; this.beacons.set(key, s); this.updateBeacon(s, true); }
+      if ((w.tick + s.t) % 80 === 0) this.updateBeacon(s, false);
+    }
+  }
+  for (const k of [...this.beacons.keys()]) if (!seen.has(k)) this.beacons.delete(k);
+};
+Game.prototype.updateBeacon = function (s, quiet) {
+  const w = this.world, p = this.player, be = this.beaconBE(s.x, s.y, s.z);
+  const was = s.levels > 0 && s.beam;
+  s.levels = beaconLevels(w, s.x, s.y, s.z); s.beam = beaconBeam(w, s.x, s.y, s.z);
+  if (be.levels !== s.levels) { be.levels = s.levels; this.markBEDirty && this.markBEDirty(be); }
+  const on = s.levels > 0 && s.beam;
+  const near = Math.hypot(p.x - s.x, p.z - s.z) < 32;
+  if (!quiet && near) { if (on && !was) this.sound('beacon_on', s.x + 0.5, s.y + 0.5, s.z + 0.5); else if (!on && was) this.sound('beacon_off', s.x + 0.5, s.y + 0.5, s.z + 0.5); else if (on) this.sound('beacon_hum', s.x + 0.5, s.y + 0.5, s.z + 0.5); }
+  if (!on || !be.primary || quiet) return;
+  // powers reach players within 10 blocks per level (+10), from that far below up to the sky
+  const r = s.levels * 10 + 10, dur = (9 + s.levels * 2) * 20;
+  if (p.dead || Math.abs(p.x - (s.x + 0.5)) > r + 0.5 || Math.abs(p.z - (s.z + 0.5)) > r + 0.5 || p.y < s.y - r) return;
+  const amp = s.levels >= 4 && be.primary === be.secondary ? 1 : 0;
+  p.addEffect(be.primary, dur, amp, true);
+  if (s.levels >= 4 && be.secondary && be.secondary !== be.primary) p.addEffect(be.secondary, dur, 0, true);
+};
+const _gameTickBC = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickBC.call(this); if (this.world && this.player) this.tickBeacons(); };
+
+/* ---------------- the beam ---------------- */
+Game.prototype.drawBeams = function (r, alpha, outer) {
+  if (!this.beacons || !this.beacons.size) return;
+  const w = this.world, t = (w.tick % 40) + alpha, layer = texL('beacon_beam'), eye = r.org, maxD = (OPTIONS.renderDist * 16) ** 2;
+  for (const s of this.beacons.values()) {
+    if (!s.beam || !s.levels || (s.x - eye[0]) ** 2 + (s.z - eye[2]) ** 2 > maxD) continue;
+    const cx = s.x + 0.5, cz = s.z + 0.5, scroll = -1 + ((t * 0.2) % 1 + 1) % 1;
+    const ang = (t * 2.25 - 45) * Math.PI / 180, rad = outer ? 0.25 : 0.2, a0 = outer ? Math.PI / 4 : ang;
+    const corners = [0, 1, 2, 3].map(k => [cx + Math.cos(a0 + k * Math.PI / 2) * rad * Math.SQRT2, cz + Math.sin(a0 + k * Math.PI / 2) * rad * Math.SQRT2]);
+    for (const [y0, h, col] of s.beam) {
+      const y1 = y0 + h, vs = outer ? h : h * 2.5;
+      const al = outer ? 0.125 : 1;
+      for (let k = 0; k < 4; k++) {
+        const A = corners[k], Bc = corners[(k + 1) & 3];
+        r.dv(A[0], y0, A[1], 0, scroll + vs, layer, col[0], col[1], col[2], al, 15, 15);
+        r.dv(Bc[0], y0, Bc[1], 1, scroll + vs, layer, col[0], col[1], col[2], al, 15, 15);
+        r.dv(Bc[0], y1, Bc[1], 1, scroll, layer, col[0], col[1], col[2], al, 15, 15);
+        r.dv(A[0], y1, A[1], 0, scroll, layer, col[0], col[1], col[2], al, 15, 15);
+        if (outer) { r.dv(A[0], y1, A[1], 0, scroll, layer, col[0], col[1], col[2], al, 15, 15); r.dv(Bc[0], y1, Bc[1], 1, scroll, layer, col[0], col[1], col[2], al, 15, 15); r.dv(Bc[0], y0, Bc[1], 1, scroll + vs, layer, col[0], col[1], col[2], al, 15, 15); r.dv(A[0], y0, A[1], 0, scroll + vs, layer, col[0], col[1], col[2], al, 15, 15); }
+      }
+    }
+  }
+};
+// the solid core goes with the other models, the faint glow around it with the blended pass
+const _renderSpawnerMobsBC = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) { if (_renderSpawnerMobsBC) _renderSpawnerMobsBC.call(this, r, alpha); this.drawBeams(r, alpha, false); };
+const _renderBeamsBC = Game.prototype.renderBeams;
+Game.prototype.renderBeams = function (r, alpha) { _renderBeamsBC.call(this, r, alpha); this.drawBeams(r, alpha, true); };
+
+/* ---------------- the beacon screen ---------------- */
+SCREEN_LOGIC.beacon = {
+  accept(ui, c, i, st) { return c !== 'local' || BEACON_PAY.includes(ITEMS[st.id].name); },
+  open(ui) {
+    if (ui._bc && ui._bc.inv === ui.inv) return;
+    const d = ui.inv.data, g = ui.game, be = g.beaconBE(d.x, d.y, d.z);
+    be.levels = beaconLevels(g.world, d.x, d.y, d.z);
+    ui._bc = { primary: be.primary, secondary: be.secondary, levels: be.levels, inv: ui.inv };
+  },
+  extra(ui, win) {
+    this.open(ui);
+    const B2 = (x, y, kind, eff, tier) => {
+      const b = el('div', 'bcbtn');
+      b.style.cssText = `position:absolute;left:${x * GS}px;top:${y * GS}px;width:${22 * GS}px;height:${22 * GS}px;cursor:pointer`;
+      b.dataset.kind = kind; if (eff) b.dataset.eff = eff; b.dataset.tier = tier;
+      b.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); this.click(ui, b); });
+      win.appendChild(b);
+      return b;
+    };
+    ui._bcBtns = [];
+    for (let i = 0; i < 3; i++) {
+      const L = BEACON_POWERS[i], k = L.length * 22 + (L.length - 1) * 2;
+      L.forEach((eff, l) => ui._bcBtns.push(B2(76 + l * 24 - k / 2, 22 + i * 25, 'primary', eff, i)));
+    }
+    ui._bcBtns.push(B2(167 - 23, 47, 'secondary', 'regeneration', 3), B2(167 + 1, 47, 'upgrade', null, 3));
+    ui._bcBtns.push(B2(164, 107, 'confirm', null, 0), B2(190, 107, 'cancel', null, 0));
+    // what the beacon takes as payment
+    BEACON_PAY.forEach((n, k) => { const im = document.createElement('img'); im.src = iconFor(itemOf(n)); im.style.cssText = `position:absolute;left:${(k === 0 ? 14 : 14 + k * 21) * GS}px;top:${109 * GS}px;width:${16 * GS}px;height:${16 * GS}px;image-rendering:pixelated;pointer-events:none`; win.appendChild(im); });
+    this.paint(ui);
+  },
+  enabled(ui, b) {
+    const s = ui._bc, tier = +b.dataset.tier, k = b.dataset.kind;
+    if (k === 'primary') return s.levels > tier;
+    if (k === 'secondary') return s.levels >= 4 && !!s.primary;
+    if (k === 'upgrade') return s.levels >= 4 && !!s.primary;
+    if (k === 'confirm') return !!s.primary && !!ui.inv.local[0] && s.levels > 0;
+    return true;
+  },
+  paint(ui) {
+    const s = ui._bc;
+    for (const b of ui._bcBtns || []) {
+      const k = b.dataset.kind, on = this.enabled(ui, b);
+      const sel = (k === 'primary' && s.primary === b.dataset.eff) || (k === 'secondary' && s.secondary === 'regeneration') || (k === 'upgrade' && s.secondary && s.secondary === s.primary);
+      b.style.background = !on ? '#2c2c2c' : sel ? '#3d6b2f' : '#8b8b8b';
+      b.style.boxShadow = `inset ${GS}px ${GS}px 0 ${sel ? '#6fbf52' : '#c6c6c6'}, inset -${GS}px -${GS}px 0 ${sel ? '#1e3a16' : '#373737'}`;
+      const icon = k === 'confirm' ? null : k === 'cancel' ? null : k === 'upgrade' ? (s.primary || 'regeneration') : b.dataset.eff;
+      b.innerHTML = icon ? `<img src="${effectIcon(icon)}" style="position:absolute;left:${2 * GS}px;top:${2 * GS}px;width:${18 * GS}px;height:${18 * GS}px;image-rendering:pixelated;opacity:${on ? 1 : 0.35}">` + (k === 'upgrade' ? `<span style="position:absolute;right:${2 * GS}px;bottom:0;color:#fff;font-size:${8 * GS}px;text-shadow:${GS}px ${GS}px 0 #3f3f3f">II</span>` : '')
+        : `<span style="position:absolute;left:0;top:0;width:100%;line-height:${22 * GS}px;text-align:center;font-size:${12 * GS}px;color:${k === 'confirm' ? (on ? '#7cff5c' : '#3b5a33') : '#ff5c5c'}">${k === 'confirm' ? '✔' : '✖'}</span>`;
+      b.title = icon ? EFFECTS[icon][0] + (k === 'upgrade' ? ' II' : '') : '';
+    }
+  },
+  click(ui, b) {
+    const s = ui._bc, k = b.dataset.kind, g = ui.game;
+    if (!this.enabled(ui, b)) return;
+    AUDIO.play('click');
+    if (k === 'primary') { s.primary = b.dataset.eff; if (s.secondary && s.secondary !== 'regeneration') s.secondary = s.primary; }
+    else if (k === 'secondary') s.secondary = 'regeneration';
+    else if (k === 'upgrade') s.secondary = s.primary;
+    else if (k === 'cancel') { ui.closeInv(); return; }
+    else if (k === 'confirm') {
+      const d = ui.inv.data, be = g.beaconBE(d.x, d.y, d.z), pay = ui.inv.local[0];
+      be.primary = s.primary; be.secondary = s.levels >= 4 ? s.secondary : null;
+      pay.count--; if (pay.count <= 0) ui.inv.local[0] = null;
+      g.world.setBE(d.x, d.y, d.z, be);
+      g.sound('beacon_power', d.x + 0.5, d.y + 0.5, d.z + 0.5);
+      const st = g.beacons && g.beacons.get(d.x + ',' + d.y + ',' + d.z);
+      if (st) g.updateBeacon(st, false);
+      ui.closeInv();
+      return;
+    }
+    this.paint(ui);
+  },
+  update(ui) { this.paint(ui); },
+  changed(ui) { this.paint(ui); },
+};
+
+/* ---------------- sounds and pack names ---------------- */
+const _audioPlayBC = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  if (!/^beacon_/.test(name)) return _audioPlayBC.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  if (name === 'beacon_on') { this.tone(dst, 'sine', 220, 440, 1.2, 0.18); this.tone(dst, 'sine', 330, 660, 1.2, 0.1); }
+  else if (name === 'beacon_off') { this.tone(dst, 'sine', 440, 180, 1.0, 0.16); }
+  else if (name === 'beacon_power') { this.tone(dst, 'triangle', 520, 780, 0.5, 0.16); this.tone(dst, 'sine', 780, 1040, 0.6, 0.08); }
+  else this.tone(dst, 'sine', 110, 112, 2.5, 0.05);
+};
+const _packTexMapBC = packTexMap;
+packTexMap = function () { const fresh = !PACKS.texMap, m = _packTexMapBC(); if (fresh) m.beacon_beam = ['entity/beacon_beam']; return m; };
 
 </script>
 </body>
