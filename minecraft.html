@@ -2454,7 +2454,7 @@ addStructure('desert_pyramid', 384, { salt: 9601, avoid: 90, chance: 0.6, biomes
   W.chest(10, -14, 7, 2, 'desert_pyramid'); W.chest(10, -14, 13, 0, 'desert_pyramid'); W.chest(7, -14, 10, 1, 'desert_pyramid'); W.chest(13, -14, 10, 3, 'desert_pyramid');
   W.set(10, -14, 10, B.STONE_PRESSURE_PLATE);
   W.fill(9, -16, 9, 11, -16, 11, B.TNT);
-  for (const [a, b] of [[8, 8], [12, 12], [8, 12]]) if (W.rand(a, -15, b, 7) < 0.6) W.set(a, -15, b, B.SUSPICIOUS_SAND);
+  for (const [a, b] of [[8, 8], [12, 12], [8, 12]]) if (W.rand(a, -15, b, 7) < 0.6) { W.set(a, -15, b, B.SUSPICIOUS_SAND); W.be(a, -15, b, { type: 'brushable', table: 'desert_pyramid_archaeology' }); }
 });
 
 // jungle temple: three stepped storeys of mossy cobblestone, a hidden lower room
@@ -2553,7 +2553,7 @@ addStructure('pillager_outpost', 448, { salt: 9641, avoid: 200, chance: 0.45, bi
 });
 
 // desert well
-addStructure('desert_well', 224, { salt: 9651, avoid: 70, chance: 0.18, biomes: new Set([BI.DESERT]), size: [5, 5], flat: 1 }, (W, R, p) => {
+addStructure('desert_well', 224, { salt: 9651, avoid: 70, chance: 0.18, biomes: new Set([BI.DESERT]), size: [5, 5], flat: 1 }, (W, R, p, ctx) => {
   W.foundation(0, 0, 4, 4, B.SANDSTONE);
   W.fill(0, 1, 0, 4, 4, 4, B.AIR);
   W.fill(0, -2, 0, 4, 0, 4, B.SANDSTONE);
@@ -2561,7 +2561,37 @@ addStructure('desert_well', 224, { salt: 9651, avoid: 70, chance: 0.18, biomes: 
   for (let i = 0; i <= 4; i++) for (const [a, b] of [[i, 0], [i, 4], [0, i], [4, i]]) W.set(a, 1, b, B.SANDSTONE_SLAB);
   for (const [a, b] of [[1, 1], [3, 1], [1, 3], [3, 3]]) { W.set(a, 1, b, B.SANDSTONE); W.set(a, 2, b, B.SANDSTONE); }
   W.fill(1, 3, 1, 3, 3, 3, B.SANDSTONE_SLAB); W.set(2, 3, 2, B.SANDSTONE);
-  W.set(2, -2, 1, B.SUSPICIOUS_SAND);
+  W.set(2, -2, 1, B.SUSPICIOUS_SAND); W.be(2, -2, 1, { type: 'brushable', table: 'desert_well_archaeology' });
+});
+
+// trail ruins: the buried remains of an old settlement, terracotta and mud brick walls filled with gravel, things to brush out
+addStructure('trail_ruins', 448, { salt: 9701, avoid: 100, chance: 0.5, size: [15, 15], flat: 4, surface: false,
+  biomes: new Set([BI.TAIGA, BI.SNOWY_TAIGA, BI.OLD_GROWTH_PINE_TAIGA, BI.OLD_GROWTH_SPRUCE_TAIGA, BI.OLD_GROWTH_BIRCH_FOREST, BI.BIRCH_FOREST, BI.JUNGLE]),
+  level: (col, lo) => lo - 6 }, (W, R, p) => {
+  const WALL = [B.TERRACOTTA, B.BROWN_TERRACOTTA, B.LIGHT_GRAY_TERRACOTTA, B.RED_TERRACOTTA, B.YELLOW_TERRACOTTA, B.CYAN_TERRACOTTA, B.MUD_BRICKS, B.BRICKS, B.PACKED_MUD];
+  const wall = (lx, ly, lz) => WALL[Math.floor(W.rand(lx, ly, lz, 3) * WALL.length)];
+  // the old floor, then gravel over everything up to where the ground was
+  for (let lz = 0; lz < 15; lz++) for (let lx = 0; lx < 15; lx++) {
+    W.set(lx, -1, lz, W.rand(lx, -1, lz, 1) < 0.5 ? B.MUD_BRICKS : (lx + lz) % 2 ? B.BROWN_TERRACOTTA : B.TERRACOTTA);
+    for (let ly = 0; ly <= 4; ly++) W.set(lx, ly, lz, ly === 4 && W.rand(lx, ly, lz, 2) < 0.5 ? B.DIRT : B.GRAVEL);
+  }
+  // three rooms of broken walls
+  for (const [x0, z0, x1, z1] of [[0, 0, 6, 6], [8, 0, 14, 7], [3, 8, 11, 14]]) {
+    for (let lx = x0; lx <= x1; lx++) for (let lz = z0; lz <= z1; lz++) {
+      if (lx !== x0 && lx !== x1 && lz !== z0 && lz !== z1) continue;
+      const h = 1 + Math.floor(W.rand(lx, 0, lz, 4) * 5);
+      for (let ly = 0; ly < h; ly++) W.set(lx, ly, lz, wall(lx, ly, lz));
+    }
+  }
+  // a tower whose top breaks the surface
+  for (let ly = 0; ly <= 7; ly++) for (let lx = 6; lx <= 8; lx++) for (let lz = 6; lz <= 8; lz++) if (lx !== 7 || lz !== 7) W.set(lx, ly, lz, ly === 7 ? B.MUD_BRICK_SLAB : wall(lx, ly, lz));
+  // finds in the gravel: mostly common, a couple rare
+  for (let k = 0; k < 14; k++) {
+    const lx = Math.floor(R() * 15), lz = Math.floor(R() * 15), ly = Math.floor(R() * 4);
+    if (W.get(lx, ly, lz) !== B.GRAVEL) continue;
+    W.set(lx, ly, lz, B.SUSPICIOUS_GRAVEL); W.be(lx, ly, lz, { type: 'brushable', table: k < 2 ? 'trail_ruins_rare' : 'trail_ruins_common' });
+  }
+  if (R() < 0.6) W.set(4, 0, 11, B.DECORATED_POT);
 });
 
 // ruined portal: a broken obsidian frame on a splash of netherrack, with a chest of golden things
@@ -22416,6 +22446,853 @@ AUDIO.play = function (name, x, y, z) {
 };
 const _packTexMapBC = packTexMap;
 packTexMap = function () { const fresh = !PACKS.texMap, m = _packTexMapBC(); if (fresh) m.beacon_beam = ['entity/beacon_beam']; return m; };
+
+/* @file 104_signs_books.js */
+/* ===================================================================
+   SIGNS, BOOKS AND LECTERNS — text on both sides of signs (dyes, glow
+   ink sacs, honeycomb wax), the book and quill, written books and their
+   copies, lecterns that hold a book open
+   =================================================================== */
+
+/* ---------------- the font as a model texture ---------------- */
+// the built-in glyphs on vanilla's 16x16 grid, so a resource pack's font/ascii.png can take their place
+defSkin('font/ascii', 128, 128, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'), img = g.createImageData(128, 128);
+  for (let code = 33; code < 127; code++) {
+    const rows = FONT_GLYPHS[String.fromCharCode(code)];
+    if (!rows) continue;
+    const cx = (code % 16) * 8, cy = (code >> 4) * 8;
+    rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] === '#') { const o = ((cy + y) * 128 + cx + x) * 4; img.data[o] = img.data[o + 1] = img.data[o + 2] = img.data[o + 3] = 255; } });
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+});
+const FONT3D = { atlas: null, w: new Uint8Array(128) };
+function glyphW() {
+  if (FONT3D.atlas === ATLAS.canvas) return FONT3D.w;
+  FONT3D.atlas = ATLAS.canvas;
+  const vt = VTEX['font/ascii'], W = FONT3D.w;
+  W.fill(0);
+  if (vt && vt.pack && ATLAS.canvas) {
+    const k = vt.reg.w / 128, rw = vt.reg.w, d = ATLAS.canvas.getContext('2d').getImageData(vt.reg.x, vt.reg.y, vt.reg.w, vt.reg.h).data;
+    for (let code = 33; code < 127; code++) {
+      const cx = (code % 16) * 8, cy = (code >> 4) * 8;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if (d[(Math.floor((cy + y + 0.5) * k) * rw + Math.floor((cx + x + 0.5) * k)) * 4 + 3] > 127) W[code] = Math.max(W[code], x + 1);
+    }
+  } else for (let code = 33; code < 127; code++) { const rows = FONT_GLYPHS[String.fromCharCode(code)]; W[code] = rows ? Math.max(...rows.map(r => r.length)) : 0; }
+  W[32] = 3;
+  return W;
+}
+const charCode = ch => { const c = ch.charCodeAt(0); return c >= 32 && c < 127 ? c : 63; };
+function textW(s) { const W = glyphW(); let w = 0; for (const ch of s) w += W[charCode(ch)] + 1; return Math.max(0, w - 1); }
+// one line of text; P(fx, fy, depth) maps font pixels (x right, y down) to the world
+function drawText3D(r, s, x, y, P, col, l, depth) {
+  const vt = VTEX['font/ascii'];
+  if (!vt) return;
+  const W = glyphW(), A = ATLAS.S, rg = vt.reg, k = rg.w / 128;
+  for (const ch of s) {
+    const c = charCode(ch), w = W[c];
+    if (c !== 32 && w) {
+      const u0 = (rg.x + (c % 16) * 8 * k) / A, v0 = (rg.y + (c >> 4) * 8 * k) / A, u1 = u0 + w * k / A, v1 = v0 + 8 * k / A;
+      const q = [[P(x, y + 8, depth), u0, v1], [P(x + w, y + 8, depth), u1, v1], [P(x + w, y, depth), u1, v0], [P(x, y, depth), u0, v0]];
+      for (const [p, u, v] of q) r.dv(p[0], p[1], p[2], u, v, -1, col[0], col[1], col[2], 1, l[0], l[1]);
+    }
+    x += w + 1;
+  }
+}
+// words wrapped into lines no wider than maxW font pixels
+function wrapText(s, maxW) {
+  const out = [];
+  for (const para of s.split('\n')) {
+    let line = '';
+    for (const word of para.split(/(\s+)/)) {
+      if (textW(line + word) <= maxW) { line += word; continue; }
+      if (line.trim()) out.push(line.replace(/\s+$/, ''));
+      line = word.replace(/^\s+/, '');
+      while (textW(line) > maxW) { let k = line.length; while (k > 1 && textW(line.slice(0, k)) > maxW) k--; out.push(line.slice(0, k)); line = line.slice(k); }
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/* ---------------- signs ---------------- */
+const SIGN_RGB = { white: 0xF0F0F0, orange: 0xF9801D, magenta: 0xC74EBD, light_blue: 0x3AB3DA, yellow: 0xFED83D, lime: 0x80C71F, pink: 0xF38BAA, gray: 0x474F52,
+  light_gray: 0x9D9D97, cyan: 0x169C9C, purple: 0x8932B8, blue: 0x3C44AA, brown: 0x835432, green: 0x5E7C16, red: 0xB02E26, black: 0x000000 };
+const rgb01 = h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255];
+// text is drawn darker unless it glows; glowing text gets an outline in the darker colour
+function signInk(side) {
+  const c = rgb01(SIGN_RGB[side.color] !== undefined ? SIGN_RGB[side.color] : 0), dark = side.color === 'black' && side.glow ? rgb01(0xF0EBCC) : c.map(v => v * 0.4);
+  return side.glow ? { text: c, outline: dark } : { text: side.color === 'black' || !side.color ? [0, 0, 0] : dark, outline: null };
+}
+const newSignSide = () => ({ lines: ['', '', '', ''], color: 'black', glow: false });
+Game.prototype.signBE = function (x, y, z) {
+  const w = this.world;
+  let be = w.getBE(x, y, z);
+  if (!be || be.type !== 'sign') { be = { type: 'sign', front: newSignSide(), back: newSignSide(), waxed: false }; w.setBE(x, y, z, be); }
+  return be;
+};
+// where the text of a sign goes: origin (the middle of the board's face), right, up, out, size of a font pixel, line height, line width
+function signFrame(w, x, y, z, back) {
+  const id = w.getBlock(x, y, z), m = w.getMeta(x, y, z), sh = SHAPE[id];
+  let N, c, half, s = 1 / 96, lh = 10, maxW = 90;
+  if (sh === SH.SIGN && (m & 16)) {
+    if (back) return null;                                   // wall signs show one side only
+    const r = m & 3;
+    N = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1, 0, 0]][r];
+    const cc = [[8, 0.75], [15.25, 8], [8, 15.25], [0.75, 8]][r];
+    c = [x + cc[0] / 16, y + 8.5 / 16, z + cc[1] / 16]; half = 0.75;
+  } else if (sh === SH.SIGN || sh === SH.HSIGN) {
+    const a = (m & 15) * Math.PI / 8;
+    N = [-Math.sin(a), 0, Math.cos(a)];
+    if (sh === SH.SIGN) { c = [x + 0.5, y + 13.3 / 16, z + 0.5]; half = 0.7; }
+    else { c = [x + 0.5, y + 5 / 16, z + 0.5]; half = 1; s = 0.9 / 64; lh = 9; maxW = 60; }
+  } else return null;
+  if (back) N = [-N[0], -N[1], -N[2]];
+  const k = half / 16 + 0.002;
+  return { o: [c[0] + N[0] * k, c[1] + N[1] * k, c[2] + N[2] * k], c, R: [N[2], 0, -N[0]], U: [0, 1, 0], N, s, lh, maxW };
+}
+function drawSignSide(r, f, side, light) {
+  const ink = signInk(side), li = side.glow ? [15, 15] : light;
+  const P = (fx, fy, d) => [f.o[0] + (f.R[0] * fx - f.U[0] * fy) * f.s + f.N[0] * d, f.o[1] + (f.R[1] * fx - f.U[1] * fy) * f.s + f.N[1] * d, f.o[2] + (f.R[2] * fx - f.U[2] * fy) * f.s + f.N[2] * d];
+  for (let i = 0; i < 4; i++) {
+    const s = side.lines[i];
+    if (!s) continue;
+    const x0 = -textW(s) / 2, y0 = i * f.lh - f.lh * 2;
+    if (ink.outline) for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) drawText3D(r, s, x0 + dx, y0 + dy, P, ink.outline, li, 0);
+    drawText3D(r, s, x0, y0, P, ink.text, li, 0.0008);
+  }
+}
+Game.prototype.drawSignTexts = function (r) {
+  const w = this.world, p = this.player, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, eye = r.org;
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.be.size) continue;
+    for (const [i, be] of c.be) {
+      if (be.type !== 'sign') continue;
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15);
+      if ((x - eye[0]) ** 2 + (y - eye[1]) ** 2 + (z - eye[2]) ** 2 > 48 * 48) continue;
+      const lr = w.getLightRaw(x, y, z), light = [lr >> 4, lr & 15];
+      for (const back of [false, true]) {
+        const side = back ? be.back : be.front;
+        if (!side || !side.lines.some(s => s)) continue;
+        const f = signFrame(w, x, y, z, back);
+        if (f) drawSignSide(r, f, side, light);
+      }
+    }
+  }
+};
+const _renderSpawnerMobsSG = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) { _renderSpawnerMobsSG.call(this, r, alpha); this.drawSignTexts(r); };
+// placing a sign opens its editor; clicking one edits the side you face, or dyes, lights, darkens or waxes it
+const _afterPlaceSG = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const r = _afterPlaceSG.call(this, p, x, y, z, id);
+  if (BLK[id] && BLK[id].sign && this.world.getBlock(x, y, z) === id) { this.signBE(x, y, z); this.editSign(x, y, z, false); }
+  return r;
+};
+const DYE_OF_ITEM = {};
+for (const c in SIGN_RGB) DYE_OF_ITEM[c + '_dye'] = c;
+const _useBlockSG = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const w = this.world, { x, y, z } = hit, d = BLK[hit.id];
+  if (d && d.sign && !p.sneaking) {
+    const be = this.signBE(x, y, z), f = signFrame(w, x, y, z, false), e = p.eye();
+    const back = f && (e[0] - f.c[0]) * f.N[0] + (e[2] - f.c[2]) * f.N[2] < 0 && signFrame(w, x, y, z, true) !== null;
+    const side = back ? be.back : be.front, n = held ? ITEMS[held.id].name : '';
+    if (be.waxed) { this.sound('click', x + 0.5, y + 0.5, z + 0.5); return true; }
+    const use = () => { if (p.mode !== 1) p.consumeHeld(1); this.ui.refreshHotbar(); return true; };
+    if (DYE_OF_ITEM[n] && side.color !== DYE_OF_ITEM[n] && side.lines.some(s => s)) { side.color = DYE_OF_ITEM[n]; this.sound('dye', x + 0.5, y + 0.5, z + 0.5); return use(); }
+    if (n === 'glow_ink_sac' && !side.glow && side.lines.some(s => s)) { side.glow = true; this.sound('glow_ink', x + 0.5, y + 0.5, z + 0.5); return use(); }
+    if (n === 'ink_sac' && side.glow) { side.glow = false; this.sound('dye', x + 0.5, y + 0.5, z + 0.5); return use(); }
+    if (n === 'honeycomb') { be.waxed = true; this.particles.poof(x + 0.5, y + 0.6, z + 0.5, [1, 0.75, 0.2], 6); this.sound('scrape', x + 0.5, y + 0.5, z + 0.5); return use(); }
+    this.editSign(x, y, z, back);
+    return true;
+  }
+  if (hit.id === B.LECTERN && this.useLectern(p, hit, held)) return true;
+  return _useBlockSG.call(this, p, hit, held);
+};
+
+/* ---------------- screens for typing ---------------- */
+const TYPE_CSS = `
+.tscreen { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
+.tscreen .ttl { color:#fff; text-shadow:2px 2px 0 #3f3f3f; font-size:20px; }
+.sgboard { position:relative; image-rendering:pixelated; background-size:96px 96px; box-shadow:0 0 0 4px #000, inset 0 0 0 3px rgba(0,0,0,.25); }
+.sgboard input { display:block; width:100%; border:0; outline:0; background:transparent; text-align:center; font:inherit; color:#000; padding:0; caret-color:#000; }
+.sgboard input.cur { background:rgba(255,255,255,.12); }
+.bkpage { position:relative; background:#efe6cc; box-shadow:0 0 0 4px #5c4428, inset -6px 0 0 #d9cba4, inset 6px 0 0 #fff8e4; color:#000; }
+.bkpage textarea, .bkpage .txt { position:absolute; border:0; outline:0; resize:none; background:transparent; font:inherit; color:#000; overflow:hidden; white-space:pre-wrap; word-break:break-word; padding:0; margin:0; }
+.bkpage .pg { position:absolute; right:0; color:#000; text-align:right; }
+.bkpage .arr { position:absolute; cursor:pointer; color:#7a5c30; user-select:none; }
+.bkpage .arr:hover { color:#e04030; }
+.tbtns { display:flex; gap:8px; }
+`;
+function typeScreen(id) {
+  let s = document.getElementById(id);
+  if (s) return s;
+  if (!document.getElementById('type-css')) { const st = document.createElement('style'); st.id = 'type-css'; st.textContent = TYPE_CSS; document.head.appendChild(st); }
+  s = document.createElement('div'); s.id = id; s.className = 'screen dim hidden tscreen';
+  document.body.appendChild(s);
+  return s;
+}
+function mcButton(label, fn, w) {
+  const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; if (w) b.style.width = w + 'px';
+  b.addEventListener('click', e => { e.preventDefault(); AUDIO.play('click'); fn(); });
+  return b;
+}
+const fontFam = () => `'${FONT.family}', monospace`;
+Game.prototype.closeTyping = function () { this.ui.show(null); this.lockPointer(); };
+Game.prototype.editSign = function (x, y, z, back) {
+  const g = this, w = this.world, f = signFrame(w, x, y, z, back);
+  if (!f) return;
+  const be = this.signBE(x, y, z), side = back ? be.back : be.front, d = BLK[w.getBlock(x, y, z)];
+  const scr = typeScreen('scr-sign'), k = 4, bw = Math.round(f.maxW * 1.25 * k / 1.25), lh = f.lh * k;
+  scr.innerHTML = '';
+  const ttl = document.createElement('div'); ttl.className = 'ttl'; ttl.textContent = 'Edit Sign Message'; scr.appendChild(ttl);
+  const board = document.createElement('div'); board.className = 'sgboard';
+  board.style.cssText = `width:${bw + 40}px;padding:${lh * 0.6}px 20px;font-family:${fontFam()};font-size:${8 * k}px;line-height:${lh}px;background-image:url(${tileC(texL(TEX.names[FACETEX[d.id * 6]] || 'oak_planks'), null).toDataURL()});background-size:${16 * k}px ${16 * k}px`;
+  const ins = [];
+  for (let i = 0; i < 4; i++) {
+    const inp = document.createElement('input'); inp.value = side.lines[i] || ''; inp.spellcheck = false; inp.style.height = lh + 'px';
+    inp.style.color = side.glow ? '#' + (SIGN_RGB[side.color] || 0).toString(16).padStart(6, '0') : '#' + signInk(side).text.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+    inp.addEventListener('input', () => { while (textW(inp.value) > f.maxW) inp.value = inp.value.slice(0, -1); });
+    inp.addEventListener('focus', () => ins.forEach(q => q.classList.toggle('cur', q === inp)));
+    inp.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); if (i < 3) ins[i + 1].focus(); else done(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (i > 0) ins[i - 1].focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); done(); }
+    });
+    board.appendChild(inp); ins.push(inp);
+  }
+  scr.appendChild(board);
+  const done = () => { side.lines = ins.map(q => q.value); w.setBE(x, y, z, be); g.closeTyping(); };
+  const bt = document.createElement('div'); bt.className = 'tbtns'; bt.appendChild(mcButton('Done', done, 200)); scr.appendChild(bt);
+  this.releasePointer(); this.input.reset();
+  this.ui.show('scr-sign');
+  setTimeout(() => ins[0].focus(), 0);
+};
+
+/* ---------------- books ---------------- */
+const BOOK_LINES = 14, BOOK_W = 114, BOOK_PAGES = 100;
+// mode: 'edit' a book and quill, 'read' a written book, 'lectern' read one on a lectern
+Game.prototype.openBook = function (st, mode, lectern) {
+  const g = this, p = this.player, scr = typeScreen('scr-book'), k = 3;
+  const pages = (st.tag && st.tag.pages ? st.tag.pages.slice() : []);
+  if (!pages.length) pages.push('');
+  let page = lectern ? Math.min(lectern.be.page || 0, pages.length - 1) : 0, signing = false, title = '';
+  const save = () => { if (mode === 'edit') { st.tag = Object.assign({}, st.tag || {}, { pages: pages.slice() }); while (st.tag.pages.length > 1 && !st.tag.pages[st.tag.pages.length - 1]) st.tag.pages.pop(); g.ui.refreshHotbar(); } };
+  const close = () => { save(); g.closeTyping(); };
+  const draw = () => {
+    scr.innerHTML = '';
+    const book = document.createElement('div'); book.className = 'bkpage';
+    book.style.cssText = `width:${146 * k}px;height:${180 * k}px;font-family:${fontFam()};font-size:${8 * k}px;line-height:${9 * k}px`;
+    scr.appendChild(book);
+    if (signing) {
+      const box = document.createElement('div'); box.className = 'txt'; box.style.cssText = `left:${16 * k}px;top:${30 * k}px;width:${BOOK_W * k}px;text-align:center`;
+      box.innerHTML = '<div>Enter Book Title:</div>';
+      const ti = document.createElement('input'); ti.value = title; ti.maxLength = 32; ti.spellcheck = false;
+      ti.style.cssText = `width:100%;border:0;outline:0;background:rgba(0,0,0,.06);text-align:center;font:inherit;color:#000;margin:${4 * k}px 0`;
+      ti.addEventListener('input', () => { title = ti.value; signBtn.disabled = !title.trim(); });
+      ti.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' && title.trim()) finish(); if (e.key === 'Escape') { signing = false; draw(); } });
+      box.appendChild(ti);
+      const by = document.createElement('div'); by.style.color = '#555'; by.textContent = 'by Player'; box.appendChild(by);
+      const note = document.createElement('div'); note.style.cssText = `margin-top:${12 * k}px;color:#000`; note.textContent = 'Note! When you sign the book, it will no longer be editable.'; box.appendChild(note);
+      book.appendChild(box);
+      const bt = document.createElement('div'); bt.className = 'tbtns';
+      const finish = () => {
+        save();
+        const out = { id: I.WRITTEN_BOOK, count: 1, tag: { title: title.trim(), author: 'Player', generation: 0, pages: st.tag && st.tag.pages ? st.tag.pages : [''] } };
+        if (p.inv[p.sel] === st) p.inv[p.sel] = out; else if (p.offhand[0] === st) p.offhand[0] = out;
+        g.sound('book_sign', p.x, p.y + 1, p.z);
+        g.closeTyping(); g.ui.refreshHotbar();
+      };
+      const signBtn = mcButton('Sign and Close', finish, 200); signBtn.disabled = !title.trim();
+      bt.appendChild(signBtn); bt.appendChild(mcButton('Cancel', () => { signing = false; draw(); }, 200));
+      scr.appendChild(bt);
+      setTimeout(() => ti.focus(), 0);
+      return;
+    }
+    const pg = document.createElement('div'); pg.className = 'pg'; pg.style.cssText = `right:${16 * k}px;top:${12 * k}px`; pg.textContent = `Page ${page + 1} of ${pages.length}`; book.appendChild(pg);
+    if (mode === 'edit') {
+      const ta = document.createElement('textarea'); ta.spellcheck = false; ta.value = pages[page];
+      ta.style.cssText = `left:${16 * k}px;top:${28 * k}px;width:${BOOK_W * k + 4}px;height:${BOOK_LINES * 9 * k}px`;
+      ta.addEventListener('input', () => { while (wrapText(ta.value, BOOK_W).length > BOOK_LINES || ta.value.length > 1024) ta.value = ta.value.slice(0, -1); pages[page] = ta.value; });
+      ta.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') close(); if (e.key === 'PageDown') turn(1); if (e.key === 'PageUp') turn(-1); });
+      book.appendChild(ta);
+      setTimeout(() => ta.focus(), 0);
+    } else {
+      const tx = document.createElement('div'); tx.className = 'txt'; tx.style.cssText = `left:${16 * k}px;top:${28 * k}px;width:${BOOK_W * k + 4}px;height:${BOOK_LINES * 9 * k}px`;
+      tx.textContent = wrapText(pages[page] || '', BOOK_W).slice(0, BOOK_LINES).join('\n');
+      book.appendChild(tx);
+    }
+    const arrow = (dir, label) => { const a = document.createElement('div'); a.className = 'arr'; a.textContent = label; a.style.cssText = `${dir > 0 ? 'right' : 'left'}:${18 * k}px;bottom:${12 * k}px;font-size:${12 * k}px`; a.addEventListener('mousedown', e => { e.preventDefault(); turn(dir); }); book.appendChild(a); };
+    if (page > 0) arrow(-1, '◀');
+    if (page < pages.length - 1 || (mode === 'edit' && pages.length < BOOK_PAGES)) arrow(1, '▶');
+    const bt = document.createElement('div'); bt.className = 'tbtns';
+    if (mode === 'edit') { bt.appendChild(mcButton('Sign', () => { signing = true; draw(); }, 98)); bt.appendChild(mcButton('Done', close, 98)); }
+    else if (mode === 'lectern') { bt.appendChild(mcButton('Done', close, 98)); bt.appendChild(mcButton('Take Book', () => { g.takeLecternBook(lectern); g.closeTyping(); }, 98)); }
+    else bt.appendChild(mcButton('Done', close, 200));
+    scr.appendChild(bt);
+  };
+  const turn = dir => {
+    const np = page + dir;
+    if (np < 0) return;
+    if (np >= pages.length) { if (mode !== 'edit' || pages.length >= BOOK_PAGES) return; pages.push(''); }
+    page = np;
+    if (lectern) g.turnLecternPage(lectern, page);
+    g.sound('page', p.x, p.y + 1, p.z);
+    draw();
+  };
+  this.releasePointer(); this.input.reset();
+  this.ui.show('scr-book');
+  draw();
+  // keys outside the text area turn pages and close the book
+  scr.onkeydown = e => { if (e.key === 'Escape') close(); };
+};
+const _useItemSpecialBK = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (held && held.id === I.WRITABLE_BOOK) { this.openBook(held, 'edit'); return true; }
+  if (held && held.id === I.WRITTEN_BOOK) { this.openBook(held, 'read'); return true; }
+  return _useItemSpecialBK.call(this, p, hit, held, it);
+};
+// copying: a written book and books and quills make copies (a copy of a copy at most); the original stays in the grid
+for (let k = 1; k <= 8; k++) {
+  shapeless('written_book', k, ['written_book', ...new Array(k).fill('writable_book')]);
+  RECIPES[RECIPES.length - 1].fn = (grid, out) => {
+    const src = grid.find(s => s && s.id === I.WRITTEN_BOOK);
+    if (!src || !src.tag || (src.tag.generation || 0) >= 2) return null;
+    out.tag = JSON.parse(JSON.stringify(src.tag)); out.tag.generation = (src.tag.generation || 0) + 1; return out;
+  };
+}
+const _consumeGridBK = UI.prototype.consumeGrid;
+UI.prototype.consumeGrid = function () {
+  const grid = this.craftGrid(), keep = [];
+  if (grid.some(s => s && s.id === I.WRITABLE_BOOK)) grid.forEach((s, k) => { if (s && s.id === I.WRITTEN_BOOK) keep.push([k, copyStack(s, s.count)]); });
+  _consumeGridBK.call(this);
+  for (const [k, s] of keep) grid[k] = s;
+};
+const _stackNameBK = stackName;
+stackName = function (st) { if (st.id === I.WRITTEN_BOOK && st.tag && st.tag.title && !st.tag.name) return st.tag.title; return _stackNameBK(st); };
+const _tooltipLinesBK = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesBK(st);
+  if (st.id === I.WRITTEN_BOOK && st.tag) out.splice(1, 0, ['by ' + (st.tag.author || 'Player'), '#aaaaaa'], [['Original', 'Copy of original', 'Copy of a copy', 'Tattered'][st.tag.generation || 0], '#aaaaaa']);
+  return out;
+};
+
+/* ---------------- lecterns ---------------- */
+// a lectern keeps its book in its block entity (items[0]) and shows it on top (meta bit 4)
+const _lecternModel = BOX_MODELS.lectern;
+BOX_MODELS.lectern = (d, m, c) => {
+  const ps = _lecternModel(d, m, c);
+  if (m & 4) ps.push(...rotParts([BX(3, 16, 3.5, 13, 17, 12.5, { top: 'writable_book_cover', side: 'book_pages', bottom: 'writable_book_cover' })], m & 3));
+  return ps;
+};
+TEXGEN.push(function texLecternBook() {
+  T('writable_book_cover', (d, r) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) sp(d, x, y, (x === 7 || x === 8) ? [90, 50, 30] : mul([236, 226, 196], 0.92 + r() * 0.08)); for (let y = 2; y < 14; y += 2) for (let x = 1; x < 15; x++) if (x !== 7 && x !== 8 && r() < 0.6) sp(d, x, y, [120, 110, 100]); });
+  T('book_pages', (d, r) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) sp(d, x, y, y % 2 ? [220, 210, 180] : [244, 236, 210]); });
+});
+Game.prototype.useLectern = function (p, hit, held) {
+  const w = this.world, { x, y, z } = hit, m = w.getMeta(x, y, z);
+  let be = w.getBE(x, y, z);
+  const book = be && be.items && be.items[0];
+  if (!book) {
+    if (!held || (held.id !== I.WRITABLE_BOOK && held.id !== I.WRITTEN_BOOK)) return false;
+    be = Object.assign(be || {}, { type: 'lectern', items: [copyStack(held, 1)], page: 0 });
+    w.setBE(x, y, z, be); w.setMeta(x, y, z, m | 4);
+    if (p.mode !== 1) p.consumeHeld(1);
+    this.sound('book_put', x + 0.5, y + 1, z + 0.5);
+    this.remeshNear(x, z); this.ui.refreshHotbar();
+    if (this.redstoneChanged) this.redstoneChanged(x, y, z);
+    return true;
+  }
+  if (p.sneaking) return false;
+  this.openBook(book, 'lectern', { x, y, z, be });
+  return true;
+};
+Game.prototype.turnLecternPage = function (L, page) {
+  L.be.page = page; this.world.setBE(L.x, L.y, L.z, L.be);
+  // turning a page sends a short redstone pulse
+  L.be.pulse = 2;
+  if (this.redstoneChanged) this.redstoneChanged(L.x, L.y, L.z);
+  this.world.schedule(L.x, L.y, L.z, 2, 'lectern_off');
+};
+Game.prototype.takeLecternBook = function (L) {
+  const w = this.world, book = L.be.items && L.be.items[0];
+  if (!book) return;
+  L.be.items = [null]; L.be.page = 0; w.setBE(L.x, L.y, L.z, L.be);
+  w.setMeta(L.x, L.y, L.z, w.getMeta(L.x, L.y, L.z) & ~4);
+  this.giveOrDrop(this.player, book);
+  this.remeshNear(L.x, L.z); this.ui.refreshHotbar();
+  if (this.redstoneChanged) this.redstoneChanged(L.x, L.y, L.z);
+};
+const _onScheduledBK = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind === 'lectern_off') { const be = this.world.getBE(x, y, z); if (be) be.pulse = 0; if (this.redstoneChanged) this.redstoneChanged(x, y, z); return; }
+  return _onScheduledBK.call(this, kind, x, y, z);
+};
+// comparators read how far the book is open
+const _containerSignalBK = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  if (w.getBlock(x, y, z) === B.LECTERN) {
+    const be = w.getBE(x, y, z), book = be && be.items && be.items[0];
+    if (!book) return 0;
+    const n = book.tag && book.tag.pages ? book.tag.pages.length : 1;
+    return Math.floor((n > 1 ? (be.page || 0) / (n - 1) : 1) * 14) + 1;
+  }
+  return _containerSignalBK.call(this, w, x, y, z);
+};
+
+/* ---------------- sounds ---------------- */
+const _audioPlaySG = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  const S = { dye: 1, glow_ink: 1, page: 1, book_put: 1, book_sign: 1 };
+  if (!S[name]) return _audioPlaySG.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  if (name === 'page') this.noiseHit(dst, 'highpass', 3000, 0.7, 0.18, 0.2);
+  else if (name === 'book_put') { this.noiseHit(dst, 'bandpass', 900, 1, 0.12, 0.3); this.noiseHit(dst, 'highpass', 2500, 1, 0.15, 0.12); }
+  else if (name === 'book_sign') { this.noiseHit(dst, 'highpass', 2800, 1, 0.3, 0.15); this.tone(dst, 'sine', 600, 900, 0.2, 0.06); }
+  else if (name === 'glow_ink') { this.noiseHit(dst, 'lowpass', 800, 1, 0.2, 0.3); this.tone(dst, 'sine', 900, 1300, 0.3, 0.06); }
+  else this.noiseHit(dst, 'lowpass', 700, 1, 0.18, 0.3);
+};
+// the pulse: weak power all round, strong power into the block below
+RS_SRC[B.LECTERN] = 14; RS_ANY[B.LECTERN] = 1;
+const _emitBK = RS.emit;
+RS.emit = function (w, x, y, z, f, strong) {
+  if (w.getBlock(x, y, z) === B.LECTERN) { const be = w.getBE(x, y, z); return be && be.pulse ? (strong ? (f === 3 ? 15 : 0) : 15) : 0; }
+  return _emitBK.call(this, w, x, y, z, f, strong);
+};
+
+/* @file 105_banners.js */
+/* ===================================================================
+   BANNERS AND THE LOOM — banners carry up to six pattern layers, added
+   at the loom with dyes (and pattern items for the special charges);
+   patterned banners keep their design when placed and broken
+   =================================================================== */
+// the front of a banner is 20x40 pixels; every pattern is a mask over it (x left to right as seen from the front)
+const BANNER_SHAPES = {
+  base: () => 1,
+  square_bottom_left: (x, y) => x < 10 && y >= 27, square_bottom_right: (x, y) => x >= 10 && y >= 27,
+  square_top_left: (x, y) => x < 10 && y < 13, square_top_right: (x, y) => x >= 10 && y < 13,
+  stripe_bottom: (x, y) => y >= 27, stripe_top: (x, y) => y < 13, stripe_left: (x, y) => x < 7, stripe_right: (x, y) => x >= 13,
+  stripe_center: (x, y) => x >= 7 && x < 13, stripe_middle: (x, y) => y >= 15 && y < 25,
+  stripe_downright: (x, y) => Math.abs(y - x * 2 - 0.5) < 5.5, stripe_downleft: (x, y) => Math.abs(y - (19 - x) * 2 - 0.5) < 5.5,
+  small_stripes: (x) => x % 4 < 2,
+  cross: (x, y) => Math.abs(y - x * 2 - 0.5) < 3.5 || Math.abs(y - (19 - x) * 2 - 0.5) < 3.5,
+  straight_cross: (x, y) => (x >= 8 && x < 12) || (y >= 18 && y < 22),
+  triangle_bottom: (x, y) => y >= 29 + Math.abs(x - 9.5), triangle_top: (x, y) => y < 11 - Math.abs(x - 9.5),
+  triangles_bottom: (x, y) => y >= 35 + Math.abs((x % 5) - 2) * 1.5, triangles_top: (x, y) => y < 5 - Math.abs((x % 5) - 2) * 1.5,
+  diagonal_left: (x, y) => y < 39 - x * 2, diagonal_right: (x, y) => y < x * 2,
+  diagonal_up_left: (x, y) => y >= x * 2, diagonal_up_right: (x, y) => y >= 39 - x * 2,
+  circle: (x, y) => (x - 9.5) ** 2 + (y - 19.5) ** 2 < 22, rhombus: (x, y) => Math.abs(x - 9.5) / 7 + Math.abs(y - 19.5) / 13 < 1,
+  half_vertical: (x) => x < 10, half_horizontal: (x, y) => y < 20, half_vertical_right: (x) => x >= 10, half_horizontal_bottom: (x, y) => y >= 20,
+  border: (x, y) => x < 2 || x >= 18 || y < 2 || y >= 38,
+  curly_border: (x, y) => x < 2 || x >= 18 || y < 2 || y >= 38 || ((x < 4 || x >= 16) && y % 4 < 2) || ((y < 4 || y >= 36) && x % 4 < 2),
+  gradient: (x, y) => Math.max(0, 1 - y / 36), gradient_up: (x, y) => Math.max(0, (y - 3) / 36),
+  bricks: (x, y) => y % 5 === 0 || (x + (Math.floor(y / 5) % 2 ? 4 : 0)) % 8 === 0,
+  globe: (x, y) => { const dx = x - 9.5, dy = y - 19.5, d = Math.hypot(dx, dy); return (d > 6 && d < 7.3) || (d < 6.5 && (Math.abs(dx) < 0.6 || Math.abs(dy) < 0.6 || Math.abs((dx / 3.4) ** 2 + (dy / 6.5) ** 2 - 1) < 0.18 || Math.abs(Math.abs(dy) - 3.5) < 0.5)); },
+  creeper: (x, y) => bitmapAt(['........', '.##..##.', '.##..##.', '...##...', '..####..', '..####..', '..#..#..', '........'], x - 2, y - 12, 2),
+  skull: (x, y) => bitmapAt(['..####..', '.######.', '.#.##.#.', '.######.', '..#..#..', '#..##..#', '.##..##.', '#......#'], x - 2, y - 12, 2),
+  flower: (x, y) => { const dx = x - 9.5, dy = y - 19.5, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx); return d < 1.6 || (d > 2.4 && d < 3.5 + 3.5 * Math.abs(Math.cos(a * 4))); },
+  mojang: (x, y) => { const dx = x - 9.5, dy = y - 19.5; return (Math.abs(Math.hypot(dx + 1.5, dy + 1.5) - 4.5) < 1.2 && !(dx > 0 && dy < 0)) || (Math.abs(dx - 2.5) < 1 && Math.abs(dy - 1.5) < 4) || (Math.abs(dy + 4.5) < 1 && dx > -0.5 && dx < 5); },
+  piglin: (x, y) => x >= 4 && x < 16 && y >= 16 && y < 25 && !((x === 6 || x === 7 || x === 12 || x === 13) && y >= 19 && y < 22),
+  flow: (x, y) => { const dx = x - 9.5, dy = y - 19.5, r = Math.hypot(dx, dy), a = Math.atan2(dy, dx) + Math.PI; return r < 8 && ((r - a * 1.1 + 40) % 3.5) < 1.4; },
+  guster: (x, y) => { const dx = x - 9.5, dy = y - 19.5, r = Math.hypot(dx, dy), a = Math.atan2(dy, dx) + Math.PI; return r < 8.5 && r > 1.5 && ((r + a * 0.9) % 3.8) < 1.3 && Math.abs(dy) < 7; },
+};
+function bitmapAt(rows, x, y, s) { const bx = Math.floor(x / s), by = Math.floor(y / s); return bx >= 0 && by >= 0 && by < rows.length && bx < rows[by].length && rows[by][bx] === '#'; }
+const BANNER_NAMES = { base: 'Fully', square_bottom_left: 'Base Dexter Canton', square_bottom_right: 'Base Sinister Canton', square_top_left: 'Chief Dexter Canton', square_top_right: 'Chief Sinister Canton',
+  stripe_bottom: 'Base', stripe_top: 'Chief', stripe_left: 'Pale Dexter', stripe_right: 'Pale Sinister', stripe_center: 'Pale', stripe_middle: 'Fess', stripe_downright: 'Bend', stripe_downleft: 'Bend Sinister',
+  small_stripes: 'Paly', cross: 'Saltire', straight_cross: 'Cross', triangle_bottom: 'Chevron', triangle_top: 'Inverted Chevron', triangles_bottom: 'Base Indented', triangles_top: 'Chief Indented',
+  diagonal_left: 'Per Bend Sinister', diagonal_right: 'Per Bend', diagonal_up_left: 'Per Bend Inverted', diagonal_up_right: 'Per Bend Sinister Inverted', circle: 'Roundel', rhombus: 'Lozenge',
+  half_vertical: 'Per Pale', half_horizontal: 'Per Fess', half_vertical_right: 'Per Pale Inverted', half_horizontal_bottom: 'Per Fess Inverted', border: 'Bordure', curly_border: 'Bordure Indented',
+  gradient: 'Gradient', gradient_up: 'Base Gradient', bricks: 'Field Masoned', globe: 'Globe', creeper: 'Creeper Charge', skull: 'Skull Charge', flower: 'Flower Charge', mojang: 'Thing', piglin: 'Snout', flow: 'Flow', guster: 'Guster' };
+// the loom offers these without a pattern item; pattern items unlock the others
+const LOOM_BASIC = ['square_bottom_left', 'square_bottom_right', 'square_top_left', 'square_top_right', 'stripe_bottom', 'stripe_top', 'stripe_left', 'stripe_right', 'stripe_center', 'stripe_middle',
+  'stripe_downright', 'stripe_downleft', 'small_stripes', 'cross', 'straight_cross', 'triangle_bottom', 'triangle_top', 'triangles_bottom', 'triangles_top', 'diagonal_left', 'diagonal_right',
+  'diagonal_up_left', 'diagonal_up_right', 'circle', 'rhombus', 'half_vertical', 'half_horizontal', 'half_vertical_right', 'half_horizontal_bottom', 'border', 'gradient', 'gradient_up'];
+const PATTERN_OF_ITEM = { field_masoned: 'bricks', bordure_indented: 'curly_border' };
+// vanilla pattern textures are 64x64 with the front of the flag at (1, 1); resource packs can replace them
+for (const n in BANNER_SHAPES) defSkin('entity/banner/' + n, 64, 64, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), img = g.createImageData(64, 64), R = mulberry32(strHash(n)), f = BANNER_SHAPES[n];
+  for (let y = 0; y < 40; y++) for (let x = 0; x < 20; x++) {
+    let a = f(x, y); a = a === true ? 1 : a === false ? 0 : a;
+    if (!a) continue;
+    const o = ((y + 1) * 64 + x + 1) * 4, k = n === 'base' ? 0.86 + R() * 0.1 - (y % 6 === 0 ? 0.04 : 0) : 0.9 + R() * 0.1;
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = 255 * k; img.data[o + 3] = 255 * a;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+});
+// the 20x40 front of a design, from the pattern textures in the model atlas
+const BANNER_MASKS = { atlas: null, m: {} };
+function bannerMask(n) {
+  if (BANNER_MASKS.atlas !== ATLAS.canvas) { BANNER_MASKS.atlas = ATLAS.canvas; BANNER_MASKS.m = {}; BANNER_MASKS.data = null; }
+  if (BANNER_MASKS.m[n]) return BANNER_MASKS.m[n];
+  const vt = VTEX['entity/banner/' + n], out = new Float32Array(20 * 40 * 4);
+  if (vt && ATLAS.canvas) {
+    if (!BANNER_MASKS.data) BANNER_MASKS.data = ATLAS.canvas.getContext('2d').getImageData(0, 0, ATLAS.S, ATLAS.S).data;
+    const d = BANNER_MASKS.data, k = vt.reg.w / 64, S = ATLAS.S;
+    for (let y = 0; y < 40; y++) for (let x = 0; x < 20; x++) {
+      const s = ((vt.reg.y + Math.floor((y + 1.5) * k)) * S + vt.reg.x + Math.floor((x + 1.5) * k)) * 4, o = (y * 20 + x) * 4;
+      out[o] = d[s] / 255; out[o + 1] = d[s + 1] / 255; out[o + 2] = d[s + 2] / 255; out[o + 3] = d[s + 3] / 255;
+    }
+  }
+  return BANNER_MASKS.m[n] = out;
+}
+function bannerPixels(color, patterns) {
+  const px = new Uint8ClampedArray(20 * 40 * 4), acc = new Float32Array(20 * 40 * 3);
+  const layers = [['base', color], ...(patterns || [])];
+  for (const [n, c] of layers) {
+    const m = bannerMask(n), t = dyeTint(c);
+    for (let i = 0; i < 800; i++) { const a = m[i * 4 + 3]; if (!a) continue; for (let k = 0; k < 3; k++) acc[i * 3 + k] = acc[i * 3 + k] * (1 - a) + t[k] * m[i * 4 + k] * a; }
+  }
+  for (let i = 0; i < 800; i++) { px[i * 4] = acc[i * 3] * 255; px[i * 4 + 1] = acc[i * 3 + 1] * 255; px[i * 4 + 2] = acc[i * 3 + 2] * 255; px[i * 4 + 3] = 255; }
+  return px;
+}
+const bannerKey = (color, patterns) => color + '|' + (patterns || []).map(p => p.join(':')).join(',');
+// designs on screen share a few slots of the model atlas
+const BANNER_SLOTS = 16;
+for (let k = 0; k < BANNER_SLOTS; k++) defSkin('banner/slot' + k, 20, 40, () => { const c = document.createElement('canvas'); c.width = 20; c.height = 40; return c; });
+const BANTEX = { atlas: null, slots: [], clock: 0 };
+function bannerTexture(g, color, patterns) {
+  if (!ATLAS.canvas || !g.r || !g.r.atlas) return null;
+  if (BANTEX.atlas !== ATLAS.canvas) { BANTEX.atlas = ATLAS.canvas; BANTEX.slots = []; for (let k = 0; k < BANNER_SLOTS; k++) BANTEX.slots.push({ key: 'banner/slot' + k, id: null, used: 0 }); }
+  const id = bannerKey(color, patterns);
+  let s = BANTEX.slots.find(q => q.id === id);
+  if (!s) {
+    s = BANTEX.slots.reduce((a, b) => a.used <= b.used ? a : b);
+    const vt = VTEX[s.key];
+    if (!vt) return null;
+    const img = new ImageData(bannerPixels(color, patterns), 20, 40), gl = g.r.gl;
+    ATLAS.canvas.getContext('2d').putImageData(img, vt.reg.x, vt.reg.y);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, g.r.atlas);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, vt.reg.x, vt.reg.y, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    s.id = id;
+  }
+  s.used = ++BANTEX.clock;
+  return VTEX[s.key];
+}
+// a picture of a design for screens and icons
+const BANNER_CANVAS = new Map();
+function bannerCanvas(color, patterns) {
+  const id = bannerKey(color, patterns);
+  let e = BANNER_CANVAS.get(id);
+  if (e && e.atlas === ATLAS.canvas) return e.cv;
+  const cv = document.createElement('canvas'); cv.width = 20; cv.height = 40;
+  cv.getContext('2d').putImageData(new ImageData(bannerPixels(color, patterns), 20, 40), 0, 0);
+  BANNER_CANVAS.set(id, { cv, atlas: ATLAS.canvas });
+  return cv;
+}
+
+/* ---------------- placed banners ---------------- */
+// patterned banners (meta bit 32) leave the cloth out of the block model; it is drawn with the design instead
+const _mdlBanner = MDL[SH.BANNER];
+MDL[SH.BANNER] = (d, m, c) => {
+  const ps = _mdlBanner(d, m, c);
+  if (m & 32) return ps.slice(0, ps.length - 1);
+  // a standing banner's cloth hangs in front of its pole, like vanilla's
+  if (!(m & 16)) { const f = ps[ps.length - 1]; ps[ps.length - 1] = Object.assign({}, f, { b: [f.b[0], f.b[1], 8.6, f.b[3], f.b[4], 9.4] }); }
+  return ps;
+};
+function bannerFrame(w, x, y, z) {
+  const m = w.getMeta(x, y, z);
+  let N, c;
+  if (m & 16) {
+    const r = m & 3;
+    N = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1, 0, 0]][r];
+    const cc = [[8, 1], [15, 8], [8, 15], [1, 8]][r];
+    c = [x + cc[0] / 16, y + 13 / 16, z + cc[1] / 16];
+  } else {
+    const a = (m & 15) * Math.PI / 8;
+    N = [-Math.sin(a), 0, Math.cos(a)]; c = [x + 0.5 + N[0] / 16, y + 29 / 16, z + 0.5 + N[2] / 16];
+  }
+  return { top: c, N, R: [N[2], 0, -N[0]], half: (m & 16) ? 0.5 : 0.4 };
+}
+Game.prototype.drawBanners = function (r, alpha) {
+  const w = this.world, p = this.player, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, eye = r.org, t = w.tick + alpha;
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    const ch = w.getChunk(pcx + dx, pcz + dz);
+    if (!ch || ch.state < 2 || !ch.be.size) continue;
+    for (const [i, be] of ch.be) {
+      if (be.type !== 'banner' || !be.patterns) continue;
+      const x = ch.cx * 16 + (i & 15), y = i >> 8, z = ch.cz * 16 + ((i >> 4) & 15), id = w.getBlock(x, y, z);
+      if (SHAPE[id] !== SH.BANNER || (x - eye[0]) ** 2 + (z - eye[2]) ** 2 > 64 * 64) continue;
+      const vt = bannerTexture(this, BLK[id].color, be.patterns);
+      if (!vt) continue;
+      const f = bannerFrame(w, x, y, z), lr = w.getLightRaw(x, y, z), l = [lr >> 4, lr & 15], A = ATLAS.S, rg = vt.reg;
+      // the cloth hangs from its bar and sways a little
+      const sway = Math.sin(t * 0.06 + x * 0.7 + z * 1.3) * 0.06, cs = Math.cos(sway), sn = Math.sin(sway), W = 6 / 16, H = 27 / 16, D = f.half / 16;
+      const P = (u, v, d) => { const yy = -v * cs, out = v * sn + d; return [f.top[0] + f.R[0] * u + f.N[0] * out, f.top[1] + yy, f.top[2] + f.R[2] * u + f.N[2] * out]; };
+      const u0 = rg.x / A, u1 = (rg.x + rg.w) / A, v0 = rg.y / A, v1 = (rg.y + rg.h) / A;
+      const quad = (pts, uv, s) => { for (let k = 0; k < 4; k++) r.dv(pts[k][0], pts[k][1], pts[k][2], uv[k][0], uv[k][1], -1, s, s, s, 1, l[0], l[1]); };
+      quad([P(-W, H, D), P(W, H, D), P(W, 0, D), P(-W, 0, D)], [[u0, v1], [u1, v1], [u1, v0], [u0, v0]], 1);
+      quad([P(W, H, -D), P(-W, H, -D), P(-W, 0, -D), P(W, 0, -D)], [[u1, v1], [u0, v1], [u0, v0], [u1, v0]], 0.75);
+      const ue = (u0 + u1) / 2;
+      quad([P(-W, H, -D), P(-W, H, D), P(-W, 0, D), P(-W, 0, -D)], [[u0, v1], [u0, v1], [u0, v0], [u0, v0]], 0.8);
+      quad([P(W, H, D), P(W, H, -D), P(W, 0, -D), P(W, 0, D)], [[u1, v1], [u1, v1], [u1, v0], [u1, v0]], 0.8);
+      quad([P(-W, H, -D), P(W, H, -D), P(W, H, D), P(-W, H, D)], [[ue, v1], [ue, v1], [ue, v1], [ue, v1]], 0.6);
+    }
+  }
+};
+const _renderSpawnerMobsBN = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) { _renderSpawnerMobsBN.call(this, r, alpha); this.drawBanners(r, alpha); };
+// placing a patterned banner stores its design; breaking it gives the design back
+const _afterPlaceBN = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const held = p.held, pats = held && held.id === id && held.tag && held.tag.patterns;
+  const r = _afterPlaceBN.call(this, p, x, y, z, id);
+  if (pats && pats.length && SHAPE[id] === SH.BANNER && this.world.getBlock(x, y, z) === id) {
+    this.world.setBE(x, y, z, { type: 'banner', patterns: pats.map(q => q.slice()) });
+    this.world.setMeta(x, y, z, this.world.getMeta(x, y, z) | 32);
+    this.remeshNear(x, z);
+  }
+  return r;
+};
+const _breakBlockBN = Game.prototype.breakBlock;
+Game.prototype.breakBlock = function (x, y, z, byPlayer, natural) {
+  const w = this.world, id = w.getBlock(x, y, z), be = SHAPE[id] === SH.BANNER ? w.getBE(x, y, z) : null;
+  if (!be || !be.patterns || !be.patterns.length) return _breakBlockBN.call(this, x, y, z, byPlayer, natural);
+  const own = Object.prototype.hasOwnProperty.call(this, 'dropItem'), drop = this.dropItem;
+  this.dropItem = (px, py, pz, st, ...rest) => drop.call(this, px, py, pz, st && st.id === id ? Object.assign({}, st, { tag: Object.assign({}, st.tag || {}, { patterns: be.patterns.map(q => q.slice()) }) }) : st, ...rest);
+  try { return _breakBlockBN.call(this, x, y, z, byPlayer, natural); } finally { if (own) this.dropItem = drop; else delete this.dropItem; }
+};
+
+/* ---------------- items ---------------- */
+const isBannerItem = id => ITEMS[id] && ITEMS[id].block !== undefined && SHAPE[ITEMS[id].block] === SH.BANNER;
+const _iconForBN = iconFor;
+iconFor = function (id, tag, st) {
+  if (!(tag && tag.patterns && tag.patterns.length && isBannerItem(id))) return _iconForBN(id, tag, st);
+  const key = 'banner#' + bannerKey(BLK[ITEMS[id].block].color, tag.patterns) + '#' + (ATLAS.canvas ? 1 : 0);
+  if (ICONS[key]) return ICONS[key];
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  g.fillStyle = '#6b4a2b'; g.fillRect(30, 4, 4, 58); g.fillStyle = '#8a6438'; g.fillRect(14, 4, 36, 4);
+  g.drawImage(bannerCanvas(BLK[ITEMS[id].block].color, tag.patterns), 20, 8, 24, 48);
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(20, 8, 24, 2);
+  return ICONS[key] = c.toDataURL();
+};
+const titleWords = s => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+const _tooltipLinesBN = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesBN(st);
+  if (st.tag && st.tag.patterns && isBannerItem(st.id)) out.splice(1, 0, ...st.tag.patterns.map(([n, c]) => [titleWords(c) + ' ' + (BANNER_NAMES[n] || titleWords(n)), '#aaaaaa']));
+  const it = ITEMS[st.id];
+  if (it && /_banner_pattern$/.test(it.name)) { const n = it.name.replace('_banner_pattern', ''); out.splice(1, 0, [BANNER_NAMES[PATTERN_OF_ITEM[n] || n] || titleWords(n), '#aaaaaa']); }
+  return out;
+};
+
+/* ---------------- the loom ---------------- */
+SCREEN_LOGIC.loom = {
+  accept(ui, c, i, st) {
+    if (c !== 'local') return true;
+    const n = ITEMS[st.id].name;
+    return i === 0 ? isBannerItem(st.id) : i === 1 ? /_dye$/.test(n) : /_banner_pattern$/.test(n);
+  },
+  options(ui) {
+    const [b, d, p] = ui.inv.local;
+    if (!b || !d) return [];
+    if (b.tag && b.tag.patterns && b.tag.patterns.length >= 6) return [];
+    if (p) { const n = ITEMS[p.id].name.replace('_banner_pattern', ''); return [PATTERN_OF_ITEM[n] || n]; }
+    return LOOM_BASIC;
+  },
+  result(ui) {
+    const [b, d] = ui.inv.local, opts = this.options(ui), pick = opts.length === 1 ? opts[0] : opts[ui.inv.pick];
+    if (!b || !d || !pick) return null;
+    const out = copyStack(b, 1);
+    out.tag = Object.assign({}, b.tag || {}, { patterns: [...(b.tag && b.tag.patterns || []).map(q => q.slice()), [pick, ITEMS[d.id].name.replace('_dye', '')]] });
+    return out;
+  },
+  take(ui) {
+    for (const k of [0, 1]) { const s = ui.inv.local[k]; s.count--; if (s.count <= 0) ui.inv.local[k] = null; }
+    const p = ui.game.player;
+    ui.game.sound('loom', p.x, p.y + 1, p.z);
+    if (!ui.inv.local[0] || !ui.inv.local[1]) ui.inv.pick = -1;
+  },
+  open(ui) { ui.inv.pick = -1; },
+  extra(ui, win) {
+    const box = el('div', 'sclist'); box.style.cssText = `position:absolute;left:${60 * GS}px;top:${13 * GS}px;width:${56 * GS + 14}px;height:${56 * GS}px;overflow-y:auto;display:flex;flex-wrap:wrap;align-content:flex-start`;
+    win.appendChild(box); ui._loom = box;
+    const pv = document.createElement('canvas'); pv.width = 20; pv.height = 40;
+    pv.style.cssText = `position:absolute;left:${141 * GS}px;top:${9 * GS}px;width:${20 * GS}px;height:${40 * GS}px;image-rendering:pixelated;pointer-events:none`;
+    win.appendChild(pv); ui._loomPv = pv; ui._loomKey = null;
+  },
+  update(ui) {
+    const [b, d, p] = ui.inv.local, opts = this.options(ui);
+    const key = (b ? b.id + JSON.stringify(b.tag || {}) : '') + '|' + (d ? d.id : '') + '|' + (p ? p.id : '') + '|' + ui.inv.pick;
+    if (key === ui._loomKey && ui._loom && ui._loom.childNodes.length === (opts.length > 1 ? opts.length : 0)) return;
+    ui._loomKey = key;
+    const box = ui._loom; if (!box) return;
+    box.innerHTML = '';
+    const color = d ? ITEMS[d.id].name.replace('_dye', '') : 'white', base = b ? BLK[ITEMS[b.id].block].color : 'white';
+    if (opts.length > 1) opts.forEach((n, k) => {
+      const btn = el('div', 'scbtn' + (k === ui.inv.pick ? ' sel' : ''));
+      const cv = bannerCanvas(base === color ? (color === 'white' ? 'gray' : 'white') : base, [[n, color]]);
+      btn.innerHTML = `<img src="${cv.toDataURL()}" style="width:${7 * GS}px;height:${14 * GS}px;image-rendering:pixelated;margin:auto">`;
+      btn.title = titleWords(color) + ' ' + (BANNER_NAMES[n] || n);
+      btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); ui.inv.pick = k; AUDIO.play('click'); ui._loomKey = null; ui.renderInv(); });
+      box.appendChild(btn);
+    });
+    // the preview shows the banner as it will come out
+    const pv = ui._loomPv, res = this.result(ui), g2 = pv.getContext('2d');
+    g2.clearRect(0, 0, 20, 40);
+    const show = res || b;
+    if (show) g2.drawImage(bannerCanvas(BLK[ITEMS[show.id].block].color, show.tag && show.tag.patterns), 0, 0);
+  },
+  single: true,
+};
+
+/* @file 106_archaeology.js */
+/* ===================================================================
+   BRUSHING AND ARCHAEOLOGY — a brush dusts suspicious sand and gravel
+   away in stages until the buried find pops out; desert pyramids, desert
+   wells and trail ruins hide them. Brushing an armadillo gives a scute.
+   =================================================================== */
+TEXGEN.push(function texDust() {
+  for (const [n, base, dark] of [['suspicious_sand', 'sand', [150, 120, 76]], ['suspicious_gravel', 'gravel', [120, 104, 88]]]) for (let k = 1; k <= 3; k++) T(n + '_' + k, (d, r) => {
+    d.set(copyOf(base));
+    // brush strokes sweep the surface away, the find shows through more each stage
+    for (let s = 0; s < 3 + k * 3; s++) { const y = Math.floor(r() * 16), x0 = Math.floor(r() * 10); for (let x = x0; x < x0 + 3 + k; x++) sp(d, x, y, mul(gp(d, x, y), 1.12)); }
+    const rad = 1.5 + k;
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const q = Math.hypot(x - 7.5, y - 8.5); if (q < rad) sp(d, x, y, mul(dark, 0.8 + 0.25 * (q / rad) + r() * 0.06)); }
+  });
+});
+// dusting stages live in meta bits 0-1 and pick one of four textures
+const DUST = { ready: false };
+const _faceLayerAR = faceLayer;
+faceLayer = function (id, meta, f) {
+  if (meta & 3) {
+    if (!DUST.ready) { DUST.ready = true; for (const n of ['suspicious_sand', 'suspicious_gravel']) DUST[B[n.toUpperCase()]] = [0, 1, 2, 3].map(k => texLayer(n + '_' + k, FACETEX[B[n.toUpperCase()] * 6])); }
+    const d = DUST[id];
+    if (d) return d[meta & 3];
+  }
+  return _faceLayerAR(id, meta, f);
+};
+
+/* ---------------- what is buried ---------------- */
+Object.assign(LOOT, {
+  desert_pyramid_archaeology: [[[1, 1], [['archer_pottery_sherd', 1], ['miner_pottery_sherd', 1], ['prize_pottery_sherd', 1], ['skull_pottery_sherd', 1], ['diamond', 1], ['tnt', 1], ['gunpowder', 1], ['emerald', 1]]]],
+  desert_well_archaeology: [[[1, 1], [['arms_up_pottery_sherd', 2], ['brewer_pottery_sherd', 2], ['brick', 1], ['emerald', 1], ['stick', 1], ['suspicious_stew', 1]]]],
+  trail_ruins_common: [[[1, 1], [['emerald', 2], ['wheat', 2], ['wooden_hoe', 2], ['clay', 2], ['brick', 2], ['yellow_dye', 2], ['blue_dye', 2], ['light_blue_dye', 2], ['white_dye', 2],
+    ['orange_dye', 2], ['red_candle', 2], ['green_candle', 2], ['purple_candle', 2], ['brown_candle', 2], ['magenta_stained_glass_pane', 1], ['pink_stained_glass_pane', 1], ['blue_stained_glass_pane', 1],
+    ['light_blue_stained_glass_pane', 1], ['red_stained_glass_pane', 1], ['yellow_stained_glass_pane', 1], ['purple_stained_glass_pane', 1], ['spruce_hanging_sign', 1], ['oak_hanging_sign', 1],
+    ['gold_nugget', 1], ['coal', 1], ['wheat_seeds', 1], ['beetroot_seeds', 1], ['dead_bush', 1], ['flower_pot', 1], ['string', 1], ['lead', 1]]]],
+  trail_ruins_rare: [[[1, 1], [['burn_pottery_sherd', 1], ['danger_pottery_sherd', 1], ['friend_pottery_sherd', 1], ['heart_pottery_sherd', 1], ['heartbreak_pottery_sherd', 1], ['howl_pottery_sherd', 1],
+    ['sheaf_pottery_sherd', 1], ['wayfinder_armor_trim_smithing_template', 1], ['raiser_armor_trim_smithing_template', 1], ['shaper_armor_trim_smithing_template', 1], ['host_armor_trim_smithing_template', 1],
+    ['music_disc_relic', 1]]]],
+});
+
+/* ---------------- the brush ---------------- */
+const _useKindAR = Player.prototype.useKind;
+Player.prototype.useKind = function (st) { return st && st.id === I.BRUSH ? 'brush' : _useKindAR.call(this, st); };
+const _useTickAR = Player.prototype.useTick;
+Player.prototype.useTick = function (u, st) {
+  if (u.kind !== 'brush') return _useTickAR.call(this, u, st);
+  const g = this.game, hit = g.target, ent = g.targetEntity;
+  if (u.t >= 200) u.t = 0;
+  if (hit && u.t % 2 === 0) {
+    const d = [DX[hit.face], DY[hit.face], DZ[hit.face]], e = this.eye(), lk = this.look(), t = hit.t || 2;
+    const px = e[0] + lk[0] * t + d[0] * 0.02, py = e[1] + lk[1] * t + d[1] * 0.02, pz = e[2] + lk[2] * t + d[2] * 0.02;
+    for (let k = 0; k < 2; k++) g.particles.add({ x: px, y: py, z: pz, vx: d[0] * 0.04 + (Math.random() - 0.5) * 0.06, vy: d[1] * 0.04 + Math.random() * 0.04, vz: d[2] * 0.04 + (Math.random() - 0.5) * 0.06, life: 10 + Math.floor(Math.random() * 6), layer: FACETEX[hit.id * 6], u: Math.random() * 0.8, v: Math.random() * 0.8, us: 0.2, size: 0.04, g: 0.03, col: [1, 1, 1] });
+  }
+  if (u.t % 10 !== 5) return;
+  if (hit && BLK[hit.id].brush) g.brushBlock(hit.x, hit.y, hit.z, hit.face, this);
+  else if (ent && ent.type === 'armadillo' && !ent.dead) g.brushArmadillo(ent, this);
+  else if (hit) g.sound('brush_' + (BLK[hit.id].sound === 'gravel' ? 'gravel' : 'sand'), hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+};
+Game.prototype.brushBlock = function (x, y, z, face, p) {
+  const w = this.world, id = w.getBlock(x, y, z), d = BLK[id], key = x + ',' + y + ',' + z;
+  let be = w.getBE(x, y, z);
+  // (the loot table is kept under 'table': a 'loot' key would turn the block entity into a chest)
+  if (!be || be.type !== 'brushable') { be = { type: 'brushable', table: null }; w.setBE(x, y, z, be); }
+  if (be.item === undefined) { const got = be.table ? rollLoot(be.table, Math.random) : []; be.item = got[0] || null; }
+  be.count = (be.count || 0) + 1; be.last = w.tick; be.face = face;
+  (this.brushing || (this.brushing = new Map())).set(key, [x, y, z]);
+  this.sound('brush_' + d.brush, x + 0.5, y + 0.5, z + 0.5);
+  if (be.count >= 10) {
+    // done: the find pops out of the face and the block is plain sand or gravel again
+    const item = be.item;
+    w.setBlock(x, y, z, d.brush === 'gravel' ? B.GRAVEL : B.SAND, 0);
+    const c = w.getChunk(x >> 4, z >> 4); if (c) c.be.delete((y << 8) | ((z & 15) << 4) | (x & 15));
+    this.brushing.delete(key);
+    if (item) { const e = this.dropItem(x + 0.5 + DX[face] * 0.6, y + 0.5 + DY[face] * 0.6, z + 0.5 + DZ[face] * 0.6, item); e.vx = DX[face] * 0.1; e.vy = 0.1 + DY[face] * 0.1; e.vz = DZ[face] * 0.1; }
+    this.sound('brush_done', x + 0.5, y + 0.5, z + 0.5);
+    if (p.mode !== 1) p.damageHeld(1);
+    this.remeshNear(x, z); this.ui.refreshHotbar();
+    return;
+  }
+  const stage = be.count < 3 ? 1 : be.count < 6 ? 2 : 3;
+  if ((w.getMeta(x, y, z) & 3) !== stage) { w.setMeta(x, y, z, stage); this.remeshNear(x, z); }
+};
+Game.prototype.brushArmadillo = function (m, p) {
+  this.dropItem(m.x, m.y + 0.5, m.z, { id: itemOf('armadillo_scute'), count: 1 });
+  this.sound('brush_sand', m.x, m.y + 0.5, m.z);
+  if (p.mode !== 1) p.damageHeld(16);
+  this.ui.refreshHotbar();
+};
+// left alone, a half-brushed block slowly settles back
+Game.prototype.tickBrushing = function () {
+  const w = this.world;
+  if (!this.brushing || !this.brushing.size || w.tick % 4) return;
+  for (const [key, [x, y, z]] of this.brushing) {
+    const be = w.getBE(x, y, z), id = w.getBlock(x, y, z);
+    if (!be || !BLK[id].brush) { this.brushing.delete(key); continue; }
+    if (w.tick - be.last < 40 || !be.count) continue;
+    be.count = Math.max(0, be.count - 2);
+    const stage = be.count === 0 ? 0 : be.count < 3 ? 1 : be.count < 6 ? 2 : 3;
+    if ((w.getMeta(x, y, z) & 3) !== stage) { w.setMeta(x, y, z, stage); this.remeshNear(x, z); }
+    if (!be.count) this.brushing.delete(key);
+  }
+};
+const _gameTickAR = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickAR.call(this); if (this.world && this.player) this.tickBrushing(); };
+// the find pokes out of the brushed face more and more
+Game.prototype.drawFinds = function (r) {
+  if (!this.brushing || !this.brushing.size) return;
+  const w = this.world;
+  for (const [x, y, z] of this.brushing.values()) {
+    const be = w.getBE(x, y, z), stage = w.getMeta(x, y, z) & 3;
+    if (!be || !be.item || !stage || be.face === undefined) continue;
+    const f = be.face, [R, U, N] = hangBasis(f), k = 0.5, out = 0.25 + stage / 10 * 0.75, lr = w.getLightRaw(x + DX[f], y + DY[f], z + DZ[f]);
+    const c = [x + 0.5 + N[0] * out, y + 0.5 + N[1] * out, z + 0.5 + N[2] * out];
+    // the item stands out of the face: its up is the face's normal
+    const Z = [R[1] * N[2] - R[2] * N[1], R[2] * N[0] - R[0] * N[2], R[0] * N[1] - R[1] * N[0]];
+    const m = new Float32Array([R[0] * k, R[1] * k, R[2] * k, 0, N[0] * k, N[1] * k, N[2] * k, 0, Z[0] * k, Z[1] * k, Z[2] * k, 0, c[0], c[1], c[2], 1]);
+    if (itemStyle(be.item.id) === 'sprite') this.pushItemXform(r, m, be.item, [lr >> 4, lr & 15]);
+    else this.pushBlockItem(r, m, be.item.id, [lr >> 4, lr & 15]);
+  }
+};
+const _renderSpawnerMobsAR = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) { _renderSpawnerMobsAR.call(this, r, alpha); this.drawFinds(r); };
+// the brush sweeps from side to side while in use
+const _pushItemXformAR = Game.prototype.pushItemXform;
+Game.prototype.pushItemXform = function (r, m, st, l, layerOverride) {
+  const p = this.player;
+  if (this._handPass && st && st.id === I.BRUSH && p.using && p.using.kind === 'brush') m = M4.mul(M4.create(), m, M4.rotZ(M4.create(), Math.sin(p.using.t * 0.63) * 0.35));
+  return _pushItemXformAR.call(this, r, m, st, l, layerOverride);
+};
+// suspicious blocks that fall break apart instead of landing
+const _fallingTickAR = FallingBlock.prototype.tick;
+FallingBlock.prototype.tick = function () {
+  if (!(BLK[this.block] && BLK[this.block].brush)) return _fallingTickAR.call(this);
+  this.savePrev(); this.age++;
+  this.vy -= 0.04; this.vy *= 0.98;
+  this.physicsStep();
+  if (this.onGround || this.age > 600) { this.dead = true; this.game.particles.blockBreak(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z), this.block); this.game.sound('break_sand', this.x, this.y, this.z); }
+};
+const _audioPlayAR = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  if (name !== 'brush_sand' && name !== 'brush_gravel' && name !== 'brush_done') return _audioPlayAR.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  if (name === 'brush_done') { this.noiseHit(dst, 'bandpass', 1500, 0.8, 0.3, 0.3); this.tone(dst, 'sine', 700, 1050, 0.18, 0.08); }
+  else this.noiseHit(dst, name === 'brush_sand' ? 'highpass' : 'bandpass', name === 'brush_sand' ? 2600 : 1300, 0.8, 0.22, 0.22);
+};
 
 </script>
 </body>
