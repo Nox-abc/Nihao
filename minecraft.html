@@ -1429,7 +1429,7 @@ Generator.prototype.genChunk = function (cx, cz) {
     const x = Math.floor(hash2(cx, cz * 5 + k, seed + 6102) * 16), z = Math.floor(hash2(cx * 3 + k, cz, seed + 6103) * 16), y0 = 8 + Math.floor(hash2(cx, cz + k, seed + 6104) * 40);
     for (let y = y0; y < y0 + 20; y++) if (blocks[I(x, y, z)] === B.AIR && OPAQUE_GEN[blocks[I(x, y + 1, z)]]) { blocks[I(x, y, z)] = B.COBWEB; break; }
   }
-  buildPortalRoom(blocks, cx, cz, seed);
+  buildPortalRoom(blocks, cx, cz, seed, be, meta);
   // ---- structures ----
   if (structs.length) {
     const ctx = { gen: this, cx, cz, blocks, meta, be, mobs, hs, bs, M, W, I };
@@ -1509,7 +1509,18 @@ function nearestFortress(seed, wx, wz) {
   }
   return best;
 }
-function buildFortress(blocks, cx, cz, seed) {
+// is (wx, wz) on a fortress bridge or in its hall? (blazes and wither skeletons spawn there)
+function inFortress(seed, wx, wz) {
+  const f = nearestFortress(seed, wx, wz);
+  if (!f) return false;
+  if (Math.abs(wx - f.x) <= 6 && Math.abs(wz - f.z) <= 6) return true;
+  for (const [x0, z0, x1, z1] of f.segs) {
+    if (z0 === z1) { if (Math.abs(wz - z0) <= 3 && wx >= Math.min(x0, x1) - 1 && wx <= Math.max(x0, x1) + 1) return true; }
+    else if (Math.abs(wx - x0) <= 3 && wz >= Math.min(z0, z1) - 1 && wz <= Math.max(z0, z1) + 1) return true;
+  }
+  return false;
+}
+function buildFortress(blocks, cx, cz, seed, be, meta) {
   const I = (x, y, z) => (y << 8) | (z << 4) | x;
   const bx = cx * 16, bz = cz * 16;
   const fx0 = Math.floor((bx + 8) / FORTRESS_CELL), fz0 = Math.floor((bz + 8) / FORTRESS_CELL);
@@ -1544,13 +1555,19 @@ function buildFortress(blocks, cx, cz, seed) {
         const wall = ex === 5 || ez === 5, door = (ex <= 1 || ez <= 1) && y <= Y + 3;
         blocks[I(lx, y, lz)] = wall && !door ? (y === Y + 2 && (ex + ez) % 3 === 0 ? B.NETHER_BRICK_FENCE : B.NETHER_BRICKS) : 0;
       }
-      if (ex === 0 && ez === 0) blocks[I(lx, Y + 1, lz)] = B.SOUL_SAND;
     }
+    // a nether wart garden, a blaze spawner and a chest in the hall
+    const put = (wx, y, wz, id, m) => { if (wx < bx || wx > bx + 15 || wz < bz || wz > bz + 15) return -1; const i = I(wx - bx, y, wz - bz); blocks[i] = id; if (meta) meta[i] = m || 0; return i; };
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { put(f.x + dx, Y, f.z + dz, B.SOUL_SAND); put(f.x + dx, Y + 1, f.z + dz, B.NETHER_WART, 3); }
+    let i = put(f.x + 3, Y + 1, f.z + 3, B.SPAWNER);
+    if (i >= 0 && be) be.push([i, { type: 'spawner', mob: 'blaze' }]);
+    i = put(f.x - 3, Y + 1, f.z - 3, B.CHEST, 0);
+    if (i >= 0 && be) be.push([i, { type: 'chest', kind: 'chest', loot: 'nether_bridge' }]);
   }
 }
 
 function NetherGenerator(seed) {
-  this.seed = seed | 0;
+  this.seed = seed | 0; this.plans = new Map();
   const P = i => new Perlin((this.seed ^ Math.imul(i + 201, 0x9E3779B1)) | 0);
   this.n1 = P(1); this.n2 = P(2); this.nb = P(3); this.nb2 = P(4); this.nf = P(5);
 }
@@ -1679,8 +1696,10 @@ NetherGenerator.prototype.genChunk = function (cx, cz) {
       }
     }
   }
-  buildFortress(blocks, cx, cz, seed);
-  return { blocks, biomes };
+  const meta = new Uint8Array(65536), be = [], mobs = [];
+  buildFortress(blocks, cx, cz, seed, be, meta);
+  for (const p of bastionsFor(this, cx, cz)) buildBastion(p, { gen: this, cx, cz, blocks, meta, be, mobs, I });
+  return { blocks, biomes, meta, be, mobs };
 };
 
 /* ---------- the End ---------- */
@@ -1689,7 +1708,14 @@ function EndGenerator(seed) {
   const P = i => new Perlin((this.seed ^ Math.imul(i + 301, 0x9E3779B1)) | 0);
   this.n1 = P(1); this.n2 = P(2);
   this.fountainY = Math.floor(60 + fbm2(this.n1, 0, 0, 3) * 4) + 1;
+  this.plans = new Map();
 }
+// top of the outer islands at a column, or -1 over the void
+EndGenerator.prototype.islandTop = function (wx, wz) {
+  if (Math.hypot(wx, wz) <= 700) return -1;
+  const n = fbm2(this.n2, wx / 90, wz / 90, 4) * 1.6;
+  return n > 0.32 ? Math.floor(58 + (n - 0.32) * 18) : -1;
+};
 EndGenerator.prototype.column = function () { return { h: 60, b: BI.THE_END }; };
 function endPillars(seed) {
   const out = [];
@@ -1755,7 +1781,10 @@ EndGenerator.prototype.genChunk = function (cx, cz) {
     if (d2 > 6.5 && d2 <= 12.5) blocks[I(x, fy, z)] = B.BEDROCK;
     if (d2 === 0) for (let y = fy; y < fy + 4; y++) blocks[I(x, y, z)] = B.BEDROCK;
   }
-  return { blocks, biomes };
+  // end cities on the outer islands
+  const meta = new Uint8Array(65536), be = [], mobs = [];
+  for (const p of endCitiesFor(this, cx, cz)) buildEndCity(p, { gen: this, cx, cz, blocks, meta, be, mobs, I });
+  return { blocks, biomes, meta, be, mobs };
 };
 
 /* ---------- overworld structures ---------- */
@@ -1780,7 +1809,7 @@ function nearestPortalRoom(seed, wx, wz) {
 // frame positions around the 3x3 portal: [dx, dz, facing]
 const FRAME_RING = [];
 for (let i = -1; i <= 1; i++) { FRAME_RING.push([i, -2, 2], [i, 2, 0], [-2, i, 1], [2, i, 3]); }
-function buildPortalRoom(blocks, cx, cz, seed) {
+function buildPortalRoom(blocks, cx, cz, seed, be, meta) {
   const I = (x, y, z) => (y << 8) | (z << 4) | x;
   const bx = cx * 16, bz = cz * 16;
   const p = portalRoomAt(seed, Math.floor((bx + 8) / PORTAL_ROOM_REGION), Math.floor((bz + 8) / PORTAL_ROOM_REGION));
@@ -1805,6 +1834,14 @@ function buildPortalRoom(blocks, cx, cz, seed) {
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) set(p.x + dx, p.y, p.z + dz, B.LAVA);
   for (const [dx, dz, f] of FRAME_RING) set(p.x + dx, p.y + 1, p.z + dz, B.END_PORTAL_FRAME);
   for (const [dx, dz] of [[-5, -5], [5, -5], [-5, 5], [5, 5]]) set(p.x + dx, p.y, p.z + dz, B.LANTERN);
+  // two chests in the corners of the hall
+  for (const [dx, dz, m] of [[-6, -6, 0], [6, 6, 2]]) {
+    const wx = p.x + dx, wz = p.z + dz, lx = wx - bx, lz = wz - bz;
+    if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue;
+    const i = I(lx, p.y, lz);
+    blocks[i] = B.CHEST; if (meta) meta[i] = m;
+    if (be) be.push([i, { type: 'chest', kind: 'chest', loot: 'stronghold_corridor' }]);
+  }
 }
 function framesMeta(seed, wx, wz) { return hash2(wx, wz, seed + 8105) < 0.1 ? 4 : 0; }
 
@@ -1865,7 +1902,7 @@ Generator.prototype.structuresFor = function (cx, cz) {
 };
 // the structure of a kind nearest to (wx, wz), searching rings of regions outward
 function nearestStructure(gen, name, wx, wz, maxRegions) {
-  const S = STRUCTURES.find(s => s.name === name);
+  const S = STRUCTURES.find(s => s.name === name) || (name === 'end_city' ? END_CITY_STRUCT : name === 'bastion_remnant' ? BASTION_STRUCT : null);
   if (!S) return null;
   const rx0 = Math.floor(wx / S.region), rz0 = Math.floor(wz / S.region);
   let best = null, bd = Infinity;
@@ -1920,8 +1957,9 @@ function pieceWriter(ctx, p) {
       if (x >> 4 === ctx.cx && z >> 4 === ctx.cz) ctx.mobs.push([type, x + 0.5, p.y + ly, z + 0.5, opts || {}]);
     },
   };
-  // local x: +1 is world direction d(1)
-  W.dirX = [W.d(3), W.d(1)];
+  // per-cell randomness that doesn't depend on which chunk is building
+  W.rand = (lx, ly, lz, k) => hash3(WX(lx, lz), p.y + ly, WZ(lx, lz), (p.seed | 0) + (k || 0));
+  W.be = (lx, ly, lz, v) => { const i = W.idx(lx, ly, lz); if (i >= 0) ctx.be.push([i, v]); };
   return W;
 }
 // clipped writes in world coordinates
@@ -2352,6 +2390,483 @@ function buildAncientCity(p, ctx) {
 STRUCTURES.push({ name: 'village', region: VILLAGE_REGION, reach: 100, plan: villagePlan, build: buildVillage });
 const CITY_STRUCT = { name: 'ancient_city', region: CITY_REGION, reach: 70, plan: ancientCityPlan, build: buildAncientCity };
 STRUCTURES.push(CITY_STRUCT);
+
+/* ---------------- the smaller structures ---------------- */
+const corners4 = r => [[r[0], r[1]], [r[2], r[1]], [r[0], r[3]], [r[2], r[3]]];
+const M_LADDER = M_TORCH;                            // ladders hang on walls like torches do
+const FACE_OF_DIR = [5, 0, 4, 1];                    // block face toward a horizontal direction (vines, lichen)
+// one structure per region at a random spot, where the biome and the ground suit it
+function placedPlan(o) {
+  return (gen, rx, rz) => {
+    const s = gen.seed + o.salt;
+    if (hash2(rx, rz, s) > o.chance) return null;
+    const m = o.margin || 24, X = rx * o.region + m + Math.floor(hash2(rx, rz, s + 1) * (o.region - 2 * m)), Z = rz * o.region + m + Math.floor(hash2(rx, rz, s + 2) * (o.region - 2 * m));
+    const col = gen.columnAt(X, Z);
+    if (o.biomes && !o.biomes.has(col.b)) return null;
+    if (o.avoid && villageNear(gen, X, Z, o.avoid)) return null;
+    const f = Math.floor(hash2(rx, rz, s + 3) * 4), [w, d] = o.size, sx = (f & 1) ? d : w, sz = (f & 1) ? w : d;
+    const rect = [X - (sx >> 1), Z - (sz >> 1), X - (sx >> 1) + sx - 1, Z - (sz >> 1) + sz - 1];
+    let lo = col.h, hi = col.h;
+    for (const [x, z] of corners4(rect)) { const h = gen.columnAt(x, z).h; lo = Math.min(lo, h); hi = Math.max(hi, h); }
+    if (o.flat !== undefined && hi - lo > o.flat) return null;
+    const y = o.level ? o.level(col, lo, hi, hash2(rx, rz, s + 4), gen, X, Z) : col.h;
+    if (y === null || y === undefined) return null;
+    const pad = o.pad || 2;
+    return { X, Y: y, Z, rect, f, y, seed: Math.floor(hash2(rx, rz, s + 5) * 2147483647), bbox: [rect[0] - pad, rect[1] - pad, rect[2] + pad, rect[3] + pad], rects: o.surface === false ? [] : [rect] };
+  };
+}
+function villageNear(gen, x, z, r) {
+  const V = STRUCTURES[0], rx0 = Math.floor(x / V.region), rz0 = Math.floor(z / V.region);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const v = structurePlan(gen, V, rx0 + dx, rz0 + dz); if (v && Math.hypot(v.X - x, v.Z - z) < r) return true; }
+  return false;
+}
+function addStructure(name, region, o, build) {
+  STRUCTURES.push({ name, region, reach: Math.max(o.size[0], o.size[1]) + (o.pad || 2) + 8, plan: placedPlan(Object.assign({ region }, o)), build: (p, ctx) => build(pieceWriter(ctx, p), mulberry32(p.seed), p, ctx) });
+}
+const LAND = b => !OCEAN_BIOMES.has(b) && b !== BI.RIVER && b !== BI.FROZEN_RIVER;
+const ALL_LAND = new Set(BIOME_NAMES.map((n, i) => i).filter(i => i < BI.NETHER_WASTES || (i > BI.THE_END && i < BI.LUSH_CAVES)).filter(LAND));
+
+// desert pyramid: a sandstone hall under a stepped roof, two towers, and a buried room with four chests over a TNT trap
+addStructure('desert_pyramid', 384, { salt: 9601, avoid: 90, chance: 0.6, biomes: new Set([BI.DESERT]), size: [21, 21], flat: 5 }, (W, R, p, ctx) => {
+  const S = B.SANDSTONE, C = B.CUT_SANDSTONE, H = B.CHISELED_SANDSTONE, O = B.ORANGE_TERRACOTTA;
+  W.foundation(0, 0, 20, 20, S);
+  W.fill(0, 1, 0, 20, 20, 20, B.AIR);
+  W.fill(0, -3, 0, 20, 0, 20, S);
+  for (let ly = 1; ly <= 4; ly++) for (let i = 2; i <= 18; i++) { const id = ly === 4 ? C : S; W.set(i, ly, 2, id); W.set(i, ly, 18, id); W.set(2, ly, i, id); W.set(18, ly, i, id); }
+  for (let k = 0; k <= 8; k++) W.fill(2 + k, 5 + k, 2 + k, 18 - k, 5 + k, 18 - k, k === 8 ? H : (k & 1) ? C : S);
+  for (const tx of [0, 16]) {
+    W.fill(tx, 1, 0, tx + 4, 10, 4, S); W.fill(tx + 1, 1, 1, tx + 3, 9, 3, B.AIR);
+    W.fill(tx, 10, 0, tx + 4, 10, 4, C);
+    for (let ly = 3; ly <= 9; ly += 3) { W.set(tx + 2, ly, 0, O); W.set(tx + 2, ly + 1, 0, H); }
+    for (let k = 0; k < 8; k++) W.set(tx + 2, 1 + k, 3, B.LADDER, M_LADDER(W.d(2)));
+  }
+  W.fill(9, 1, 2, 11, 3, 2, B.AIR); W.fill(8, 4, 2, 12, 4, 2, O); W.set(10, 5, 2, H);
+  W.fill(9, 0, 0, 11, 0, 1, S);
+  // the hall floor: an orange star around a blue terracotta centre
+  for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) { const a = Math.abs(i) + Math.abs(j); if (a === 4 || a === 2) W.set(10 + i, 0, 10 + j, O); }
+  W.set(10, 0, 10, B.BLUE_TERRACOTTA);
+  for (const [a, b] of [[6, 6], [14, 6], [6, 14], [14, 14]]) { W.fill(a, 1, b, a, 4, b, C); W.set(a, 2, b, H); }
+  // the treasure room straight below the blue terracotta
+  W.fill(6, -15, 6, 14, -9, 14, S);
+  W.fill(7, -14, 7, 13, -10, 13, B.AIR);
+  W.fill(10, -8, 10, 10, -1, 10, S);
+  for (let i = 7; i <= 13; i += 2) { W.set(i, -12, 6, O); W.set(i, -12, 14, O); W.set(6, -12, i, O); W.set(14, -12, i, O); }
+  W.chest(10, -14, 7, 2, 'desert_pyramid'); W.chest(10, -14, 13, 0, 'desert_pyramid'); W.chest(7, -14, 10, 1, 'desert_pyramid'); W.chest(13, -14, 10, 3, 'desert_pyramid');
+  W.set(10, -14, 10, B.STONE_PRESSURE_PLATE);
+  W.fill(9, -16, 9, 11, -16, 11, B.TNT);
+  for (const [a, b] of [[8, 8], [12, 12], [8, 12]]) if (W.rand(a, -15, b, 7) < 0.6) W.set(a, -15, b, B.SUSPICIOUS_SAND);
+});
+
+// jungle temple: three stepped storeys of mossy cobblestone, a hidden lower room
+addStructure('jungle_temple', 384, { salt: 9611, avoid: 90, chance: 0.6, biomes: new Set([BI.JUNGLE, BI.BAMBOO_JUNGLE, BI.SPARSE_JUNGLE]), size: [12, 15], flat: 6 }, (W, R, p, ctx) => {
+  const st = (lx, ly, lz) => W.rand(lx, ly, lz, 3) < 0.45 ? B.MOSSY_COBBLESTONE : B.COBBLESTONE;
+  const box = (x0, y0, z0, x1, y1, z1) => {
+    for (let ly = y0; ly <= y1; ly++) for (let lz = z0; lz <= z1; lz++) for (let lx = x0; lx <= x1; lx++) {
+      const edge = lx === x0 || lx === x1 || lz === z0 || lz === z1 || ly === y0 || ly === y1;
+      W.set(lx, ly, lz, edge ? st(lx, ly, lz) : B.AIR);
+    }
+  };
+  W.foundation(0, 0, 11, 14, B.COBBLESTONE);
+  W.fill(0, 1, 0, 11, 14, 14, B.AIR);
+  box(0, -4, 0, 11, 4, 14); box(1, 4, 1, 10, 8, 13); box(2, 8, 2, 9, 11, 12);
+  W.fill(3, 11, 3, 8, 12, 11, B.COBBLESTONE); W.fill(4, 13, 5, 7, 13, 9, B.CHISELED_STONE_BRICKS);
+  W.fill(0, 0, 0, 11, 0, 14, B.COBBLESTONE); W.fill(1, -3, 1, 10, -1, 13, B.AIR);
+  // doorway, windows, stairs up and down
+  W.fill(5, 1, 0, 6, 2, 0, B.AIR); W.fill(5, 5, 1, 6, 6, 1, B.AIR); W.fill(5, 9, 2, 6, 10, 2, B.AIR);
+  for (const lz of [4, 8, 12]) { W.set(0, 2, lz, B.AIR); W.set(11, 2, lz, B.AIR); }
+  for (let k = 0; k < 4; k++) { W.set(2 + k, 1 + k, 12, B.COBBLESTONE_STAIRS, M_STAIRS(W.d(1))); W.set(2 + k, k, 12, B.COBBLESTONE); }
+  W.fill(5, 4, 11, 6, 4, 12, B.AIR);
+  for (let k = 0; k < 4; k++) { W.set(9 - k, -k, 2, B.COBBLESTONE_STAIRS, M_STAIRS(W.d(1))); W.set(9 - k, 1 - k, 2, B.AIR); W.set(9 - k, 2 - k, 2, B.AIR); }
+  for (const [a, b] of [[2, 6], [9, 6], [2, 10], [9, 10]]) W.fill(a, 1, b, a, 3, b, B.CHISELED_STONE_BRICKS);
+  W.chest(5, 1, 13, 0, 'jungle_temple'); W.chest(3, -3, 12, 1, 'jungle_temple');
+  W.set(8, 1, 13, B.LEVER, 3); W.set(6, 1, 13, B.LEVER, 3);
+  // vines on the outside walls
+  for (let ly = 1; ly <= 7; ly++) for (let lz = 1; lz < 14; lz++) { if (W.rand(-1, ly, lz, 4) < 0.25) W.set(-1, ly, lz, B.VINE, 1 << FACE_OF_DIR[W.d(1)]); if (W.rand(12, ly, lz, 4) < 0.25) W.set(12, ly, lz, B.VINE, 1 << FACE_OF_DIR[W.d(3)]); }
+});
+
+// swamp hut: a little spruce house on stilts with a witch and her black cat
+addStructure('swamp_hut', 320, { salt: 9621, avoid: 80, chance: 0.6, biomes: new Set([BI.SWAMP]), size: [7, 9], level: col => Math.max(col.h, SEA) }, (W, R, p) => {
+  for (const [a, b] of [[1, 2], [5, 2], [1, 8], [5, 8]]) { for (let ly = 3; ly >= -6; ly--) { const cur = W.get(a, ly, b); if (ly < 1 && cur >= 0 && !FILLABLE[cur]) break; W.set(a, ly, b, B.SPRUCE_LOG); } }
+  W.fill(0, 4, 0, 6, 9, 8, B.AIR);
+  W.fill(1, 3, 0, 5, 3, 8, B.SPRUCE_PLANKS);
+  for (let ly = 4; ly <= 6; ly++) for (let lz = 2; lz <= 8; lz++) for (let lx = 1; lx <= 5; lx++) {
+    if (lx > 1 && lx < 5 && lz > 2 && lz < 8) continue;
+    W.set(lx, ly, lz, (lx === 1 || lx === 5) && (lz === 2 || lz === 8) ? B.OAK_LOG : B.SPRUCE_PLANKS);
+  }
+  W.set(3, 4, 2, B.AIR); W.set(3, 5, 2, B.AIR);
+  W.set(1, 5, 5, B.OAK_FENCE); W.set(5, 5, 5, B.OAK_FENCE); W.set(3, 5, 8, B.OAK_FENCE);
+  for (const lx of [1, 5]) { W.set(lx, 4, 0, B.OAK_FENCE); W.set(lx, 4, 1, B.OAK_FENCE); }
+  for (let lz = 0; lz <= 9; lz++) { W.set(0, 7, lz, B.SPRUCE_STAIRS, M_STAIRS(W.d(1))); W.set(6, 7, lz, B.SPRUCE_STAIRS, M_STAIRS(W.d(3))); W.fill(1, 7, lz, 5, 7, lz, B.SPRUCE_PLANKS); W.fill(2, 8, lz, 4, 8, lz, lz === 0 || lz === 9 ? B.SPRUCE_SLAB : B.SPRUCE_PLANKS); }
+  W.set(2, 4, 7, B.CRAFTING_TABLE); W.set(4, 4, 7, B.CAULDRON); W.set(4, 4, 3, B.FLOWER_POT, POTTABLE.indexOf('red_mushroom') + 1);
+  W.spawn('witch', 3, 4, 5, {}); W.spawn('cat', 2, 4, 4, { variant: 'all_black' });
+});
+
+// igloo: a snow dome with a bed, sometimes a ladder down to a hidden laboratory
+addStructure('igloo', 320, { salt: 9631, avoid: 80, chance: 0.55, biomes: new Set([BI.SNOWY_PLAINS, BI.SNOWY_TAIGA, BI.ICE_SPIKES]), size: [7, 9], flat: 3 }, (W, R, p, ctx) => {
+  W.foundation(0, 0, 6, 8, B.SNOW_BLOCK);
+  W.fill(0, 1, 0, 6, 6, 8, B.AIR);
+  for (let ly = 0; ly <= 4; ly++) for (let lz = 2; lz <= 8; lz++) for (let lx = 0; lx <= 6; lx++) {
+    const v = ((lx - 3) / 3.45) ** 2 + ((lz - 5) / 3.45) ** 2 + (ly / 4.3) ** 2;
+    if (v > 1) continue;
+    W.set(lx, ly, lz, ly === 0 || v > 0.5 ? B.SNOW_BLOCK : B.AIR);
+  }
+  W.fill(2, 0, 0, 4, 3, 2, B.SNOW_BLOCK); W.fill(3, 1, 0, 3, 2, 2, B.AIR);
+  W.set(0, 2, 5, B.ICE); W.set(6, 2, 5, B.ICE);
+  W.fill(1, 0, 3, 5, 0, 7, B.SNOW_BLOCK); W.fill(1, 1, 3, 5, 1, 7, B.AIR);
+  W.bed(1, 1, 5, B.RED_BED, 2); W.set(5, 1, 7, B.CRAFTING_TABLE); W.set(5, 1, 6, B.FURNACE, M_FACING(W.d(3)));
+  W.set(3, 2, 7, B.REDSTONE_TORCH, M_TORCH(W.d(2)));
+  W.fill(1, 1, 3, 5, 1, 3, B.WHITE_CARPET); W.set(3, 1, 3, B.AIR);
+  if (R() < 0.5) {
+    W.set(3, 0, 5, B.OAK_TRAPDOOR, 0);
+    W.fill(2, -10, 4, 4, -1, 6, B.STONE_BRICKS); W.fill(3, -10, 5, 3, -1, 5, B.AIR);
+    for (let ly = -1; ly >= -9; ly--) W.set(3, ly, 5, B.LADDER, M_LADDER(W.d(0)));
+    W.fill(0, -13, 2, 6, -9, 8, B.STONE_BRICKS); W.fill(1, -12, 3, 5, -10, 7, B.AIR);
+    W.set(1, -12, 3, B.BREWING_STAND); W.chest(5, -12, 3, 2, 'igloo_chest'); W.set(1, -12, 7, B.CAULDRON); W.set(5, -12, 7, B.CRAFTING_TABLE);
+    W.fill(2, -12, 6, 4, -11, 6, B.IRON_BARS); W.fill(2, -12, 7, 4, -12, 7, B.AIR);
+    W.spawn('villager', 2, -12, 7, { vtype: 'snow' }); W.spawn('zombie_villager', 4, -12, 7, { vtype: 'snow' });
+    W.set(2, -12, 3, B.TORCH, M_TORCH(W.d(0)));
+  }
+});
+
+// pillager outpost: a tall dark oak watchtower, a caged iron golem and pillagers on guard
+addStructure('pillager_outpost', 448, { salt: 9641, avoid: 200, chance: 0.45, biomes: new Set([BI.PLAINS, BI.SUNFLOWER_PLAINS, BI.DESERT, BI.SAVANNA, BI.TAIGA, BI.SNOWY_PLAINS, BI.MEADOW, BI.GROVE, BI.CHERRY_GROVE, BI.SNOWY_SLOPES]), size: [13, 9], flat: 5 }, (W, R, p) => {
+  const L = B.DARK_OAK_LOG, P = B.BIRCH_PLANKS, D = B.DARK_OAK_PLANKS;
+  W.foundation(0, 0, 8, 8, B.COBBLESTONE);
+  W.fill(0, 1, 0, 12, 24, 8, B.AIR);
+  W.fill(0, 0, 0, 8, 0, 8, B.COBBLESTONE);
+  for (const [a, b] of [[1, 1], [7, 1], [1, 7], [7, 7]]) W.fill(a, 1, b, a, 18, b, L);
+  for (const ly of [5, 10, 14]) { W.fill(1, ly, 1, 7, ly, 7, P); W.set(2, ly, 2, B.AIR); }
+  for (let ly = 1; ly <= 18; ly++) { W.set(2, ly, 1, D); W.set(2, ly, 2, B.LADDER, M_LADDER(W.d(0))); }
+  for (const ly of [6, 11]) for (let i = 1; i <= 7; i++) { W.set(i, ly, 0, B.DARK_OAK_FENCE); W.set(i, ly, 8, B.DARK_OAK_FENCE); W.set(0, ly, i, B.DARK_OAK_FENCE); W.set(8, ly, i, B.DARK_OAK_FENCE); }
+  // the lookout on top
+  for (let ly = 15; ly <= 17; ly++) for (let i = 1; i <= 7; i++) { const id = ly === 16 && i % 2 === 0 ? B.AIR : D; W.set(i, ly, 1, id); W.set(i, ly, 7, id); W.set(1, ly, i, id); W.set(7, ly, i, id); }
+  W.fill(0, 18, 0, 8, 18, 8, D); W.set(2, 18, 2, B.AIR);
+  for (let i = 0; i <= 8; i++) { W.set(i, 19, 0, B.DARK_OAK_FENCE); W.set(i, 19, 8, B.DARK_OAK_FENCE); W.set(0, 19, i, B.DARK_OAK_FENCE); W.set(8, 19, i, B.DARK_OAK_FENCE); }
+  W.chest(5, 15, 5, 3, 'pillager_outpost'); W.set(4, 15, 6, B.TORCH, M_TORCH(W.d(2)));
+  W.set(4, 1, 4, B.CRAFTING_TABLE);
+  // the cage
+  W.fill(10, 0, 2, 12, 0, 6, B.DARK_OAK_PLANKS);
+  for (let ly = 1; ly <= 3; ly++) for (let lz = 2; lz <= 6; lz++) for (let lx = 10; lx <= 12; lx++) if (lx === 10 || lx === 12 || lz === 2 || lz === 6) W.set(lx, ly, lz, B.DARK_OAK_FENCE);
+  W.fill(10, 4, 2, 12, 4, 6, B.DARK_OAK_SLAB);
+  W.spawn('iron_golem', 11, 1, 4, {});
+  for (const [a, ly, b] of [[4, 1, 6], [5, 6, 3], [4, 15, 3], [5, 19, 5]]) W.spawn('pillager', a, ly, b, {});
+});
+
+// desert well
+addStructure('desert_well', 224, { salt: 9651, avoid: 70, chance: 0.18, biomes: new Set([BI.DESERT]), size: [5, 5], flat: 1 }, (W, R, p) => {
+  W.foundation(0, 0, 4, 4, B.SANDSTONE);
+  W.fill(0, 1, 0, 4, 4, 4, B.AIR);
+  W.fill(0, -2, 0, 4, 0, 4, B.SANDSTONE);
+  W.set(2, 0, 2, B.WATER); W.set(2, -1, 2, B.WATER);
+  for (let i = 0; i <= 4; i++) for (const [a, b] of [[i, 0], [i, 4], [0, i], [4, i]]) W.set(a, 1, b, B.SANDSTONE_SLAB);
+  for (const [a, b] of [[1, 1], [3, 1], [1, 3], [3, 3]]) { W.set(a, 1, b, B.SANDSTONE); W.set(a, 2, b, B.SANDSTONE); }
+  W.fill(1, 3, 1, 3, 3, 3, B.SANDSTONE_SLAB); W.set(2, 3, 2, B.SANDSTONE);
+  W.set(2, -2, 1, B.SUSPICIOUS_SAND);
+});
+
+// ruined portal: a broken obsidian frame on a splash of netherrack, with a chest of golden things
+addStructure('ruined_portal', 352, { salt: 9661, avoid: 80, chance: 0.5, biomes: ALL_LAND, size: [9, 9], flat: 4 }, (W, R, p) => {
+  const w = 4 + (R() < 0.5 ? 1 : 0), h = 5 + (R() < 0.5 ? 1 : 0), x0 = (9 - w) >> 1;
+  for (let lz = 0; lz < 9; lz++) for (let lx = 0; lx < 9; lx++) {
+    const d = Math.hypot(lx - 4, lz - 4) + (W.rand(lx, 0, lz, 1) - 0.5) * 2.5;
+    if (d > 4.3) continue;
+    const r = W.rand(lx, 0, lz, 2);
+    if (W.get(lx, 0, lz) > 0 && !FILLABLE[W.get(lx, 0, lz)]) W.set(lx, 0, lz, r < 0.08 ? B.MAGMA_BLOCK : r < 0.11 ? B.GOLD_BLOCK : B.NETHERRACK);
+    W.foundation(lx, lz, lx, lz, B.NETHERRACK);
+    for (let ly = 1; ly <= h + 1; ly++) W.set(lx, ly, lz, B.AIR);
+  }
+  for (let ly = 1; ly <= h; ly++) for (let i = 0; i < w; i++) {
+    const edge = i === 0 || i === w - 1 || ly === 1 || ly === h;
+    if (!edge || W.rand(x0 + i, ly, 4, 3) < 0.28) continue;
+    W.set(x0 + i, ly, 4, W.rand(x0 + i, ly, 4, 5) < 0.18 ? B.CRYING_OBSIDIAN : B.OBSIDIAN);
+  }
+  for (let k = 0; k < 3; k++) { const lx = Math.floor(R() * 9), lz = Math.floor(R() * 9); if (Math.hypot(lx - 4, lz - 4) < 4 && lz !== 4) W.set(lx, 1, lz, R() < 0.5 ? B.OBSIDIAN : B.NETHERRACK); }
+  W.chest(1, 1, 6, 1, 'ruined_portal');
+});
+
+// shipwreck: a flooded wooden ship on the sea floor (or run aground on a beach)
+const SHIP_WOODS = ['oak', 'spruce', 'dark_oak', 'jungle', 'birch', 'acacia'];
+addStructure('shipwreck', 320, { salt: 9671, chance: 0.6, biomes: new Set([BI.OCEAN, BI.DEEP_OCEAN, BI.LUKEWARM_OCEAN, BI.DEEP_LUKEWARM_OCEAN, BI.COLD_OCEAN, BI.DEEP_COLD_OCEAN, BI.WARM_OCEAN, BI.BEACH]), size: [7, 20], flat: 6,
+  level: (col) => col.b === BI.BEACH ? col.h : (col.h < SEA - 6 ? col.h : null) }, (W, R, p) => {
+  const wd = SHIP_WOODS[Math.floor(R() * SHIP_WOODS.length)], U = n => B[(wd + n).toUpperCase()];
+  const planks = U('_planks'), log = U('_log'), stairs = U('_stairs'), slab = U('_slab'), fence = U('_fence'), trap = U('_trapdoor');
+  const hollow = ly => p.y + ly <= SEA ? B.WATER : B.AIR;
+  for (let lz = 0; lz < 20; lz++) {
+    const hw = lz < 5 ? 1 + (lz >> 1) : lz > 17 ? 2 : 3;
+    for (let lx = 3 - hw; lx <= 3 + hw; lx++) {
+      const side = lx === 3 - hw || lx === 3 + hw;
+      W.set(lx, 0, lz, side ? stairs : planks, side ? M_STAIRS(W.d(lx < 3 ? 1 : 3), true) : 0);
+      for (let ly = 1; ly <= 3; ly++) W.set(lx, ly, lz, side ? planks : (ly === 3 && !(lz > 6 && lz < 10 && lx === 3) ? planks : hollow(ly)));
+      if (side) W.set(lx, 4, lz, fence);
+    }
+    W.set(3, -1, lz, log, W.axisZ);
+  }
+  for (let ly = 4; ly <= 11; ly++) W.set(3, ly, 11, log);
+  for (let lx = 1; lx <= 5; lx++) W.set(lx, 9, 11, log, W.axisX);
+  // the cabin at the stern
+  for (let ly = 4; ly <= 6; ly++) for (let lz = 15; lz <= 19; lz++) for (let lx = 1; lx <= 5; lx++) {
+    const edge = lx === 1 || lx === 5 || lz === 15 || lz === 19;
+    W.set(lx, ly, lz, edge ? (ly === 5 && (lx === 3 || lz === 17) ? trap : planks) : hollow(ly));
+  }
+  W.set(3, 4, 15, hollow(4)); W.set(3, 5, 15, hollow(5));
+  W.fill(1, 7, 15, 5, 7, 19, slab);
+  W.chest(3, 1, 3, 2, 'shipwreck_supply'); W.chest(3, 4, 18, 0, 'shipwreck_map'); W.chest(2, 1, 17, 1, 'shipwreck_treasure');
+});
+
+// buried treasure: one chest under the sand of a beach
+addStructure('buried_treasure', 256, { salt: 9681, chance: 0.35, biomes: new Set([BI.BEACH, BI.SNOWY_BEACH]), size: [1, 1], surface: false }, (W, R, p) => {
+  W.chest(0, -3, 0, Math.floor(R() * 4), 'buried_treasure');
+});
+
+// dungeon: a mossy cobblestone room around a monster spawner
+addStructure('dungeon', 96, { salt: 9691, chance: 0.4, size: [9, 7], surface: false,
+  level: (col, lo, hi, r) => { const y = 12 + Math.floor(r * 36); return y < lo - 10 ? y : null; } }, (W, R, p, ctx) => {
+  for (let ly = -1; ly <= 4; ly++) for (let lz = 0; lz < 7; lz++) for (let lx = 0; lx < 9; lx++) {
+    const edge = lx === 0 || lx === 8 || lz === 0 || lz === 6 || ly === -1 || ly === 4;
+    W.set(lx, ly, lz, edge ? (W.rand(lx, ly, lz, 1) < (ly === -1 ? 0.6 : 0.25) ? B.MOSSY_COBBLESTONE : B.COBBLESTONE) : B.AIR);
+  }
+  const mob = ['zombie', 'zombie', 'skeleton', 'spider'][Math.floor(R() * 4)];
+  W.set(4, 0, 3, B.SPAWNER); W.be(4, 0, 3, { type: 'spawner', mob });
+  W.chest(1, 0, 3, 1, 'simple_dungeon');
+  if (R() < 0.5) W.chest(4, 0, 5, 0, 'simple_dungeon');
+});
+
+// mineshaft: plank-braced tunnels with rails, cobwebs, chests and a cave spider nest
+STRUCTURES.push({ name: 'mineshaft', region: 384, reach: 80, plan: (gen, rx, rz) => {
+  const s = gen.seed + 9701;
+  if (hash2(rx, rz, s) > 0.45) return null;
+  const X = rx * 384 + 80 + Math.floor(hash2(rx, rz, s + 1) * 224), Z = rz * 384 + 80 + Math.floor(hash2(rx, rz, s + 2) * 224), Y = 18 + Math.floor(hash2(rx, rz, s + 3) * 24);
+  if (gen.columnAt(X, Z).h < Y + 14) return null;
+  const R = mulberry32((hash2(rx, rz, s + 4) * 4294967296) | 0), tunnels = [];
+  for (let d = 0; d < 4; d++) {
+    if (R() < 0.2) continue;
+    const len = 24 + Math.floor(R() * 48);
+    tunnels.push({ d, len, y: Y + Math.floor(R() * 3) - 1, seed: Math.floor(R() * 2147483647), nest: R() < 0.35 ? 8 + Math.floor(R() * (len - 16)) : -1 });
+  }
+  return { X, Y, Z, tunnels, bbox: [X - 80, Z - 80, X + 80, Z + 80], rects: [] };
+}, build: (p, ctx) => {
+  const Wr = worldWriter(ctx), { X, Y, Z } = p;
+  const solidAt = (x, y, z) => { const b = Wr.get(x, y, z); return b > 0 && !FILLABLE[b]; };
+  // the central room
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    if (!Wr.inside(X + dx, Z + dz)) continue;
+    Wr.set(X + dx, Y - 1, Z + dz, B.DIRT);
+    for (let y = Y; y <= Y + 4; y++) Wr.set(X + dx, y, Z + dz, B.AIR);
+  }
+  for (const t of p.tunnels) {
+    const [dx, dz] = DIR4[t.d], [px, pz] = DIR4[(t.d + 1) & 3], y = t.y;
+    for (let k = 0; k < t.len; k++) {
+      const cx2 = X + dx * (5 + k), cz2 = Z + dz * (5 + k);
+      for (let a = -1; a <= 1; a++) {
+        const x = cx2 + px * a, z = cz2 + pz * a;
+        if (!Wr.inside(x, z)) continue;
+        if (!solidAt(x, y - 1, z)) Wr.set(x, y - 1, z, B.OAK_PLANKS);
+        for (let h = 0; h <= 2; h++) Wr.set(x, y + h, z, B.AIR);
+        const r = hash3(x, y, z, p.Y + t.seed);
+        if (k % 4 === 0) { if (a !== 0) { Wr.set(x, y, z, B.OAK_FENCE); Wr.set(x, y + 1, z, B.OAK_FENCE); } Wr.set(x, y + 2, z, B.OAK_PLANKS); if (a === 0 && k > 0 && r < 0.2) Wr.set(x - dx, y + 2, z - dz, B.TORCH, M_TORCH(t.d)); }
+        else if (a === 0 && r < 0.85) Wr.set(x, y, z, B.RAIL, (t.d & 1) ? 1 : 0);
+        else if (a !== 0 && r < 0.05) Wr.set(x, y + 2, z, B.COBWEB);
+        else if (a !== 0 && r > 0.988) { const i = Wr.set(x, y, z, B.CHEST, M_FACING((t.d + (a > 0 ? 3 : 1)) & 3)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot: 'abandoned_mineshaft' }]); }
+        if (t.nest >= 0 && Math.abs(k - t.nest) <= 3 && r < 0.55 && !(k === t.nest && a === 0)) Wr.set(x, y + (r < 0.3 ? 1 : 2), z, B.COBWEB);
+      }
+      if (k === t.nest) { const i = Wr.set(cx2, y, cz2, B.SPAWNER); if (i >= 0) ctx.be.push([i, { type: 'spawner', mob: 'cave_spider' }]); }
+    }
+  }
+} });
+
+// trial chambers: a tuff and copper hall full of trial spawners, with vaults and corridors to side rooms
+const TRIAL_MOBS = ['zombie', 'skeleton', 'spider', 'husk', 'stray', 'slime', 'cave_spider', 'bogged', 'silverfish'];
+STRUCTURES.push({ name: 'trial_chambers', region: 640, reach: 60, plan: (gen, rx, rz) => {
+  const s = gen.seed + 9711;
+  if (hash2(rx, rz, s) > 0.6) return null;
+  const X = rx * 640 + 100 + Math.floor(hash2(rx, rz, s + 1) * 440), Z = rz * 640 + 100 + Math.floor(hash2(rx, rz, s + 2) * 440), Y = 20 + Math.floor(hash2(rx, rz, s + 3) * 6);
+  for (const [dx, dz] of [[0, 0], [-30, 0], [30, 0], [0, -30], [0, 30]]) if (gen.columnAt(X + dx, Z + dz).h < SEA) return null;
+  const R = mulberry32((hash2(rx, rz, s + 4) * 4294967296) | 0);
+  const mobs = []; for (let k = 0; k < 9; k++) mobs.push(TRIAL_MOBS[Math.floor(R() * TRIAL_MOBS.length)]);
+  return { X, Y, Z, mobs, bbox: [X - 46, Z - 46, X + 46, Z + 46], rects: [] };
+}, build: (p, ctx) => {
+  const Wr = worldWriter(ctx), { X, Y, Z } = p, seed = ctx.gen.seed;
+  const wall = (x, y, z) => { const r = hash3(x, y, z, seed + 9712); return r < 0.08 ? B.CHISELED_TUFF_BRICKS : r < 0.5 ? B.TUFF_BRICKS : B.POLISHED_TUFF; };
+  const room = (x0, y0, z0, x1, y1, z1) => {
+    for (let z = Math.max(z0, ctx.cz * 16); z <= Math.min(z1, ctx.cz * 16 + 15); z++) for (let x = Math.max(x0, ctx.cx * 16); x <= Math.min(x1, ctx.cx * 16 + 15); x++) for (let y = y0; y <= y1; y++) {
+      const edge = x === x0 || x === x1 || z === z0 || z === z1 || y === y0 || y === y1;
+      Wr.set(x, y, z, !edge ? B.AIR : y === y0 ? ((x + z) & 1 ? B.POLISHED_TUFF : B.TUFF_TILES) : y === y1 ? (hash3(x, y, z, seed + 9713) < 0.15 ? B.WAXED_COPPER_GRATE : B.TUFF_BRICKS) : wall(x, y, z));
+    }
+  };
+  const spawnerAt = (x, y, z, mob) => { const i = Wr.set(x, y, z, B.TRIAL_SPAWNER); if (i >= 0) ctx.be.push([i, { type: 'trial_spawner', mob }]); };
+  const bulb = (x, y, z) => Wr.set(x, y, z, B.WAXED_COPPER_BULB, 1);
+  // corridors and side rooms first, so the hall's walls are cut by their doorways afterwards
+  for (let d = 0; d < 4; d++) {
+    const [dx, dz] = DIR4[d], [px, pz] = DIR4[(d + 1) & 3];
+    for (let k = 11; k <= 26; k++) for (let a = -2; a <= 2; a++) {
+      const x = X + dx * k + px * a, z = Z + dz * k + pz * a;
+      if (!Wr.inside(x, z)) continue;
+      for (let h = 0; h <= 5; h++) {
+        const edge = Math.abs(a) === 2 || h === 0 || h === 5;
+        Wr.set(x, Y + h, z, !edge ? B.AIR : h === 0 ? (a === 0 ? B.WAXED_CUT_COPPER : B.POLISHED_TUFF) : wall(x, Y + h, z));
+      }
+      if (a === 0 && k % 5 === 0) bulb(x, Y + 5, z);
+    }
+    const cx2 = X + dx * 31, cz2 = Z + dz * 31;
+    room(cx2 - 4, Y, cz2 - 4, cx2 + 4, Y + 6, cz2 + 4);
+    for (let a = -1; a <= 1; a++) for (let h = 1; h <= 3; h++) Wr.set(X + dx * 27 + px * a, Y + h, Z + dz * 27 + pz * a, B.AIR);
+    spawnerAt(cx2, Y + 1, cz2, p.mobs[4 + d]);
+    bulb(cx2, Y + 6, cz2);
+    let i = Wr.set(cx2 + px * 3 + dx * 3, Y + 1, cz2 + pz * 3 + dz * 3, B.CHEST, M_FACING((d + 2) & 3)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot: 'trial_chambers_supply' }]);
+    i = Wr.set(cx2 - px * 3 + dx * 3, Y + 1, cz2 - pz * 3 + dz * 3, B.BARREL, 2); if (i >= 0) ctx.be.push([i, { type: 'barrel', kind: 'barrel', loot: 'trial_chambers_corridor' }]);
+    Wr.set(cx2 + px * 3 - dx * 3, Y + 1, cz2 + pz * 3 - dz * 3, B.DECORATED_POT, 0);
+    Wr.set(cx2 - px * 3 - dx * 3, Y + 1, cz2 - pz * 3 - dz * 3, B.DECORATED_POT, 0);
+  }
+  // the main hall
+  room(X - 11, Y, Z - 11, X + 11, Y + 12, Z + 11);
+  for (let d = 0; d < 4; d++) { const [dx, dz] = DIR4[d], [px, pz] = DIR4[(d + 1) & 3]; for (let a = -1; a <= 1; a++) for (let h = 1; h <= 3; h++) Wr.set(X + dx * 11 + px * a, Y + h, Z + dz * 11 + pz * a, B.AIR); }
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) Wr.set(X + dx, Y + 1, Z + dz, Math.abs(dx) === 2 || Math.abs(dz) === 2 ? B.CUT_COPPER : B.CHISELED_TUFF_BRICKS);
+  spawnerAt(X, Y + 2, Z, 'breeze');
+  spawnerAt(X - 7, Y + 1, Z - 7, p.mobs[0]); spawnerAt(X + 7, Y + 1, Z - 7, p.mobs[1]); spawnerAt(X - 7, Y + 1, Z + 7, p.mobs[2]); spawnerAt(X + 7, Y + 1, Z + 7, p.mobs[3]);
+  for (const [x, z, d] of [[X - 9, Z, 1], [X + 9, Z, 3]]) { Wr.set(x, Y + 1, z, B.POLISHED_TUFF); const i = Wr.set(x, Y + 2, z, B.VAULT, M_FACING(d) | 4); if (i >= 0) ctx.be.push([i, { type: 'vault' }]); }
+  for (const [x, z] of [[X - 5, Z - 5], [X + 5, Z - 5], [X - 5, Z + 5], [X + 5, Z + 5]]) for (let h = 1; h <= 11; h++) Wr.set(x, Y + h, z, h === 6 ? B.CHISELED_COPPER : B.POLISHED_TUFF);
+  for (const [x, z] of [[X, Z - 6], [X, Z + 6], [X - 6, Z], [X + 6, Z]]) bulb(x, Y + 12, z);
+  for (const [x, z] of [[X - 10, Z - 10], [X + 10, Z - 10], [X - 10, Z + 10], [X + 10, Z + 10], [X - 10, Z - 3], [X + 10, Z + 3]]) Wr.set(x, Y + 1, z, B.DECORATED_POT, 0);
+} });
+
+/* ---------------- end cities ---------------- */
+// purpur towers on the outer End islands, with shulkers, treasure, and sometimes an End ship carrying an elytra
+const END_CITY_REGION = 352;
+function endCityPlan(gen, rx, rz) {
+  const s = gen.seed + 9801;
+  if (hash2(rx, rz, s) > 0.6) return null;
+  const X = rx * END_CITY_REGION + 48 + Math.floor(hash2(rx, rz, s + 1) * 256), Z = rz * END_CITY_REGION + 48 + Math.floor(hash2(rx, rz, s + 2) * 256);
+  if (Math.hypot(X, Z) < 900) return null;
+  let top = 999;
+  for (const [dx, dz] of [[0, 0], [-6, -6], [6, -6], [-6, 6], [6, 6]]) { const t = gen.islandTop(X + dx, Z + dz); if (t < 0) return null; top = Math.min(top, t); }
+  const R = mulberry32((hash2(rx, rz, s + 3) * 4294967296) | 0);
+  const H = 18 + Math.floor(R() * 4) * 6, ship = R() < 0.5;
+  return { X, Y: top + 1, Z, H, ship, seed: Math.floor(R() * 2147483647), bbox: [X - 8, Z - 8, X + (ship ? 22 : 8), Z + 8], rects: [] };
+}
+function endCitiesFor(gen, cx, cz) {
+  const out = [], x0 = cx * 16, z0 = cz * 16;
+  for (let rz = Math.floor((z0 - 30) / END_CITY_REGION); rz <= Math.floor((z0 + 45) / END_CITY_REGION); rz++)
+    for (let rx = Math.floor((x0 - 30) / END_CITY_REGION); rx <= Math.floor((x0 + 45) / END_CITY_REGION); rx++) {
+      const p = structurePlan(gen, END_CITY_STRUCT, rx, rz);
+      if (p && p.bbox[0] <= x0 + 15 && p.bbox[2] >= x0 && p.bbox[1] <= z0 + 15 && p.bbox[3] >= z0) out.push(p);
+    }
+  return out;
+}
+function buildEndCity(p, ctx) {
+  const Wr = worldWriter(ctx), { X, Y, Z, H } = p;
+  const chest = (x, y, z, d, loot) => { const i = Wr.set(x, y, z, B.CHEST, M_FACING(d)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot }]); };
+  const shulker = (x, y, z) => { if (x >> 4 === ctx.cx && z >> 4 === ctx.cz) ctx.mobs.push(['shulker', x + 0.5, y, z + 0.5, {}]); };
+  const box = (x0, y0, z0, x1, y1, z1, wall, floor) => {
+    for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+      const cx2 = (x === x0 || x === x1) && (z === z0 || z === z1), edge = x === x0 || x === x1 || z === z0 || z === z1;
+      Wr.set(x, y, z, y === y0 ? floor : y === y1 ? B.PURPUR_BLOCK : cx2 ? B.PURPUR_PILLAR : edge ? wall : B.AIR);
+    }
+  };
+  // the house at the foot of the tower, standing on end stone
+  for (let dz = -5; dz <= 5; dz++) for (let dx = -5; dx <= 5; dx++) for (let y = Y - 4; y < Y; y++) { const c = Wr.get(X + dx, y, Z + dz); if (c === 0) Wr.set(X + dx, y, Z + dz, B.END_STONE); }
+  box(X - 5, Y, Z - 5, X + 5, Y + 5, Z + 5, B.PURPUR_BLOCK, B.END_STONE_BRICKS);
+  for (let y = Y + 1; y <= Y + 3; y++) Wr.set(X, y, Z - 5, B.AIR);
+  for (const [x, z] of [[X - 5, Z], [X + 5, Z], [X, Z + 5]]) Wr.set(x, Y + 3, z, B.MAGENTA_STAINED_GLASS);
+  // the tower
+  const T0 = Y + 5;
+  for (let lvl = 0; lvl * 6 < H; lvl++) {
+    const y0 = T0 + lvl * 6;
+    box(X - 3, y0, Z - 3, X + 3, y0 + 6, Z + 3, B.PURPUR_BLOCK, B.PURPUR_BLOCK);
+    for (const [x, z] of [[X - 3, Z], [X + 3, Z], [X, Z + 3]]) Wr.set(x, y0 + 3, z, B.MAGENTA_STAINED_GLASS);
+    if (lvl % 2 === 1) shulker(X + 2, y0 + 1, Z + 2);
+  }
+  // ladder up the middle of the tower, through every floor
+  for (let y = Y + 1; y < T0 + H; y++) { Wr.set(X, y, Z - 2, B.PURPUR_PILLAR); Wr.set(X, y, Z - 1, B.LADDER, M_LADDER(0)); }
+  for (let y = T0; y < T0 + H; y += 6) Wr.set(X, y, Z - 1, B.LADDER, M_LADDER(0));
+  // the treasure room and the roof
+  const top = T0 + H;
+  box(X - 5, top, Z - 5, X + 5, top + 5, Z + 5, B.PURPUR_BLOCK, B.PURPUR_BLOCK);
+  Wr.set(X, top, Z - 1, B.LADDER, M_LADDER(0));
+  for (let x = X - 6; x <= X + 6; x++) for (let z = Z - 6; z <= Z + 6; z++) if (Math.abs(x - X) === 6 || Math.abs(z - Z) === 6) Wr.set(x, top + 5, z, B.PURPUR_SLAB);
+  for (const [x, z] of [[X - 5, Z - 5], [X + 5, Z - 5], [X - 5, Z + 5], [X + 5, Z + 5]]) { Wr.set(x, top + 6, z, B.END_ROD, 2); Wr.set(x, top + 7, z, B.END_ROD, 2); }
+  chest(X - 3, top + 1, Z + 4, 0, 'end_city_treasure'); chest(X + 3, top + 1, Z + 4, 0, 'end_city_treasure');
+  for (const [x, z] of [[X - 4, Z], [X + 4, Z]]) Wr.set(x, top + 1, z, B.PURPUR_STAIRS, 0);
+  shulker(X - 4, top + 1, Z - 4); shulker(X + 4, top + 1, Z - 4); shulker(X + 2, top + 1, Z + 2);
+  // the End ship floating beside the tower
+  if (p.ship) {
+    const sx = X + 16, sy = top - 4;
+    for (let dz = -7; dz <= 7; dz++) {
+      const hw = Math.abs(dz) > 5 ? 1 : 2;
+      for (let dx = -hw; dx <= hw; dx++) {
+        const side = Math.abs(dx) === hw;
+        Wr.set(sx + dx, sy, Z + dz, B.PURPUR_BLOCK);
+        Wr.set(sx + dx, sy + 1, Z + dz, side ? B.PURPUR_BLOCK : B.AIR);
+        Wr.set(sx + dx, sy + 2, Z + dz, side ? B.PURPUR_SLAB : B.AIR);
+      }
+      Wr.set(sx, sy - 1, Z + dz, B.OBSIDIAN);
+    }
+    for (let y = sy + 1; y <= sy + 9; y++) Wr.set(sx, y, Z, B.PURPUR_PILLAR);
+    for (let dx = -3; dx <= 3; dx++) Wr.set(sx + dx, sy + 8, Z, B.PURPUR_BLOCK);
+    Wr.set(sx, sy + 1, Z - 7, B.DRAGON_HEAD, 8);
+    chest(sx - 1, sy + 1, Z + 5, 0, 'end_ship_elytra'); chest(sx + 1, sy + 1, Z + 5, 0, 'end_city_treasure');
+    for (const x of [sx - 1, sx + 1]) for (const z of [Z + 3, Z + 6]) Wr.set(x, sy + 1, z, B.END_ROD, 2);
+    shulker(sx, sy + 1, Z - 3); shulker(sx - 1, sy + 1, Z + 1);
+  }
+}
+const END_CITY_STRUCT = { name: 'end_city', region: END_CITY_REGION, reach: 40, plan: endCityPlan, build: buildEndCity };
+
+/* ---------------- bastion remnants (the Nether) ---------------- */
+// a blackstone keep above the lava sea: piglins, brutes, a gold-lined treasure room
+const BASTION_REGION = 480;
+function bastionPlan(gen, rx, rz) {
+  const s = gen.seed + 9901;
+  if (hash2(rx, rz, s) > 0.55) return null;
+  const X = rx * BASTION_REGION + 64 + Math.floor(hash2(rx, rz, s + 1) * 352), Z = rz * BASTION_REGION + 64 + Math.floor(hash2(rx, rz, s + 2) * 352);
+  if (gen.biome(X, Z) === BI.BASALT_DELTAS) return null;
+  const f = nearestFortress(gen.seed, X, Z);
+  if (f && Math.hypot(f.x - X, f.z - Z) < 110) return null;
+  return { X, Y: 34, Z, treasure: hash2(rx, rz, s + 3) < 0.3, seed: Math.floor(hash2(rx, rz, s + 4) * 2147483647), bbox: [X - 13, Z - 13, X + 13, Z + 13], rects: [] };
+}
+const BASTION_STRUCT = { name: 'bastion_remnant', region: BASTION_REGION, reach: 20, plan: bastionPlan };
+function bastionsFor(gen, cx, cz) {
+  const out = [], x0 = cx * 16, z0 = cz * 16;
+  for (let rz = Math.floor((z0 - 20) / BASTION_REGION); rz <= Math.floor((z0 + 35) / BASTION_REGION); rz++)
+    for (let rx = Math.floor((x0 - 20) / BASTION_REGION); rx <= Math.floor((x0 + 35) / BASTION_REGION); rx++) {
+      const p = structurePlan(gen, BASTION_STRUCT, rx, rz);
+      if (p && p.bbox[0] <= x0 + 15 && p.bbox[2] >= x0 && p.bbox[1] <= z0 + 15 && p.bbox[3] >= z0) out.push(p);
+    }
+  return out;
+}
+function buildBastion(p, ctx) {
+  const Wr = worldWriter(ctx), { X, Y, Z } = p, seed = ctx.gen.seed;
+  const brick = (x, y, z) => { const r = hash3(x, y, z, seed + 9902); return r < 0.14 ? B.CRACKED_POLISHED_BLACKSTONE_BRICKS : r < 0.3 ? B.BLACKSTONE : r < 0.35 ? B.GILDED_BLACKSTONE : B.POLISHED_BLACKSTONE_BRICKS; };
+  for (let dz = -12; dz <= 12; dz++) for (let dx = -12; dx <= 12; dx++) {
+    const x = X + dx, z = Z + dz;
+    if (!Wr.inside(x, z)) continue;
+    const ring = Math.max(Math.abs(dx), Math.abs(dz)), wall = ring >= 11;
+    // blackstone pillars down into the lava sea
+    for (let y = Y - 1; y > Y - 14; y--) { const c = Wr.get(x, y, z); if (c !== 0 && c !== B.LAVA && y < Y - 1) break; Wr.set(x, y, z, y === Y - 1 ? B.POLISHED_BLACKSTONE_BRICKS : B.BLACKSTONE); }
+    for (let y = Y; y <= Y + 16; y++) {
+      const h = y - Y;
+      let id = 0;
+      if (wall) {
+        id = h <= 14 ? brick(x, y, z) : (h === 15 && ((dx + dz) & 1) === 0 ? B.POLISHED_BLACKSTONE_BRICK_WALL : 0);
+        const door = (Math.abs(dx) <= 1 || Math.abs(dz) <= 1) && h <= 3 && (Math.abs(dz) >= 11 && Math.abs(dx) <= 1 || Math.abs(dx) >= 11 && Math.abs(dz) <= 1);
+        if (door) id = 0;
+        if (h === 6 && ring === 12 && (Math.abs(dx) % 4 === 0 || Math.abs(dz) % 4 === 0)) id = B.POLISHED_BLACKSTONE_BRICKS;
+      } else if (h === 7) id = (dx === -9 && dz === 0) ? 0 : (Math.abs(dx) <= 2 && Math.abs(dz) <= 2 ? (p.treasure ? B.GOLD_BLOCK : B.POLISHED_BLACKSTONE) : B.POLISHED_BLACKSTONE_BRICKS);
+      else if (h === 14) id = hash3(x, y, z, seed + 9903) < 0.75 ? B.POLISHED_BLACKSTONE_SLAB : 0;
+      else if (h > 14) id = 0;
+      Wr.set(x, y, z, id);
+    }
+  }
+  // ladder to the upper floor along the west wall
+  for (let y = Y; y <= Y + 7; y++) Wr.set(X - 10, y, Z, B.LADDER, M_LADDER(3));
+  const chest = (x, y, z, d, loot) => { const i = Wr.set(x, y, z, B.CHEST, M_FACING(d)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot }]); };
+  chest(X - 9, Y, Z - 9, 2, 'bastion_other'); chest(X + 9, Y, Z + 9, 0, 'bastion_other');
+  chest(X, Y + 8, Z, 2, p.treasure ? 'bastion_treasure' : 'bastion_other');
+  for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) Wr.set(X + dx, Y + 8, Z + dz, p.treasure ? B.GILDED_BLACKSTONE : B.CHAIN);
+  if (p.treasure) for (const [dx, dz] of [[-6, -6], [6, 6]]) { const i = Wr.set(X + dx, Y + 8, Z + dz, B.SPAWNER); if (i >= 0) ctx.be.push([i, { type: 'spawner', mob: 'magma_cube' }]); }
+  for (const [dx, dz] of [[-5, 4], [5, -4], [3, 6], [-4, -6]]) Wr.set(X + dx, Y, Z + dz, B.GOLD_BLOCK);
+  const mob = (type, x, y, z) => { if (x >> 4 === ctx.cx && z >> 4 === ctx.cz) ctx.mobs.push([type, x + 0.5, y, z + 0.5, {}]); };
+  mob('piglin', X - 4, Y, Z + 2); mob('piglin', X + 4, Y, Z - 2); mob('piglin', X + 2, Y + 8, Z + 6); mob('piglin_brute', X - 6, Y, Z - 2); mob('piglin_brute', X + 6, Y + 8, Z);
+  mob('hoglin', X + 7, Y, Z + 7);
+}
 
 </script>
 <script>
@@ -4798,6 +5313,9 @@ TEXGEN.push(function texBlocks2() {
   T('vault_front_off', over('vault_top', (d) => { rect(d, 3, 3, 12, 12, [30, 34, 40]); rect(d, 6, 6, 9, 9, [180, 140, 60]); }));
   const tspawn = (d, r) => fillF(d, (x, y) => { const e = Math.min(x, y, 15 - x, 15 - y); return e < 2 ? mul([90, 84, 70], 0.9 + r() * 0.1) : ((x + y) % 4 < 2 ? [0, 0, 0, 0] : mul([110, 100, 80], 0.9 + r() * 0.1)); });
   T('trial_spawner_top_inactive', tspawn); T('trial_spawner_side_inactive', tspawn); T('trial_spawner_bottom', over('vault_bottom', () => { }));
+  const tspawnOn = (d, r) => fillF(d, (x, y) => { const e = Math.min(x, y, 15 - x, 15 - y); return e < 2 ? mul([120, 100, 72], 0.9 + r() * 0.1) : ((x + y) % 4 < 2 ? (e > 4 ? mul([255, 150, 50], 0.85 + r() * 0.15) : [0, 0, 0, 0]) : mul([140, 116, 84], 0.9 + r() * 0.1)); });
+  T('trial_spawner_top_active', tspawnOn); T('trial_spawner_side_active', tspawnOn);
+  T('vault_front_on', over('vault_top', (d) => { rect(d, 3, 3, 12, 12, [44, 40, 36]); rect(d, 5, 5, 10, 10, [200, 120, 40]); rect(d, 6, 6, 9, 9, [255, 214, 110]); }));
   T('spawner', (d, r) => fillF(d, (x, y) => (x % 4 === 0 || y % 4 === 0) ? mul([40, 48, 60], 0.9 + r() * 0.2) : [0, 0, 0, 0]));
   T('crafter_top', over('crafting_table_top', (d) => frame(d, [70, 70, 74], 2)));
   T('crafter_bottom', (d, r) => fillF(d, () => mul([110, 110, 114], 0.9 + r() * 0.1)));
@@ -6401,6 +6919,8 @@ function resolveFaceTextures() {
     if (d.lamp) { ALTMASK[id] = 1; for (let k = 0; k < 6; k++) FACETEX_ALT[o + k] = L('redstone_lamp_on'); }
     if (d.rtorch) { ALTMASK[id] = 8; for (let k = 0; k < 6; k++) FACETEX_ALT[o + k] = L('redstone_torch_off'); }
     if (d.farmland) { ALTMASK[id] = 7; FACETEX_ALT[o + 2] = L('farmland_moist'); }
+    if (id === B.TRIAL_SPAWNER) { ALTMASK[id] = 1; for (let k = 0; k < 6; k++) if (k !== 3) FACETEX_ALT[o + k] = L(k === 2 ? 'trial_spawner_top_active' : 'trial_spawner_side_active'); }
+    if (id === B.VAULT) { ALTMASK[id] = 4; FACETEX_ALT[o + 4] = L('vault_front_on'); }
     // crops and bushes: one texture per age
     const stages = d.stages || (d.berry ? 4 : 0);
     if (stages && typeof d.tex === 'string' && /\d$/.test(d.tex)) {
@@ -15591,15 +16111,19 @@ class Game {
             return say('The nearest portal room is at ' + pr.x + ', ' + pr.y + ', ' + pr.z + ' (' + dist(pr.x, pr.z) + ' blocks away)', '#8f8');
           }
           const name = what.replace(/_/g, ' ');
-          const st = STRUCTURES.find(s => s.name === what.replace(/ /g, '_'));
+          const st = [...STRUCTURES, END_CITY_STRUCT, BASTION_STRUCT].find(s => s.name === what.replace(/ /g, '_').replace(/^bastion$/, 'bastion_remnant'));
           if (st) {
-            if (w.dim !== 'overworld') return say('That structure is found in the Overworld', '#f66');
-            const f = nearestStructure(this.genInfo(), st.name, p.x, p.z, 12);
+            const dim = st === END_CITY_STRUCT ? 'end' : st === BASTION_STRUCT ? 'nether' : 'overworld';
+            if (w.dim !== dim) return say('That structure is found in ' + (dim === 'end' ? 'the End' : dim === 'nether' ? 'the Nether' : 'the Overworld'), '#f66');
+            const key = '_gen_' + dim;
+            if (dim !== 'overworld' && (!this[key] || this[key].seed !== (w.seed | 0))) this[key] = makeGenerator(w.seed, dim);
+            const gen = dim === 'overworld' ? this.genInfo() : this[key];
+            const f = nearestStructure(gen, st.name, p.x, p.z, 12);
             if (!f) return say('Could not find a ' + name + ' nearby', '#f66');
             return say('The nearest ' + name + ' is at ' + f.X + ', ' + (f.Y === undefined ? '~' : f.Y) + ', ' + f.Z + ' (' + dist(f.X, f.Z) + ' blocks away)', '#8f8');
           }
           const bi = BIOME_NAMES.findIndex(n => n.toLowerCase() === name);
-          if (bi < 0) return say('Unknown biome or structure. Try fortress, portal_room, ' + STRUCTURES.map(s => s.name).join(', ') + ' or a biome: ' + BIOME_NAMES.join(', '), '#f66');
+          if (bi < 0) return say('Unknown biome or structure. Try fortress, portal_room, end_city, bastion_remnant, ' + STRUCTURES.map(s => s.name).join(', ') + ' or a biome: ' + BIOME_NAMES.join(', '), '#f66');
           const g = w.dim === 'overworld' ? this.genInfo() : makeGenerator(w.seed, w.dim);
           const caveBit = bi === BI.LUSH_CAVES ? 1 : bi === BI.DRIPSTONE_CAVES ? 2 : bi === BI.DEEP_DARK ? 4 : 0;
           if (caveBit) {
@@ -15747,6 +16271,7 @@ class Game {
     this.camYaw = camYaw;
     const maxD2 = (OPTIONS.renderDist * 16) ** 2;
     for (const e of this.entities) { const dx = e.x - eye[0], dz = e.z - eye[2]; if (dx * dx + dz * dz < maxD2) e.render(r, alpha); }
+    if (this.renderSpawnerMobs) this.renderSpawnerMobs(r, alpha);
     if (this.thirdPerson && !panorama && !p.dead) this.renderPlayerModel(r, p, alpha);
     r.dynFlush(r.vp, env);
     this.flushGlint(r.vp, env);
@@ -17482,6 +18007,7 @@ const SPAWN_MONSTERS = {
   warped_forest: [['enderman', 1, 2, 4]],
   soul_sand_valley: [['skeleton', 20, 2, 4], ['ghast', 50, 1, 1], ['enderman', 1, 1, 2]],
   basalt_deltas: [['magma_cube', 100, 2, 4], ['ghast', 40, 1, 1]],
+  fortress: [['blaze', 10, 2, 3], ['zombified_piglin', 5, 2, 4], ['wither_skeleton', 8, 2, 4], ['skeleton', 2, 2, 4], ['magma_cube', 3, 2, 3]],
   end: [['enderman', 10, 1, 4]],
 };
 const SPAWN_ANIMALS = {
@@ -17638,7 +18164,7 @@ Object.assign(Game.prototype, {
       const below = w.getBlock(x, y - 1, z);
       if (!OPAQUE[below] || below === B.BEDROCK && w.dim === 'overworld' || BLK[w.getBlock(x, y, z)].liquid) continue;
       const l = w.getLightRaw(x, y, z), sky = (l >> 4) - this.skyDarken(), blk = l & 15;
-      const key = w.dim === 'nether' ? biomeKey(bi) : w.dim === 'end' ? 'end' : bi === BI.DESERT ? 'desert' : SNOWY_BIOMES.has(bi) ? 'snowy' : bi === BI.SWAMP || bi === BI.MANGROVE_SWAMP ? 'swamp' : 'default';
+      const key = w.dim === 'nether' ? (inFortress(w.seed, x, z) ? 'fortress' : biomeKey(bi)) : w.dim === 'end' ? 'end' : bi === BI.DESERT ? 'desert' : SNOWY_BIOMES.has(bi) ? 'snowy' : bi === BI.SWAMP || bi === BI.MANGROVE_SWAMP ? 'swamp' : 'default';
       if (w.dim === 'overworld' && (blk > 0 || sky > Math.floor(R() * 8))) continue;
       if (w.dim === 'nether' && blk > 11) continue;
       if (w.dim === 'overworld' && bi === BI.MUSHROOM_FIELDS) continue;
@@ -18799,13 +19325,29 @@ const LOOT = {
     ['potion', 1, 2, 5, { potion: 'regeneration' }], ['potion', 1, 2, 5, { potion: 'strength' }], ['stone_pickaxe', 2], ['milk_bucket', 1]]]],
   trial_spawner: [[[1, 1], [['emerald', 4, 2, 4], ['arrow', 4, 4, 8], ['iron_ingot', 3, 1, 2], ['honey_bottle', 3], ['bread', 3, 1, 3], ['cooked_chicken', 3, 1, 3], ['golden_carrot', 2, 1, 2], ['diamond', 1], ['wind_charge', 3, 4, 12],
     ['ominous_bottle', 1]]], [[1, 1], [['trial_key', 1]]]],
-  trial_vault: [[[1, 1], [['emerald', 5, 4, 10], ['wind_charge', 4, 4, 12], ['arrow', 3, 2, 8], ['shield', 3], ['bow', 2, 1, 1, { ench: 15 }], ['crossbow', 2, 1, 1, { ench: 15 }], ['iron_axe', 2, 1, 1, { ench: 15 }],
+  trial_vault: [[[1, 3], [['emerald', 5, 4, 10], ['wind_charge', 4, 4, 12], ['arrow', 3, 2, 8], ['shield', 3], ['bow', 2, 1, 1, { ench: 15 }], ['crossbow', 2, 1, 1, { ench: 15 }], ['iron_axe', 2, 1, 1, { ench: 15 }],
     ['iron_chestplate', 2, 1, 1, { ench: 15 }], ['golden_carrot', 2, 1, 2], ['enchanted_book', 2, 1, 1, { book: true }], ['diamond_axe', 1, 1, 1, { ench: 20 }], ['diamond_chestplate', 1, 1, 1, { ench: 20 }], ['golden_apple', 2],
     ['music_disc_precipice', 1], ['flow_banner_pattern', 1], ['guster_banner_pattern', 1], ['bolt_armor_trim_smithing_template', 1], ['flow_armor_trim_smithing_template', 1], ['heavy_core', 1], ['diamond', 2, 1, 2]]]],
   end_city_treasure: [[[2, 6], [['diamond', 5, 2, 7], ['iron_ingot', 10, 4, 8], ['gold_ingot', 15, 2, 7], ['emerald', 2, 2, 6], ['beetroot_seeds', 5, 1, 10], ['saddle', 3], ['iron_horse_armor', 1], ['golden_horse_armor', 1],
     ['diamond_horse_armor', 1], ['diamond_sword', 3, 1, 1, { ench: 25 }], ['diamond_boots', 3, 1, 1, { ench: 25 }], ['diamond_chestplate', 3, 1, 1, { ench: 25 }], ['diamond_leggings', 3, 1, 1, { ench: 25 }],
     ['diamond_helmet', 3, 1, 1, { ench: 25 }], ['diamond_pickaxe', 3, 1, 1, { ench: 25 }], ['diamond_shovel', 3, 1, 1, { ench: 25 }], ['iron_sword', 3, 1, 1, { ench: 25 }], ['iron_pickaxe', 3, 1, 1, { ench: 25 }]]],
     [[1, 1], [[null, 14], ['spire_armor_trim_smithing_template', 1]]]],
+  end_ship_elytra: [[[1, 1], [['elytra', 1]]], [[2, 4], [['diamond', 5, 2, 7], ['iron_ingot', 10, 4, 8], ['gold_ingot', 15, 2, 7], ['emerald', 2, 2, 6], ['diamond_sword', 3, 1, 1, { ench: 25 }]]]],
+  nether_bridge: [[[2, 4], [['diamond', 5, 1, 3], ['iron_ingot', 5, 1, 5], ['gold_ingot', 15, 1, 3], ['golden_sword', 5], ['golden_chestplate', 5], ['flint_and_steel', 5], ['nether_wart', 5, 3, 7], ['saddle', 10],
+    ['golden_horse_armor', 8], ['iron_horse_armor', 5], ['diamond_horse_armor', 3], ['obsidian', 2, 2, 4]]], [[1, 1], [[null, 14], ['rib_armor_trim_smithing_template', 1]]]],
+  bastion_treasure: [[[3, 4], [['netherite_ingot', 15], ['ancient_debris', 10], ['netherite_scrap', 8], ['diamond_sword', 6, 1, 1, { ench: 30 }], ['diamond_chestplate', 6, 1, 1, { ench: 30 }], ['diamond_helmet', 6, 1, 1, { ench: 30 }],
+    ['diamond_leggings', 6, 1, 1, { ench: 30 }], ['diamond_boots', 6, 1, 1, { ench: 30 }], ['diamond', 6, 2, 6], ['enchanted_golden_apple', 2]]], [[1, 1], [['netherite_upgrade_smithing_template', 1]]],
+    [[1, 1], [[null, 11], ['snout_armor_trim_smithing_template', 1]]],
+    [[3, 4], [['spectral_arrow', 1, 12, 25], ['gold_block', 1, 2, 5], ['iron_block', 1, 2, 5], ['gold_ingot', 1, 3, 9], ['iron_ingot', 1, 3, 9], ['crying_obsidian', 1, 3, 5], ['quartz', 1, 8, 23], ['gilded_blackstone', 1, 5, 15], ['magma_cream', 1, 3, 8]]]],
+  bastion_other: [[[1, 1], [['diamond_pickaxe', 6, 1, 1, { ench: 20 }], ['diamond_shovel', 6], ['crossbow', 6, 1, 1, { ench: 20 }], ['ancient_debris', 12], ['netherite_scrap', 4], ['spectral_arrow', 10, 10, 22],
+    ['piglin_banner_pattern', 9], ['music_disc_pigstep', 5], ['golden_carrot', 12, 6, 17], ['golden_apple', 9], ['enchanted_book', 10, 1, 1, { book: 'soul_speed' }]]],
+    [[2, 2], [['iron_sword', 2, 1, 1, { ench: 15 }], ['iron_block', 2], ['golden_boots', 1, 1, 1, { book: false }], ['golden_axe', 1], ['gold_block', 2], ['crossbow', 1], ['gold_ingot', 1, 1, 6], ['iron_ingot', 1, 1, 6],
+      ['golden_sword', 1], ['golden_chestplate', 1], ['golden_helmet', 1], ['golden_leggings', 1], ['crying_obsidian', 1, 1, 5]]],
+    [[1, 1], [[null, 9], ['netherite_upgrade_smithing_template', 1]]], [[1, 1], [[null, 11], ['snout_armor_trim_smithing_template', 1]]],
+    [[3, 4], [['blackstone', 1, 2, 7], ['chain', 1, 2, 10], ['magma_cream', 1, 2, 6], ['bone_block', 1, 3, 6], ['iron_nugget', 1, 2, 8], ['obsidian', 1, 4, 6], ['gold_nugget', 1, 2, 8], ['string', 1, 4, 6], ['arrow', 2, 5, 17], ['cooked_porkchop', 1]]]],
+  stronghold_corridor: [[[2, 3], [['ender_pearl', 10], ['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['redstone', 5, 4, 9], ['bread', 15, 1, 3], ['apple', 15, 1, 3], ['iron_pickaxe', 5], ['iron_sword', 5],
+    ['iron_chestplate', 5], ['iron_helmet', 5], ['iron_leggings', 5], ['iron_boots', 5], ['golden_apple', 1], ['saddle', 1], ['iron_horse_armor', 1], ['golden_horse_armor', 1], ['diamond_horse_armor', 1], ['music_disc_otherside', 1],
+    ['enchanted_book', 1, 1, 1, { book: true }]]], [[1, 1], [[null, 9], ['eye_armor_trim_smithing_template', 1]]]],
   swamp_hut: [[[2, 4], [['glass_bottle', 3, 1, 3], ['redstone', 2, 1, 4], ['glowstone_dust', 2, 1, 4], ['sugar', 2, 1, 4], ['spider_eye', 2, 1, 2], ['gunpowder', 2, 1, 2], ['stick', 2, 1, 3]]]],
 };
 function enchantTag(id, level, R) {
@@ -18907,6 +19449,125 @@ Object.assign(SPAWN_ANIMALS, {
   frozen_peaks: SPAWN_ANIMALS.jagged_peaks, windswept_forest: SPAWN_ANIMALS.windswept_hills, windswept_gravelly_hills: SPAWN_ANIMALS.windswept_hills,
 });
 Object.assign(SPAWN_WATER, { deep_lukewarm_ocean: SPAWN_WATER.lukewarm_ocean, deep_cold_ocean: SPAWN_WATER.cold_ocean, deep_frozen_ocean: SPAWN_WATER.frozen_ocean, swamp: [['salmon', 1, 1, 2]], mangrove_swamp: [['tropical_fish', 25, 4, 8]] });
+
+/* ---------------- spawners, trial spawners and vaults ---------------- */
+Game.prototype.tickSpawners = function () {
+  const w = this.world, p = this.player;
+  if (!p || p.dead) return;
+  // the spawners around the player are listed again once a second
+  if (!this._spList || w.tick % 20 === 0) {
+    const list = [], pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+      const c = w.getChunk(pcx + dx, pcz + dz);
+      if (!c || c.state < 2) continue;
+      for (const [i, v] of c.be) if (v.type === 'spawner' || v.type === 'trial_spawner') list.push([c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), v]);
+    }
+    this._spList = list;
+  }
+  for (const [x, y, z, be] of this._spList) {
+    const id = w.getBlock(x, y, z);
+    if (be.type === 'spawner' && id === B.SPAWNER) this.tickMobSpawner(x, y, z, be);
+    else if (be.type === 'trial_spawner' && id === B.TRIAL_SPAWNER) this.tickTrialSpawner(x, y, z, be);
+  }
+};
+// a spot near (x, y, z) where a mob of this type can stand
+Game.prototype.spawnSpotNear = function (x, y, z, type, r) {
+  const w = this.world, T = MOB_TYPES[type];
+  for (let k = 0; k < 12; k++) {
+    const sx = x + Math.floor(Math.random() * (2 * r + 1)) - r, sz = z + Math.floor(Math.random() * (2 * r + 1)) - r;
+    let sy = y + 1;
+    while (sy > y - 2 && !SOLID[w.getBlock(sx, sy - 1, sz)]) sy--;
+    if (NAV.stand(w, sx, sy, sz, { h: T.h, T: { fireproof: T.fireproof } })) return [sx, sy, sz];
+  }
+  return null;
+};
+// monster spawners: while a player is within 16 blocks, up to four mobs every 10 to 40 seconds, never more than six around
+Game.prototype.tickMobSpawner = function (x, y, z, be) {
+  const w = this.world, p = this.player;
+  if (Math.hypot(p.x - x - 0.5, p.y - y, p.z - z - 0.5) > 16) return;
+  if (Math.random() < 0.25) { this.particles.smoke(x + 0.5, y + 0.5, z + 0.5, 1); this.particles.flame(x + 0.5, y + 0.3, z + 0.5); }
+  if (be.delay === undefined) be.delay = 20;
+  if (--be.delay > 0) return;
+  be.delay = 200 + Math.floor(Math.random() * 600);
+  const mob = be.mob || 'pig', T = MOB_TYPES[mob];
+  if (!T) return;
+  let near = 0;
+  for (const e of this.entities) if (e.type === mob && !e.dead && Math.abs(e.x - x) < 9 && Math.abs(e.y - y) < 5 && Math.abs(e.z - z) < 9) near++;
+  for (let k = 0; k < 4 && near < 6; k++) {
+    const s = this.spawnSpotNear(x, y, z, mob, 4);
+    if (!s) continue;
+    if (T.cat === 'monster' && (w.getLightRaw(s[0], s[1], s[2]) & 15) > 11) continue;
+    if (this.spawnMob(mob, s[0] + 0.5, s[1], s[2] + 0.5)) { near++; this.particles.poof(s[0] + 0.5, s[1] + 0.5, s[2] + 0.5, [0.6, 0.6, 0.6], 8); }
+  }
+};
+// trial spawners: wake up when a player comes near, send waves of mobs, then hand out rewards and rest for half an hour
+Game.prototype.tickTrialSpawner = function (x, y, z, be) {
+  const w = this.world, p = this.player, d = Math.hypot(p.x - x - 0.5, p.y - y, p.z - z - 0.5);
+  const lit = on => { const m = w.getMeta(x, y, z); if (!!(m & 1) !== on) { w.setMeta(x, y, z, on ? m | 1 : m & ~1); this.remeshNear(x, z); } };
+  be.state = be.state || 'waiting';
+  if (be.state === 'cooldown') { if ((be.cool = (be.cool || 0) - 1) <= 0) { be.state = 'waiting'; w.setBE(x, y, z, be); } return; }
+  if (be.state === 'waiting') {
+    if (d < 14 && p.mode !== 1 && p.mode !== 3) { Object.assign(be, { state: 'active', spawned: 0, total: 6, t: 20 }); be._alive = []; lit(true); this.sound('spawner', x + 0.5, y + 0.5, z + 0.5); }
+    return;
+  }
+  if (be.state === 'active') {
+    if (Math.random() < 0.35) this.particles.flame(x + 0.5, y + 1.05, z + 0.5);
+    const alive = (be._alive || []).filter(id => this.entities.some(e => e.id === id && !e.dead && e.deathTime === 0));
+    be._alive = alive;
+    if (be.spawned >= be.total && !alive.length) { be.state = 'eject'; be.t = 30; return; }
+    if (--be.t > 0) return;
+    be.t = 40;
+    if (be.spawned < be.total && alive.length < 2 && d < 47) {
+      const s = this.spawnSpotNear(x, y, z, be.mob || 'zombie', 4);
+      if (s) {
+        const e = this.spawnMob(be.mob || 'zombie', s[0] + 0.5, s[1], s[2] + 0.5);
+        if (e) { e.persistent = true; be._alive.push(e.id); be.spawned++; this.particles.poof(s[0] + 0.5, s[1] + 0.5, s[2] + 0.5, [1, 0.55, 0.15], 12); }
+      }
+    }
+    return;
+  }
+  if (be.state === 'eject') {
+    if (--be.t > 0) return;
+    for (const st of rollLoot('trial_spawner', Math.random)) this.dropItem(x + 0.5, y + 1.2, z + 0.5, st);
+    this.sound('pop', x + 0.5, y + 1, z + 0.5);
+    be.state = 'cooldown'; be.cool = 36000; lit(false);
+    w.setBE(x, y, z, be);
+  }
+};
+// vaults open once for a trial key and throw out a reward
+const _useBlockGen = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit.id === B.VAULT) {
+    const w = this.world, be = w.getBE(hit.x, hit.y, hit.z) || { type: 'vault' };
+    if (!held || held.id !== I.TRIAL_KEY || be.opened) { this.sound('click', hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); return !!held && held.id === I.TRIAL_KEY; }
+    if (p.mode !== 1) p.consumeHeld(1);
+    be.type = 'vault'; be.opened = 1;
+    w.setBE(hit.x, hit.y, hit.z, be);
+    w.setMeta(hit.x, hit.y, hit.z, w.getMeta(hit.x, hit.y, hit.z) & 3);
+    for (const st of rollLoot('trial_vault', Math.random)) this.dropItem(hit.x + 0.5, hit.y + 1.1, hit.z + 0.5, st);
+    this.sound('vault', hit.x + 0.5, hit.y + 1, hit.z + 0.5); this.remeshNear(hit.x, hit.z);
+    return true;
+  }
+  return _useBlockGen.call(this, p, hit, held);
+};
+const _gameTickGen = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickGen.call(this); if (this.world && this.player) this.tickSpawners(); };
+// the little mob turning inside a monster spawner
+Game.prototype.renderSpawnerMobs = function (r, a) {
+  const p = this.player;
+  if (!this._spList || !p) return;
+  this._spDummies = this._spDummies || {};
+  for (const [x, y, z, be] of this._spList) {
+    if (be.type !== 'spawner' || !be.mob || Math.hypot(p.x - x, p.z - z) > 24) continue;
+    let m = this._spDummies[be.mob];
+    if (m === undefined) { try { m = createMob(this, be.mob, x, y, z, {}); } catch (e) { m = null; } this._spDummies[be.mob] = m; }
+    if (!m || !MOB_MODELS[be.mob]) continue;
+    const md = MOB_MODELS[be.mob], t = this.world.tick + a, st = m.animState(a);
+    st.swing = 0; st.amt = 0;
+    const sc = 0.45 / Math.max(m.T.w, m.T.h, 0.6);
+    drawMob(r, md, m.skins(), [x + 0.5, y + 0.2, z + 0.5], t * 0.08, st, [1, 1, 1, 1], [this.world.getLightRaw(x, y, z) & 15, (this.world.getLightRaw(x, y, z) >> 4)], sc, 0);
+  }
+};
 
 </script>
 </body>
