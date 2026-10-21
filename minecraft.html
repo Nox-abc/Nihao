@@ -92,6 +92,27 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 .slider .lab { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; text-shadow: 2px 2px 0 #3f3f3f; color: #e0e0e0; pointer-events: none; }
 .slider:hover .knob { background: #a2acdf; }
 .hint { color: #a0a0a0; font-size: 20px; margin: 6px; text-align: center; max-width: 620px; }
+/* the Create World tabs and its sub-screens */
+.cwtabs { display: flex; gap: 2px; margin-bottom: 10px; border-bottom: 2px solid #000; }
+.cwtab { width: 130px; height: 34px; border: 2px solid #000; border-bottom: none; background: #4a4a4a; color: #a0a0a0; font: inherit; font-size: 22px; text-shadow: 2px 2px 0 #222; cursor: pointer; box-shadow: inset 2px 2px 0 #777; }
+.cwtab:hover { color: #ffffa0; }
+.cwtab.sel { background: #6f6f6f; color: #fff; box-shadow: inset 2px 2px 0 #aaa; height: 38px; margin-top: -4px; }
+.cpage { display: flex; flex-direction: column; align-items: center; min-height: 300px; }
+.field.wide { width: 620px; max-width: 94vw; }
+.flathead { width: 620px; max-width: 94vw; display: flex; justify-content: space-between; font-size: 20px; color: #a0a0a0; padding: 0 12px; }
+.flatlist { height: 42vh; }
+.flatrow { display: flex; align-items: center; gap: 10px; padding: 3px 8px; border: 2px solid transparent; cursor: pointer; font-size: 22px; }
+.flatrow.sel { border-color: #aaa; background: rgba(0,0,0,.5); }
+.flatrow canvas { width: 32px; height: 32px; image-rendering: pixelated; flex: none; }
+.flatrow .fn { flex: 1; color: #fff; }
+.flatrow .fh { color: #ccc; }
+.rulelist { height: 56vh; width: 700px; }
+.rulecat { color: #ffff55; font-size: 22px; font-weight: bold; margin: 10px 0 2px; text-align: center; }
+.rulerow { display: flex; align-items: center; justify-content: space-between; padding: 2px 8px; font-size: 21px; }
+.rulerow .rn { color: #fff; }
+.rulerow .btn { width: 120px; height: 34px; font-size: 20px; margin: 2px; }
+.rulerow input { width: 116px; height: 32px; background: #000; color: #fff; border: 2px solid #a0a0a0; font: inherit; font-size: 20px; padding: 0 6px; }
+.rulerow input.bad { border-color: #f44; color: #f88; }
 .keys { columns: 2; font-size: 21px; line-height: 25px; width: 700px; max-width: 94vw; background: rgba(0,0,0,.45); padding: 12px 18px; }
 .keys b { color: #ffff80; font-weight: normal; display: inline-block; min-width: 120px; }
 #scr-death { background: linear-gradient(rgba(80,0,0,.5), rgba(160,0,0,.6)); }
@@ -251,15 +272,56 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
 
 <div id="scr-create" class="screen dirt hidden">
   <div class="h1">Create New World</div>
-  <div class="field"><label>World Name</label><input id="in-name" value="New World"></div>
-  <div class="field"><label>Seed for the world generator (leave blank for random)</label><input id="in-seed"></div>
-  <button class="btn" id="b-mode">Game Mode: Survival</button>
-  <div class="hint" id="mode-hint">Search for resources, craft, gain levels, health and hunger</div>
-  <button class="btn" id="b-cdiff">Difficulty: Normal</button>
-  <button class="btn" id="b-cheats">Allow Commands: OFF</button>
-  <div class="hint">Whether commands like /gamemode, /experience can be used</div>
+  <div class="cwtabs" id="ctabs"><button class="cwtab sel" data-tab="game">Game</button><button class="cwtab" data-tab="world">World</button><button class="cwtab" data-tab="more">More</button></div>
+  <div class="cpage" id="cpage-game">
+    <div class="field"><label>World Name</label><input id="in-name" value="New World"></div>
+    <button class="btn" id="b-mode">Game Mode: Survival</button>
+    <div class="hint" id="mode-hint">Search for resources, craft, gain levels, health and hunger</div>
+    <button class="btn" id="b-cdiff">Difficulty: Normal</button>
+    <button class="btn" id="b-cheats">Allow Commands: OFF</button>
+    <div class="hint">Whether commands like /gamemode, /experience can be used</div>
+  </div>
+  <div class="cpage hidden" id="cpage-world">
+    <div class="row"><button class="btn half" id="b-wtype">World Type: Default</button><button class="btn half" id="b-wcustom" disabled>Customize</button></div>
+    <div class="hint" id="wtype-hint"></div>
+    <div class="field"><label>Seed for the World Generator</label><input id="in-seed" placeholder="Leave blank for a random seed"></div>
+    <button class="btn" id="b-wstruct">Generate Structures: ON</button>
+    <div class="hint">Villages, shipwrecks, strongholds and the other structures</div>
+    <button class="btn" id="b-wbonus">Bonus Chest: OFF</button>
+  </div>
+  <div class="cpage hidden" id="cpage-more">
+    <button class="btn" id="b-wrules">Game Rules</button>
+    <div class="hint">The rules the new world starts with; /gamerule changes them later</div>
+  </div>
   <div class="sep"></div>
   <div class="row"><button class="btn half" id="b-docreate">Create New World</button><button class="btn half" id="b-cback">Cancel</button></div>
+</div>
+
+<div id="scr-flat" class="screen dirt hidden">
+  <div class="h1">Superflat Customization</div>
+  <div class="flathead"><span>Layer Material</span><span>Height</span></div>
+  <div class="worldlist flatlist" id="flatlist"></div>
+  <div class="row"><button class="btn half" id="b-flremove" disabled>Remove Layer</button><button class="btn half" id="b-flpresets">Presets</button></div>
+  <div class="row"><button class="btn half" id="b-fldone">Done</button><button class="btn half" id="b-flcancel">Cancel</button></div>
+</div>
+
+<div id="scr-flatpresets" class="screen dirt hidden">
+  <div class="h1">Select a Preset</div>
+  <div class="field wide"><label>Copy this text to share the world's layers, or paste one to use it</label><input id="in-flatpreset"></div>
+  <div class="worldlist flatlist" id="presetlist"></div>
+  <div class="row"><button class="btn half" id="b-fpuse">Use Preset</button><button class="btn half" id="b-fpcancel">Cancel</button></div>
+</div>
+
+<div id="scr-buffet" class="screen dirt hidden">
+  <div class="h1">Single Biome</div>
+  <div class="worldlist flatlist" id="biomelist"></div>
+  <div class="row"><button class="btn half" id="b-bdone">Done</button><button class="btn half" id="b-bcancel">Cancel</button></div>
+</div>
+
+<div id="scr-rules" class="screen dirt hidden">
+  <div class="h1">Edit Game Rules</div>
+  <div class="worldlist rulelist" id="rulelist"></div>
+  <div class="row"><button class="btn half" id="b-rdone">Done</button><button class="btn half" id="b-rcancel">Cancel</button></div>
 </div>
 
 <div id="scr-options" class="screen dirt hidden">
@@ -1684,7 +1746,9 @@ class BlendedNoise {
 /* ---------------- the terrain splines (TerrainProvider), in float like Java ---------------- */
 const F = Math.fround;
 // spline points [location, value or spline, derivative]; coordinate: 0 continents, 1 erosion, 2 ridges folded, 3 ridges
-function spl(coord, pts) { return { c: coord, loc: pts.map(p => F(p[0])), val: pts.map(p => typeof p[1] === 'number' ? F(p[1]) : p[1]), der: pts.map(p => F(p[2] || 0)) }; }
+// (a builder's value transform, when one is set, applies to the plain values, not to the derivatives: amplified worlds)
+let SPL_TF = null;
+function spl(coord, pts) { return { c: coord, loc: pts.map(p => F(p[0])), val: pts.map(p => typeof p[1] === 'number' ? (SPL_TF ? SPL_TF(F(p[1])) : F(p[1])) : p[1]), der: pts.map(p => F(p[2] || 0)) }; }
 function splineAt(s, v) {
   if (typeof s === 'number') return s;
   const f = v[s.c], L = s.loc, n = L.length;
@@ -1698,30 +1762,32 @@ function splineAt(s, v) {
   return F(F(n0 + F(k * F(o - n0))) + F(F(k * F(1 - k)) * F(p + F(k * F(q - p)))));
 }
 const lerpF = (t, a, b) => F(a + F(t * F(b - a)));
+// (Java's float literals: every constant is a float before it takes part)
+const C117 = F(1.17), C046 = F(0.46082947);
 function mountainCont(ridge, f) {
-  const j = F(1 - F(F(1 - f) * 0.5)), k = F(0.5 * F(1 - f)), l = F(F(ridge + 1.17) * 0.46082947), m = F(F(l * j) - k);
-  return ridge < -0.7 ? Math.max(m, F(-0.2222)) : Math.max(m, 0);
+  const j = F(1 - F(F(1 - f) * 0.5)), k = F(0.5 * F(1 - f)), l = F(F(ridge + C117) * C046), m = F(F(l * j) - k);
+  return ridge < F(-0.7) ? Math.max(m, F(-0.2222)) : Math.max(m, 0);
 }
 function ridgeMountainSpline(f, bl) {
-  const i = mountainCont(-1, f), k = mountainCont(1, f), l = F(F(F(0.5 * F(1 - f)) / F(0.46082947 * F(1 - F(F(1 - f) * 0.5)))) - 1.17);
-  if (-0.65 < l && l < 1) {
-    const u = mountainCont(-0.65, f), p = mountainCont(-0.75, f), q = F(F(p - i) * 4), r = mountainCont(l, f), s = F(F(k - r) / F(1 - l));
-    return spl(2, [[-1, i, q], [-0.75, p], [-0.65, u], [F(l - 0.01), r], [l, r, s], [1, k, s]]);
+  const i = mountainCont(-1, f), k = mountainCont(1, f), l = F(F(F(0.5 * F(1 - f)) / F(C046 * F(1 - F(F(1 - f) * 0.5)))) - C117);
+  if (F(-0.65) < l && l < 1) {
+    const u = mountainCont(F(-0.65), f), p = mountainCont(-0.75, f), q = F(F(p - i) * 4), r = mountainCont(l, f), s = F(F(k - r) / F(1 - l));
+    return spl(2, [[-1, i, q], [-0.75, p], [-0.65, u], [F(l - F(0.01)), r], [l, r, s], [1, k, s]]);
   }
   const u = F(F(k - i) * 0.5);
   return bl ? spl(2, [[-1, Math.max(0.2, i)], [0, lerpF(0.5, i, k), u], [1, k, u]]) : spl(2, [[-1, i, u], [1, k, u]]);
 }
 function ridgeSpline(f, g, h, i, j, k) {
   const l = Math.max(F(0.5 * F(g - f)), F(k)), m = F(5 * F(h - g));
-  return spl(2, [[-1, f, l], [-0.4, g, Math.min(l, m)], [0, h, m], [0.4, i, F(2 * F(i - h))], [1, j, F(0.7 * F(j - i))]]);
+  return spl(2, [[-1, f, l], [-0.4, g, Math.min(l, m)], [0, h, m], [0.4, i, F(2 * F(i - h))], [1, j, F(F(0.7) * F(j - i))]]);
 }
 function erosionOffsetSpline(f, g, h, i, j, k, bl, bl2) {
   f = F(f); g = F(g); h = F(h); i = F(i); j = F(j); k = F(k);
-  const s1 = ridgeMountainSpline(lerpF(i, 0.6, 1.5), bl2), s2 = ridgeMountainSpline(lerpF(i, 0.6, 1.0), bl2), s3 = ridgeMountainSpline(i, bl2);
+  const s1 = ridgeMountainSpline(lerpF(i, F(0.6), 1.5), bl2), s2 = ridgeMountainSpline(lerpF(i, F(0.6), 1.0), bl2), s3 = ridgeMountainSpline(i, bl2);
   const ih = F(0.5 * i);
-  const s4 = ridgeSpline(F(f - 0.15), ih, ih, ih, F(i * 0.6), 0.5), s5 = ridgeSpline(f, F(j * i), F(g * i), ih, F(i * 0.6), 0.5);
+  const s4 = ridgeSpline(F(f - F(0.15)), ih, ih, ih, F(F(0.6) * i), 0.5), s5 = ridgeSpline(f, F(j * i), F(g * i), ih, F(F(0.6) * i), 0.5);
   const s6 = ridgeSpline(f, j, j, g, h, 0.5), s7 = ridgeSpline(f, j, j, g, h, 0.5);
-  const s8 = spl(2, [[-1, f], [-0.4, s6], [0, F(h + 0.07)]]), s9 = ridgeSpline(-0.02, k, k, g, h, 0);
+  const s8 = spl(2, [[-1, f], [-0.4, s6], [0, F(h + F(0.07))]]), s9 = ridgeSpline(F(-0.02), k, k, g, h, 0);
   const pts = [[-0.85, s1], [-0.7, s2], [-0.4, s3], [-0.35, s4], [-0.1, s5], [0.2, s6]];
   if (bl) pts.push([0.4, s7], [0.45, s8], [0.55, s8], [0.58, s7]);
   pts.push([0.7, s9]);
@@ -1739,14 +1805,30 @@ function erosionFactor(f, bl) {
   return spl(1, pts);
 }
 const FACTOR_SPLINE = spl(0, [[-0.19, 3.95], [-0.15, erosionFactor(6.25, true)], [-0.1, erosionFactor(5.47, true)], [0.03, erosionFactor(5.08, true)], [0.06, erosionFactor(4.69, false)]]);
-const peaksValleys = r => F(-F(F(Math.abs(F(Math.abs(r) - 0.6666667))) - 0.33333334) * 3);
-function weirdJag(f) { return spl(3, [[-0.01, F(0.63 * f)], [0.01, F(0.3 * f)]]); }
+const peaksValleys = r => F(-F(F(Math.abs(F(Math.abs(r) - F(0.6666667)))) - F(0.33333334)) * 3);
+function weirdJag(f) { return spl(3, [[-0.01, F(F(0.63) * f)], [0.01, F(F(0.3) * f)]]); }
 function ridgeJag(f, g) {
-  const h = peaksValleys(0.4), i = peaksValleys(0.56666666), j = F(F(h + i) / 2);
+  const h = peaksValleys(F(0.4)), i = peaksValleys(F(0.56666666)), j = F(F(h + i) / 2);
   return spl(2, [[h, 0], [j, g > 0 ? weirdJag(g) : 0], [1, f > 0 ? weirdJag(f) : 0]]);
 }
 function erosionJag(f, g, h, i) { const s = ridgeJag(f, h), s2 = ridgeJag(g, i); return spl(1, [[-1, s], [-0.78, s2], [-0.5775, s2], [-0.375, 0]]); }
 const JAGGED_SPLINE = spl(0, [[-0.11, 0], [0.03, erosionJag(1, 0.5, 0, 0)], [0.65, erosionJag(1, 1, 1, 0)]]);
+// the splines of the amplified preset: the offset doubles above 0, the factor shrinks (1.25 - 6.25 / (f + 5)), the jaggedness doubles
+const withTf = (tf, fn) => { const o = SPL_TF; SPL_TF = tf; try { return fn(); } finally { SPL_TF = o; } };
+let AMP_SPLINES = null;
+function amplifiedSplines() {
+  if (AMP_SPLINES) return AMP_SPLINES;
+  const tO = f => f < 0 ? f : F(f * 2), tF = f => F(1.25 - F(6.25 / F(f + 5))), tJ = f => F(f * 2);
+  const offset = withTf(tO, () => spl(0, [[-1.1, 0.044], [-1.02, -0.2222], [-0.51, -0.2222], [-0.44, -0.12], [-0.18, -0.12],
+    [-0.16, erosionOffsetSpline(-0.15, 0, 0, 0.1, 0, -0.03, false, false)], [-0.15, erosionOffsetSpline(-0.15, 0, 0, 0.1, 0, -0.03, false, false)],
+    [-0.1, erosionOffsetSpline(-0.1, 0.03, 0.1, 0.1, 0.01, -0.03, false, false)], [0.25, erosionOffsetSpline(-0.1, 0.03, 0.1, 0.7, 0.01, -0.03, true, true)],
+    [1, erosionOffsetSpline(-0.05, 0.03, 0.1, 1.0, 0.01, 0.01, true, true)]]));
+  // (the factor's first two points keep their values)
+  const f1 = erosionFactor(6.25, true), [f2, f3, f4] = withTf(tF, () => [erosionFactor(5.47, true), erosionFactor(5.08, true), erosionFactor(4.69, false)]);
+  const factor = spl(0, [[-0.19, 3.95], [-0.15, f1], [-0.1, f2], [0.03, f3], [0.06, f4]]);
+  const jag = withTf(tJ, () => spl(0, [[-0.11, 0], [0.03, erosionJag(1, 0.5, 0, 0)], [0.65, erosionJag(1, 1, 1, 0)]]));
+  return AMP_SPLINES = { offset, factor, jag };
+}
 
 /* ---------------- simplex noise (biome temperature variation) ---------------- */
 class SimplexNoise {
@@ -1933,7 +2015,7 @@ class VanillaClimate {
   biome(qx, qy, qz) { return CB_BIOME[climateBiome(this.sample(qx, qy, qz, this.np))]; }
 }
 
-return { Xoro, JRand, xoroAt, xoroPos, posSeed, md5Longs, SimplexNoise, PerlinSimplexNoise, biomeTemperature, coldEnoughToSnow, sha256Long, zoomCell, biomeInfoNoise: (x, z) => BIOME_INFO_NOISE.get(x, z), ImprovedNoise, PerlinNoise, NormalNoise, BlendedNoise, F, spl, splineAt, OFFSET_SPLINE, FACTOR_SPLINE, JAGGED_SPLINE, peaksValleys, CB_BIOME, climateBiome, climateBiomeLast, VanillaClimate };
+return { Xoro, JRand, xoroAt, xoroPos, posSeed, md5Longs, SimplexNoise, PerlinSimplexNoise, biomeTemperature, coldEnoughToSnow, sha256Long, zoomCell, biomeInfoNoise: (x, z) => BIOME_INFO_NOISE.get(x, z), ImprovedNoise, PerlinNoise, NormalNoise, BlendedNoise, F, spl, splineAt, OFFSET_SPLINE, FACTOR_SPLINE, JAGGED_SPLINE, amplifiedSplines, peaksValleys, CB_BIOME, climateBiome, climateBiomeLast, VanillaClimate };
 })();
 
 /* @file 12_dims.js */
@@ -2176,7 +2258,7 @@ NetherGenerator.prototype.genChunk = function (cx, cz) {
     }
   }
   const meta = new Uint8Array(65536), be = [], mobs = [];
-  buildFortress(blocks, cx, cz, seed, be, meta);
+  if (!this.noStructures) buildFortress(blocks, cx, cz, seed, be, meta);
   for (const p of bastionsFor(this, cx, cz)) buildBastion(p, { gen: this, cx, cz, blocks, meta, be, mobs, I });
   return { blocks, biomes, meta, be, mobs };
 };
@@ -2340,9 +2422,11 @@ function tallChunk(r, off) {
   return r;
 }
 // kind 'vanilla': Java Edition 1.21's overworld from the full 64-bit seed (seed64, a decimal string)
-function makeGenerator(seed, dim, kind, seed64) {
-  if (dim === 'overworld' && kind === 'vanilla' && typeof VanillaWorldGen !== 'undefined') return new VanillaWorldGen(seed64 !== undefined ? seed64 : seed);
+// wo: the world's Create World options (world type, Generate Structures)
+function makeGenerator(seed, dim, kind, seed64, wo) {
+  if (dim === 'overworld' && kind === 'vanilla' && typeof VanillaWorldGen !== 'undefined') return wo && wo.type === 'flat' ? new FlatWorldGen(seed64 !== undefined ? seed64 : seed, wo) : new VanillaWorldGen(seed64 !== undefined ? seed64 : seed, wo);
   const g = dim === 'nether' ? new NetherGenerator(seed) : dim === 'end' ? new EndGenerator(seed) : new Generator(seed), off = dim === 'overworld' ? 64 : 0;
+  if (wo && wo.structures === false) g.noStructures = true;
   const t = Object.create(g);
   t.genChunk = (cx, cz) => tallChunk(g.genChunk(cx, cz), off);
   t.yOff = off;
@@ -2374,6 +2458,7 @@ NO_SNOW[B.DIRT_PATH] = 1; NO_SNOW[B.FARMLAND] = 1;
 
 /* ---------------- registry ---------------- */
 function structurePlan(gen, S, rx, rz) {
+  if (gen.noStructures) return null;
   const k = S.name + ':' + rx + ',' + rz;
   let p = gen.plans.get(k);
   if (p === undefined) {
@@ -3483,7 +3568,7 @@ function buildBastion(p, ctx) {
    Worlds span vanilla y -64..319, stored at y + 64.
    =================================================================== */
 const VG = (() => {
-const { Xoro, xoroAt, NormalNoise, BlendedNoise, splineAt, OFFSET_SPLINE, FACTOR_SPLINE, JAGGED_SPLINE, VanillaClimate, CB_BIOME, climateBiome } = VN;
+const { Xoro, xoroAt, NormalNoise, BlendedNoise, splineAt, OFFSET_SPLINE, FACTOR_SPLINE, JAGGED_SPLINE, amplifiedSplines, VanillaClimate, CB_BIOME, climateBiome } = VN;
 const F = Math.fround;
 
 /* ---------------- 64-bit integers as int32 pairs (fast, no BigInt) ---------------- */
@@ -3863,6 +3948,8 @@ const SURFACE_RULE =
 const NOISE_PARAMS = {
   offset: [-3, [1, 1, 1, 0]], continentalness: [-9, [1, 1, 2, 2, 2, 1, 1, 1, 1]], erosion: [-9, [1, 1, 0, 1, 1]], ridge: [-7, [1, 2, 1, 0, 0, 0]],
   temperature: [-10, [1.5, 0, 1, 0, 0, 0]], vegetation: [-8, [1, 1, 0, 0, 0, 0]], jagged: [-16, new Array(16).fill(1)],
+  // the large biomes preset: the climate noises two octaves wider
+  continentalness_large: [-11, [1, 1, 2, 2, 2, 1, 1, 1, 1]], erosion_large: [-11, [1, 1, 0, 1, 1]], temperature_large: [-12, [1.5, 0, 1, 0, 0, 0]], vegetation_large: [-10, [1, 1, 0, 0, 0, 0]],
   aquifer_barrier: [-3, [1]], aquifer_fluid_level_floodedness: [-7, [1]], aquifer_fluid_level_spread: [-5, [1]], aquifer_lava: [-1, [1]],
   pillar: [-7, [1, 1]], pillar_rareness: [-8, [1]], pillar_thickness: [-8, [1]],
   spaghetti_2d: [-7, [1]], spaghetti_2d_elevation: [-8, [1]], spaghetti_2d_modulator: [-11, [1]], spaghetti_2d_thickness: [-11, [1]],
@@ -3902,31 +3989,39 @@ class Column {
     this.sx = N.offset.get(x * 0.25, 0, z * 0.25) * 4;
     this.sz = N.offset.get(z * 0.25, x * 0.25, 0) * 4;
     const px = x * 0.25 + this.sx, pz = z * 0.25 + this.sz;
-    this.cont = N.continentalness.get(px, 0, pz);
-    this.eros = N.erosion.get(px, 0, pz);
+    this.cont = g.nCont.get(px, 0, pz);
+    this.eros = g.nEros.get(px, 0, pz);
     this.ridge = N.ridge.get(px, 0, pz);
     this.pv = (Math.abs(Math.abs(this.ridge) + -0.6666666666666666) + -0.3333333333333333) * -3;
     const v = [F(this.cont), F(this.eros), F(this.pv), F(this.ridge)];
-    this.offset = splineAt(OFFSET_SPLINE, v) + -0.5037500262260437;
-    this.factor = (splineAt(FACTOR_SPLINE, v) + -10) + 10;
-    this.jag = splineAt(JAGGED_SPLINE, v);
+    this.offset = splineAt(g.spO, v) + -0.5037500262260437;
+    this.factor = (splineAt(g.spF, v) + -10) + 10;
+    this.jag = splineAt(g.spJ, v);
     this.x = x; this.z = z; this._jn = undefined; this._el = undefined; this._t = undefined;
     this.g = g;
   }
   // half_negative of the jagged noise (only needed where jaggedness isn't 0)
   get jagged() { if (this._jn === undefined) { const n = this.g.N.jagged.get(this.x * 1500, 0, this.z * 1500); this._jn = n > 0 ? n : n * 0.5; } return this._jn; }
   get elevation() { if (this._el === undefined) this._el = this.g.N.spaghetti_2d_elevation.get(this.x, 0, this.z) * 8 + 0; return this._el; }
-  get temp() { if (this._t === undefined) { const px = this.x * 0.25 + this.sx, pz = this.z * 0.25 + this.sz; this._t = this.g.N.temperature.get(px, 0, pz); this._h = this.g.N.vegetation.get(px, 0, pz); } return this._t; }
+  get temp() { if (this._t === undefined) { const px = this.x * 0.25 + this.sx, pz = this.z * 0.25 + this.sz; this._t = this.g.nTemp.get(px, 0, pz); this._h = this.g.nVeg.get(px, 0, pz); } return this._t; }
   get humid() { this.temp; return this._h; }
   depth(y) { return yGrad(y, -64, 320, 1.5, -1.5) + this.offset; }
 }
 
 class Overworld {
-  constructor(seed) {
+  // opts: the world preset — large (large biomes), amplified, biome (a single biome everywhere: its id)
+  constructor(seed, opts) {
     this.seed = BigInt.asIntN(64, BigInt(seed));
     const pf = this.pf = Xoro.seeded(this.seed).fork();
-    const cache = {};
+    const cache = {}, o = opts || {};
     this.N = new Proxy(cache, { get: (o, name) => o[name] || (o[name] = new NormalNoise(xoroAt(pf, 'minecraft:' + name), NOISE_PARAMS[name][0], NOISE_PARAMS[name][1])) });
+    const L = o.large ? '_large' : '';
+    this.nCont = this.N['continentalness' + L]; this.nEros = this.N['erosion' + L]; this.nTemp = this.N['temperature' + L]; this.nVeg = this.N['vegetation' + L];
+    const sp = o.amplified ? amplifiedSplines() : { offset: OFFSET_SPLINE, factor: FACTOR_SPLINE, jag: JAGGED_SPLINE };
+    this.spO = sp.offset; this.spF = sp.factor; this.spJ = sp.jag;
+    // slideOverworld: the top fades to -0.078125 from y 240 to 256 (amplified: 304 to 320), the bottom to 0.1171875 (amplified: 0.4)
+    this.slT0 = o.amplified ? 304 : 240; this.slT1 = o.amplified ? 320 : 256; this.slB = o.amplified ? 0.4 : 0.1171875;
+    this.fixedBiome = o.biome >= 0 ? o.biome : -1;
     this.blended = new BlendedNoise(xoroAt(pf, 'minecraft:terrain'), 0.25, 0.125, 80, 160, 8);
     this.mainF = factoryF(pf);
     this.aquiferF = factoryF(xoroAt(pf, 'minecraft:aquifer').fork());
@@ -3993,7 +4088,7 @@ class Overworld {
     let X;
     if (gb === 0) X = 0;
     else {
-      const gt = yGrad(y, 240, 256, 1, 0);
+      const gt = yGrad(y, this.slT0, this.slT1, 1, 0);
       let U;
       if (gt === 0) U = 0;
       else {
@@ -4012,21 +4107,21 @@ class Overworld {
         }
         U = gt * (R + 0.078125);
       }
-      X = gb * ((U + -0.078125) + -0.1171875);
+      X = gb * ((U + -0.078125) + -this.slB);
     }
-    return X + 0.1171875;
+    return X + this.slB;
   }
   // initial_density_without_jaggedness (the preliminary surface)
   initialDensity(c, y) {
     const gb = yGrad(y, -64, -40, 0, 1);
-    if (gb === 0) return 0.1171875;
-    const gt = yGrad(y, 240, 256, 1, 0);
+    if (gb === 0) return this.slB;
+    const gt = yGrad(y, this.slT0, this.slT1, 1, 0);
     let U = 0;
     if (gt !== 0) {
       const d = c.depth(y), m = d === 0 ? 0 : d * c.factor;
       U = gt * (clampD((m > 0 ? m : m * 0.25) * 4 + -0.703125, -64, 64) + 0.078125);
     }
-    return gb * ((U + -0.078125) + -0.1171875) + 0.1171875;
+    return gb * ((U + -0.078125) + -this.slB) + this.slB;
   }
   prelimSurface(x, z) {
     const i = Math.floor(x / 4) * 4, j = Math.floor(z / 4) * 4, k = ckey(i, j);
@@ -4044,6 +4139,7 @@ class Overworld {
   /* ---- biomes ---- */
   // the biome of a quart cell (vanilla quart coordinates, y clamped like a chunk's storage)
   quartBiome(qx, qy, qz) {
+    if (this.fixedBiome >= 0) return this.fixedBiome;
     if (qy < -16) qy = -16; else if (qy > 79) qy = 79;
     const k = ckey(qx, qz);
     let col = this.qbio.get(k);
@@ -4058,6 +4154,7 @@ class Overworld {
   }
   // BiomeManager.getBiome: the biome a block reads, through the fuzzy zoom
   biomeAt(x, y, z) {
+    if (this.fixedBiome >= 0) return this.fixedBiome;
     const i = x - 2, j = y - 2, k = z - 2, l = i >> 2, m = j >> 2, n = k >> 2, d = (i & 3) / 4, e = (j & 3) / 4, f = (k & 3) / 4;
     let best = 0, bd = Infinity;
     for (let p = 0; p < 8; p++) {
@@ -4128,13 +4225,13 @@ class Overworld {
     const u = cc.ub || (cc.ub = new Float64Array(49).fill(NaN));
     let v = u[j];
     if (Number.isNaN(v)) {
-      const c = cc.c, y = -64 + j * 8, gb = yGrad(y, -64, -40, 0, 1), gt = yGrad(y, 240, 256, 1, 0);
-      if (gb === 0) v = 0.1171875;
-      else if (gt === 0) v = gb * (-0.078125 + -0.1171875) + 0.1171875;
+      const c = cc.c, y = -64 + j * 8, gb = yGrad(y, -64, -40, 0, 1), gt = yGrad(y, this.slT0, this.slT1, 1, 0), sb = this.slB;
+      if (gb === 0) v = sb;
+      else if (gt === 0) v = gb * (-0.078125 + -sb) + sb;
       else {
         const jt = c.jag === 0 ? 0 : Math.abs(c.jag) * this.jagMax, d = c.depth(y);
         const b = Math.max((d + jt) * c.factor, (d - jt) * c.factor), sc = (b > 0 ? b : b * 0.25) * 4 + this.blendMax;
-        v = sc >= 1.5625 ? Infinity : gb * ((gt * (sc + 0.078125) + -0.078125) + -0.1171875) + 0.1171875;
+        v = sc >= 1.5625 ? Infinity : gb * ((gt * (sc + 0.078125) + -0.078125) + -sb) + sb;
       }
       u[j] = v;
     }
@@ -4704,10 +4801,14 @@ const hTrapezoid = (a, b, plateau) => r => { const k = b - a; if ((plateau || 0)
 const hVeryBiased = (a, b, inner) => r => { const k = rBetween(r, a + inner, b), l = rBetween(r, a, k - 1); return rBetween(r, a, l - 1 + inner); };
 
 class VanillaWorldGen {
-  constructor(seed64) {
+  // wo: the world's options from the Create World screen (17_world_types.js): the type (default, large_biomes,
+  // amplified, single_biome with its biome, flat) and whether structures generate
+  constructor(seed64, wo) {
     this.seed64 = String(seed64);
-    const big = BigInt.asIntN(64, BigInt(this.seed64));
-    this.v = new VG.Overworld(big);
+    const big = BigInt.asIntN(64, BigInt(this.seed64)), o = this.wo = wo || {};
+    this.v = new VG.Overworld(big, { large: o.type === 'large_biomes', amplified: o.type === 'amplified', biome: o.type === 'single_biome' ? worldBiomeId(o.biome) : -1 });
+    // Generate Structures off: no structure starts at all (dungeons and desert wells are features and stay)
+    if (o.structures === false) { this.noStruct = new Set(STRUCTURES.map(s => s.name).filter(n => n !== 'desert_well').concat(['dungeon'])); this.noStrongholds = true; this.noStructures = true; }
     this.seed = Number(BigInt.asIntN(32, big));
     this.yOff = 0;
     this.plans = new Map();
@@ -4773,7 +4874,7 @@ class VanillaWorldGen {
   surfaceBiome(x, z) {
     const k = (x + 33554432) * 67108864 + (z + 33554432), m = this._sb || (this._sb = new Map());
     let b = m.get(k);
-    if (b === undefined) { if (m.size > 200000) m.clear(); b = this.v.biomeAt(x, Math.max(this.approxTop(x, z), VSEA - 1) + 1, z); m.set(k, b); }
+    if (b === undefined) { if (m.size > 200000) m.clear(); b = this.v.biomeAt(x, Math.max(this.approxTop(x, z), this.seaLevel - 1) + 1, z); m.set(k, b); }
     return b;
   }
   // what the classic structure code asks: the surface (stored y) and biome of a column
@@ -4797,11 +4898,11 @@ class VanillaWorldGen {
   // (for decisions about plants and trees that must agree across chunk borders)
   groundBlock(x, z) {
     const g = this.v, top = this.approxTop(x, z), lx = x & 15, lz = z & 15, x0 = x - lx, z0 = z - lz, hm = this._gbHm || (this._gbHm = new Int32Array(256));
-    const H = (a, b) => Math.max(this.approxTop(x0 + a, z0 + b), VSEA - 1);
+    const H = (a, b) => Math.max(this.approxTop(x0 + a, z0 + b), this.seaLevel - 1);
     hm[(lz << 4) | Math.max(lx - 1, 0)] = H(Math.max(lx - 1, 0), lz); hm[(lz << 4) | Math.min(lx + 1, 15)] = H(Math.min(lx + 1, 15), lz);
     hm[(Math.max(lz - 1, 0) << 4) | lx] = H(lx, Math.max(lz - 1, 0)); hm[(Math.min(lz + 1, 15) << 4) | lx] = H(lx, Math.min(lz + 1, 15));
     const C = g.surfaceCtx(x, z, hm);
-    C.y = top; C.above = 1; C.below = 8; C.water = top < VSEA - 1 ? VSEA : -2147483648;
+    C.y = top; C.above = 1; C.below = 8; C.water = top < this.seaLevel - 1 ? this.seaLevel : -2147483648;
     const r = g.rule(VG.SURFACE_RULE, C);
     return r < 0 ? B.STONE : r;
   }
@@ -4823,7 +4924,7 @@ class VDeco {
   set(x, vy, z, id, m) { if (!this.inside(x, z) || vy < -63 || vy > 319) return false; const i = vIdx(x - this.x0, vy, z - this.z0); this.blocks[i] = id; this.meta[i] = m || 0; return true; }
   // terrain heights every chunk agrees on: the top solid block of the noise terrain, and the water above it
   top(x, z) { return this.gen.approxTop(x, z); }
-  waterDepth(x, z) { const t = this.top(x, z); return t < VSEA - 1 ? VSEA - 1 - t : 0; }
+  waterDepth(x, z) { const t = this.top(x, z), s = this.gen.seaLevel; return t < s - 1 ? s - 1 - t : 0; }
   biome(x, vy, z) { return this.gen.v.quartBiome(x >> 2, vy >> 2, z >> 2); }
   ground(x, z) { return this.gen.groundBlock(x, z); }
   // structure footprints trees keep away from (set by the chunk)
@@ -5051,12 +5152,13 @@ const V_MEADOW_FLOWERS = [B.DANDELION, B.ALLIUM, B.POPPY, B.AZURE_BLUET, B.RED_T
 // one surface feature: [biomes, count spec, function(D, r, x, z)] — count spec: n, [[n, w]...], 'rN' rarity, or a function of the position
 const V_SURFACE = [];
 // reach: how far from its column the feature can place blocks
-const vS = (biomes, count, f, reach) => V_SURFACE.push({ biomes: biomes && new Set(biomes), count, f, reach });
+// (under: a feature of the underground structures step, which superflat worlds leave out)
+const vS = (biomes, count, f, reach, under) => V_SURFACE.push({ biomes: biomes && new Set(biomes), count, f, reach, under });
 const GRASSY = [BI.PLAINS, BI.SUNFLOWER_PLAINS, BI.MEADOW, BI.CHERRY_GROVE];
 // patch_tall_grass_2 / patch_grass_plain / flower_plains: count from the biome noise (noise_threshold_count)
 const vNoiseCount = (x, z, level, below, above) => VN.biomeInfoNoise(x / 200, z / 200) < level ? below : above;
 vS([BI.PLAINS, BI.SUNFLOWER_PLAINS, BI.MEADOW, BI.CHERRY_GROVE, BI.LUSH_CAVES, BI.DRIPSTONE_CAVES, BI.DEEP_DARK], (x, z) => vNoiseCount(x, z, -0.8, 0, 7), (D, r, x, z) => {
-  if (!vRarity(r, 32)) return; const y = Math.max(D.top(x, z), VSEA - 1) + 1;
+  if (!vRarity(r, 32)) return; const y = Math.max(D.top(x, z), D.gen.seaLevel - 1) + 1;
   vPatch(D, r, x, y, z, 96, 7, 3, (px, py, pz) => vTall(D, px, py, pz, B.TALL_GRASS));
 }, 7);
 vS([BI.SAVANNA, BI.SAVANNA_PLATEAU], 1, (D, r, x, z) => { if (!vRarity(r, 5)) return; const y = D.top(x, z) + 1; vPatch(D, r, x, y, z, 96, 7, 3, (px, py, pz) => vTall(D, px, py, pz, B.TALL_GRASS)); }, 7);
@@ -5094,7 +5196,7 @@ vS([BI.SWAMP], 2, vMush(B.BROWN_MUSHROOM, 0), 7);
 vS([BI.OLD_GROWTH_PINE_TAIGA, BI.OLD_GROWTH_SPRUCE_TAIGA], 3, vMush(B.BROWN_MUSHROOM, 4), 7);
 vS([BI.OLD_GROWTH_PINE_TAIGA, BI.OLD_GROWTH_SPRUCE_TAIGA], 1, vMush(B.RED_MUSHROOM, 171), 7);
 const vCane = (D, r, x, z) => {
-  const y = Math.max(D.top(x, z), VSEA - 1) + 1;
+  const y = Math.max(D.top(x, z), D.gen.seaLevel - 1) + 1;
   vPatch(D, r, x, y, z, 20, 4, 0, (px, py, pz, q) => {
     if (D.get(px, py, pz) !== B.AIR) return;
     const g = D.get(px, py - 1, pz);
@@ -5121,7 +5223,7 @@ const vDeadBush = (D, r, x, z) => { const y = D.top(x, z) + 1; vPatch(D, r, x, y
 vS([BI.DESERT], 2, vDeadBush, 7);
 vS([BI.BADLANDS, BI.ERODED_BADLANDS, BI.WOODED_BADLANDS], 20, vDeadBush, 7);
 vS([BI.SWAMP, BI.MANGROVE_SWAMP, BI.OLD_GROWTH_PINE_TAIGA, BI.OLD_GROWTH_SPRUCE_TAIGA], 1, vDeadBush, 7);
-vS([BI.SWAMP, BI.MANGROVE_SWAMP], 4, (D, r, x, z) => { vPatch(D, r, x, VSEA, z, 10, 7, 3, (px, py, pz) => { if (D.get(px, py, pz) === B.AIR && D.get(px, py - 1, pz) === B.WATER) D.set(px, py, pz, B.LILY_PAD); }); }, 7);
+vS([BI.SWAMP, BI.MANGROVE_SWAMP], 4, (D, r, x, z) => { vPatch(D, r, x, D.gen.seaLevel, z, 10, 7, 3, (px, py, pz) => { if (D.get(px, py, pz) === B.AIR && D.get(px, py - 1, pz) === B.WATER) D.set(px, py, pz, B.LILY_PAD); }); }, 7);
 // bamboo
 const vBamboo = (D, r, x, z, podzol) => {
   const y = D.top(x, z) + 1, h = 5 + rInt(r, 12);
@@ -5400,7 +5502,7 @@ vS(null, 1, (D, r, x, z) => {
 // lake_lava_surface: 1 in 200 chunks, on the surface
 vS(null, 1, (D, r, x, z) => {
   if (!vRarity(r, 200)) return;
-  const y = Math.max(D.top(x, z), VSEA - 1) + 1;
+  const y = Math.max(D.top(x, z), D.gen.seaLevel - 1) + 1;
   vLake(D, r, x, y - 4, z, B.LAVA);
 }, 16);
 // GeodeFeature (amethyst_geode, 1 in 24 chunks between y -58 and 30): 3 or 4 points 4 to 6 blocks off the origin;
@@ -5494,8 +5596,8 @@ const vDungeon = (lo, hi) => (D, r, x, z) => {
   }
   if (D.inside(x, z)) { D.set(x, y, z, B.SPAWNER); D.be.push([vIdx(x - D.x0, y, z - D.z0), { type: 'spawner', mob: V_DUNGEON_MOBS[rInt(rr, 4)], delay: 200 }]); }
 };
-vS(null, 10, vDungeon(0, 319), 5);
-vS(null, 4, vDungeon(-58, -1), 5);
+vS(null, 10, vDungeon(0, 319), 5, true);
+vS(null, 4, vDungeon(-58, -1), 5, true);
 // mossy boulders in old growth taigas
 vS([BI.OLD_GROWTH_PINE_TAIGA, BI.OLD_GROWTH_SPRUCE_TAIGA], 2, (D, r, x, z) => { const seed = rInt(r, 1 << 30); if (!D.near(x, z, 3)) return; const g = D.ground(x, z); if (!(g === B.GRASS_BLOCK || g === B.PODZOL || g === B.COARSE_DIRT || g === B.DIRT)) return; growTree('boulder', x, D.top(x, z) + 1, z, mulberry32(seed), (bx, by, bz, id) => { if (D.inside(bx, bz)) { const c = D.get(bx, by, bz); if (c === B.AIR || V_REPLACEABLE[c] || V_DIRT[c]) D.set(bx, by, bz, id); } }); }, 3);
 // ice spikes and packed ice patches
@@ -5524,6 +5626,10 @@ vS(null, 1, vDisk(B.GRAVEL, 2, 5, 2), 6);
 // structures, in stored heights (vanilla y + 64)
 Object.assign(VanillaWorldGen.prototype, {
   sea: VSEA - 1 + VY,
+  seaLevel: VSEA,                                    // the sea level the features and starts read (superflat: -63)
+  deco: true,                                        // the decoration steps run (superflat presets may leave them out)
+  // the terrain and its heightmap: the noise generator's (superflat worlds stack their layers)
+  terrain(cx, cz) { return this.v.terrain(cx, cz); },
   cityY: -51 + VY,                                   // the floor of an ancient city
   cityOk(x, z) { return this.v.biomeAt(x, -27, z) === BI.DEEP_DARK; },
   trialY: h => -40 + VY + Math.floor(h * 21),        // trial chambers start between y -40 and -20
@@ -5532,7 +5638,7 @@ Object.assign(VanillaWorldGen.prototype, {
   structuresFor: Generator.prototype.structuresFor,
 });
 VanillaWorldGen.prototype.genChunk = function (cx, cz) {
-  const { blocks, hm } = this.v.terrain(cx, cz);
+  const { blocks, hm } = this.terrain(cx, cz);
   const meta = new Uint8Array(CH_VOL), be = [], mobs = [], x0 = cx * 16, z0 = cz * 16;
   // biomes: the chunk's quart cells (for underground biomes) and the biome of each column's surface
   const bio3 = new Uint8Array(1536);
@@ -5559,7 +5665,7 @@ VanillaWorldGen.prototype.genChunk = function (cx, cz) {
     return s;
   };
   // ores
-  for (let sz = cz - 1; sz <= cz + 1; sz++) for (let sx = cx - 1; sx <= cx + 1; sx++) {
+  if (this.deco) for (let sz = cz - 1; sz <= cz + 1; sz++) for (let sx = cx - 1; sx <= cx + 1; sx++) {
     V_ORES.forEach((o, fi) => {
       const r = vRand(this.seed, sx, sz, 1000 + fi);
       let n = o[3];
@@ -5574,9 +5680,10 @@ VanillaWorldGen.prototype.genChunk = function (cx, cz) {
   }
   // lakes, geodes, dungeons, springs and plants; then the trees
   const CAVE_BIOMES = [BI.LUSH_CAVES, BI.DRIPSTONE_CAVES, BI.DEEP_DARK];
-  for (let sz = cz - 1; sz <= cz + 1; sz++) for (let sx = cx - 1; sx <= cx + 1; sx++) {
+  if (this.deco) for (let sz = cz - 1; sz <= cz + 1; sz++) for (let sx = cx - 1; sx <= cx + 1; sx++) {
     const bs = biomesNear(sx, sz);
     V_SURFACE.forEach((f, fi) => {
+      if (f.under && this.noUnder) return;
       if (f.biomes) { let any = false; for (const b of f.biomes) if (bs.has(b)) { any = true; break; } if (!any) return; }
       const r = vRand(this.seed, sx, sz, 2000 + fi);
       const n = typeof f.count === 'number' ? f.count : Array.isArray(f.count) ? vWeighted(r, f.count) : f.count(sx * 16, sz * 16, r);
@@ -5612,7 +5719,8 @@ VanillaWorldGen.prototype.genChunk = function (cx, cz) {
     const room = this.portalRoomOf(s);
     if (Math.abs(room.x - (x0 + 8)) < 40 && Math.abs(room.z - (z0 + 8)) < 40) buildPortalRoom(blocks, cx, cz, this.seed, be, meta, room);
   }
-  this.freezeTop(D);
+  if (this.deco) this.freezeTop(D);
+  if (this.afterChunk) this.afterChunk(D);
   return { blocks, biomes, meta, be, mobs, bio3 };
 };
 // freeze_top_layer: ice on still water and a layer of snow where it's cold enough (vanilla y)
@@ -5767,7 +5875,7 @@ const V_PER_CHUNK = new Set(['buried_treasure', 'mineshaft', 'desert_well']);
 /* ---------------- the starts of a vanilla world ---------------- */
 Object.assign(VanillaWorldGen.prototype, {
   // heights the starts read (vanilla y): the first free block above the surface (WORLD_SURFACE_WG counts water) and the ocean floor
-  wsTop(x, z) { return Math.max(this.approxTop(x, z), VSEA - 1); },
+  wsTop(x, z) { return Math.max(this.approxTop(x, z), this.seaLevel - 1); },
   qb(x, vy, z) { return this.v.quartBiome(x >> 2, vy >> 2, z >> 2); },
   // the start of a structure kind in region (rx, rz) of its set, or null: { cx, cz, X, Z, y, type }
   vStart(name, rx, rz) {
@@ -5819,7 +5927,7 @@ Object.assign(VanillaWorldGen.prototype, {
       case 'desert_pyramid': case 'jungle_temple': {
         // the four corners must be above the sea
         const [w, d] = name === 'desert_pyramid' ? [21, 21] : [12, 15], x0 = cx * 16, z0 = cz * 16;
-        for (const [a, b] of [[0, 0], [0, d], [w, 0], [w, d]]) if (this.wsTop(x0 + a, z0 + b) < VSEA) return null;
+        for (const [a, b] of [[0, 0], [0, d], [w, 0], [w, d]]) if (this.wsTop(x0 + a, z0 + b) < this.seaLevel) return null;
         return T[name].has(this.qb(mx, this.wsTop(mx, mz), mz)) ? out() : null;
       }
       case 'swamp_hut': case 'igloo':
@@ -5841,7 +5949,7 @@ Object.assign(VanillaWorldGen.prototype, {
       case 'ocean_monument': {
         // oceans and rivers all around (29 blocks, sea level), deep ocean in the middle
         const bx = cx * 16 + 9, bz = cz * 16 + 9;
-        for (let qy = (VSEA - 29) >> 2; qy <= (VSEA + 29) >> 2; qy++) for (let qz = (bz - 29) >> 2; qz <= (bz + 29) >> 2; qz++) for (let qx = (bx - 29) >> 2; qx <= (bx + 29) >> 2; qx++)
+        for (let qy = (this.seaLevel - 29) >> 2; qy <= (this.seaLevel + 29) >> 2; qy++) for (let qz = (bz - 29) >> 2; qz <= (bz + 29) >> 2; qz++) for (let qx = (bx - 29) >> 2; qx <= (bx + 29) >> 2; qx++)
           if (!T.monument_around.has(this.v.quartBiome(qx, qy, qz))) return null;
         return T.ocean_monument.has(this.qb(mx, this.approxTop(mx, mz), mz)) ? out() : null;
       }
@@ -5876,6 +5984,7 @@ Object.assign(VanillaWorldGen.prototype, {
   },
   // the plan the game's builder of a kind makes at a vanilla start
   vPlan(name, rx, rz) {
+    if (this.noStruct.has(name)) return null;
     const k = name + ':' + rx + ',' + rz;
     let p = this.plans.get(k);
     if (p !== undefined) return p;
@@ -5946,6 +6055,7 @@ Object.assign(VanillaWorldGen.prototype, {
 const V_SH_BAD = new Set([BI.OCEAN, BI.DEEP_OCEAN, BI.FROZEN_OCEAN, BI.DEEP_FROZEN_OCEAN, BI.COLD_OCEAN, BI.DEEP_COLD_OCEAN, BI.LUKEWARM_OCEAN, BI.DEEP_LUKEWARM_OCEAN, BI.WARM_OCEAN,
   BI.RIVER, BI.FROZEN_RIVER, BI.BEACH, BI.SNOWY_BEACH, BI.STONY_SHORE, BI.SWAMP, BI.MANGROVE_SWAMP, BI.DEEP_DARK]);
 VanillaWorldGen.prototype.strongholds = function (n) {
+  if (this.noStrongholds) return [];
   let S = this._sh;
   if (!S) {
     const [h, l] = VG.hiLo(this.v.seed), r = new VG.JRandF(h, l);
@@ -5960,9 +6070,12 @@ VanillaWorldGen.prototype.strongholds = function (n) {
     const [lh, ll] = [VG.R64.h, VG.R64.l], lr = new VG.JRandF(lh, ll), st = { alt: 0 }, qx0 = ax >> 2, qz0 = az >> 2;
     let ox = ax, oz = az, found = 0;
     for (let j = -28; j <= 28; j++) for (let i = -28; i <= 28; i++) {
-      const c = g.column((qx0 + i) * 4, (qz0 + j) * 4);
-      np[0] = q(c.temp); np[1] = q(c.humid); np[2] = q(c.cont); np[3] = q(c.eros); np[4] = q(c.depth(0)); np[5] = q(c.ridge);
-      const b = VN.CB_BIOME[VN.climateBiomeLast(np, st)];
+      let b = g.fixedBiome;
+      if (b < 0) {
+        const c = g.column((qx0 + i) * 4, (qz0 + j) * 4);
+        np[0] = q(c.temp); np[1] = q(c.humid); np[2] = q(c.cont); np[3] = q(c.eros); np[4] = q(c.depth(0)); np[5] = q(c.ridge);
+        b = VN.CB_BIOME[VN.climateBiomeLast(np, st)];
+      }
       if (V_SH_BAD.has(b)) continue;
       if (found === 0 || lr.nextInt(found + 1) === 0) { ox = (qx0 + i) * 4; oz = (qz0 + j) * 4; }
       found++;
@@ -5998,6 +6111,137 @@ VanillaWorldGen.prototype.nearestPortalRoom = function (x, z) {
   for (const s of this.strongholds(V_SH_RINGS[k])) { const d = (s.x - x) ** 2 + (s.z - z) ** 2; if (d < bd) { bd = d; best = s; } }
   return best && this.portalRoomOf(best);
 };
+
+/* @file 17_world_types.js */
+/* ===================================================================
+   WORLD TYPES — the presets of the Create World screen besides the
+   default one. Large Biomes, Amplified and Single Biome are the noise
+   generator with other options (VG.Overworld); Superflat stacks layers
+   from the bottom of the world under one biome, with the structure sets
+   its preset names, and runs the biome's features only for the presets
+   that decorate. Shared with the generator workers.
+   World options (meta.wo): { type: 'default' | 'flat' | 'large_biomes' |
+   'amplified' | 'single_biome', biome, structures, bonus, flat: { layers,
+   biome, sets, features, lakes } }.
+   =================================================================== */
+const WORLD_TYPES = ['default', 'flat', 'large_biomes', 'amplified', 'single_biome'];
+// a biome by its key ('plains', 'minecraft:plains') or name ('Plains'); -1 if there is none
+function worldBiomeId(name) {
+  const k = String(name || '').replace(/^minecraft:/, '').toLowerCase().replace(/ /g, '_');
+  const i = BIOME_NAMES.findIndex(n => n.toLowerCase().replace(/ /g, '_') === k);
+  return i;
+}
+const worldBiomeKey = id => BIOME_NAMES[id].toLowerCase().replace(/ /g, '_');
+
+/* ---------------- superflat presets ---------------- */
+// [name, icon, layers;biome (the preset text: bottom layer first), structure sets, features, lakes]
+const FLAT_PRESETS = [
+  ['Classic Flat', 'grass_block', 'minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block;minecraft:plains', ['villages'], false, false],
+  ["Tunnelers' Dream", 'stone', 'minecraft:bedrock,230*minecraft:stone,5*minecraft:dirt,minecraft:grass_block;minecraft:windswept_hills', ['mineshafts', 'strongholds'], true, false],
+  ['Water World', 'water_bucket', 'minecraft:bedrock,64*minecraft:deepslate,5*minecraft:stone,5*minecraft:dirt,5*minecraft:gravel,90*minecraft:water;minecraft:deep_ocean', ['ocean_ruins', 'shipwrecks', 'ocean_monuments'], false, false],
+  ['Overworld', 'short_grass', 'minecraft:bedrock,59*minecraft:stone,3*minecraft:dirt,minecraft:grass_block;minecraft:plains', ['villages', 'mineshafts', 'pillager_outposts', 'ruined_portals', 'strongholds'], true, true],
+  ['Snowy Kingdom', 'snow', 'minecraft:bedrock,59*minecraft:stone,3*minecraft:dirt,minecraft:grass_block,minecraft:snow;minecraft:snowy_plains', ['villages', 'igloos'], false, false],
+  ['Bottomless Pit', 'feather', '2*minecraft:cobblestone,3*minecraft:dirt,minecraft:grass_block;minecraft:plains', ['villages'], false, false],
+  ['Desert', 'sand', 'minecraft:bedrock,3*minecraft:stone,52*minecraft:sandstone,8*minecraft:sand;minecraft:desert', ['villages', 'desert_pyramids', 'mineshafts', 'strongholds'], true, false],
+  ['Redstone Ready', 'redstone', 'minecraft:bedrock,3*minecraft:stone,116*minecraft:sandstone;minecraft:desert', [], false, false],
+  ['The Void', 'barrier', 'minecraft:air;minecraft:the_void', [], true, false],
+];
+// structure sets and the structures they hold
+const FLAT_SETS = {
+  villages: 'village', desert_pyramids: 'desert_pyramid', igloos: 'igloo', jungle_temples: 'jungle_temple', swamp_huts: 'swamp_hut',
+  pillager_outposts: 'pillager_outpost', ocean_monuments: 'ocean_monument', ocean_ruins: 'ocean_ruin', shipwrecks: 'shipwreck',
+  ruined_portals: 'ruined_portal', trail_ruins: 'trail_ruins', trial_chambers: 'trial_chambers', mineshafts: 'mineshaft',
+  buried_treasures: 'buried_treasure', ancient_cities: 'ancient_city', woodland_mansions: 'woodland_mansion', strongholds: 'stronghold',
+};
+// the layers of a preset text, bottom first: [[block name, height]...] (null when it doesn't read, like Java's parser:
+// an unknown block or a bad count spoils it all; heights past the world's 384 blocks are cut)
+function parseFlatLayers(text) {
+  const out = [];
+  let total = 0;
+  for (const part of String(text).split(',')) {
+    const m = part.trim().match(/^(?:(-?\d+)\*)?(?:minecraft:)?([a-z0-9_]+)$/);
+    if (!m) return null;
+    const name = m[2], id = B[name.toUpperCase()];
+    if (id === undefined || BLOCK_NAMES[id] !== name) return null;
+    const n = Math.min(total + Math.max(m[1] === undefined ? 1 : parseInt(m[1], 10), 0), 384) - total;
+    out.push([name, n]); total += n;
+  }
+  return out.length ? out : null;
+}
+// a preset text: "layers;biome" — the biome is optional (plains) and an unknown one falls back to plains
+function parseFlatPreset(text, base) {
+  const [lt, bt] = String(text || '').split(';'), layers = parseFlatLayers(lt || '');
+  if (!layers) return null;
+  let biome = 'plains';
+  if (bt !== undefined && worldBiomeId(bt) >= 0) biome = worldBiomeKey(worldBiomeId(bt));
+  const b = base || flatFromPreset(0);
+  return { layers, biome, sets: b.sets.slice(), features: b.features, lakes: b.lakes };
+}
+function flatFromPreset(i) {
+  const P = FLAT_PRESETS[i], f = parseFlatPreset(P[2], { sets: P[3], features: P[4], lakes: P[5] });
+  f.preset = i;
+  return f;
+}
+function flatPresetText(f) {
+  return f.layers.map(([n, h]) => (h === 1 ? '' : h + '*') + 'minecraft:' + n).join(',') + ';minecraft:' + f.biome;
+}
+
+/* ---------------- the superflat generator ---------------- */
+class FlatWorldGen extends VanillaWorldGen {
+  constructor(seed64, wo) {
+    const f = (wo && wo.flat) || flatFromPreset(0), bi = worldBiomeId(f.biome) >= 0 ? worldBiomeId(f.biome) : BI.PLAINS;
+    // the noise generator only gives the seeds of the structures; the biome is fixed
+    super(seed64, Object.assign({}, wo, { type: 'single_biome', biome: worldBiomeKey(bi) }));
+    this.flat = f; this.fixed = bi;
+    const col = this.col = new Uint16Array(384);
+    let y = 0;
+    for (const [name, n] of f.layers) { const id = B[name.toUpperCase()]; for (let k = 0; k < n && y < 384; k++) col[y++] = id; }
+    // the top block of the stack (heightmaps count water) and the top solid one (where things grow)
+    this.flatSurf = -65; this.flatTop = -65;
+    for (let i = 383; i >= 0; i--) if (col[i] !== B.AIR) { this.flatSurf = i - 64; break; }
+    for (let i = 383; i >= 0; i--) if (col[i] !== B.AIR && col[i] !== B.WATER && col[i] !== B.LAVA && V_MOTION[col[i]]) { this.flatTop = i - 64; break; }
+    // FlatLevelSource's sea level is -63; the classic structure builders read the water's top as their sea
+    this.seaLevel = -63;
+    let wt = -1;
+    for (let i = 383; i >= 0; i--) if (col[i] === B.WATER) { wt = i; break; }
+    this.sea = wt >= 0 ? wt + VY : VY - 64;
+    // the decoration steps: the biome's features, but no underground or surface structures (dungeons, fossils, wells)
+    this.deco = !!f.features; this.noUnder = true;
+    this.void = bi === BI.THE_VOID;
+    const allowed = new Set((wo && wo.structures === false ? [] : f.sets).map(s => FLAT_SETS[s]).filter(Boolean));
+    this.noStruct = new Set(STRUCTURES.map(s => s.name).filter(n => !allowed.has(n)).concat(['dungeon', 'desert_well']));
+    this.noStrongholds = !allowed.has('stronghold');
+    if (this.void) this.deco = false;
+  }
+  terrain(cx, cz) {
+    const blocks = new Uint16Array(98304), hm = new Int32Array(256).fill(this.flatSurf), col = this.col;
+    for (let y = 0; y < 384; y++) if (col[y]) blocks.fill(col[y], y << 8, (y + 1) << 8);
+    return { blocks, hm };
+  }
+  approxTop() { return this.flatTop; }
+  wsTop() { return this.flatSurf; }
+  densityAt(x, vy, z) { const id = vy >= -64 && vy < 320 ? this.col[vy + 64] : B.AIR; return id !== B.AIR && id !== B.WATER && id !== B.LAVA ? 1 : -1; }
+  groundBlock() { return this.flatTop >= -64 ? this.col[this.flatTop + 64] : B.STONE; }
+  surfaceBiome() { return this.fixed; }
+  biomeAt() { return this.fixed; }
+  caveFlags() { return 0; }
+  caveBiomeAt() { return -1; }
+  // flat worlds have no spawn target: the search starts at the origin's chunk
+  spawnEstimate() { return [0, 0]; }
+  // strongholds in a superflat world sit at its bottom (StructurePiecesBuilder.moveBelowSeaLevel with sea level -63)
+  portalRoomOf(s) { return { x: s.x + 4, z: s.z + 4, y: VY - 61 }; }
+  mineY() { return VY - 55; }
+  trialY() { return VY - 40; }
+  // The Void's one feature: a 33 x 33 stone platform around (8, -61, 8) with a cobblestone in the middle
+  afterChunk(D) {
+    if (!this.void || !this.flat.features) return;
+    if (Math.max(Math.abs(D.cx), Math.abs(D.cz)) > 1) return;
+    for (let z = D.z0; z < D.z0 + 16; z++) for (let x = D.x0; x < D.x0 + 16; x++) {
+      if (Math.max(Math.abs(x - 8), Math.abs(z - 8)) > 16) continue;
+      D.set(x, -61, z, x === 8 && z === 8 ? B.COBBLESTONE : B.STONE);
+    }
+  }
+}
 
 </script>
 <script>
@@ -15744,12 +15988,12 @@ class UI {
     click('b-controls', () => { this.back = 'scr-title'; this.show('scr-controls'); });
     click('b-kback', () => this.show(this.back || 'scr-title'));
     click('b-wback', () => this.show('scr-title'));
-    click('b-create', () => { this.newMode = 0; this.newCheats = null; this.newDiff = OPTIONS.difficulty; this.updateModeBtn(); $('in-name').value = 'New World'; $('in-seed').value = ''; this.show('scr-create'); });
+    click('b-create', () => { this.newMode = 0; this.newCheats = null; this.newDiff = OPTIONS.difficulty; this.updateModeBtn(); $('in-name').value = 'New World'; $('in-seed').value = ''; if (this.cwReset) this.cwReset(); this.show('scr-create'); });
     click('b-cback', () => this.openWorlds());
     click('b-mode', () => { this.newMode = (this.newMode + 1) % 3; this.updateModeBtn(); });
     click('b-cdiff', () => { this.newDiff = (this.newDiff + 1) % 4; this.updateModeBtn(); });
     click('b-cheats', () => { this.newCheats = !this.newCheatsOn(); this.updateModeBtn(); });
-    click('b-docreate', () => g.createWorld({ name: $('in-name').value.trim() || 'New World', seed: $('in-seed').value.trim(), mode: this.newMode === 2 ? 1 : 0, hardcore: this.newMode === 1, cheats: this.newCheatsOn(), difficulty: this.newMode === 1 ? 3 : this.newDiff }));
+    click('b-docreate', () => g.createWorld(Object.assign({ name: $('in-name').value.trim() || 'New World', seed: $('in-seed').value.trim(), mode: this.newMode === 2 ? 1 : 0, hardcore: this.newMode === 1, cheats: this.newCheatsOn(), difficulty: this.newMode === 1 ? 3 : this.newDiff }, this.cwOptions ? this.cwOptions() : {})));
     click('b-play', () => { if (this.selWorld) g.loadWorld(this.selWorld); });
     click('b-delete', async () => {
       if (!this.selWorld) return;
@@ -18204,7 +18448,7 @@ class Game {
   }
   // ---------------- workers ----------------
   setupWorkers() {
-    const src = $('shared-src').textContent + '\nconst G={};onmessage=function(e){const d=e.data,k=d.dim+":"+(d.seed|0)+":"+(d.kind||"")+":"+(d.seed64||"");if(!G[k])G[k]=makeGenerator(d.seed,d.dim,d.kind,d.seed64);const r=G[k].genChunk(d.cx,d.cz);const t=[r.blocks.buffer,r.biomes.buffer];if(r.meta)t.push(r.meta.buffer);if(r.bio3)t.push(r.bio3.buffer);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,dim:d.dim,blocks:r.blocks,biomes:r.biomes,meta:r.meta||null,be:r.be||null,mobs:r.mobs||null,bio3:r.bio3||null},t);};';
+    const src = $('shared-src').textContent + '\nconst G={};onmessage=function(e){const d=e.data,k=d.dim+":"+(d.seed|0)+":"+(d.kind||"")+":"+(d.seed64||"")+":"+(d.wo?JSON.stringify(d.wo):"");if(!G[k])G[k]=makeGenerator(d.seed,d.dim,d.kind,d.seed64,d.wo);const r=G[k].genChunk(d.cx,d.cz);const t=[r.blocks.buffer,r.biomes.buffer];if(r.meta)t.push(r.meta.buffer);if(r.bio3)t.push(r.bio3.buffer);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,dim:d.dim,blocks:r.blocks,biomes:r.biomes,meta:r.meta||null,be:r.be||null,mobs:r.mobs||null,bio3:r.bio3||null},t);};';
     this.workers = [];
     try {
       const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
@@ -18239,7 +18483,7 @@ class Game {
   }
   genChunk(c) {
     const w = this.world;
-    if (this.workers.length) { this.workers[this.wrr++ % this.workers.length].postMessage({ cx: c.cx, cz: c.cz, seed: w.seed, tok: this.tok, dim: w.dim, kind: w.vanilla ? 'vanilla' : '', seed64: w.seed64 }); }
+    if (this.workers.length) { this.workers[this.wrr++ % this.workers.length].postMessage({ cx: c.cx, cz: c.cz, seed: w.seed, tok: this.tok, dim: w.dim, kind: w.vanilla ? 'vanilla' : '', seed64: w.seed64, wo: w.wo }); }
     else { this.localQueue = this.localQueue || []; this.localQueue.push(c); }
   }
   // meta/be/ents come from a save; gen holds what the generator made for a fresh chunk (block states, loot chests, mobs)
@@ -18317,8 +18561,8 @@ class Game {
     const t0 = performance.now();
     // main-thread generation fallback
     if (this.localQueue && this.localQueue.length) {
-      const gk = w.dim + ':' + (w.seed | 0) + ':' + (w.vanilla ? w.seed64 : '');
-      if (!this.localGen || this.localGenKey !== gk) { this.localGen = makeGenerator(w.seed, w.dim, w.vanilla ? 'vanilla' : '', w.seed64); this.localGenKey = gk; }
+      const gk = w.dim + ':' + (w.seed | 0) + ':' + (w.vanilla ? w.seed64 : '') + ':' + w.woKey;
+      if (!this.localGen || this.localGenKey !== gk) { this.localGen = makeGenerator(w.seed, w.dim, w.vanilla ? 'vanilla' : '', w.seed64, w.wo); this.localGenKey = gk; }
       while (this.localQueue.length && performance.now() - t0 < budget * 0.5) {
         const c = this.localQueue.shift(); this.inflight--;
         const r = this.localGen.genChunk(c.cx, c.cz);
@@ -18381,6 +18625,10 @@ class Game {
     // the seed as Java Edition reads it: a whole number in the long range, or else the text's hash
     const seed64 = javaSeed(o.seed), seed = Number(BigInt.asIntN(32, BigInt(seed64)));
     const meta = { id: 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: o.name, seed, seed64, gen: 'vanilla', h: CH_H, mode: o.mode, hardcore: !!o.hardcore, cheats: o.cheats !== undefined ? !!o.cheats : !o.hardcore, difficulty: o.hardcore ? 3 : o.difficulty, created: Date.now(), lastPlayed: Date.now(), time: 1000, player: null };
+    // the World and More tabs: world type and Generate Structures (meta.wo), the bonus chest, the game rules
+    if (o.wo) meta.wo = o.wo;
+    if (o.bonus) meta.bonusPending = true;
+    if (o.rules && Object.keys(o.rules).length) meta.rules = Object.assign({}, o.rules);
     this.noSave = false;
     try { await DB.putWorld(meta); } catch (e) { this.noSave = true; }
     this.startWorld(meta, new Set());
@@ -18444,6 +18692,10 @@ class Game {
   newWorld(dim, st) {
     const w = new World(this.meta.seed, dim);
     w.vanilla = this.meta.gen === 'vanilla'; w.seed64 = this.meta.seed64 || String(this.meta.seed | 0);
+    // the Create World options: the world type and Generate Structures (17_world_types.js)
+    w.wo = w.vanilla && this.meta.wo || null; w.woKey = w.wo ? JSON.stringify(w.wo) : '';
+    w.noStructures = !!(w.wo && w.wo.structures === false); w.flatWorld = !!(w.wo && w.wo.type === 'flat');
+    w.horizonY = w.flatWorld ? -64 : 63;
     w.time = st.time; w.tick = st.tick;
     w.raining = !!st.raining; w.rainTime = st.rainTime || (12000 + Math.random() * 24000); w.rainStrength = w.raining && dim === 'overworld' ? 1 : 0;
     w.onFizz = (x, y, z) => { this.sound('fizz', x, y, z); this.particles.smoke(x + 0.5, y + 1, z + 0.5, 4); };
@@ -19417,13 +19669,14 @@ class Game {
           const dist = (x, z) => Math.round(Math.hypot(x - p.x, z - p.z));
           if (what === 'fortress' || what === 'nether_fortress') {
             if (w.dim !== 'nether') return say('Fortresses are found in the Nether', '#f66');
-            const f = nearestFortress(w.seed, p.x, p.z);
+            const f = w.noStructures ? null : nearestFortress(w.seed, p.x, p.z);
             if (!f) return say('Could not find a fortress nearby', '#f66');
             return say('The nearest fortress is at ' + f.x + ', ' + f.y + ', ' + f.z + ' (' + dist(f.x, f.z) + ' blocks away)', '#8f8');
           }
           if (what === 'portal_room' || what === 'portal room' || what === 'stronghold') {
             if (w.dim !== 'overworld') return say('Portal rooms are found in the Overworld', '#f66');
             const pr = w.vanilla ? this.genInfo().nearestPortalRoom(p.x, p.z) : nearestPortalRoom(w.seed, p.x, p.z);
+            if (!pr) return say('Could not find a portal room nearby', '#f66');
             return say('The nearest portal room is at ' + pr.x + ', ' + showY(pr.y + this.genYOff()) + ', ' + pr.z + ' (' + dist(pr.x, pr.z) + ' blocks away)', '#8f8');
           }
           const name = what.replace(/_/g, ' ');
@@ -19432,7 +19685,7 @@ class Game {
             const dim = st === END_CITY_STRUCT ? 'end' : st === BASTION_STRUCT ? 'nether' : 'overworld';
             if (w.dim !== dim) return say('That structure is found in ' + (dim === 'end' ? 'the End' : dim === 'nether' ? 'the Nether' : 'the Overworld'), '#f66');
             const key = '_gen_' + dim;
-            if (dim !== 'overworld' && (!this[key] || this[key].seed !== (w.seed | 0))) this[key] = makeGenerator(w.seed, dim);
+            if (dim !== 'overworld' && (!this[key] || this[key].seed !== (w.seed | 0) || this[key]._wo !== w.woKey)) { this[key] = makeGenerator(w.seed, dim, '', undefined, w.wo); this[key]._wo = w.woKey; }
             const gen = dim === 'overworld' ? this.genInfo() : this[key];
             const f = nearestStructure(gen, st.name, p.x, p.z, 12);
             if (!f) return say('Could not find a ' + name + ' nearby', '#f66');
@@ -19500,7 +19753,7 @@ class Game {
       skyTint: L(L([0.6, 0.66, 1.0], [1, 1, 1], day), [1.0, 0.86, 0.72], sunset * 0.5),
       cloudCol: L(L([0.08, 0.08, 0.12], [1, 1, 1], day), [1.0, 0.72, 0.55], sunset * 0.6).map(v => v * (1 - 0.35 * rain)),
       fogEnd: OPTIONS.renderDist * 16, fogStart: 0, under: false,
-      nightVision: 0, dim: 0, ambient: [0.025, 0.025, 0.025], voidDark: eye[1] - this.world.yOff < 63 ? 1 : 0,
+      nightVision: 0, dim: 0, ambient: [0.025, 0.025, 0.025], voidDark: eye[1] - this.world.yOff < this.world.horizonY ? 1 : 0,
       lm: this.lightmapEnv('overworld', w.time, rain, this.storm ? this.storm.level || 0 : 0, this.storm && this.storm.flash > 0),
     };
     // vanilla's terrain fog: the last tenth of the render distance (4 to 64 blocks)
@@ -20458,6 +20711,8 @@ Object.assign(Game.prototype, {
     if (w.dim !== 'overworld') return false;
     // the eye drifts towards the nearest stronghold portal room
     const room = w.vanilla ? this.genInfo().nearestPortalRoom(p.x, p.z) : nearestPortalRoom(w.seed, p.x, p.z);
+    // no stronghold to find (structures turned off): nothing happens
+    if (!room) return true;
     this.entities.push(new EyeEntity(this, p.x, p.y + 1.5, p.z, room.x + 0.5, room.z + 0.5));
     this.sound('throw', p.x, p.y + 1.5, p.z);
     p.consumeHeld(1); p.useCd = 10; this.ui.refreshHotbar();
@@ -22751,8 +23006,8 @@ Game.prototype.initialSpawn = function (c) {
 // the overworld generator, for questions about the world (biomes, heights, structures); its heights are its
 // own: classic worlds sit 64 below the stored y (genYOff), vanilla ones use the stored y
 Game.prototype.genInfo = function () {
-  const w = this.world, s = w.seed | 0, k = w.vanilla ? 'v' + w.seed64 : 'c' + s;
-  if (!this._genInfo || this._genInfoKey !== k) { this._genInfo = w.vanilla ? new VanillaWorldGen(w.seed64) : new Generator(s); this._genInfoKey = k; }
+  const w = this.world, s = w.seed | 0, k = w.vanilla ? 'v' + w.seed64 + ':' + w.woKey : 'c' + s;
+  if (!this._genInfo || this._genInfoKey !== k) { this._genInfo = w.vanilla ? makeGenerator(s, 'overworld', 'vanilla', w.seed64, w.wo) : new Generator(s); this._genInfoKey = k; }
   return this._genInfo;
 };
 Game.prototype.genYOff = function () { const w = this.world; return w && w.dim === 'overworld' && !w.vanilla ? 64 : 0; };
@@ -28848,7 +29103,7 @@ Object.assign(Game.prototype, {
       if (!(cat in s.lists) || y < s.y0 || y > s.y1) continue;
       for (const b of s.boxes) if (x >= b[0] && x <= b[2] && z >= b[1] && z <= b[3]) return s.lists[cat];
     }
-    if (w.dim === 'nether' && cat === 'monster' && w.getBlock(x, y - 1, z) === B.NETHER_BRICKS && inFortress(w.seed, x, z)) return VM_FORTRESS;
+    if (w.dim === 'nether' && cat === 'monster' && !w.noStructures && w.getBlock(x, y - 1, z) === B.NETHER_BRICKS && inFortress(w.seed, x, z)) return VM_FORTRESS;
     const L = V_BSP[this.vBiome(x, y, z)];
     return L && L[cat] || V_NONE;
   },
@@ -33111,6 +33366,245 @@ const _playerDataST = Game.prototype.playerData;
 Game.prototype.playerData = function () { const d = _playerDataST.call(this), p = this.player; if (p.stats) d.stats = p.stats; return d; };
 const _startWorldST = Game.prototype.startWorld;
 Game.prototype.startWorld = function (meta, saved) { const r = _startWorldST.call(this, meta, saved), s = meta.player, p = this.player; if (p && s && s.stats) p.stats = s.stats; return r; };
+
+/* @file 128_create_world.js */
+/* ===================================================================
+   CREATE WORLD — Java Edition 1.21's Create World screen in its three
+   tabs: Game (name, game mode, difficulty, commands), World (world
+   type with Customize, seed, Generate Structures, Bonus Chest) and More
+   (the game rules); the superflat layer and preset screens, the single
+   biome list and the game rule editor. A new world keeps its options in
+   meta.wo (17_world_types.js), and its bonus chest goes down in the
+   spawn chunk once that chunk is there.
+   =================================================================== */
+const WT_LABEL = { default: 'Default', flat: 'Superflat', large_biomes: 'Large Biomes', amplified: 'Amplified', single_biome: 'Single Biome' };
+const WT_HINT = {
+  default: '',
+  flat: 'A flat world of stacked layers; Customize picks them or a preset',
+  large_biomes: 'The default world with every biome four times as wide',
+  amplified: 'Towering mountains and deep valleys: just for fun, and heavy on the computer',
+  single_biome: '',
+};
+// the game rules by the categories of the editor, each with a short description of ours
+const RULE_CATS = [
+  ['Player', { disableElytraMovementCheck: 'Skip the elytra speed check', doImmediateRespawn: 'Respawn without the death screen', doLimitedCrafting: 'Craft only unlocked recipes',
+    drowningDamage: 'Drowning hurts', enderPearlsVanishOnDeath: 'Thrown ender pearls vanish when their thrower dies', fallDamage: 'Falling hurts', fireDamage: 'Fire hurts',
+    freezeDamage: 'Freezing hurts', keepInventory: 'Keep the inventory after dying', naturalRegeneration: 'Health comes back with a full hunger bar',
+    playersSleepingPercentage: 'Share of players who must sleep to skip the night (%)', spawnRadius: 'Radius of the area players spawn in', spectatorsGenerateChunks: 'Spectators load new terrain' }],
+  ['Mobs', { disableRaids: 'No raids', forgiveDeadPlayers: 'Angry neutral mobs forgive a player who died', maxEntityCramming: 'Mobs in one spot before they get squeezed',
+    mobGriefing: 'Mobs can change blocks and pick up items', universalAnger: 'Angry neutral mobs go after every player nearby' }],
+  ['Spawning', { doInsomnia: 'Phantoms come after sleepless nights', doMobSpawning: 'Mobs spawn on their own', doPatrolSpawning: 'Pillager patrols', doTraderSpawning: 'Wandering traders',
+    doWardenSpawning: 'Wardens emerge' }],
+  ['Drops', { blockExplosionDropDecay: 'Block explosions lose some drops', doEntityDrops: 'Minecarts, boats, frames and the like drop as items', doMobLoot: 'Mobs drop loot and experience',
+    doTileDrops: 'Broken blocks drop items', mobExplosionDropDecay: 'Mob explosions lose some drops', projectilesCanBreakBlocks: 'Projectiles break what they can break',
+    tntExplosionDropDecay: 'TNT explosions lose some drops' }],
+  ['World Updates', { doDaylightCycle: 'The time of day moves on', doFireTick: 'Fire spreads and burns out', doVinesSpread: 'Vines grow and spread', doWeatherCycle: 'The weather changes',
+    lavaSourceConversion: 'Flowing lava between two sources becomes a source', randomTickSpeed: 'Random ticks per chunk section and tick',
+    snowAccumulationHeight: 'Snow layers that build up while it snows', waterSourceConversion: 'Flowing water between two sources becomes a source' }],
+  ['Chat', { announceAdvancements: 'Advancements show in the chat', commandBlockOutput: 'Command blocks report in the chat', logAdminCommands: 'Log operator commands',
+    sendCommandFeedback: 'Commands answer in the chat', showDeathMessages: 'Death messages' }],
+  ['Miscellaneous', { commandModificationBlockLimit: 'Blocks one command may change', globalSoundEvents: 'Some sounds carry to every player', maxCommandChainLength: 'Longest chain of commands',
+    maxCommandForkCount: 'Most contexts a command may fork into', reducedDebugInfo: 'Less on the debug screen', spawnChunkRadius: 'Chunks kept loaded around the spawn' }],
+];
+const RULE_RANGE = { spawnChunkRadius: [0, 32] };
+
+/* ---------------- the screen ---------------- */
+UI.prototype.cwReset = function () {
+  this.cw = { tab: 'game', type: 'default', structures: true, bonus: false, flat: flatFromPreset(0), biome: 'plains', rules: {} };
+  this.cwRefresh();
+};
+UI.prototype.cwRefresh = function () {
+  const c = this.cw || (this.cwReset(), this.cw);
+  for (const b of document.querySelectorAll('#ctabs .cwtab')) b.classList.toggle('sel', b.dataset.tab === c.tab);
+  for (const t of ['game', 'world', 'more']) $('cpage-' + t).classList.toggle('hidden', t !== c.tab);
+  $('b-wtype').textContent = 'World Type: ' + WT_LABEL[c.type];
+  $('b-wcustom').disabled = !(c.type === 'flat' || c.type === 'single_biome');
+  $('wtype-hint').textContent = c.type === 'single_biome' ? 'Biome: ' + BIOME_NAMES[worldBiomeId(c.biome)] : c.type === 'flat' ? WT_HINT.flat + ' (' + (c.flat.preset !== undefined ? FLAT_PRESETS[c.flat.preset][0] : 'custom') + ')' : WT_HINT[c.type];
+  $('b-wstruct').textContent = 'Generate Structures: ' + (c.structures ? 'ON' : 'OFF');
+  // hardcore worlds have no bonus chest
+  const hc = this.newMode === 1;
+  $('b-wbonus').textContent = 'Bonus Chest: ' + (c.bonus && !hc ? 'ON' : 'OFF');
+  $('b-wbonus').disabled = hc;
+};
+// what the Create button hands to createWorld
+UI.prototype.cwOptions = function () {
+  const c = this.cw || {};
+  const wo = { type: c.type || 'default', structures: c.structures !== false };
+  if (wo.type === 'flat') wo.flat = JSON.parse(JSON.stringify(c.flat));
+  if (wo.type === 'single_biome') wo.biome = c.biome;
+  return { wo, bonus: !!c.bonus && this.newMode !== 1, rules: Object.assign({}, c.rules) };
+};
+const _bindMenusCW = UI.prototype.bindMenus;
+UI.prototype.bindMenus = function () {
+  _bindMenusCW.call(this);
+  const click = (id, fn) => $(id).addEventListener('click', e => { AUDIO.init(); AUDIO.play('click'); fn(e); });
+  for (const b of document.querySelectorAll('#ctabs .cwtab')) b.addEventListener('click', () => { AUDIO.init(); AUDIO.play('click'); this.cw.tab = b.dataset.tab; this.cwRefresh(); });
+  // a cycle button: shift goes back
+  click('b-wtype', e => { const i = WORLD_TYPES.indexOf(this.cw.type), n = WORLD_TYPES.length; this.cw.type = WORLD_TYPES[(i + (e.shiftKey ? n - 1 : 1)) % n]; this.cwRefresh(); });
+  click('b-wcustom', () => { if (this.cw.type === 'flat') this.openFlat(); else if (this.cw.type === 'single_biome') this.openBuffet(); });
+  click('b-wstruct', () => { this.cw.structures = !this.cw.structures; this.cwRefresh(); });
+  click('b-wbonus', () => { this.cw.bonus = !this.cw.bonus; this.cwRefresh(); });
+  click('b-wrules', () => this.openRules());
+  // the game mode changes what the bonus chest button allows
+  for (const id of ['b-mode']) $(id).addEventListener('click', () => this.cwRefresh());
+  // superflat
+  click('b-flremove', () => { const f = this.flatEdit; if (this.flatSel >= 0 && this.flatSel < f.layers.length) { f.layers.splice(this.flatSel, 1); delete f.preset; this.flatSel = -1; this.flatRender(); } });
+  click('b-flpresets', () => this.openFlatPresets());
+  click('b-fldone', () => { this.cw.flat = this.flatEdit; this.show('scr-create'); this.cwRefresh(); });
+  click('b-flcancel', () => { this.show('scr-create'); this.cwRefresh(); });
+  click('b-fpuse', () => {
+    const base = this.presetSel >= 0 ? flatFromPreset(this.presetSel) : this.flatEdit, text = $('in-flatpreset').value;
+    let f = parseFlatPreset(text, base) || base;
+    if (this.presetSel >= 0 && text.trim() === FLAT_PRESETS[this.presetSel][2]) f = base;
+    else if (f !== base) delete f.preset;
+    this.flatEdit = JSON.parse(JSON.stringify(f)); this.flatSel = -1;
+    this.show('scr-flat'); this.flatRender();
+  });
+  click('b-fpcancel', () => { this.show('scr-flat'); this.flatRender(); });
+  // single biome
+  click('b-bdone', () => { if (this.buffetSel) this.cw.biome = this.buffetSel; this.show('scr-create'); this.cwRefresh(); });
+  click('b-bcancel', () => { this.show('scr-create'); this.cwRefresh(); });
+  // game rules
+  click('b-rdone', () => { if (this.rulesBad && this.rulesBad.size) return; this.cw.rules = this.rulesEdit; this.show('scr-create'); this.cwRefresh(); });
+  click('b-rcancel', () => { this.show('scr-create'); this.cwRefresh(); });
+  $('in-flatpreset').addEventListener('keydown', e => e.stopPropagation());
+};
+
+/* ---------------- superflat customization ---------------- */
+// an item's icon on a small canvas (blocks without an item, like water, show their texture)
+UI.prototype.cwIcon = function (name) {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const it = ITEM_BY_NAME[name] ? ITEM_BY_NAME[name].id : name === 'water' ? I.WATER_BUCKET : name === 'lava' ? I.LAVA_BUCKET : name === 'air' ? I.BARRIER : undefined;
+  if (it === undefined) return c;
+  const img = new Image();
+  img.onload = () => { const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, 32, 32); };
+  img.src = iconFor(it);
+  return c;
+};
+const blockTitle = n => ITEM_BY_NAME[n] ? ITEM_BY_NAME[n].display : n.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+UI.prototype.openFlat = function () {
+  this.flatEdit = JSON.parse(JSON.stringify(this.cw.flat)); this.flatSel = -1;
+  this.show('scr-flat'); this.flatRender();
+};
+UI.prototype.flatRender = function () {
+  const list = $('flatlist'), f = this.flatEdit, n = f.layers.length;
+  list.innerHTML = '';
+  // top layer first, like the game lists them
+  for (let k = n - 1; k >= 0; k--) {
+    const [name, h] = f.layers[k], row = el('div', 'flatrow' + (k === this.flatSel ? ' sel' : ''));
+    row.appendChild(this.cwIcon(name));
+    const nm = el('span', 'fn'); nm.textContent = blockTitle(name); row.appendChild(nm);
+    const ht = el('span', 'fh'); ht.textContent = k === n - 1 ? 'Top - ' + h : k === 0 ? 'Bottom - ' + h : String(h); row.appendChild(ht);
+    row.addEventListener('mousedown', () => { this.flatSel = k; this.flatRender(); });
+    list.appendChild(row);
+  }
+  $('b-flremove').disabled = !(this.flatSel >= 0 && this.flatSel < n);
+};
+UI.prototype.openFlatPresets = function () {
+  this.presetSel = -1;
+  $('in-flatpreset').value = flatPresetText(this.flatEdit);
+  const list = $('presetlist'); list.innerHTML = '';
+  FLAT_PRESETS.forEach((P, i) => {
+    const row = el('div', 'flatrow');
+    row.appendChild(this.cwIcon(P[1]));
+    const nm = el('span', 'fn'); nm.textContent = P[0]; row.appendChild(nm);
+    row.addEventListener('mousedown', () => {
+      this.presetSel = i; $('in-flatpreset').value = P[2];
+      for (const r of list.children) r.classList.toggle('sel', r === row);
+    });
+    list.appendChild(row);
+  });
+  this.show('scr-flatpresets');
+};
+
+/* ---------------- single biome ---------------- */
+UI.prototype.openBuffet = function () {
+  this.buffetSel = this.cw.biome;
+  const list = $('biomelist'); list.innerHTML = '';
+  const names = OVERWORLD_BIOMES.slice().sort();
+  for (const n of names) {
+    const key = n.toLowerCase().replace(/ /g, '_'), row = el('div', 'flatrow' + (key === this.buffetSel ? ' sel' : ''));
+    const nm = el('span', 'fn'); nm.textContent = n; row.appendChild(nm);
+    row.addEventListener('mousedown', () => { this.buffetSel = key; for (const r of list.children) r.classList.toggle('sel', r === row); });
+    list.appendChild(row);
+  }
+  this.show('scr-buffet');
+  const s = list.querySelector('.sel'); if (s) s.scrollIntoView({ block: 'center' });
+};
+
+/* ---------------- the game rules ---------------- */
+UI.prototype.openRules = function () {
+  this.rulesEdit = Object.assign({}, this.cw.rules); this.rulesBad = new Set();
+  const list = $('rulelist'); list.innerHTML = '';
+  const val = k => this.rulesEdit[k] !== undefined ? this.rulesEdit[k] : GAMERULES[k];
+  const setv = (k, v) => { if (v === GAMERULES[k]) delete this.rulesEdit[k]; else this.rulesEdit[k] = v; };
+  for (const [cat, rules] of RULE_CATS) {
+    const h = el('div', 'rulecat'); h.textContent = cat; list.appendChild(h);
+    for (const k of Object.keys(rules).sort()) {
+      if (GAMERULES[k] === undefined) continue;
+      const row = el('div', 'rulerow'), nm = el('span', 'rn');
+      nm.textContent = rules[k]; row.title = k + ' (default: ' + GAMERULES[k] + ')';
+      row.appendChild(nm);
+      if (typeof GAMERULES[k] === 'boolean') {
+        const b = el('button', 'btn'); b.textContent = val(k) ? 'ON' : 'OFF';
+        b.addEventListener('click', () => { AUDIO.play('click'); setv(k, !val(k)); b.textContent = val(k) ? 'ON' : 'OFF'; });
+        row.appendChild(b);
+      } else {
+        const inp = document.createElement('input'); inp.value = String(val(k));
+        inp.addEventListener('keydown', e => e.stopPropagation());
+        inp.addEventListener('input', () => {
+          const t = inp.value.trim(), r = RULE_RANGE[k], ok = /^-?\d+$/.test(t) && Math.abs(+t) <= 2147483647 && (!r || (+t >= r[0] && +t <= r[1]));
+          inp.classList.toggle('bad', !ok);
+          if (ok) { this.rulesBad.delete(k); setv(k, parseInt(t, 10)); } else this.rulesBad.add(k);
+          $('b-rdone').disabled = this.rulesBad.size > 0;
+        });
+        row.appendChild(inp);
+      }
+      list.appendChild(row);
+    }
+  }
+  $('b-rdone').disabled = false;
+  this.show('scr-rules');
+};
+
+/* ---------------- the bonus chest ---------------- */
+LOOT.spawn_bonus_chest = [
+  [[1, 1], [['stone_axe', 1], ['wooden_axe', 3]]],
+  [[1, 1], [['stone_pickaxe', 1], ['wooden_pickaxe', 3]]],
+  [[3, 3], [['apple', 5, 1, 2], ['bread', 3, 1, 2], ['salmon', 3, 1, 2]]],
+  [[4, 4], [['stick', 10, 1, 12], ['oak_planks', 10, 1, 12], ['oak_log', 3, 1, 3], ['spruce_log', 3, 1, 3], ['birch_log', 3, 1, 3], ['jungle_log', 3, 1, 3], ['acacia_log', 3, 1, 3],
+    ['dark_oak_log', 3, 1, 3], ['mangrove_log', 3, 1, 3]]],
+];
+// BonusChestFeature: the columns of the spawn chunk in a shuffled order; the chest goes in the first empty spot on top
+// (the MOTION_BLOCKING_NO_LEAVES height), with a torch on each side that has ground under it
+Game.prototype.placeBonusChest = function () {
+  const w = this.world, sp = this.meta.spawn, cx = sp[0] >> 4, cz = sp[1] >> 4, R = Math.random;
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const xs = shuffle([...Array(16).keys()].map(i => cx * 16 + i)), zs = shuffle([...Array(16).keys()].map(i => cz * 16 + i));
+  for (const x of xs) for (const z of zs) {
+    let y = CH_TOP - 1;
+    while (y > 0) { const id = w.getBlock(x, y, z); if ((SOLID[id] && !BLK[id].leaves) || BLK[id].liquid) break; y--; }
+    y++;
+    if (w.getBlock(x, y, z) !== B.AIR) continue;
+    w.setBlock(x, y, z, B.CHEST, 2);
+    w.setBE(x, y, z, { type: 'chest', kind: 'chest', loot: 'spawn_bonus_chest' });
+    for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const tx = x + dx, tz = z + dz, below = w.getBlock(tx, y - 1, tz);
+      if (w.getBlock(tx, y, tz) === B.AIR && SOLID[below] && !BLK[below].leaves) w.setBlock(tx, y, tz, B.TORCH, 0);
+    }
+    return [x, y, z];
+  }
+  return null;
+};
+const _gameTickCW = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const m = this.meta, w = this.world;
+  if (m && m.bonusPending && w && w.dim === 'overworld' && m.spawn) {
+    const c = w.getChunk(m.spawn[0] >> 4, m.spawn[1] >> 4);
+    if (c && c.state >= 2) { m.bonusPending = false; this.bonusChestAt = this.placeBonusChest(); }
+  }
+  return _gameTickCW.call(this);
+};
 
 </script>
 </body>
