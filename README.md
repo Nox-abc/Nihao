@@ -71,7 +71,7 @@ place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots
 | `/effect give <effect> [seconds\|infinite] [amplifier]`, `/effect clear [effect]` | Status effects |
 | `/enchant <enchantment> [level]` | Enchant the item in your hand |
 | `/xp add\|set <amount> [points\|levels]`, `/xp query` | Experience |
-| `/gamerule <rule> [true\|false]` | `keepInventory`, `doDaylightCycle`, `doWeatherCycle`, `doMobSpawning`, `commandBlockOutput` (saved with the world) |
+| `/gamerule <rule> [value]` | All of Java Edition 1.21's game rules (saved with the world), see [Game rules](#game-rules) |
 | `/locate <structure\|biome>` | Find the nearest structure or biome (vanilla ids such as `monument` or `village_plains` work) |
 | `/setblock <x> <y> <z> <block>`, `/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace\|keep\|hollow\|outline\|destroy]` | Edit blocks |
 | `/say <message>` | Say something in chat |
@@ -230,6 +230,60 @@ Java tutorials work:
 - The `doPatrolSpawning`, `doTraderSpawning`, `doInsomnia` and `disableRaids` game rules work
   like Java Edition's.
 
+### Trial chambers
+
+- **Trial spawners** work like Java Edition 1.21's: each has its mob's vanilla config (zombies,
+  husks and spiders; slimes, cave spiders, silverfish and baby zombies; skeletons, strays and
+  bogged, some of them slow; breezes), wakes up when it sees you within 14 blocks, sends its wave
+  (six mobs, three at a time for most, more for every extra player it saw), then throws out a
+  trial key or food and potions for each player and rests for 30 minutes. Its mob turns inside it
+  while it waits.
+- **Ominous trials**: come near a trial spawner with Bad Omen and it becomes Trial Omen (15
+  minutes for each level). Every trial spawner you meet with it turns ominous: blue flames,
+  bigger waves of spiders, slimes and other small mobs, zombies and skeletons in copper-trimmed
+  armor with three protections and swords or bows, and ominous item spawners that drop lingering
+  potions, arrows, fire charges or wind charges onto you and its mobs every 8 seconds. It gives
+  ominous trial keys (3 in 10) or better food.
+- **Vaults** light up when a player who has not opened them comes within 4 blocks and take one
+  key per player: the item they would give turns inside, and the rewards come out one by one.
+  Ominous vaults take ominous keys for the ominous rewards (heavy cores, enchanted golden apples,
+  Wind Burst books, the Creator disc). All rewards, the chambers' chests and barrels, and the gear
+  of ominous mobs use the vanilla loot tables.
+- The potions of the ominous trials: **Wind Charged** mobs burst like a wind charge when they die,
+  **Weaving** leaves cobwebs (and lets you through them faster), **Oozing** two slimes, and
+  **Infested** lets out silverfish when hit.
+- A trial spawner placed by hand waits for a spawn egg to give it a mob; a placed vault takes a
+  trial key.
+
+### Game rules
+
+All 49 of Java Edition 1.21's game rules can be set with `/gamerule`, and they do what they do in
+Java: `keepInventory`, `mobGriefing` (creepers, ghasts and the wither break nothing, endermen
+leave blocks alone, sheep eat without leaving dirt, farmers stop harvesting), `doFireTick`,
+`randomTickSpeed` (for crop farms), `doTileDrops`, `doMobLoot`, `doEntityDrops`,
+`naturalRegeneration`, `fallDamage`, `fireDamage`, `drowningDamage`, `freezeDamage`,
+`doImmediateRespawn`, `showDeathMessages`, `sendCommandFeedback`, `commandBlockOutput`,
+`commandModificationBlockLimit`, `doDaylightCycle`, `doWeatherCycle`, `doMobSpawning`,
+`doPatrolSpawning`, `doTraderSpawning`, `doInsomnia`, `doWardenSpawning`, `doVinesSpread`,
+`disableRaids`, `waterSourceConversion`, `lavaSourceConversion`, `snowAccumulationHeight`,
+`maxEntityCramming`, `spawnRadius`, `playersSleepingPercentage`, `forgiveDeadPlayers`,
+`enderPearlsVanishOnDeath`, `projectilesCanBreakBlocks`, `reducedDebugInfo`, the three explosion
+drop decay rules and the rest (the ones about servers are accepted and kept).
+
+### Fire, explosions and weather
+
+- **Fire** spreads like Java Edition's: each fire ages on its own ticks, catches blocks by their
+  vanilla ignite and burn odds (leaves and wool fast, planks slower, logs slowly), burns out on
+  stone, faster in humid biomes and in the rain, and lava sets nearby wood alight.
+- **Explosions** cast vanilla's 1352 rays, stopped by each block's blast resistance: obsidian and
+  water hold, TNT under water breaks nothing, TNT next to a blast goes off with a short fuse.
+  Creatures take damage by how much of them the blast can see, so walls protect, and Blast
+  Protection softens the push. TNT drops every block it breaks; creepers drop one in three.
+  Primed TNT drifts with water currents and bounces, so TNT cannons work.
+- **Snow and ice**: snow settles in cold biomes while it snows (layer on layer up to
+  `snowAccumulationHeight`), cold ponds freeze from their edges, and cauldrons fill with rain or
+  powder snow. Packing more than 24 creatures into one spot hurts them (entity cramming).
+
 ### Redstone and automation
 
 - Redstone dust with vanilla signal strength, torches, levers, buttons, pressure plates,
@@ -265,6 +319,12 @@ Java tutorials work:
   pattern layers, beacons with their pyramid, beam and powers, conduits, jukeboxes and discs.
 - Archaeology: brush suspicious sand and gravel in desert pyramids, wells and trail ruins for
   pottery sherds and other finds; brush armadillos for scutes.
+- **Decorated pots**: craft them from four bricks or pottery sherds and the sherds' pictures show
+  on its sides (each of the 23 sherds has its own). A pot holds one stack: put items in by hand
+  or with a hopper, take them out with a hopper below, and a comparator reads how full it is. A
+  sword, axe, pickaxe, shovel, hoe, trident or mace (without Silk Touch), or an arrow, shatters
+  it into its sherds; broken by hand it keeps its sides. Trial chambers have pots with flow,
+  guster and scrape sherds, some holding loot.
 - Sponges soak up water and dry out in the Nether.
 
 ### Graphics and sound

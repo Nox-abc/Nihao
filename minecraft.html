@@ -3260,10 +3260,12 @@ function buildMineshaft(p, ctx) {
 }
 
 // trial chambers: a tuff and copper hall full of trial spawners, with vaults and corridors to side rooms
-const TRIAL_MOBS = ['zombie', 'skeleton', 'spider', 'husk', 'stray', 'slime', 'cave_spider', 'bogged', 'silverfish'];
+// the spawner configs of vanilla's trial chambers (121_trials.js): melee, small melee, ranged and slow ranged mobs
+const TRIAL_SPAWNER_KINDS = ['melee/zombie', 'melee/husk', 'melee/spider', 'small_melee/slime', 'small_melee/cave_spider', 'small_melee/silverfish', 'small_melee/baby_zombie',
+  'ranged/skeleton', 'ranged/stray', 'ranged/poison_skeleton', 'slow_ranged/skeleton', 'slow_ranged/stray', 'slow_ranged/poison_skeleton'];
 function trialChambersAt(X, Y, Z, rs) {
   const R = mulberry32((rs * 4294967296) | 0);
-  const mobs = []; for (let k = 0; k < 9; k++) mobs.push(TRIAL_MOBS[Math.floor(R() * TRIAL_MOBS.length)]);
+  const mobs = []; for (let k = 0; k < 9; k++) mobs.push(TRIAL_SPAWNER_KINDS[Math.floor(R() * TRIAL_SPAWNER_KINDS.length)]);
   return { X, Y, Z, mobs, bbox: [X - 46, Z - 46, X + 46, Z + 46], rects: [] };
 }
 STRUCTURES.push({ name: 'trial_chambers', region: 640, reach: 60, plan: (gen, rx, rz) => {
@@ -3281,8 +3283,17 @@ STRUCTURES.push({ name: 'trial_chambers', region: 640, reach: 60, plan: (gen, rx
       Wr.set(x, y, z, !edge ? B.AIR : y === y0 ? ((x + z) & 1 ? B.POLISHED_TUFF : B.TUFF_TILES) : y === y1 ? (hash3(x, y, z, seed + 9713) < 0.15 ? B.WAXED_COPPER_GRATE : B.TUFF_BRICKS) : wall(x, y, z));
     }
   };
-  const spawnerAt = (x, y, z, mob) => { const i = Wr.set(x, y, z, B.TRIAL_SPAWNER); if (i >= 0) ctx.be.push([i, { type: 'trial_spawner', mob }]); };
+  const spawnerAt = (x, y, z, cfg) => { const i = Wr.set(x, y, z, B.TRIAL_SPAWNER, 1); if (i >= 0) ctx.be.push([i, { type: 'trial_spawner', cfg, state: 'waiting' }]); };
   const bulb = (x, y, z) => Wr.set(x, y, z, B.WAXED_COPPER_BULB, 1);
+  // decorated pots, some with a flow, guster or scrape sherd and some holding loot (pots/trial_chambers/corridor)
+  const pot = (x, y, z) => {
+    const i = Wr.set(x, y, z, B.DECORATED_POT, Math.floor(hash3(x, y, z, seed + 9714) * 4));
+    if (i < 0) return;
+    const r = hash3(x, y, z, seed + 9715), sherd = r < 0.2 ? 'flow' : r < 0.3 ? 'guster' : r < 0.4 ? 'scrape' : null, be = { type: 'pot', kind: 'pot', items: [null] };
+    if (sherd) be.sherds = [sherd + '_pottery_sherd', 'brick', 'brick', 'brick'];
+    if (hash3(x, y, z, seed + 9716) < 0.35) be.loot = 'pots_trial_chambers_corridor';
+    ctx.be.push([i, be]);
+  };
   // corridors and side rooms first, so the hall's walls are cut by their doorways afterwards
   for (let d = 0; d < 4; d++) {
     const [dx, dz] = DIR4[d], [px, pz] = DIR4[(d + 1) & 3];
@@ -3302,8 +3313,8 @@ STRUCTURES.push({ name: 'trial_chambers', region: 640, reach: 60, plan: (gen, rx
     bulb(cx2, Y + 6, cz2);
     let i = Wr.set(cx2 + px * 3 + dx * 3, Y + 1, cz2 + pz * 3 + dz * 3, B.CHEST, M_FACING((d + 2) & 3)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot: 'trial_chambers_supply' }]);
     i = Wr.set(cx2 - px * 3 + dx * 3, Y + 1, cz2 - pz * 3 + dz * 3, B.BARREL, 2); if (i >= 0) ctx.be.push([i, { type: 'barrel', kind: 'barrel', loot: 'trial_chambers_corridor' }]);
-    Wr.set(cx2 + px * 3 - dx * 3, Y + 1, cz2 + pz * 3 - dz * 3, B.DECORATED_POT, 0);
-    Wr.set(cx2 - px * 3 - dx * 3, Y + 1, cz2 - pz * 3 - dz * 3, B.DECORATED_POT, 0);
+    pot(cx2 + px * 3 - dx * 3, Y + 1, cz2 + pz * 3 - dz * 3);
+    pot(cx2 - px * 3 - dx * 3, Y + 1, cz2 - pz * 3 - dz * 3);
   }
   // the main hall
   room(X - 11, Y, Z - 11, X + 11, Y + 12, Z + 11);
@@ -3311,10 +3322,14 @@ STRUCTURES.push({ name: 'trial_chambers', region: 640, reach: 60, plan: (gen, rx
   for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) Wr.set(X + dx, Y + 1, Z + dz, Math.abs(dx) === 2 || Math.abs(dz) === 2 ? B.CUT_COPPER : B.CHISELED_TUFF_BRICKS);
   spawnerAt(X, Y + 2, Z, 'breeze');
   spawnerAt(X - 7, Y + 1, Z - 7, p.mobs[0]); spawnerAt(X + 7, Y + 1, Z - 7, p.mobs[1]); spawnerAt(X - 7, Y + 1, Z + 7, p.mobs[2]); spawnerAt(X + 7, Y + 1, Z + 7, p.mobs[3]);
-  for (const [x, z, d] of [[X - 9, Z, 1], [X + 9, Z, 3]]) { Wr.set(x, Y + 1, z, B.POLISHED_TUFF); const i = Wr.set(x, Y + 2, z, B.VAULT, M_FACING(d) | 4); if (i >= 0) ctx.be.push([i, { type: 'vault' }]); }
+  for (const [x, z, d, om] of [[X - 9, Z, 1, 0], [X + 9, Z, 3, 1]]) { Wr.set(x, Y + 1, z, B.POLISHED_TUFF); const i = Wr.set(x, Y + 2, z, B.VAULT, M_FACING(d) | (om ? 16 : 0)); if (i >= 0) ctx.be.push([i, om ? { type: 'vault', om: 1 } : { type: 'vault' }]); }
+  for (const [x, z, f, kind, loot] of [[X - 10, Z + 3, 1, B.CHEST, 'trial_chambers_intersection'], [X + 10, Z - 3, 1, B.BARREL, 'trial_chambers_intersection_barrel'], [X + 24, Z + 1, 3, B.CHEST, 'trial_chambers_entrance']]) {
+    const i = Wr.set(x, Y + 1, z, kind, kind === B.BARREL ? f : M_FACING(f));
+    if (i >= 0) ctx.be.push([i, kind === B.BARREL ? { type: 'barrel', kind: 'barrel', loot } : { type: 'chest', kind: 'chest', loot }]);
+  }
   for (const [x, z] of [[X - 5, Z - 5], [X + 5, Z - 5], [X - 5, Z + 5], [X + 5, Z + 5]]) for (let h = 1; h <= 11; h++) Wr.set(x, Y + h, z, h === 6 ? B.CHISELED_COPPER : B.POLISHED_TUFF);
   for (const [x, z] of [[X, Z - 6], [X, Z + 6], [X - 6, Z], [X + 6, Z]]) bulb(x, Y + 12, z);
-  for (const [x, z] of [[X - 10, Z - 10], [X + 10, Z - 10], [X - 10, Z + 10], [X + 10, Z + 10], [X - 10, Z - 3], [X + 10, Z + 3]]) Wr.set(x, Y + 1, z, B.DECORATED_POT, 0);
+  for (const [x, z] of [[X - 10, Z - 10], [X + 10, Z - 10], [X - 10, Z + 10], [X + 10, Z + 10], [X - 10, Z - 3], [X + 10, Z + 3]]) pot(x, Y + 1, z);
 } });
 
 /* ---------------- end cities ---------------- */
@@ -9210,7 +9225,7 @@ class World {
           best = Math.max(best, amt(m));
         }
         const below = this.getBlock(x, y - 1, z);
-        if (!lava && sources >= 2 && (SOLID[below] || (below === B.WATER && this.getMeta(x, y - 1, z) === 0))) newMeta = 0;
+        if ((lava ? this.lavaSources === true : this.waterSources !== false) && sources >= 2 && (SOLID[below] || (below === id && this.getMeta(x, y - 1, z) === 0))) newMeta = 0;
         else {
           const a = best - drop;
           newMeta = a <= 0 ? -1 : 8 - a;
@@ -9439,6 +9454,7 @@ function texLayer(name, fb) { const i = TEX.idx[name]; return i === undefined ? 
 const FMODE = new Uint8Array(MAXB);         // 0 plain, 1 log axis, 2 facing, 3 facing6, 4 log6 (barrel), 5 respawn anchor
 const ALTMASK = new Uint8Array(MAXB);       // meta bits that switch a block to its alternate texture set
 const FACETEX_ALT = new Int16Array(MAXB * 6);
+const VARTEX = [];                          // id -> meta => face set [side, side, top, bottom, front, back] of blocks with many state textures
 const TOPTEX = new Int16Array(MAXB);        // upper half of two block tall plants
 const VFRONT = new Int16Array(MAXB);        // front when facing up or down (dispenser, dropper)
 const EDGETEX = new Int16Array(MAXB);       // top edge of panes
@@ -9449,7 +9465,7 @@ const FRONT4 = [4, 1, 5, 0];                // face that shows the front, by hor
 const DIR_ROT = [3, 1, 0, 0, 0, 2];         // rotation index that turns a model's +Z side toward direction a
 const _ao = new Int32Array(4), _sk = new Float32Array(4), _bl = new Float32Array(4);
 function faceLayer(id, meta, f) {
-  const T = (meta & ALTMASK[id]) ? FACETEX_ALT : FACETEX, o = id * 6;
+  const vt = VARTEX[id], T = vt ? vt(meta) : (meta & ALTMASK[id]) ? FACETEX_ALT : FACETEX, o = vt ? 0 : id * 6;
   switch (FMODE[id]) {
     case 1: {
       const axis = meta & 3;
@@ -10094,8 +10110,6 @@ function resolveFaceTextures() {
     if (d.lamp) { ALTMASK[id] = 1; for (let k = 0; k < 6; k++) FACETEX_ALT[o + k] = L('redstone_lamp_on'); }
     if (d.rtorch) { ALTMASK[id] = 8; for (let k = 0; k < 6; k++) FACETEX_ALT[o + k] = L('redstone_torch_off'); }
     if (d.farmland) { ALTMASK[id] = 7; FACETEX_ALT[o + 2] = L('farmland_moist'); }
-    if (id === B.TRIAL_SPAWNER) { ALTMASK[id] = 1; for (let k = 0; k < 6; k++) if (k !== 3) FACETEX_ALT[o + k] = L(k === 2 ? 'trial_spawner_top_active' : 'trial_spawner_side_active'); }
-    if (id === B.VAULT) { ALTMASK[id] = 4; FACETEX_ALT[o + 4] = L('vault_front_on'); }
     // crops and bushes: one texture per age
     const stages = d.stages || (d.berry ? 4 : 0);
     if (stages && typeof d.tex === 'string' && /\d$/.test(d.tex)) {
@@ -11499,8 +11513,7 @@ class Projectile extends Entity {
     if (this.kind === 'ghast' || this.kind === 'skull') {
       if (e) e.hurt(this.kind === 'ghast' ? 6 : 8, this.kind === 'ghast' ? 'fireball' : 'wither', this.owner);
       if (e && this.kind === 'skull' && e.addEffect && OPTIONS.difficulty > 1) e.addEffect('wither', OPTIONS.difficulty === 3 ? 800 : 200, 1);
-      g.explode(this.x, this.y, this.z, this.blue ? 1.5 : 1, false, this.kind === 'ghast' ? 'fireball' : 'wither');
-      if (this.kind === 'ghast') for (let k = 0; k < 6; k++) { const fx = Math.floor(this.x + (Math.random() - 0.5) * 3), fy = Math.floor(this.y + (Math.random() - 0.5) * 2), fz = Math.floor(this.z + (Math.random() - 0.5) * 3); if (w.getBlock(fx, fy, fz) === 0 && SOLID[w.getBlock(fx, fy - 1, fz)]) w.setBlock(fx, fy, fz, B.FIRE, 0); }
+      g.explode(this.x, this.y, this.z, 1, false, this.kind === 'ghast' ? 'fireball' : this.blue ? 'wither_blue' : 'wither');
       return;
     }
     if (this.kind === 'bullet') { if (e) { e.hurt(4, 'bullet', this.owner); if (e.addEffect) e.addEffect('levitation', 200, 0); } g.particles.poof(this.x, this.y, this.z, [0.9, 0.85, 0.6], 6); return; }
@@ -13538,6 +13551,7 @@ class Mob extends Entity {
   keepWhenUnloaded() { return this.persistent || this.T.cat === 'creature' || this.T.cat === 'water' && !this.T.fish || this.customName || this.data.owner || this.data.tame; }
   // ---------- damage ----------
   armorPoints() { return this.T.armor + (this.data.armorPts || 0); }
+  armorToughness() { let t = 0; for (const s of this.data.armor || []) if (s && ITEMS[s.id] && ITEMS[s.id].armor) t += ITEMS[s.id].armor.tough || 0; return t; }
   hurt(amount, source, attacker) {
     if (this.dead || this.deathTime > 0) return false;
     if (this.invuln > 0 && amount <= (this.lastDmg || 0)) return false;
@@ -13545,9 +13559,11 @@ class Mob extends Entity {
     if (this.immune && this.immune(source, attacker)) return false;
     let dmg = this.invuln > 0 ? amount - this.lastDmg : amount;
     const ap = this.armorPoints();
-    if (ap && !BYPASS_ARMOR.has(source)) dmg *= 1 - Math.min(20, Math.max(ap / 5, ap - dmg / 2)) / 25;
+    if (ap && !BYPASS_ARMOR.has(source)) dmg *= 1 - Math.min(20, Math.max(ap / 5, ap - dmg / (2 + this.armorToughness() / 4))) / 25;
     const res = this.effectLevel ? this.effectLevel('resistance') : 0;
     if (res) dmg *= Math.max(0, 1 - 0.2 * res);
+    const epf = this.data.armor && source !== 'void' && source !== 'kill' ? armorEPF(this.data.armor, source) : 0;
+    if (epf) dmg *= 1 - epf / 25;
     this.lastDmg = amount; this.invuln = 10; this.hurtTime = 10;
     this.health -= dmg;
     const g = this.game;
@@ -13603,7 +13619,8 @@ class Mob extends Entity {
       g.dropItem(this.x, this.y + 0.5, this.z, { id: itemOf(name), count: n });
     }
     // gear the mob carried
-    for (const st of [this.data.hand, this.data.offhand, ...(this.data.armor || [])]) if (st && Math.random() < (this.data.gearDrop || 0.085) + 0.01 * loot && this.killedByPlayer) g.dropItem(this.x, this.y + 0.5, this.z, Object.assign({}, st, { dmg: Math.floor(Math.random() * ((ITEMS[st.id] && ITEMS[st.id].dur) || 1) * 0.8) }));
+    const noDrop = this.data.noDrop || [];
+    [this.data.hand, this.data.offhand, ...(this.data.armor || [])].forEach((st, slot) => { if (st && !noDrop.includes(slot) && Math.random() < (this.data.gearDrop || 0.085) + 0.01 * loot && this.killedByPlayer) g.dropItem(this.x, this.y + 0.5, this.z, Object.assign({}, st, { dmg: Math.floor(Math.random() * ((ITEMS[st.id] && ITEMS[st.id].dur) || 1) * 0.8) })); });
     if (this.data.saddle) g.dropItem(this.x, this.y + 0.5, this.z, { id: I.SADDLE, count: 1 });
     if (this.data.chest) { g.dropItem(this.x, this.y + 0.5, this.z, { id: B.CHEST, count: 1 }); for (const st of this.data.items || []) if (st) g.dropItem(this.x, this.y + 0.5, this.z, st); }
     if (this.killedByPlayer) {
@@ -14043,7 +14060,7 @@ const GOALS = {
     return true;
   },
   eatGrass(m) {
-    if (m.data.eat > 0) { m.data.eat--; m.nav = null; if (m.data.eat === 4) { const w = m.game.world, x = Math.floor(m.x), y = Math.floor(m.y), z = Math.floor(m.z); if (w.getBlock(x, y - 1, z) === B.GRASS_BLOCK) { w.setBlock(x, y - 1, z, B.DIRT, 0); m.data.sheared = false; if (m.baby) m.growth = Math.min(0, m.growth + 1200); m.game.remeshNear(x, z); } else if (w.getBlock(x, y, z) === B.SHORT_GRASS) { w.setBlock(x, y, z, 0, 0); m.data.sheared = false; m.game.remeshNear(x, z); } } return true; }
+    if (m.data.eat > 0) { m.data.eat--; m.nav = null; if (m.data.eat === 4) { const w = m.game.world, x = Math.floor(m.x), y = Math.floor(m.y), z = Math.floor(m.z); const grief = m.game.rule('mobGriefing'); if (w.getBlock(x, y - 1, z) === B.GRASS_BLOCK) { if (grief) w.setBlock(x, y - 1, z, B.DIRT, 0); m.data.sheared = false; if (m.baby) m.growth = Math.min(0, m.growth + 1200); m.game.remeshNear(x, z); } else if (w.getBlock(x, y, z) === B.SHORT_GRASS) { if (grief) w.setBlock(x, y, z, 0, 0); m.data.sheared = false; m.game.remeshNear(x, z); } } return true; }
     if (Math.random() < (m.baby ? 1 / 50 : 1 / 1000)) { const w = m.game.world, x = Math.floor(m.x), y = Math.floor(m.y), z = Math.floor(m.z); if (w.getBlock(x, y - 1, z) === B.GRASS_BLOCK || w.getBlock(x, y, z) === B.SHORT_GRASS) { m.data.eat = 40; return true; } }
     return false;
   },
@@ -14154,7 +14171,7 @@ const GOALS = {
     const close = t && m.distTo(t) < 3 && m.canSee(t), far = !t || m.distTo(t) > 7;
     if (close || m.data.ignited) { if (m.data.fuse === 0) m.game.sound('fuse', m.x, m.y, m.z); m.data.fuse++; }
     else if (far || !close) m.data.fuse = Math.max(0, m.data.fuse - 1);
-    if (m.data.fuse >= 30) { m.dead = true; m.noDrops = true; m.game.explode(m.x, m.y + 0.5, m.z, m.data.charged ? 6 : 3, false, 'creeper'); return true; }
+    if (m.data.fuse >= 30) { m.dead = true; m.noDrops = true; m.game.explode(m.x, m.y, m.z, m.data.charged ? 6 : 3, false, 'creeper'); return true; }
     if (!t) return false;
     m.lookAt(t.x, t.y + 1.5, t.z);
     if (m.data.fuse > 0) { m.nav = null; return true; }
@@ -14174,6 +14191,7 @@ const GOALS = {
     const w = m.game.world;
     if (m.target) return false;
     const carry = m.data.carry;
+    if (!m.game.rule('mobGriefing')) return false;
     if (!carry && Math.random() < 1 / 400) {
       const x = Math.floor(m.x + (Math.random() - 0.5) * 4), y = Math.floor(m.y + Math.random() * 3), z = Math.floor(m.z + (Math.random() - 0.5) * 4), id = w.getBlock(x, y, z);
       if (ENDER_HOLDABLE.has(id)) { m.data.carry = BLOCK_NAMES[id]; w.setBlock(x, y, z, 0, 0); m.game.remeshNear(x, z); }
@@ -14849,6 +14867,19 @@ function raycast(world, ox, oy, oz, dx, dy, dz, maxD, fluids) {
 
 // enchantment level on a stack
 function enchLevel(st, k) { return st && st.tag && st.tag.ench ? st.tag.ench[k] || 0 : 0; }
+// enchantment protection factor of worn armor against a kind of damage (capped at 20, 4% each)
+function armorEPF(armor, source) {
+  let e = 0;
+  for (const s of armor) {
+    if (!s) continue;
+    e += enchLevel(s, 'protection');
+    if (source === 'fire' || source === 'lava' || source === 'magma' || source === 'fireball') e += 2 * enchLevel(s, 'fire_protection');
+    if (source === 'explosion' || source === 'creeper') e += 2 * enchLevel(s, 'blast_protection');
+    if (source === 'arrow' || source === 'trident' || source === 'fireball') e += 2 * enchLevel(s, 'projectile_protection');
+    if (source === 'fall' || source === 'pearl') e += 3 * enchLevel(s, 'feather_falling');
+  }
+  return Math.min(20, e);
+}
 // damage that armor does not reduce
 const BYPASS_ARMOR = new Set(['fall', 'drown', 'starve', 'void', 'kill', 'magic', 'poison', 'wither', 'fire', 'freeze', 'sonic_boom', 'suffocate', 'dripstone', 'pearl', 'fly_into_wall']);
 const BLOCKABLE = new Set(['zombie', 'spider', 'skeleton', 'arrow', 'wither_skeleton', 'enderman', 'blaze', 'fireball', 'explosion', 'player', 'creeper', 'husk', 'stray', 'drowned', 'piglin', 'zombified_piglin', 'vindicator', 'pillager', 'witch', 'iron_golem', 'silverfish', 'cave_spider', 'slime', 'magma_cube', 'phantom', 'hoglin', 'warden', 'trident', 'wolf', 'polar_bear', 'bee', 'endermite', 'piglin_brute', 'zoglin', 'ravager', 'evoker', 'vex', 'guardian', 'ghast', 'shulker', 'breeze', 'goat', 'llama', 'dolphin', 'panda', 'fox', 'pufferfish', 'ender_dragon', 'void_orb']);
@@ -14938,18 +14969,7 @@ class Player extends Entity {
   // ---------- armor ----------
   armorPoints() { let a = 0; for (const s of this.armor) if (s && ITEMS[s.id].armor) a += ITEMS[s.id].armor.pts; return a; }
   armorToughness() { let a = 0; for (const s of this.armor) if (s && ITEMS[s.id].armor) a += ITEMS[s.id].armor.tough; return a; }
-  protectionEPF(source) {
-    let e = 0;
-    for (const s of this.armor) {
-      if (!s) continue;
-      e += enchLevel(s, 'protection');
-      if (source === 'fire' || source === 'lava' || source === 'magma' || source === 'fireball') e += 2 * enchLevel(s, 'fire_protection');
-      if (source === 'explosion' || source === 'creeper') e += 2 * enchLevel(s, 'blast_protection');
-      if (source === 'arrow' || source === 'trident' || source === 'fireball') e += 2 * enchLevel(s, 'projectile_protection');
-      if (source === 'fall' || source === 'pearl') e += 3 * enchLevel(s, 'feather_falling');
-    }
-    return Math.min(20, e);
-  }
+  protectionEPF(source) { return armorEPF(this.armor, source); }
   damageArmor(amount) {
     const n = Math.max(1, Math.floor(amount / 4));
     for (let k = 0; k < 4; k++) if (this.armor[k] && ITEMS[this.armor[k].id].armor) this.armor[k] = this.wear(this.armor[k], n);
@@ -15168,7 +15188,7 @@ class Player extends Entity {
     const whw = this.w / 2;
     let web = 0;
     if (!this.flying) aabbHitsBlock(w, this.x - whw, this.y, this.z - whw, this.x + whw, this.y + this.h, this.z + whw, id => { const d = BLK[id]; if (d.web) web = Math.max(web, 3); else if (id === B.SWEET_BERRY_BUSH) web = Math.max(web, 2); else if (d.powderSnow) web = Math.max(web, 1); return false; });
-    if (web === 3) { this.vx *= 0.25; this.vy *= 0.05; this.vz *= 0.25; this.fallDist = 0; }
+    if (web === 3) { const wv = this.effectLevel('weaving') > 0; this.vx *= wv ? 0.5 : 0.25; this.vy *= wv ? 0.25 : 0.05; this.vz *= wv ? 0.5 : 0.25; this.fallDist = 0; }
     else if (web === 2) { this.vx *= 0.8; this.vy *= 0.75; this.vz *= 0.8; this.fallDist = 0; }
     else if (web === 1) { this.vx *= 0.9; this.vz *= 0.9; if (this.armor[3] && this.armor[3].id === I.LEATHER_BOOTS) { if (jump) this.vy = 0.15; } else this.vy = Math.max(this.vy, -0.05); this.fallDist = 0; }
     const res = this.physicsStep();
@@ -15278,9 +15298,10 @@ class Player extends Entity {
     else this.freeze = Math.max(0, this.freeze - 2);
     // hunger
     if (this.exh >= 4) { this.exh -= 4; if (this.sat > 0) this.sat = Math.max(0, this.sat - 1); else this.food = Math.max(0, this.food - 1); }
-    if (this.food >= 20 && this.sat > 0 && this.health < this.maxHealth) {
+    const regen = !g.rule || g.rule('naturalRegeneration');
+    if (regen && this.food >= 20 && this.sat > 0 && this.health < this.maxHealth) {
       if (++this.regenT >= 10) { this.regenT = 0; const k = Math.min(this.sat, 6); this.heal(k / 6); this.exh += k; }
-    } else if (this.food >= 18 && this.health < this.maxHealth) {
+    } else if (regen && this.food >= 18 && this.health < this.maxHealth) {
       if (++this.regenT >= 80) { this.regenT = 0; this.heal(1); this.exh += 6; }
     } else if (this.food <= 0) {
       if (++this.starveT >= 80) { this.starveT = 0; if (this.health > (g.difficulty >= 3 ? 0 : g.difficulty === 2 ? 1 : 10)) this.hurt(1, 'starve'); }
@@ -15765,7 +15786,7 @@ class UI {
     this.selWorld = null; $('b-play').disabled = true; $('b-delete').disabled = true;
     if (!worlds.length) list.innerHTML = '<div class="hint">No worlds yet. Create one!</div>';
     for (const w of worlds) {
-      const d = el('div', 'world', `<div class="wn">${escapeHTML(w.name)}</div><div class="wd">${new Date(w.lastPlayed || w.created).toLocaleString()} — ${w.mode ? 'Creative' : 'Survival'} — seed ${w.seed}</div>`);
+      const d = el('div', 'world', `<div class="wn">${escapeHTML(w.name)}</div><div class="wd">${new Date(w.lastPlayed || w.created).toLocaleString()} — ${w.hardcore ? 'Hardcore' : w.mode ? 'Creative' : 'Survival'} — seed ${w.seed}</div>`);
       d.onclick = () => { for (const x of list.children) x.classList.remove('sel'); d.classList.add('sel'); this.selWorld = w; $('b-play').disabled = false; $('b-delete').disabled = false; };
       d.ondblclick = () => this.game.loadWorld(w);
       list.appendChild(d);
@@ -18992,13 +19013,13 @@ class Game {
   }
   randomTicks() {
     const w = this.world, p = this.player;
-    const pcx = Math.floor(p.x / 16), pcz = Math.floor(p.z / 16), R = 4;
+    const pcx = Math.floor(p.x / 16), pcz = Math.floor(p.z / 16), R = 4, n = this.rule ? this.rule('randomTickSpeed') : 3;
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       const c = w.getChunk(pcx + dx, pcz + dz);
       if (!c || c.state < 2) continue;
       for (let sy = 0; sy < CH_SECS; sy++) {
         if (!c.meshes[sy]) continue;
-        for (let k = 0; k < 3; k++) {
+        for (let k = 0; k < n; k++) {
           const r = (Math.random() * 4096) | 0, i = sy * 4096 + r;
           const id = c.blocks[i];
           if (id === 0 || id === B.STONE || id === B.DEEPSLATE || id === B.NETHERRACK || id === B.END_STONE || id === B.BASALT) continue;
@@ -19226,7 +19247,8 @@ class Game {
     const f = $('fx-sleep');
     this.sleeping++;
     f.style.opacity = Math.min(1, this.sleeping / 60);
-    if (this.sleeping === 100) {
+    // (playersSleepingPercentage over 100: nobody's sleep is enough)
+    if (this.sleeping === 100 && (!this.rule || this.rule('playersSleepingPercentage') <= 100)) {
       const w = this.world;
       w.time = (Math.floor(w.time / 24000) + 1) * 24000;
       w.raining = false; w.rainStrength = 0; w.rainTime = 12000 + Math.random() * 36000;
@@ -19889,8 +19911,10 @@ class Game {
     ];
     if (t) right.push('Targeted Block: ' + t.x + ', ' + (t.y - w.yOff) + ', ' + t.z, BLK[t.id].name + (w.getMeta(t.x, t.y, t.z) ? ' [meta ' + w.getMeta(t.x, t.y, t.z) + ']' : ''));
     if (this.targetEntity) right.push('Targeted Entity: ' + this.targetEntity.type, 'Health: ' + this.targetEntity.health.toFixed(1));
-    $('debug').innerHTML = left.map(s => s ? `<span>${escapeHTML(s)}</span>` : '').join('\n');
-    $('debugR').innerHTML = right.map(s => s ? `<span>${escapeHTML(s)}</span>` : '').join('\n');
+    // reducedDebugInfo: no coordinates
+    const red = this.rule && this.rule('reducedDebugInfo');
+    $('debug').innerHTML = left.filter(s => !red || !/^(XYZ|Block|Chunk|Facing|Biome|Seed|Light)/.test(s)).map(s => s ? `<span>${escapeHTML(s)}</span>` : '').join('\n');
+    $('debugR').innerHTML = (red ? right.slice(0, 4) : right).map(s => s ? `<span>${escapeHTML(s)}</span>` : '').join('\n');
   }
 }
 
@@ -20366,6 +20390,7 @@ Object.assign(Game.prototype, {
       if (!hit || !this.spawnMob) return false;
       const x = hit.x + DX[hit.face] + 0.5, y = hit.y + DY[hit.face], z = hit.z + DZ[hit.face] + 0.5;
       if (hid === B.SPAWNER) { const be = w.getBE(hit.x, hit.y, hit.z) || {}; be.type = 'spawner'; be.mob = it.egg; w.setBE(hit.x, hit.y, hit.z, be); p.consumeHeld(1); return done(); }
+      if (hid === B.TRIAL_SPAWNER) { const be = w.getBE(hit.x, hit.y, hit.z) || { type: 'trial_spawner', cfg: 'default', v: 2 }; be.egg = it.egg; be.nm = undefined; w.setBE(hit.x, hit.y, hit.z, be); this._spList = null; if (p.mode !== 1) p.consumeHeld(1); return done(); }
       const m = this.spawnMob(it.egg, x, y, z);
       // like Java Edition, a mob from a spawn egg despawns unless it is named
       if (m) { if (held.tag && held.tag.name) { m.customName = held.tag.name; m.persistent = true; } p.consumeHeld(1); }
@@ -20603,7 +20628,7 @@ Object.assign(Game.prototype, {
       const it = ITEMS[p.heldId()];
       if (it && it.tool && d.hard > 0) p.damageHeld(it.tool.type === 'sword' ? 2 : 1);
       p.exh += 0.005;
-      if (d.xp && harvest && !(p.toolInfo && p.toolInfo().silk)) { const [a, b] = d.xp; const n = a + Math.floor(Math.random() * (b - a + 1)); if (n > 0) this.spawnXP ? this.spawnXP(x + 0.5, y + 0.5, z + 0.5, n) : p.addXP(n); }
+      if (d.xp && harvest && !(p.toolInfo && p.toolInfo().silk) && this.rule('doTileDrops')) { const [a, b] = d.xp; const n = a + Math.floor(Math.random() * (b - a + 1)); if (n > 0) this.spawnXP ? this.spawnXP(x + 0.5, y + 0.5, z + 0.5, n) : p.addXP(n); }
       if (id === B.ICE && w.dim !== 'nether' && !(p.toolInfo && p.toolInfo().silk)) w.setBlock(x, y, z, B.WATER, 0);
     }
     this.remeshNear(x, z);
@@ -20666,7 +20691,7 @@ Object.assign(Game.prototype, {
         return;
       }
       case B.VINE: {
-        if (R() > 0.12) return;
+        if (R() > 0.12 || !this.rule('doVinesSpread')) return;
         const m = w.getMeta(x, y, z);
         if (w.getBlock(x, y - 1, z) === 0 && R() < 0.5) { let n = 1; while (w.getBlock(x, y + n, z) === id) n++; if (n < 6) w.setBlock(x, y - 1, z, id, m & ~(4 | 8)); }
         return;
@@ -21495,7 +21520,7 @@ Mob.prototype.die = function (source, attacker) {
   if (g.world.dim === 'overworld' && T.xp && !this.baby && g.sculkBloom) g.sculkBloom(this.x, this.y, this.z, typeof T.xp === 'number' ? T.xp : T.xp[1]);
   // slimes split
   if ((this.type === 'slime' || this.type === 'magma_cube') && (this.data.size || 1) > 1) {
-    const n = 2 + Math.floor(Math.random() * 3), s = this.data.size / 2;
+    const n = 2 + Math.floor(Math.random() * 3), s = Math.floor(this.data.size / 2);
     for (let k = 0; k < n; k++) { const m = createMob(g, this.type, this.x + (Math.random() - 0.5) * this.w, this.y + 0.5, this.z + (Math.random() - 0.5) * this.w, { size: s }); m.target = this.target; g.entities.push(m); }
   }
   // skeletons that kill creepers: music discs
@@ -21807,7 +21832,7 @@ Object.assign(GOALS, {
       m.lookAt(x + 0.5, y + 0.8, z + 0.5);
       // restock at work twice a day
       if ((t === 2400 || t === 6000 || (m.age + m.id) % 6000 === 0) && d.trades) for (const o of d.trades) o.uses = 0;
-      if (d.prof === 'farmer' && Math.random() < 0.02) farmerWork(m);
+      if (d.prof === 'farmer' && Math.random() < 0.02 && m.game.rule('mobGriefing')) farmerWork(m);
       return Math.random() < 0.97;
     }
     if (d.meet && t >= 9000 && t < 11000 && Math.hypot(d.meet[0] - m.x, d.meet[2] - m.z) > 6) { m.goTo(d.meet[0], d.meet[1], d.meet[2], m.T.walk, 4); return true; }
@@ -22126,7 +22151,7 @@ Object.assign(Game.prototype, {
     if (p.warning === 1) setTimeout(() => this.sound('warden', x + 5, y, z), 2000);
     else if (p.warning === 2) setTimeout(() => this.sound('warden', x - 4, y, z + 3), 2000);
     else if (p.warning === 3) setTimeout(() => this.sound('warden_roar', x, y, z - 6), 2000);
-    else if (p.warning >= 4 && !this.entities.some(e => e instanceof Warden && !e.dead && Math.hypot(e.x - x, e.z - z) < 48)) {
+    else if (p.warning >= 4 && this.rule('doWardenSpawning') && !this.entities.some(e => e instanceof Warden && !e.dead && Math.hypot(e.x - x, e.z - z) < 48)) {
       // a warden digs out of the ground near the shrieker
       for (let k = 0; k < 20; k++) {
         const wx = x + Math.floor(Math.random() * 11) - 5, wz = z + Math.floor(Math.random() * 11) - 5;
@@ -22348,7 +22373,7 @@ class EndCrystal extends Mob {
     if (this.dead) return false;
     this.dead = true;
     this.game.onCrystalDestroyed && this.game.onCrystalDestroyed(this);
-    this.game.explode(this.x, this.y + 0.6, this.z, 6, true);
+    this.game.explode(this.x, this.y + 0.6, this.z, 6, false, 'crystal');
     return true;
   }
   render(r, a) {
@@ -22491,7 +22516,7 @@ class Wither extends Mob {
       g.sound('shoot', sx, sy, sz);
     }
     // smash through blocks around it after being hurt
-    if (this.age - (this.lastHurtAge || -999) < 20 && this.age % 10 === 0) {
+    if (this.age - (this.lastHurtAge || -999) < 20 && this.age % 10 === 0 && g.rule('mobGriefing')) {
       const w = g.world;
       for (let ddy = 0; ddy < 4; ddy++) for (let ddz = -1; ddz <= 1; ddz++) for (let ddx = -1; ddx <= 1; ddx++) { const bx = Math.floor(this.x) + ddx, by = Math.floor(this.y) + ddy, bz = Math.floor(this.z) + ddz, id = w.getBlock(bx, by, bz); if (id && BLK[id].hard >= 0 && BLK[id].hard < 30 && !BLK[id].liquid) w.setBlock(bx, by, bz, 0, 0); }
       g.remeshNear(Math.floor(this.x), Math.floor(this.z));
@@ -22523,7 +22548,9 @@ function checkWither(g, x, y, z) {
    the first time a chest is opened or broken), mobs placed by structures,
    cave biomes for F3 and spawning, spawn tables of the newer biomes
    =================================================================== */
-// a pool: [[min rolls, max rolls], [[item, weight, min, max, extra], ...]]; extra: { ench: level }, { book: key or true }, { potion }
+// a pool: [[min rolls, max rolls], [[item, weight, min, max, extra], ...]]; an item named '@table' rolls that table instead.
+// extra: { ench: level, [min, max] or { key: level } }, { rand: true } (one random enchantment), { book: key, [keys] or true, lvl },
+// { potion }, { dmg: [min, max] } (durability left), { amp: [min, max] } (ominous bottles), { trim: { pattern, material } }
 const LOOT = {
   village_plains_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['dandelion', 2], ['poppy', 1], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['apple', 10, 1, 5], ['book', 1], ['feather', 1], ['emerald', 2, 1, 4], ['oak_sapling', 5, 1, 2]]]],
   village_desert_house: [[[3, 8], [['clay_ball', 1], ['green_dye', 1], ['cactus', 10, 1, 4], ['wheat', 10, 1, 7], ['bread', 10, 1, 4], ['book', 1], ['dead_bush', 2, 1, 3], ['emerald', 1, 1, 3]]]],
@@ -22566,15 +22593,16 @@ const LOOT = {
   abandoned_mineshaft: [[[1, 1], [['golden_apple', 20], ['enchanted_golden_apple', 1], ['name_tag', 30], ['enchanted_book', 10, 1, 1, { book: true }], ['iron_pickaxe', 5], [null, 5]]],
     [[2, 4], [['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['redstone', 5, 4, 9], ['lapis_lazuli', 5, 4, 9], ['diamond', 3, 1, 2], ['coal', 10, 3, 8], ['bread', 15, 1, 3], ['glow_berries', 15, 3, 6], ['melon_seeds', 10, 2, 4],
       ['pumpkin_seeds', 10, 2, 4], ['beetroot_seeds', 10, 2, 4]]], [[3, 3], [['rail', 20, 4, 8], ['powered_rail', 5, 1, 4], ['detector_rail', 5, 1, 4], ['activator_rail', 5, 1, 4], ['torch', 15, 1, 16]]]],
-  trial_chambers_corridor: [[[1, 3], [['iron_axe', 1, 1, 1, { ench: 10 }], ['honeycomb', 1, 1, 8], ['stone_axe', 2], ['stone_pickaxe', 2], ['ender_pearl', 2, 1, 2], ['bamboo_hanging_sign', 2, 1, 4], ['bamboo_planks', 2, 1, 6],
-    ['scaffolding', 2, 2, 10], ['torch', 2, 3, 6], ['tuff', 3, 8, 20]]]],
-  trial_chambers_supply: [[[3, 5], [['arrow', 2, 4, 14], ['baked_potato', 2, 2, 4], ['glow_berries', 2, 2, 10], ['acacia_planks', 1, 3, 6], ['moss_block', 1, 2, 5], ['bone_meal', 1, 2, 5], ['tuff', 1, 5, 10], ['torch', 1, 3, 6],
-    ['potion', 1, 2, 5, { potion: 'regeneration' }], ['potion', 1, 2, 5, { potion: 'strength' }], ['stone_pickaxe', 2], ['milk_bucket', 1]]]],
-  trial_spawner: [[[1, 1], [['emerald', 4, 2, 4], ['arrow', 4, 4, 8], ['iron_ingot', 3, 1, 2], ['honey_bottle', 3], ['bread', 3, 1, 3], ['cooked_chicken', 3, 1, 3], ['golden_carrot', 2, 1, 2], ['diamond', 1], ['wind_charge', 3, 4, 12],
-    ['ominous_bottle', 1]]], [[1, 1], [['trial_key', 1]]]],
-  trial_vault: [[[1, 3], [['emerald', 5, 4, 10], ['wind_charge', 4, 4, 12], ['arrow', 3, 2, 8], ['shield', 3], ['bow', 2, 1, 1, { ench: 15 }], ['crossbow', 2, 1, 1, { ench: 15 }], ['iron_axe', 2, 1, 1, { ench: 15 }],
-    ['iron_chestplate', 2, 1, 1, { ench: 15 }], ['golden_carrot', 2, 1, 2], ['enchanted_book', 2, 1, 1, { book: true }], ['diamond_axe', 1, 1, 1, { ench: 20 }], ['diamond_chestplate', 1, 1, 1, { ench: 20 }], ['golden_apple', 2],
-    ['music_disc_precipice', 1], ['flow_banner_pattern', 1], ['guster_banner_pattern', 1], ['bolt_armor_trim_smithing_template', 1], ['flow_armor_trim_smithing_template', 1], ['heavy_core', 1], ['diamond', 2, 1, 2]]]],
+  trial_chambers_corridor: [[[1, 3], [['iron_axe', 1, 1, 1, { dmg: [0.4, 0.9], rand: true }], ['honeycomb', 1, 2, 8], ['stone_axe', 2, 1, 1, { dmg: [0.15, 0.8] }], ['stone_pickaxe', 2, 1, 1, { dmg: [0.15, 0.8] }],
+    ['ender_pearl', 2, 1, 2], ['bamboo_hanging_sign', 2, 1, 4], ['bamboo_planks', 2, 3, 6], ['scaffolding', 2, 2, 10], ['torch', 2, 3, 6], ['tuff', 3, 8, 20]]]],
+  trial_chambers_supply: [[[3, 5], [['arrow', 2, 4, 14], ['tipped_arrow', 1, 4, 8, { potion: 'poison' }], ['tipped_arrow', 1, 4, 8, { potion: 'slowness' }], ['baked_potato', 2, 2, 4], ['glow_berries', 2, 2, 10],
+    ['acacia_planks', 1, 3, 6], ['moss_block', 1, 2, 5], ['bone_meal', 1, 2, 5], ['tuff', 1, 5, 10], ['torch', 1, 3, 6], ['potion', 1, 2, 2, { potion: 'regeneration' }], ['potion', 1, 2, 2, { potion: 'strength' }],
+    ['stone_pickaxe', 2, 1, 1, { dmg: [0.15, 0.8] }], ['milk_bucket', 1]]]],
+  trial_chambers_entrance: [[[2, 3], [['trial_key', 1], ['stick', 5, 2, 5], ['wooden_axe', 10], ['honeycomb', 10, 2, 8], ['arrow', 10, 5, 10]]]],
+  trial_chambers_intersection: [[[1, 3], [['diamond_block', 1], ['emerald_block', 5, 1, 3], ['diamond_axe', 5, 1, 1, { dmg: [0.1, 0.5] }], ['diamond_pickaxe', 5, 1, 1, { dmg: [0.1, 0.5] }], ['diamond', 10, 1, 2],
+    ['cake', 20, 1, 4], ['amethyst_shard', 20, 8, 20], ['iron_block', 20, 1, 2]]]],
+  trial_chambers_intersection_barrel: [[[1, 3], [['diamond_axe', 1, 1, 1, { dmg: [0.4, 0.9], rand: true }], ['diamond_pickaxe', 1, 1, 1, { dmg: [0.15, 0.8] }], ['diamond', 1, 1, 3], ['compass', 1], ['bucket', 1, 1, 2],
+    ['golden_axe', 4, 1, 1, { dmg: [0.15, 0.8] }], ['golden_pickaxe', 4, 1, 1, { dmg: [0.15, 0.8] }], ['bamboo_planks', 10, 5, 15], ['baked_potato', 10, 6, 10]]]],
   end_city_treasure: [[[2, 6], [['diamond', 5, 2, 7], ['iron_ingot', 10, 4, 8], ['gold_ingot', 15, 2, 7], ['emerald', 2, 2, 6], ['beetroot_seeds', 5, 1, 10], ['saddle', 3], ['iron_horse_armor', 1], ['golden_horse_armor', 1],
     ['diamond_horse_armor', 1], ['diamond_sword', 3, 1, 1, { ench: 25 }], ['diamond_boots', 3, 1, 1, { ench: 25 }], ['diamond_chestplate', 3, 1, 1, { ench: 25 }], ['diamond_leggings', 3, 1, 1, { ench: 25 }],
     ['diamond_helmet', 3, 1, 1, { ench: 25 }], ['diamond_pickaxe', 3, 1, 1, { ench: 25 }], ['diamond_shovel', 3, 1, 1, { ench: 25 }], ['iron_sword', 3, 1, 1, { ench: 25 }], ['iron_pickaxe', 3, 1, 1, { ench: 25 }]]],
@@ -22604,34 +22632,60 @@ function enchantTag(id, level, R) {
   for (const [k, l] of list) ench[k] = l;
   return { ench };
 }
+// EnchantRandomlyFunction over #on_random_loot (or the listed ones): one enchantment the item takes, at a random level
+const NOT_ON_RANDOM_LOOT = new Set(['swift_sneak', 'soul_speed', 'wind_burst']);
+function randomEnchant(id, R, keys) {
+  const list = keys ? keys.map(k => ENCHANT_BY_KEY[k]).filter(Boolean) : ENCHANTS.filter(en => !NOT_ON_RANDOM_LOOT.has(en.key) && canEnchant(id, en));
+  if (!list.length) return null;
+  const en = list[Math.floor(R() * list.length)];
+  return [en.key, 1 + Math.floor(R() * en.max)];
+}
+const rollRange = (v, R) => Array.isArray(v) ? v[0] + Math.floor(R() * (v[1] - v[0] + 1)) : v;
 function lootStack(e, R) {
   const [name, , mn = 1, mx = mn, x] = e;
   const it = ITEM_BY_NAME[name];
   if (!it) return null;
-  const st = { id: it.id, count: Math.min(it.stack || 64, mn + Math.floor(R() * (mx - mn + 1))) };
-  if (x && x.ench) { const t = enchantTag(it.id, x.ench, R); if (t) st.tag = t; }
+  const st = { id: it.id, count: mn + Math.floor(R() * (mx - mn + 1)) };
+  const tag = () => st.tag || (st.tag = {});
+  if (x && x.ench) {
+    if (typeof x.ench === 'object' && !Array.isArray(x.ench)) tag().ench = Object.assign({}, x.ench);
+    else { const t = enchantTag(it.id, rollRange(x.ench, R), R); if (t) st.tag = t; }
+  }
+  if (x && x.rand) { const en = randomEnchant(it.id, R); if (en) tag().ench = { [en[0]]: en[1] }; }
   if (x && x.book) {
     let key = x.book, lvl = 1;
     if (key === true) {
       const list = ENCHANTS.filter(en => !en.curse || R() < 0.3);
       const en = list[Math.floor(R() * list.length)];
       key = en.key; lvl = 1 + Math.floor(R() * en.max);
-    } else { const en = ENCHANTS.find(q => q.key === key); lvl = en ? 1 + Math.floor(R() * en.max) : 1; }
+    } else if (Array.isArray(key)) [key, lvl] = randomEnchant(it.id, R, key);
+    else { const en = ENCHANTS.find(q => q.key === key); lvl = en ? 1 + Math.floor(R() * en.max) : 1; }
+    if (x.lvl) lvl = x.lvl;
     st.tag = { stored: { [key]: lvl } };
   }
-  if (x && x.potion) st.tag = { potion: x.potion };
+  if (x && x.potion) tag().potion = x.potion;
+  if (x && x.amp) tag().amp = rollRange(x.amp, R);
+  if (x && x.trim) tag().trim = Object.assign({}, x.trim);
+  // SetItemDamageFunction: the share of durability left
+  if (x && x.dmg && it.dur) st.dmg = Math.floor((1 - (x.dmg[0] + R() * (x.dmg[1] - x.dmg[0]))) * it.dur);
   return st;
 }
-function rollLoot(table, R) {
-  const t = LOOT[table], out = [];
+function rollLoot(table, R, out) {
+  const t = LOOT[table];
+  out = out || [];
   if (!t) return out;
   for (const [[a, b], entries] of t) {
     const n = a + Math.floor(R() * (b - a + 1));
     for (let k = 0; k < n; k++) {
       const e = pickWeighted(entries, R);
       if (!e[0]) continue;
+      if (e[0][0] === '@') { rollLoot(e[0].slice(1), R, out); continue; }
       const st = lootStack(e, R);
-      if (st) out.push(st);
+      if (!st) continue;
+      // LootTable.createStackSplitter: more than a stack comes out as several stacks
+      const max = ITEMS[st.id].stack || 64;
+      while (st.count > max) { out.push(Object.assign({}, st, { count: max })); st.count -= max; }
+      out.push(st);
     }
   }
   return out;
@@ -22716,7 +22770,7 @@ Game.prototype.tickSpawners = function () {
     for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
       const c = w.getChunk(pcx + dx, pcz + dz);
       if (!c || c.state < 2) continue;
-      for (const [i, v] of c.be) if (v.type === 'spawner' || v.type === 'trial_spawner') list.push([c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), v]);
+      for (const [i, v] of c.be) if (v.type === 'spawner' || v.type === 'trial_spawner' || v.type === 'vault') list.push([c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), v]);
     }
     this._spList = list;
   }
@@ -22724,70 +22778,10 @@ Game.prototype.tickSpawners = function () {
     const id = w.getBlock(x, y, z);
     if (be.type === 'spawner' && id === B.SPAWNER) this.tickMobSpawner(x, y, z, be);
     else if (be.type === 'trial_spawner' && id === B.TRIAL_SPAWNER) this.tickTrialSpawner(x, y, z, be);
+    else if (be.type === 'vault' && id === B.VAULT) this.tickVault(x, y, z, be);
   }
 };
-// a spot near (x, y, z) where a mob of this type can stand
-Game.prototype.spawnSpotNear = function (x, y, z, type, r) {
-  const w = this.world, T = MOB_TYPES[type];
-  for (let k = 0; k < 12; k++) {
-    const sx = x + Math.floor(Math.random() * (2 * r + 1)) - r, sz = z + Math.floor(Math.random() * (2 * r + 1)) - r;
-    let sy = y + 1;
-    while (sy > y - 2 && !SOLID[w.getBlock(sx, sy - 1, sz)]) sy--;
-    if (NAV.stand(w, sx, sy, sz, { h: T.h, T: { fireproof: T.fireproof } })) return [sx, sy, sz];
-  }
-  return null;
-};
-// monster spawners: Game.prototype.tickMobSpawner in 119_spawning.js
-// trial spawners: wake up when a player comes near, send waves of mobs, then hand out rewards and rest for half an hour
-Game.prototype.tickTrialSpawner = function (x, y, z, be) {
-  const w = this.world, p = this.player, d = Math.hypot(p.x - x - 0.5, p.y - y, p.z - z - 0.5);
-  const lit = on => { const m = w.getMeta(x, y, z); if (!!(m & 1) !== on) { w.setMeta(x, y, z, on ? m | 1 : m & ~1); this.remeshNear(x, z); } };
-  be.state = be.state || 'waiting';
-  if (be.state === 'cooldown') { if ((be.cool = (be.cool || 0) - 1) <= 0) { be.state = 'waiting'; w.setBE(x, y, z, be); } return; }
-  if (be.state === 'waiting') {
-    if (d < 14 && p.mode !== 1 && p.mode !== 3) { Object.assign(be, { state: 'active', spawned: 0, total: 6, t: 20 }); be._alive = []; lit(true); this.sound('spawner', x + 0.5, y + 0.5, z + 0.5); }
-    return;
-  }
-  if (be.state === 'active') {
-    if (Math.random() < 0.35) this.particles.flame(x + 0.5, y + 1.05, z + 0.5);
-    const alive = (be._alive || []).filter(id => this.entities.some(e => e.id === id && !e.dead && e.deathTime === 0));
-    be._alive = alive;
-    if (be.spawned >= be.total && !alive.length) { be.state = 'eject'; be.t = 30; return; }
-    if (--be.t > 0) return;
-    be.t = 40;
-    if (be.spawned < be.total && alive.length < 2 && d < 47) {
-      const s = this.spawnSpotNear(x, y, z, be.mob || 'zombie', 4);
-      if (s) {
-        const e = this.spawnMob(be.mob || 'zombie', s[0] + 0.5, s[1], s[2] + 0.5);
-        if (e) { e.persistent = true; be._alive.push(e.id); be.spawned++; this.particles.poof(s[0] + 0.5, s[1] + 0.5, s[2] + 0.5, [1, 0.55, 0.15], 12); }
-      }
-    }
-    return;
-  }
-  if (be.state === 'eject') {
-    if (--be.t > 0) return;
-    for (const st of rollLoot('trial_spawner', Math.random)) this.dropItem(x + 0.5, y + 1.2, z + 0.5, st);
-    this.sound('pop', x + 0.5, y + 1, z + 0.5);
-    be.state = 'cooldown'; be.cool = 36000; lit(false);
-    w.setBE(x, y, z, be);
-  }
-};
-// vaults open once for a trial key and throw out a reward
-const _useBlockGen = Game.prototype.useBlock;
-Game.prototype.useBlock = function (p, hit, held) {
-  if (hit.id === B.VAULT) {
-    const w = this.world, be = w.getBE(hit.x, hit.y, hit.z) || { type: 'vault' };
-    if (!held || held.id !== I.TRIAL_KEY || be.opened) { this.sound('click', hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); return !!held && held.id === I.TRIAL_KEY; }
-    if (p.mode !== 1) p.consumeHeld(1);
-    be.type = 'vault'; be.opened = 1;
-    w.setBE(hit.x, hit.y, hit.z, be);
-    w.setMeta(hit.x, hit.y, hit.z, w.getMeta(hit.x, hit.y, hit.z) & 3);
-    for (const st of rollLoot('trial_vault', Math.random)) this.dropItem(hit.x + 0.5, hit.y + 1.1, hit.z + 0.5, st);
-    this.sound('vault', hit.x + 0.5, hit.y + 1, hit.z + 0.5); this.remeshNear(hit.x, hit.z);
-    return true;
-  }
-  return _useBlockGen.call(this, p, hit, held);
-};
+// monster spawners: Game.prototype.tickMobSpawner in 119_spawning.js; trial spawners and vaults: 121_trials.js
 const _gameTickGen = Game.prototype.gameTick;
 Game.prototype.gameTick = function () { _gameTickGen.call(this); if (this.world && this.player) this.tickSpawners(); };
 // the little mob turning inside a monster spawner
@@ -22803,7 +22797,7 @@ Game.prototype.renderSpawnerMobs = function (r, a) {
     const md = MOB_MODELS[be.mob], t = this.world.tick + a, st = m.animState(a);
     st.swing = 0; st.amt = 0;
     const sc = 0.45 / Math.max(m.T.w, m.T.h, 0.6);
-    drawMob(r, md, m.skins(), [x + 0.5, y + 0.2, z + 0.5], t * 0.08, st, [1, 1, 1, 1], [this.world.getLightRaw(x, y, z) & 15, (this.world.getLightRaw(x, y, z) >> 4)], sc, 0);
+    drawMob(r, md, m.skins(), [x + 0.5, y + 0.2, z + 0.5], t * 0.08, st, [1, 1, 1, 1], [this.world.getLightRaw(x, y, z) >> 4, this.world.getLightRaw(x, y, z) & 15], sc, 0);
   }
 };
 
@@ -23197,7 +23191,7 @@ Game.prototype.dispense = function (x, y, z) {
     if (st.id === I.SNOWBALL) { shoot('snow', 1.1); take(); return; }
     if (st.id === I.EGG) { shoot('egg', 1.1); take(); return; }
     if (st.id === I.FIRE_CHARGE) { shoot('fire', 1.0); take(); this.sound('blast', px, py, pz); return; }
-    if (st.id === I.SPLASH_POTION || st.id === I.LINGERING_POTION) { const pr = shoot('potion', 0.8); if (pr) pr.potion = st; take(); return; }
+    if (st.id === I.SPLASH_POTION || st.id === I.LINGERING_POTION) { const pr = shoot('potion', 0.8); if (pr) pr.stack = { id: st.id, count: 1, tag: st.tag }; take(); return; }
     if (st.id === I.TNT) { if (!front || REPL[front]) { w.setBlock(fx, fy, fz, B.TNT, 0, false); this.primeTNT(fx, fy, fz, 80); take(); } return; }
     if (st.id === I.WATER_BUCKET || st.id === I.LAVA_BUCKET) { if (!front || REPL[front]) { w.setBlock(fx, fy, fz, st.id === I.WATER_BUCKET ? B.WATER : B.LAVA, 0); giveBack(I.BUCKET); } return; }
     if (st.id === I.BUCKET) { if ((front === B.WATER || front === B.LAVA) && w.getMeta(fx, fy, fz) === 0) { w.setBlock(fx, fy, fz, 0, 0); giveBack(front === B.WATER ? I.WATER_BUCKET : I.LAVA_BUCKET); } return; }
@@ -23485,8 +23479,9 @@ class Vehicle extends Mob {
     const g = this.game;
     this.dead = true;
     if (this.rider) g.dismount(this.rider);
-    if (!creative) { const it = this.itemOf(); if (it) g.dropItem(this.x, this.y + 0.3, this.z, { id: it, count: 1 }); }
-    for (const st of this.data.items || []) if (st) g.dropItem(this.x, this.y + 0.3, this.z, st);
+    const drops = g.rule('doEntityDrops');
+    if (!creative && drops) { const it = this.itemOf(); if (it) g.dropItem(this.x, this.y + 0.3, this.z, { id: it, count: 1 }); }
+    if (drops) for (const st of this.data.items || []) if (st) g.dropItem(this.x, this.y + 0.3, this.z, st);
     g.sound('break_wood', this.x, this.y, this.z);
   }
   die() { this.breakApart(false); }
@@ -25011,8 +25006,9 @@ class ItemFrame extends Hanging {
   survives() { const [x, y, z] = this.wallPos(), id = this.game.world.getBlock(x, y, z); return !!(SOLID[id] || SHAPE[id] === SH.DIODE); }
   dropSelf() {
     const g = this.game, c = this.center();
-    g.dropItem(c[0], c[1], c[2], { id: this.type === 'glow_item_frame' ? I.GLOW_ITEM_FRAME : I.ITEM_FRAME, count: 1 });
-    if (this.data.item) { this.forgetMap(); g.dropItem(c[0], c[1], c[2], this.data.item); this.data.item = null; }
+    const drops = g.rule('doEntityDrops');
+    if (drops) g.dropItem(c[0], c[1], c[2], { id: this.type === 'glow_item_frame' ? I.GLOW_ITEM_FRAME : I.ITEM_FRAME, count: 1 });
+    if (this.data.item) { this.forgetMap(); if (drops) g.dropItem(c[0], c[1], c[2], this.data.item); this.data.item = null; }
   }
   // the frame's spot on its map, for the green marker
   forgetMap() { const it = this.data.item; if (!it || it.id !== I.FILLED_MAP || !it.tag) return; const m = this.game.mapById(it.tag.map); if (m && m.frames) m.frames = m.frames.filter(q => !(q.x === this.data.bx && q.y === this.data.by && q.z === this.data.bz)); }
@@ -25046,7 +25042,7 @@ class ItemFrame extends Hanging {
     if (source === 'fire' || source === 'lava' || source === 'drown' || source === 'fall' || source === 'in_fire') return false;
     if (this.data.item) {
       this.forgetMap();
-      if (!creative) g.dropItem(c[0], c[1], c[2], this.data.item);
+      if (!creative && g.rule('doEntityDrops')) g.dropItem(c[0], c[1], c[2], this.data.item);
       this.data.item = null; this.data.rot = 0;
       g.sound('frame_remove', c[0], c[1], c[2]);
       if (g.world.redstoneChanged) g.world.redstoneChanged(...this.wallPos());
@@ -25244,7 +25240,7 @@ class Painting extends Hanging {
     }
     return true;
   }
-  dropSelf() { const c = this.center(); this.game.dropItem(c[0], c[1], c[2], { id: I.PAINTING, count: 1 }); }
+  dropSelf() { const c = this.center(); if (this.game.rule('doEntityDrops')) this.game.dropItem(c[0], c[1], c[2], { id: I.PAINTING, count: 1 }); }
   interact() { return false; }
   hurt(amount, source, attacker) {
     if (this.dead || source === 'fire' || source === 'lava' || source === 'drown' || source === 'fall' || source === 'in_fire') return false;
@@ -25369,8 +25365,10 @@ class ArmorStand extends Mob {
   breakApart(creative) {
     const g = this.game;
     this.dead = true;
-    if (!creative) g.dropItem(this.x, this.y + 0.5, this.z, { id: I.ARMOR_STAND, count: 1 });
-    for (const st of this.data.armor || []) if (st) g.dropItem(this.x, this.y + 0.5, this.z, st);
+    // (Block.popResource: armor stands follow doTileDrops)
+    const drops = g.rule('doTileDrops');
+    if (!creative && drops) g.dropItem(this.x, this.y + 0.5, this.z, { id: I.ARMOR_STAND, count: 1 });
+    if (drops) for (const st of this.data.armor || []) if (st) g.dropItem(this.x, this.y + 0.5, this.z, st);
     g.sound('break_wood', this.x, this.y + 0.5, this.z);
     g.particles.blockBreak(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z), B.OAK_PLANKS);
   }
@@ -27679,7 +27677,7 @@ Game.prototype.runCommandBlock = function (x, y, z) {
 Game.prototype.cmdChain = function (x, y, z) {
   const w = this.world, seen = new Set();
   let cx = x, cy = y, cz = z;
-  for (let k = 0; k < 64; k++) {
+  for (let k = 0, lim = Math.min(4096, this.rule('maxCommandChainLength')); k < lim; k++) {
     const f = w.getMeta(cx, cy, cz) & 7, nx = cx + DX[f], ny = cy + DY[f], nz = cz + DZ[f], key = nx + ',' + ny + ',' + nz;
     if (w.getBlock(nx, ny, nz) !== B.CHAIN_COMMAND_BLOCK || seen.has(key)) break;
     seen.add(key);
@@ -27842,7 +27840,8 @@ Game.prototype.onChat = function (msg) {
       if (v.some(isNaN) || id === undefined || !['replace', 'keep', 'hollow', 'outline', 'destroy'].includes(mode)) return bad('Usage: /fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace|keep|hollow|outline|destroy]');
       const x0 = Math.min(v[0], v[3]), x1 = Math.max(v[0], v[3]), y0 = Math.max(0, Math.min(v[1], v[4])), y1 = Math.min(CH_TOP, Math.max(v[1], v[4])), z0 = Math.min(v[2], v[5]), z1 = Math.max(v[2], v[5]);
       const n = (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1);
-      if (n > 32768) return bad('Too many blocks in the specified area (maximum 32768, specified ' + n + ')');
+      const lim = this.rule('commandModificationBlockLimit');
+      if (n > lim) return bad('Too many blocks in the specified area (maximum ' + lim + ', specified ' + n + ')');
       let changed = 0;
       for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
         const edge = x === x0 || x === x1 || y === y0 || y === y1 || z === z0 || z === z1;
@@ -29615,6 +29614,1290 @@ Object.assign(Game.prototype, {
 Game.prototype.spawnMobs = (base => function () { base.call(this); if (this.player && this.world && (!this.rule || this.rule('doMobSpawning'))) this.vCats(); })(Game.prototype.spawnMobs);
 const _gameTickSG = Game.prototype.gameTick;
 Game.prototype.gameTick = function () { _gameTickSG.call(this); if (this.world && this.player && (!this.rule || this.rule('doMobSpawning'))) this.vSiege(); };
+
+/* @file 121_trials.js */
+/* ===================================================================
+   TRIAL CHAMBERS — Java Edition 1.21 trial spawners and vaults. A trial
+   spawner runs vanilla's TrialSpawner states with the config of its mob
+   (bigger waves for every extra player it saw); Bad Omen turns into
+   Trial Omen near one and makes it ominous: tougher waves in trial gear,
+   ominous item spawners dropping potions and arrows from above, and
+   ominous keys. Vaults open once per player for the right key and hand
+   out vanilla's rewards one item at a time. Also the Wind Charged,
+   Weaving, Oozing and Infested effects of the ominous potions.
+   =================================================================== */
+
+/* ---------------- loot tables ---------------- */
+const TRIAL_GEAR = (pattern) => ({ ench: { protection: 4, projectile_protection: 4, fire_protection: 4 }, trim: { pattern, material: 'copper_ingot' } });
+const TRIAL_PIECES = (mat, pattern) => ['helmet', 'chestplate'].map(p => [[1, 1], [[mat + '_' + p, 1, 1, 1, TRIAL_GEAR(pattern)], [null, 1]]]);
+Object.assign(LOOT, {
+  // what a trial spawner throws out for each player (spawners/trial_chamber/*, spawners/ominous/trial_chamber/*)
+  trial_consumables: [[[1, 1], [['cooked_chicken', 3], ['bread', 3, 1, 3], ['baked_potato', 2, 1, 3], ['potion', 1, 1, 1, { potion: 'regeneration' }], ['potion', 1, 1, 1, { potion: 'swiftness' }]]]],
+  trial_key: [[[1, 1], [['trial_key', 1]]]],
+  trial_ominous_consumables: [[[1, 1], [['cooked_beef', 3, 1, 2], ['baked_potato', 3, 2, 4], ['golden_carrot', 2, 1, 2], ['potion', 1, 1, 1, { potion: 'regeneration' }], ['potion', 1, 1, 1, { potion: 'strength' }]]]],
+  trial_ominous_key: [[[1, 1], [['ominous_trial_key', 1]]]],
+  trial_items_to_drop_when_ominous: [
+    [[1, 1], ['wind_charged', 'oozing', 'weaving', 'infested', 'strength', 'swiftness', 'slow_falling'].map(k => ['lingering_potion', 1, 1, 1, { potion: k }])],
+    [[1, 1], [['arrow', 1], ['tipped_arrow', 1, 1, 1, { potion: 'poison' }], ['tipped_arrow', 1, 1, 1, { potion: 'strong_slowness' }], ['fire_charge', 1, 1, 3], ['wind_charge', 1, 1, 3]]]],
+  // vault rewards (chests/trial_chambers/reward*)
+  trial_reward: [[[1, 1], [['@trial_reward_rare', 8], ['@trial_reward_common', 2]]], [[1, 3], [['@trial_reward_common', 1]]], [[1, 1], [['@trial_reward_unique', 1]]]],
+  trial_reward_common: [[[1, 1], [['arrow', 4, 2, 8], ['tipped_arrow', 4, 2, 8, { potion: 'poison' }], ['emerald', 4, 2, 4], ['wind_charge', 3, 1, 3], ['iron_ingot', 3, 1, 4], ['honey_bottle', 3, 1, 2],
+    ['ominous_bottle', 2, 1, 1, { amp: [0, 1] }], ['wind_charge', 1, 4, 12], ['diamond', 1, 1, 2]]]],
+  trial_reward_rare: [[[1, 1], [['emerald', 3, 2, 4], ['shield', 3, 1, 1, { dmg: [0.5, 1] }], ['bow', 3, 1, 1, { ench: [5, 15] }], ['crossbow', 2, 1, 1, { ench: [5, 20] }], ['iron_axe', 2, 1, 1, { ench: [0, 10] }],
+    ['iron_chestplate', 2, 1, 1, { ench: [0, 10] }], ['golden_carrot', 2, 1, 2], ['enchanted_book', 2, 1, 1, { book: ['sharpness', 'bane_of_arthropods', 'efficiency', 'fortune', 'silk_touch', 'feather_falling'] }],
+    ['enchanted_book', 2, 1, 1, { book: ['riptide', 'loyalty', 'channeling', 'impaling', 'mending'] }], ['diamond_chestplate', 1, 1, 1, { ench: [5, 15] }], ['diamond_axe', 1, 1, 1, { ench: [5, 15] }]]]],
+  trial_reward_unique: [[[1, 1], [['golden_apple', 4], ['bolt_armor_trim_smithing_template', 3], ['guster_banner_pattern', 2], ['music_disc_precipice', 2], ['trident', 1]]]],
+  trial_reward_ominous: [[[1, 1], [['@trial_reward_ominous_rare', 8], ['@trial_reward_ominous_common', 2]]], [[1, 3], [['@trial_reward_ominous_common', 1]]], [[1, 1], [['@trial_reward_ominous_unique', 1]]]],
+  trial_reward_ominous_common: [[[1, 1], [['emerald', 5, 4, 10], ['wind_charge', 4, 8, 12], ['tipped_arrow', 3, 4, 12, { potion: 'strong_slowness' }], ['diamond', 2, 2, 3], ['ominous_bottle', 1, 1, 1, { amp: [2, 4] }]]]],
+  trial_reward_ominous_rare: [[[1, 1], [['emerald_block', 5], ['iron_block', 4], ['crossbow', 4, 1, 1, { ench: [5, 20] }], ['golden_apple', 3], ['diamond_axe', 3, 1, 1, { ench: [10, 20] }],
+    ['diamond_chestplate', 3, 1, 1, { ench: [10, 20] }], ['enchanted_book', 2, 1, 1, { book: ['knockback', 'punch', 'smite', 'looting', 'multishot'] }], ['enchanted_book', 2, 1, 1, { book: ['breach', 'density'] }],
+    ['enchanted_book', 2, 1, 1, { book: 'wind_burst', lvl: 1 }], ['diamond_block', 1]]]],
+  trial_reward_ominous_unique: [[[1, 1], [['enchanted_golden_apple', 3], ['flow_armor_trim_smithing_template', 3], ['flow_banner_pattern', 2], ['music_disc_creator', 1], ['heavy_core', 1]]]],
+  // the gear of ominous waves (equipment/trial_chamber*): each piece half the time, with a copper trim and three protections
+  trial_armor: [[[1, 1], [['@trial_armor_chainmail', 4], ['@trial_armor_iron', 2], ['@trial_armor_diamond', 1]]]],
+  trial_armor_chainmail: TRIAL_PIECES('chainmail', 'bolt'), trial_armor_iron: TRIAL_PIECES('iron', 'flow'), trial_armor_diamond: TRIAL_PIECES('diamond', 'flow'),
+  trial_melee: [[[1, 1], [['@trial_armor', 1]]], [[1, 1], [['iron_sword', 4], ['iron_sword', 1, 1, 1, { ench: { sharpness: 1 } }], ['iron_sword', 1, 1, 1, { ench: { knockback: 1 } }], ['diamond_sword', 1]]]],
+  trial_ranged: [[[1, 1], [['@trial_armor', 1]]], [[1, 1], [['bow', 2], ['bow', 1, 1, 1, { ench: { power: 1 } }], ['bow', 1, 1, 1, { ench: { punch: 1 } }]]]],
+});
+
+/* ---------------- spawner configs ---------------- */
+// TrialSpawnerConfig of each spawner, normal and ominous: [total mobs, simultaneous mobs, total added per extra player,
+// simultaneous added per extra player, ticks between spawns]; the spawn range is 4 everywhere. mobs: [weight, type, nbt]
+const TRIAL_KINDS = {};
+{
+  const K = (key, mobs, n, o, gear) => { TRIAL_KINDS[key] = { mobs, n, o, gear }; };
+  const STD = [6, 3, 2, 0.5, 20], BIG = [12, 4, 2, 0.5, 20], SLOW = [6, 4, 2, 2, 160];
+  K('breeze', [[1, 'breeze']], [2, 1, 1, 0.5, 20], [4, 2, 1, 0.5, 20]);
+  K('melee/zombie', [[1, 'zombie']], STD, STD, 'trial_melee');
+  K('melee/husk', [[1, 'husk']], STD, STD, 'trial_melee');
+  K('melee/spider', [[1, 'spider']], STD, BIG);
+  K('small_melee/slime', [[3, 'slime', { size: 2 }], [1, 'slime', { size: 3 }]], STD, BIG);
+  K('small_melee/cave_spider', [[1, 'cave_spider']], STD, BIG);
+  K('small_melee/silverfish', [[1, 'silverfish']], STD, BIG);
+  K('small_melee/baby_zombie', [[1, 'zombie', { baby: true }]], [6, 2, 2, 0.5, 20], [6, 2, 2, 0.5, 20], 'trial_melee');
+  for (const [k, t] of [['skeleton', 'skeleton'], ['stray', 'stray'], ['poison_skeleton', 'bogged']]) {
+    K('ranged/' + k, [[1, t]], STD, STD, 'trial_ranged');
+    K('slow_ranged/' + k, [[1, t]], SLOW, SLOW, 'trial_ranged');
+  }
+}
+// a trial spawner placed by hand has TrialSpawnerConfig.DEFAULT and nothing to spawn until a spawn egg picks its mob
+TRIAL_KINDS.default = { mobs: [], n: [6, 2, 2, 1, 40], o: [6, 2, 2, 1, 40], plain: true };
+// spawners saved before the configs: by their mob
+const TRIAL_KIND_OF_MOB = { zombie: 'melee/zombie', husk: 'melee/husk', spider: 'melee/spider', skeleton: 'ranged/skeleton', stray: 'ranged/stray', bogged: 'ranged/poison_skeleton',
+  slime: 'small_melee/slime', cave_spider: 'small_melee/cave_spider', silverfish: 'small_melee/silverfish', breeze: 'breeze' };
+function trialKindOf(be) {
+  const K = TRIAL_KINDS[be.cfg] || TRIAL_KINDS[TRIAL_KIND_OF_MOB[be.mob]] || TRIAL_KINDS['melee/zombie'];
+  if (!be.egg) return K;
+  // TrialSpawner.overrideEntityToSpawn: the egg's mob, in both configs
+  if (!be._k || be._k.egg !== be.egg || be._k.base !== K) be._k = Object.assign({}, K, { mobs: [[1, be.egg]], gear: null, egg: be.egg, base: K });
+  return be._k;
+}
+// TrialSpawnerConfig.calculateTargetTotalMobs / calculateTargetSimultaneousMobs
+const trialTotal = (C, extra) => Math.floor(C[0] + C[2] * extra), trialSim = (C, extra) => Math.floor(C[1] + C[3] * extra);
+const TRIAL_COOLDOWN = 36000, TRIAL_RANGE = 14, TRIAL_TRACK = 47, TRIAL_ITEM_EVERY = 160;
+// (BlockPos.asLong() + game time) % 20 == 0: the tick of each second on which a spawner looks for players
+function trialPhase(x, y, z) {
+  const L = BigInt.asIntN(64, (BigInt(x & 0x3FFFFFF) << 38n) | (BigInt(z & 0x3FFFFFF) << 12n) | BigInt(y & 0xFFF));
+  return Number(((-L % 20n) + 20n) % 20n);
+}
+// Level.clip with ClipContext.Block.VISUAL from a towards b: true when it gets there or reaches block (tx, ty, tz) first.
+// Glass and panes have no visual shape, things without collision neither
+const CLIP_THROUGH = new Uint8Array(MAXB);
+for (let id = 1; id < BLOCK_NAMES.length; id++) if (/glass|^iron_bars$/.test(BLOCK_NAMES[id])) CLIP_THROUGH[id] = 1;
+function trialClipClear(w, ax, ay, az, bx, by, bz, tx, ty, tz) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+  if (len < 1e-7) return true;
+  const ux = dx / len, uy = dy / len, uz = dz / len, sx = ux > 0 ? 1 : -1, sy = uy > 0 ? 1 : -1, sz = uz > 0 ? 1 : -1;
+  let x = Math.floor(ax), y = Math.floor(ay), z = Math.floor(az);
+  const tdx = ux ? Math.abs(1 / ux) : Infinity, tdy = uy ? Math.abs(1 / uy) : Infinity, tdz = uz ? Math.abs(1 / uz) : Infinity;
+  let mx = ux ? (ux > 0 ? x + 1 - ax : ax - x) * tdx : Infinity, my = uy ? (uy > 0 ? y + 1 - ay : ay - y) * tdy : Infinity, mz = uz ? (uz > 0 ? z + 1 - az : az - z) * tdz : Infinity;
+  for (let i = 0; i < 160; i++) {
+    if (x === tx && y === ty && z === tz) return true;
+    const id = w.getBlock(x, y, z);
+    if (id && SOLID[id] && !CLIP_THROUGH[id]) {
+      if (SHAPE[id] === SH.CUBE) return false;
+      const b = selBox(id, w.getMeta(x, y, z), w, x, y, z), h = b && rayBox(ax - x, ay - y, az - z, ux, uy, uz, b);
+      if (h && h.t <= len) return false;
+    }
+    const t = Math.min(mx, my, mz);
+    if (t > len) return true;
+    if (mx === t) { x += sx; mx += tdx; } else if (my === t) { y += sy; my += tdy; } else { z += sz; mz += tdz; }
+  }
+  return true;
+}
+const trialKey = (x, y, z) => x + ',' + y + ',' + z;
+
+/* ---------------- trial spawners ---------------- */
+// meta: 1 lit, 2 ejecting, 4 bright (light 8 instead of 4), 8 ominous
+const TRIAL_META = { inactive: 0, waiting_for_players: 1, active: 5, waiting_for_reward_ejection: 5, ejecting_reward: 7, cooldown: 0 };
+EMITF[B.TRIAL_SPAWNER] = m => (m & 1) ? ((m & 4) ? 8 : 4) : 0; EMIT[B.TRIAL_SPAWNER] = 8; BLK[B.TRIAL_SPAWNER].light = 8;
+Object.assign(Game.prototype, {
+  // TrialSpawnerData.resetStatistics
+  trialReset(be) {
+    be.pl = 0; be.spawned = 0; be.next = 0; be.cool = 0; be.nm = undefined; be.eject = null;
+    for (const m of be._mobs || []) if (m.data) delete m.data.trial;
+    be._mobs = new Set();
+  },
+  // the mobs this spawner keeps count of; they are let go when they die or wander 47 blocks off
+  trialTracked(x, y, z, be, C) {
+    const key = trialKey(x, y, z);
+    if (!be._mobs) { be._mobs = new Set(); for (const e of this.entities) if (e instanceof Mob && e.data.trial === key && !e.dead && e.deathTime === 0) be._mobs.add(e); }
+    let lost = false;
+    for (const m of be._mobs) {
+      const far = (Math.floor(m.x) - x) ** 2 + (Math.floor(m.y) - y) ** 2 + (Math.floor(m.z) - z) ** 2 > TRIAL_TRACK * TRIAL_TRACK;
+      if (m.dead || m.deathTime > 0 || m.health <= 0 || far) { be._mobs.delete(m); if (far && m.data) delete m.data.trial; lost = true; }
+    }
+    if (lost) be.next = this.world.tick + C[4];
+    return be._mobs;
+  },
+  // TrialSpawnerData.tryDetectPlayers: survival players within 14 blocks the spawner can see, once a second;
+  // one with Trial Omen or Bad Omen makes it ominous (Bad Omen becomes Trial Omen, 15 minutes a level)
+  trialDetect(x, y, z, be) {
+    const w = this.world, p = this.player;
+    if (be._phase === undefined) be._phase = trialPhase(x, y - w.yOff, z);
+    if (w.tick % 20 !== be._phase) return;
+    if (be.state === 'cooldown' && be.om) return;
+    const seen = !!p && !p.dead && p.mode !== 1 && p.mode !== 3 && (Math.floor(p.x) - x) ** 2 + (Math.floor(p.y) - y) ** 2 + (Math.floor(p.z) - z) ** 2 < TRIAL_RANGE * TRIAL_RANGE &&
+      trialClipClear(w, p.x, p.y + (p.eyeCur || 1.62), p.z, x + 0.5, y + 0.5, z + 0.5, x, y, z);
+    let omen = false;
+    if (!be.om && seen && p.effects) {
+      const trial = p.effects.get('trial_omen'), bad = p.effects.get('bad_omen');
+      if (trial || bad) {
+        if (!trial) { const lvl = bad.amp + 1; p.removeEffect('bad_omen'); p.addEffect('trial_omen', 18000 * lvl, 0); }
+        this.trialOmenPuff(p.x, p.y + 1.6, p.z);
+        this.trialMakeOminous(x, y, z, be);
+        omen = true;
+      }
+    }
+    if ((be.state !== 'cooldown' || omen) && seen && !be.pl) {
+      be.pl = 1;
+      be.next = Math.max(w.tick + 40, be.next || 0);
+      if (!omen) { this.sound('trial_detect', x + 0.5, y + 0.5, z + 0.5); this.trialFlames(x + 0.5, y + 0.5, z + 0.5, be.om, 20); }
+    }
+  },
+  // TrialSpawner.applyOminous + TrialSpawnerData.resetAfterBecomingOminous: the mobs of the wave vanish in flames and it starts over
+  trialMakeOminous(x, y, z, be) {
+    const w = this.world, K = trialKindOf(be);
+    for (const m of be._mobs || []) { this.trialFlames(m.x, m.y + m.h / 2, m.z, false, 12); m.dead = true; m.removed = true; }
+    be._mobs = new Set();
+    be.om = 1; be.spawned = 0; be.nm = undefined;
+    be.next = w.tick + K.o[4];
+    be.cool = w.tick + TRIAL_ITEM_EVERY;
+    this.sound('trial_ominous', x + 0.5, y + 0.5, z + 0.5);
+    this.trialOmenPuff(x + 0.5, y + 0.5, z + 0.5);
+  },
+  tickTrialSpawner(x, y, z, be) {
+    const w = this.world, now = w.tick;
+    // spawners from before the vanilla state machine start over
+    if (be.v !== 2) { const cd = be.state === 'cooldown' ? be.cool || 0 : 0; this.trialReset(be); be.state = cd > 0 ? 'cooldown' : 'waiting_for_players'; be.cool = cd > 0 ? now + cd : 0; be.om = 0; be.v = 2; }
+    const K = trialKindOf(be), C = be.om ? K.o : K.n, before = be.state;
+    const canSpawn = OPTIONS.difficulty > 0 && (!this.rule || this.rule('doMobSpawning'));
+    this.trialTracked(x, y, z, be, C);
+    // (TrialSpawnerData.hasMobToSpawn)
+    if (!K.mobs.length && be.state !== 'cooldown' && be.state !== 'inactive') { this.trialReset(be); be.state = 'inactive'; }
+    switch (be.state) {
+      case 'inactive': if (K.mobs.length) be.state = 'waiting_for_players'; break;
+      case 'waiting_for_players':
+        if (!canSpawn) { this.trialReset(be); break; }
+        this.trialDetect(x, y, z, be);
+        if (be.pl) be.state = 'active';
+        break;
+      case 'active': {
+        if (!canSpawn) { this.trialReset(be); be.state = 'waiting_for_players'; break; }
+        const extra = Math.max(0, (be.pl || 0) - 1);
+        this.trialDetect(x, y, z, be);
+        if (be.om) this.trialItemSpawner(x, y, z, be);
+        // (becoming ominous just now swapped the wave for a new one)
+        const cur = be._mobs;
+        if ((be.spawned || 0) >= trialTotal(C, extra)) {
+          if (!cur.size) { be.cool = now + TRIAL_COOLDOWN; be.spawned = 0; be.next = 0; be.state = 'waiting_for_reward_ejection'; }
+        } else if (now >= (be.next || 0) && cur.size < trialSim(C, extra)) {
+          const m = this.trialSpawnMob(x, y, z, be, K, !!be.om);
+          if (m) { cur.add(m); be.spawned = (be.spawned || 0) + 1; be.next = now + C[4]; be.nm = trialPickMob(K); }
+        }
+        break;
+      }
+      // the shutter opens two seconds after the last mob of the wave died, then one reward per player every 1.5 seconds
+      case 'waiting_for_reward_ejection':
+        if (now >= be.cool - TRIAL_COOLDOWN + 40) { this.sound('trial_open', x + 0.5, y + 0.5, z + 0.5); be.state = 'ejecting_reward'; }
+        break;
+      case 'ejecting_reward':
+        if ((now - (be.cool - TRIAL_COOLDOWN)) % 30 !== 0) break;
+        if (!be.pl) { this.sound('trial_close', x + 0.5, y + 0.5, z + 0.5); be.eject = null; be.state = 'cooldown'; break; }
+        if (!be.eject) be.eject = pickWeighted(be.om && !K.plain ? [['trial_ominous_key', 3], ['trial_ominous_consumables', 7]] : [['trial_consumables', 1], ['trial_key', 1]], Math.random)[0];
+        for (const st of rollLoot(be.eject, Math.random)) this.trialPop(x, y, z, st);
+        this.sound('trial_eject', x + 0.5, y + 1, z + 0.5);
+        be.pl--;
+        break;
+      // half an hour of rest; only an omen wakes it early
+      case 'cooldown':
+        this.trialDetect(x, y, z, be);
+        if (be.pl) { be.spawned = 0; be.next = 0; be.state = 'active'; }
+        else if (now >= be.cool) { this.trialReset(be); be.om = 0; be.state = 'waiting_for_players'; }
+        break;
+      default: be.state = 'waiting_for_players';
+    }
+    // the look and light of the state
+    const m0 = w.getMeta(x, y, z), m1 = (TRIAL_META[be.state] || 0) | (be.om ? 8 : 0);
+    if (m0 !== m1) { w.setMeta(x, y, z, m1); this.remeshNear(x, z); }
+    if (before !== be.state || now % 200 === 0) w.setBE(x, y, z, be);
+    this.trialParticles(x, y, z, be);
+  },
+  // TrialSpawner.spawnMob: somewhere within 4 blocks and a block up or down, with room for the mob and in sight of the spawner;
+  // no light or floor needed (MobSpawnType.TRIAL_SPAWNER), but not on peaceful
+  trialSpawnMob(x, y, z, be, K, om) {
+    const w = this.world, R = Math.random;
+    if (be.nm === undefined || !K.mobs[be.nm]) be.nm = trialPickMob(K);
+    const [, type, o = {}] = K.mobs[be.nm], T = MOB_TYPES[type];
+    if (!T || OPTIONS.difficulty === 0) return null;
+    const sx = x + (R() - R()) * 4 + 0.5, sy = y + Math.floor(R() * 3) - 1, sz = z + (R() - R()) * 4 + 0.5;
+    const mw = o.size ? 0.52 * o.size : T.w * (o.baby ? 0.5 : 1), mh = o.size ? 0.52 * o.size : T.h * (o.baby ? 0.5 : 1), hw = mw / 2;
+    if (!this.vNoCollision(sx - hw, sy, sz - hw, sx + hw, sy + mh, sz + hw)) return null;
+    if (!trialClipClear(w, sx, sy, sz, x + 0.5, y + 0.5, z + 0.5, x, y, z)) return null;
+    // Silverfish.checkSilverfishSpawnRules: not within 5 blocks of a player
+    const p = this.player;
+    if (type === 'silverfish' && p && !p.dead && p.mode !== 3 && Math.hypot(p.x - Math.floor(sx) - 0.5, p.y - sy - 0.5, p.z - Math.floor(sz) - 0.5) < 5) return null;
+    // Mob.checkSpawnObstruction: nobody standing there
+    for (const e of this.mobsAndPlayer()) { const ew = e.w / 2; if (e.x + ew > sx - hw && e.x - ew < sx + hw && e.z + ew > sz - hw && e.z - ew < sz + hw && e.y + e.h > sy && e.y < sy + mh) return null; }
+    const m = createMob(this, type, sx, sy, sz, o.size ? { size: o.size } : {});
+    if (!m) return null;
+    // a spawn entry with more than the id skips finalizeSpawn: no random gear; baby zombies stay small
+    if (o.baby) m.growth = -1e9;
+    if (o.baby || o.size) { m.data.armor = null; m.data.armorPts = 0; m.data.hand = null; }
+    m.yaw = m.bodyYaw = R() * Math.PI * 2;
+    m.persistent = true;
+    if (om && K.gear) this.trialEquip(m, K.gear, R);
+    m.data.trial = trialKey(x, y, z);
+    m.savePrev();
+    this.entities.push(m);
+    this.trialFlames(x + 0.5, y + 0.5, z + 0.5, om, 20);
+    this.trialFlames(sx, sy + mh / 2, sz, om, 20);
+    this.sound('trial_spawn', sx, sy + mh / 2, sz);
+    return m;
+  },
+  // Mob.equip from an equipment table: each item goes to its slot and never drops
+  trialEquip(m, table, R) {
+    const noDrop = m.data.noDrop || (m.data.noDrop = []);
+    for (const st of rollLoot(table, R)) {
+      const a = ITEMS[st.id].armor;
+      if (a && a.slot !== undefined) { (m.data.armor || (m.data.armor = [null, null, null, null]))[a.slot] = st; noDrop.push(2 + a.slot); }
+      else { m.data.hand = st; noDrop.push(0); }
+    }
+    m.data.armorPts = (m.data.armor || []).reduce((s, st) => s + (st && ITEMS[st.id].armor ? ITEMS[st.id].armor.pts : 0), 0);
+  },
+  // TrialSpawnerData.getDispensingItems: items_to_drop_when_ominous rolled once from the world seed and the spawner's area
+  trialDispensing(x, y, z, be) {
+    if (be._drops) return be._drops;
+    const w = this.world, vy = y - w.yOff;
+    const R = mulberry32(strHash(String(w.seed) + ':' + Math.floor(x / 30) + ':' + Math.floor(vy / 20) + ':' + Math.floor(z / 30)));
+    return be._drops = rollLoot('trial_items_to_drop_when_ominous', R).map(st => [Object.assign({}, st, { count: 1 }), st.count]);
+  },
+  // TrialSpawner.spawnOminousOminousItemSpawner: every 8 seconds, two to five blocks above one of its mobs or a player in range
+  trialItemSpawner(x, y, z, be) {
+    const w = this.world, p = this.player, R = Math.random, items = this.trialDispensing(x, y, z, be);
+    if (!items.length || w.tick < (be.cool || 0)) return;
+    const near = e => (e.x - x - 0.5) ** 2 + (e.y - y - 0.5) ** 2 + (e.z - z - 0.5) ** 2 <= TRIAL_RANGE * TRIAL_RANGE;
+    if (!be.pl || !p || p.dead || p.mode === 1 || p.mode === 3 || !near(p)) return;
+    const list = R() < 0.5 ? [...(be._mobs || [])].filter(m => !m.dead && m.deathTime === 0 && near(m)) : [p];
+    if (!list.length) return;
+    const t = list[Math.floor(R() * list.length)], bx = Math.floor(t.x), bz = Math.floor(t.z), top = t.y + t.h + 2 + Math.floor(R() * 4);
+    // Level.clip straight up: under the first block in the way, or at the top
+    let hy = Math.floor(top);
+    for (let yy = Math.floor(t.y) + 1; yy <= Math.floor(top); yy++) { const id = w.getBlock(bx, yy, bz); if (id && SOLID[id] && !CLIP_THROUGH[id]) { hy = yy; break; } }
+    const sy = hy - 1;
+    if (SOLID[w.getBlock(bx, sy, bz)]) return;
+    const st = pickWeighted(items, R)[0];
+    this.entities.push(new OminousItemSpawner(this, bx + 0.5, sy + 0.5, bz + 0.5, copyStack(st, 1)));
+    this.sound('item_spawner_begin', bx + 0.5, sy + 0.5, bz + 0.5);
+    be.cool = w.tick + TRIAL_ITEM_EVERY;
+  },
+  // DefaultDispenseItemBehavior.spawnItem(..., 2, UP, 1.2 above the bottom centre): pops up out of the top
+  trialPop(x, y, z, st) {
+    const R = Math.random, e = this.dropItem(x + 0.5, y + 1.2 - 0.125, z + 0.5, st);
+    if (e) { const k = 0.0172275 * 2; e.vx = k * (R() - R()); e.vy = 0.2 + k * (R() - R()); e.vz = k * (R() - R()); }
+    return e;
+  },
+  // flames: the trial spawner's own, blue when ominous
+  trialFlames(x, y, z, om, n) {
+    for (let k = 0; k < n; k++) this.particles.add({ x: x + (Math.random() - 0.5) * 0.8, y: y + (Math.random() - 0.5) * 0.8, z: z + (Math.random() - 0.5) * 0.8, vx: (Math.random() - 0.5) * 0.02, vy: 0.02 + Math.random() * 0.02, vz: (Math.random() - 0.5) * 0.02,
+      life: 12 + Math.random() * 8, layer: texL(om ? 'particle_soul_flame' : 'particle_flame'), u: 0, v: 0, us: 1, size: 0.08, g: -0.001, col: [1, 1, 1], bright: true });
+  },
+  trialOmenPuff(x, y, z) { this.particles.poof(x, y, z, [0.1, 0.65, 0.65], 16); },
+  // vanilla's small dark smoke (SmokeParticle): a short drift up
+  trialSmoke(x, y, z, n) {
+    for (let k = 0; k < n; k++) { const R = Math.random, c = 0.15 + R() * 0.15;
+      this.particles.add({ x, y, z, vx: (R() - 0.5) * 0.02, vy: 0.01 + R() * 0.02, vz: (R() - 0.5) * 0.02, life: 8 / (R() * 0.8 + 0.2), anim: this.particles.gen(), u: 0, v: 0, us: 1, size: 0.05 + R() * 0.05, g: -0.002, col: [c, c, c] }); }
+  },
+  // TrialSpawnerState.emitParticles, near the player only
+  trialParticles(x, y, z, be) {
+    const p = this.player, R = Math.random;
+    if (!p || (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2 > 1024) return;
+    const cx = x + 0.5 + (R() - 0.5) * 0.9, cy = y + 0.5 + (R() - 0.5) * 0.9, cz = z + 0.5 + (R() - 0.5) * 0.9, om = !!be.om, fl = om ? 'particle_soul_flame' : 'particle_flame';
+    const flame = (s) => this.particles.add({ x: cx, y: cy, z: cz, vx: 0, vy: 0.005, vz: 0, life: 10 + R() * 8, layer: texL(fl), u: 0, v: 0, us: 1, size: s, g: -0.001, col: [1, 1, 1], bright: true });
+    switch (be.state) {
+      case 'waiting_for_players': case 'waiting_for_reward_ejection': case 'ejecting_reward': if (R() < 0.5) flame(0.05); break;
+      case 'active': flame(0.08); this.trialSmoke(cx, cy, cz, 1); break;
+      case 'cooldown': if (R() < 1 / 3) this.trialSmoke(cx, cy, cz, 1); if (this.world.tick % 20 === 0) this.trialSmoke(x + 0.5, y + 1, z + 0.5, 20 + Math.floor(R() * 4)); break;
+    }
+  },
+});
+const trialPickMob = K => { const tot = K.mobs.reduce((s, q) => s + q[0], 0); let r = Math.random() * tot; for (let i = 0; i < K.mobs.length; i++) { r -= K.mobs[i][0]; if (r < 0) return i; } return 0; };
+
+/* ---------------- ominous item spawners ---------------- */
+// hangs in the air for 3 to 6 seconds, then shoots its item straight down (OminousItemSpawner)
+class OminousItemSpawner extends Entity {
+  constructor(game, x, y, z, stack) {
+    super(game, x, y, z);
+    this.stack = stack; this.w = 0.25; this.h = 0.25;
+    this.spawnAt = 60 + Math.floor(Math.random() * 61);
+  }
+  tick() {
+    this.savePrev(); this.age++;
+    const g = this.game, R = Math.random;
+    if (this.age % 5 === 0) for (let k = 1 + Math.floor(R() * 3); k > 0; k--) {
+      const ox = 0.4 * (R() - R()), oy = 0.4 * (R() - R()), oz = 0.4 * (R() - R());
+      g.particles.add({ x: this.x + ox, y: this.y + oy, z: this.z + oz, vx: -ox / 12, vy: -oy / 12, vz: -oz / 12, life: 12, layer: texL('particle_generic_' + Math.floor(R() * 4)), u: 0, v: 0, us: 1, size: 0.06, g: 0, col: [0.35, 0.8, 0.9], bright: true });
+    }
+    if (this.age === this.spawnAt - 36) g.sound('item_spawner_about', this.x, this.y, this.z);
+    if (this.age >= this.spawnAt) { g.shootDown(this.stack, this.x, this.y, this.z, this); g.sound('item_spawner_spawn', this.x, this.y, this.z); g.particles.poof(this.x, this.y, this.z, [0.35, 0.8, 0.9], 10); this.dead = true; }
+  }
+  render(r, a) {
+    const p = this.ipos(a), g = this.game, st = this.stack, s = Math.min(this.age + a, 50) / 50, t = (this.age + a) / 20;
+    let m = M4.trans(M4.create(), p[0], p[1] - 0.1 * s, p[2]);
+    m = M4.mul(M4.create(), m, M4.rotY(M4.create(), t * 2));
+    const sprite = itemStyle(st.id) === 'sprite';
+    m = M4.mul(M4.create(), m, M4.scale(M4.create(), ...(sprite ? [0.5 * s, 0.5 * s, 0.5 * s] : [0.3 * s, 0.3 * s, 0.3 * s])));
+    if (sprite) g.pushItemXform(r, m, st, [15, 15]); else g.pushBlockItem(r, m, st.id, [15, 15]);
+  }
+}
+// ProjectileItem.shoot straight down for the projectile items, others just drop
+Game.prototype.shootDown = function (st, x, y, z, owner) {
+  const R = Math.random, spread = u => 0.0172275 * u * (R() - R());
+  const go = (kind, power, u) => this.spawnProjectile(kind, x, y, z, spread(u) * power, -power + spread(u) * power, spread(u) * power, null);
+  if (st.id === I.ARROW || st.id === I.TIPPED_ARROW || st.id === I.SPECTRAL_ARROW) { const pr = go('arrow', 1.1, 6); pr.arrowStack = copyStack(st, 1); pr.pickup = false; pr.mobDamage = 2; return; }
+  if (st.id === I.LINGERING_POTION || st.id === I.SPLASH_POTION) { const pr = go('potion', 1.375, 3); pr.stack = copyStack(st, 1); return; }
+  if (st.id === I.FIRE_CHARGE) { go('fire', 0.6, 6.7); return; }
+  if (st.id === I.WIND_CHARGE) { go('wind', 1, 6.7); return; }
+  this.dropItem(x, y, z, st);
+};
+
+/* ---------------- vaults ---------------- */
+// meta: facing in 3, 4 lit, 8 ejecting, 16 ominous. VaultConfig: rewards and key, players within 4 blocks switch it on, 4.5 off
+EMITF[B.VAULT] = m => (m & 12) ? 12 : 6; EMIT[B.VAULT] = 12; BLK[B.VAULT].light = 12;
+const VAULT_META = { inactive: 0, active: 4, unlocking: 4, ejecting: 12 };
+Object.assign(Game.prototype, {
+  vaultOminous(x, y, z, be) { return !!be.om || !!(this.world.getMeta(x, y, z) & 16); },
+  // VaultSharedData.updateConnectedPlayersWithinRange: players (creative ones too) in range who have not had their reward
+  vaultConnected(x, y, z, be, range) {
+    const p = this.player;
+    return !!p && !p.dead && p.mode !== 3 && !be.rewarded && (Math.floor(p.x) - x) ** 2 + (Math.floor(p.y) - y) ** 2 + (Math.floor(p.z) - z) ** 2 < range * range;
+  },
+  tickVault(x, y, z, be) {
+    const w = this.world, now = w.tick, om = this.vaultOminous(x, y, z, be), before = be.state || 'inactive';
+    if (be.opened) { be.rewarded = 1; delete be.opened; }
+    be.state = before;
+    const table = om ? 'trial_reward_ominous' : 'trial_reward';
+    // the item shown inside changes every second while it is on
+    if (now % 20 === 0 && be.state === 'active') { const l = rollLoot(table, Math.random); be._show = l.length ? l[Math.floor(Math.random() * l.length)] : null; }
+    if (now >= (be.resume || 0)) {
+      switch (be.state) {
+        case 'inactive': be.state = this.vaultConnected(x, y, z, be, 4) ? 'active' : 'inactive'; be.resume = now + 20; break;
+        case 'active': be.state = this.vaultConnected(x, y, z, be, 4.5) ? 'active' : 'inactive'; be.resume = now + 20; break;
+        case 'unlocking': be.state = 'ejecting'; be.resume = now + 20; break;
+        case 'ejecting':
+          if (!be.items || !be.items.length) { delete be.items; be._total = 0; be.state = this.vaultConnected(x, y, z, be, 4.5) ? 'active' : 'inactive'; be.resume = now + 20; break; }
+          this.trialPop(x, y, z, be.items.pop());
+          be._show = be.items.length ? be.items[be.items.length - 1] : null;
+          this.sound('vault_eject', x + 0.5, y + 1, z + 0.5);
+          this.particles.poof(x + 0.5, y + 1.1, z + 0.5, om ? [0.4, 0.8, 0.95] : [1, 0.85, 0.5], 6);
+          be.resume = now + 20;
+          break;
+        default: be.state = 'inactive';
+      }
+    }
+    if (before !== be.state) {
+      // VaultState.onEnter / onExit
+      const s = { active: 'vault_activate', inactive: 'vault_deactivate', ejecting: 'vault_open' }[be.state];
+      if (s) this.sound(s, x + 0.5, y + 0.5, z + 0.5);
+      if (before === 'ejecting') this.sound('vault_close', x + 0.5, y + 0.5, z + 0.5);
+      if (be.state === 'inactive') be._show = null;
+      if (be.state === 'active' && !be._show) { const l = rollLoot(table, Math.random); be._show = l.length ? l[0] : null; }
+      w.setBE(x, y, z, be);
+    }
+    const m0 = w.getMeta(x, y, z), m1 = (m0 & 3) | (VAULT_META[be.state] || 0) | (om ? 16 : 0);
+    if (m0 !== m1) { w.setMeta(x, y, z, m1); this.remeshNear(x, z); }
+    // small flames inside while it is on
+    const p = this.player;
+    if (be.state !== 'inactive' && p && (p.x - x) ** 2 + (p.z - z) ** 2 < 1024 && Math.random() < 0.1)
+      this.particles.add({ x: x + 0.5 + (Math.random() - 0.5) * 0.6, y: y + 0.2 + Math.random() * 0.6, z: z + 0.5 + (Math.random() - 0.5) * 0.6, vx: 0, vy: 0.01, vz: 0, life: 12, layer: texL(om ? 'particle_soul_flame' : 'particle_flame'), u: 0, v: 0, us: 1, size: 0.04, g: 0, col: [1, 1, 1], bright: true });
+  },
+});
+// VaultBlockEntity.Server.tryInsertKey: an active vault takes its key once per player and starts throwing out the rewards
+const _useBlockTR = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit.id !== B.VAULT || !held) return _useBlockTR.call(this, p, hit, held);
+  const w = this.world, { x, y, z } = hit, be = w.getBE(x, y, z) || { type: 'vault' };
+  if (be.state !== 'active') return _useBlockTR.call(this, p, hit, held);
+  const om = this.vaultOminous(x, y, z, be);
+  if (held.id !== (om ? I.OMINOUS_TRIAL_KEY : I.TRIAL_KEY)) { this.sound('vault_fail', x + 0.5, y + 0.5, z + 0.5); return true; }
+  if (be.rewarded) { this.sound('vault_reject', x + 0.5, y + 0.5, z + 0.5); return true; }
+  const items = rollLoot(om ? 'trial_reward_ominous' : 'trial_reward', Math.random);
+  if (!items.length) return true;
+  if (p.mode !== 1) p.consumeHeld(1);
+  be.type = 'vault'; be.items = items; be._total = items.length; be._show = items[items.length - 1];
+  be.rewarded = 1; be.state = 'unlocking'; be.resume = w.tick + 14;
+  w.setBE(x, y, z, be);
+  this.sound('vault_insert', x + 0.5, y + 0.5, z + 0.5);
+  if (this.ui && this.ui.refreshHotbar) this.ui.refreshHotbar();
+  return true;
+};
+
+// placed by hand: a vault with the default config, a trial spawner waiting for a spawn egg
+const _onPlacedTR = Game.prototype.onPlaced;
+Game.prototype.onPlaced = function (x, y, z, id) {
+  if (_onPlacedTR) _onPlacedTR.call(this, x, y, z, id);
+  const w = this.world;
+  if (id === B.VAULT) { w.setBE(x, y, z, { type: 'vault' }); this._spList = null; }
+  if (id === B.TRIAL_SPAWNER) { w.setBE(x, y, z, { type: 'trial_spawner', cfg: 'default', state: 'inactive', v: 2 }); w.setMeta(x, y, z, 0); this._spList = null; }
+};
+
+/* ---------------- what turns inside them ---------------- */
+// the next mob of a trial spawner spins inside while it waits or fights; a vault shows the item it would give
+Game.prototype.drawTrialDisplays = function (r, a) {
+  const p = this.player, w = this.world;
+  if (!this._spList || !p) return;
+  this._spDummies = this._spDummies || {};
+  const t = w.tick + a;
+  for (const [x, y, z, be] of this._spList) {
+    if ((p.x - x) ** 2 + (p.z - z) ** 2 > 24 * 24) continue;
+    const lr = w.getLightRaw(x, y, z), light = [lr >> 4, Math.max(lr & 15, be.type === 'vault' ? 12 : 8)];
+    if (be.type === 'trial_spawner' && (be.state === 'waiting_for_players' || be.state === 'active')) {
+      const K = trialKindOf(be), spec = K.mobs[be.nm !== undefined && K.mobs[be.nm] ? be.nm : 0];
+      if (!spec) continue;
+      const o = spec[2] || {}, key = spec[1] + (o.size ? ':' + o.size : '') + (o.baby ? ':baby' : '');
+      let m = this._spDummies[key];
+      if (m === undefined) { try { m = createMob(this, spec[1], x, y, z, o.size ? { size: o.size } : {}); if (m && o.baby) m.growth = -1e9; if (m) { m.data.armor = null; m.data.hand = spec[1] === 'zombie' || spec[1] === 'husk' || spec[1] === 'slime' ? null : m.data.hand; } } catch (e) { m = null; } this._spDummies[key] = m; }
+      if (!m || !MOB_MODELS[m.type]) continue;
+      const st = m.animState(a); st.swing = 0; st.amt = 0;
+      const sc = 0.53125 / Math.max(o.size ? 0.52 * o.size : m.T.w, o.size ? 0.52 * o.size : m.T.h, 1) * (o.baby ? 2 : 1);
+      drawMob(r, MOB_MODELS[m.type], m.skins(), [x + 0.5, y + 0.2, z + 0.5], t * (be.state === 'active' ? 0.2 : 0.08), st, [1, 1, 1, 1], light, sc, 0);
+    } else if (be.type === 'vault' && be._show && be.state !== 'inactive' && ITEMS[be._show.id]) {
+      const st = be._show, sprite = itemStyle(st.id) === 'sprite';
+      let m = M4.trans(M4.create(), x + 0.5, y + (sprite ? 0.45 : 0.4), z + 0.5);
+      m = M4.mul(M4.create(), m, M4.rotY(M4.create(), t * 0.05));
+      m = M4.mul(M4.create(), m, M4.scale(M4.create(), ...(sprite ? [0.55, 0.55, 0.55] : [0.32, 0.32, 0.32])));
+      if (sprite) this.pushItemXform(r, m, st, light); else this.pushBlockItem(r, m, st.id, light);
+    }
+  }
+};
+const _renderSpawnerMobsTR = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, a) { _renderSpawnerMobsTR.call(this, r, a); this.drawTrialDisplays(r, a); };
+
+/* ---------------- textures ---------------- */
+TEXGEN.push(function texTrials() {
+  const rect = (d, x0, y0, x1, y1, c) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) sp(d, x, y, typeof c === 'function' ? c(x, y) : c); };
+  const edge = (x, y) => Math.min(x, y, 15 - x, 15 - y), CLEAR = [0, 0, 0, 0];
+  // trial spawners: a frame round a grate, flames behind it when lit, the shutter open on top while it throws out rewards
+  const grate = (fr, bar, flame) => (d, r) => fillF(d, (x, y) => { const e = edge(x, y); return e < 2 ? mul(fr, 0.9 + r() * 0.1) : (x + y) % 4 < 2 ? (flame && e > 4 ? mul(flame, 0.85 + r() * 0.15) : CLEAR) : mul(bar, 0.9 + r() * 0.1); });
+  const open = (fr, bar, flame) => (d, r) => fillF(d, (x, y) => { const e = edge(x, y), c = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); return e < 2 ? mul(fr, 0.9 + r() * 0.1) : c < 3.5 ? CLEAR : c < 4.5 ? mul(flame, 0.9 + r() * 0.1) : mul(bar, 0.9 + r() * 0.1); });
+  T('trial_spawner_top_ejecting_reward', open([120, 100, 72], [140, 116, 84], [255, 170, 70]));
+  T('trial_spawner_top_inactive_ominous', grate([60, 64, 76], [74, 80, 96])); T('trial_spawner_side_inactive_ominous', grate([60, 64, 76], [74, 80, 96]));
+  T('trial_spawner_top_active_ominous', grate([66, 78, 96], [84, 98, 120], [70, 200, 235])); T('trial_spawner_side_active_ominous', grate([66, 78, 96], [84, 98, 120], [70, 200, 235]));
+  T('trial_spawner_top_ejecting_reward_ominous', open([66, 78, 96], [84, 98, 120], [110, 225, 250]));
+  // vaults: the ordinary ones are warm, the ominous ones cold
+  for (const [sfx, fr, inner, hole, glow, hot] of [['', [70, 74, 80], [46, 50, 56], [30, 34, 40], [200, 120, 40], [255, 214, 110]], ['_ominous', [56, 62, 76], [34, 38, 50], [24, 28, 38], [50, 150, 200], [150, 235, 255]]]) {
+    const base = (d, r) => fillF(d, (x, y) => edge(x, y) < 2 ? mul(fr, 0.9 + r() * 0.1) : mul(inner, 0.9 + r() * 0.1));
+    if (sfx) {
+      T('vault_top' + sfx, base); T('vault_bottom' + sfx, base);
+      T('vault_side_off' + sfx, (d, r) => { base(d, r); rect(d, 3, 3, 12, 12, CLEAR); });
+      T('vault_front_off' + sfx, (d, r) => { base(d, r); rect(d, 3, 3, 12, 12, hole); rect(d, 6, 6, 9, 9, mul(glow, 0.8)); });
+      T('vault_front_on' + sfx, (d, r) => { base(d, r); rect(d, 3, 3, 12, 12, mul(hole, 1.4)); rect(d, 5, 5, 10, 10, glow); rect(d, 6, 6, 9, 9, hot); });
+    }
+    T('vault_side_on' + sfx, (d, r) => { base(d, r); rect(d, 3, 3, 12, 12, CLEAR); for (let k = 3; k <= 12; k++) { sp(d, k, 3, glow); sp(d, k, 12, glow); sp(d, 3, k, glow); sp(d, 12, k, glow); } });
+    T('vault_front_ejecting' + sfx, (d, r) => { base(d, r); rect(d, 3, 3, 12, 12, glow); rect(d, 4, 4, 11, 11, hot); rect(d, 6, 6, 9, 9, CLEAR); });
+    T('vault_top_ejecting' + sfx, (d, r) => { base(d, r); rect(d, 4, 4, 11, 11, glow); rect(d, 5, 5, 10, 10, CLEAR); });
+  }
+});
+// the face sets by state (vanilla's blockstate models of trial_spawner and vault)
+const _resolveFaceTexturesTR = resolveFaceTextures;
+resolveFaceTextures = function () {
+  _resolveFaceTexturesTR();
+  const L = n => texLayer(n, texLayer(n.replace('_ominous', ''), 0));
+  const set = (side, top, bottom, front) => Int16Array.of(L(side), L(side), L(top), L(bottom), L(front || side), L(side));
+  const ts = [], vs = [];
+  for (const o of ['', '_ominous']) {
+    ts.push(set('trial_spawner_side_inactive' + o, 'trial_spawner_top_inactive' + o, 'trial_spawner_bottom'), set('trial_spawner_side_active' + o, 'trial_spawner_top_active' + o, 'trial_spawner_bottom'),
+      set('trial_spawner_side_active' + o, 'trial_spawner_top_ejecting_reward' + o, 'trial_spawner_bottom'));
+    vs.push(set('vault_side_off' + o, 'vault_top' + o, 'vault_bottom' + o, 'vault_front_off' + o), set('vault_side_on' + o, 'vault_top' + o, 'vault_bottom' + o, 'vault_front_on' + o),
+      set('vault_side_on' + o, 'vault_top_ejecting' + o, 'vault_bottom' + o, 'vault_front_ejecting' + o));
+  }
+  VARTEX[B.TRIAL_SPAWNER] = m => ts[(m & 8 ? 3 : 0) + (m & 2 ? 2 : m & 1)];
+  VARTEX[B.VAULT] = m => vs[(m & 16 ? 3 : 0) + (m & 8 ? 2 : m & 4 ? 1 : 0)];
+};
+
+/* ---------------- sounds ---------------- */
+const TRIAL_SOUNDS = new Set(['trial_detect', 'trial_open', 'trial_close', 'trial_eject', 'trial_spawn', 'trial_ominous', 'item_spawner_begin', 'item_spawner_about', 'item_spawner_spawn',
+  'vault_activate', 'vault_deactivate', 'vault_insert', 'vault_fail', 'vault_reject', 'vault_eject', 'vault_open', 'vault_close', 'wind_burst']);
+const _audioPlayTR = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  if (!TRIAL_SOUNDS.has(name)) return _audioPlayTR.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const now = this.ctx.currentTime, R = Math.random;
+  switch (name) {
+    case 'trial_detect': this.noiseHit(dst, 'bandpass', 600, 1, 0.5, 0.3); this.tone(dst, 'sine', 180, 360, 0.5, 0.12); break;
+    case 'trial_open': case 'vault_open': for (let i = 0; i < 3; i++) this.noiseHit(dst, 'bandpass', 2400 - i * 400, 4, 0.06, 0.25, now + i * 0.07); this.tone(dst, 'square', 260, 340, 0.2, 0.06); break;
+    case 'trial_close': case 'vault_close': for (let i = 0; i < 3; i++) this.noiseHit(dst, 'bandpass', 1600 + i * 400, 4, 0.06, 0.25, now + i * 0.07); this.tone(dst, 'square', 340, 240, 0.2, 0.06); break;
+    case 'trial_eject': case 'vault_eject': this.tone(dst, 'sine', 500 + R() * 200, 900 + R() * 300, 0.12, 0.15); this.noiseHit(dst, 'bandpass', 1800, 2, 0.08, 0.15); break;
+    case 'trial_spawn': this.noiseHit(dst, 'lowpass', 1200, 1, 0.35, 0.35); this.tone(dst, 'sawtooth', 120, 60, 0.3, 0.08); break;
+    case 'trial_ominous': this.tone(dst, 'sawtooth', 220, 110, 1.4, 0.12); this.tone(dst, 'sine', 330, 165, 1.4, 0.15); this.noiseHit(dst, 'bandpass', 500, 1, 1.2, 0.2); break;
+    case 'item_spawner_begin': this.tone(dst, 'sine', 300, 600, 0.8, 0.08); break;
+    case 'item_spawner_about': this.tone(dst, 'sine', 600, 1200, 1.6, 0.08); this.tone(dst, 'triangle', 900, 1800, 1.6, 0.04); break;
+    case 'item_spawner_spawn': this.noiseHit(dst, 'bandpass', 1400, 2, 0.15, 0.3); this.tone(dst, 'sine', 900, 450, 0.15, 0.1); break;
+    case 'vault_activate': [392, 523, 659].forEach((f, i) => this.tone(dst, 'triangle', f, f, 0.35, 0.07, now + i * 0.06)); break;
+    case 'vault_deactivate': [659, 523, 392].forEach((f, i) => this.tone(dst, 'triangle', f, f, 0.35, 0.06, now + i * 0.06)); break;
+    case 'vault_insert': this.noiseHit(dst, 'bandpass', 3000, 5, 0.08, 0.3); [523, 784, 1047].forEach((f, i) => this.tone(dst, 'triangle', f, f, 0.5, 0.1, now + 0.1 + i * 0.1)); break;
+    case 'vault_fail': this.tone(dst, 'square', 160, 120, 0.15, 0.12); this.noiseHit(dst, 'lowpass', 500, 1, 0.12, 0.3); break;
+    case 'vault_reject': this.tone(dst, 'sawtooth', 200, 150, 0.35, 0.1); break;
+    case 'wind_burst': this.noiseHit(dst, 'bandpass', 600, 0.6, 0.7, 0.6); this.tone(dst, 'sine', 160, 60, 0.4, 0.2); break;
+  }
+};
+
+/* ---------------- Wind Charged, Weaving, Oozing, Infested ---------------- */
+// AbstractWindCharge's explosion: pushes everything around away, hurts nobody
+Game.prototype.windBurst = function (x, y, z, r) {
+  this.particles.poof(x, y, z, [0.85, 0.9, 1], 24);
+  this.sound('wind_burst', x, y, z);
+  for (const m of this.mobsAndPlayer()) {
+    const dx = m.x - x, dy = m.y + m.h / 2 - y, dz = m.z - z, d = Math.hypot(dx, dy, dz);
+    if (d >= r || (m === this.player && m.mode === 3)) continue;
+    const k = (1 - d / r) * 1.3, l = d || 1;
+    m.vx += dx / l * k; m.vy += Math.max(0.2, dy / l * k + 0.35); m.vz += dz / l * k; m.fallDist = 0;
+  }
+};
+// MobEffect.onMobRemoved when an entity that died is removed with these effects
+Game.prototype.deathEffects = function (e) {
+  const fx = e.effects;
+  if (!fx || !fx.size) return;
+  const w = this.world, R = Math.random;
+  // Wind Charged: a wind burst of 3 to 5 blocks
+  if (fx.has('wind_charged')) this.windBurst(e.x, e.y + e.h / 2, e.z, 3 + R() * 2);
+  // Weaving: two or three cobwebs on sturdy ground right around (players always, mobs with mobGriefing)
+  if (fx.has('weaving') && (e === this.player || !this.rule || this.rule('mobGriefing') !== false)) {
+    const bx = Math.floor(e.x), by = Math.floor(e.y), bz = Math.floor(e.z), want = 2 + Math.floor(R() * 2), done = new Set();
+    for (let k = 0; k < 15 && done.size < want; k++) {
+      const x = bx + Math.floor(R() * 3) - 1, y = by + Math.floor(R() * 3) - 1, z = bz + Math.floor(R() * 3) - 1, key = x + ',' + y + ',' + z, cur = w.getBlock(x, y, z), below = w.getBlock(x, y - 1, z);
+      if (done.has(key) || !(cur === 0 || REPL[cur]) || BLK[cur].liquid || !(SOLID[below] && SHAPE[below] === SH.CUBE)) continue;
+      done.add(key); w.setBlock(x, y, z, B.COBWEB, 0); this.remeshNear(x, z);
+    }
+  }
+  // Oozing: two medium slimes, unless 24 slimes are already crowding there
+  if (fx.has('oozing')) {
+    let near = 0;
+    for (const m of this.entities) if (m instanceof Mob && m.type === 'slime' && !m.dead && Math.abs(m.x - e.x) < e.w / 2 + 2 && Math.abs(m.y - e.y) < e.h + 2 && Math.abs(m.z - e.z) < e.w / 2 + 2) near++;
+    for (let k = Math.min(2, Math.max(0, 24 - near)); k > 0; k--) { const m = createMob(this, 'slime', e.x, e.y + 0.5, e.z, { size: 2 }); if (m) { m.yaw = R() * Math.PI * 2; this.entities.push(m); } }
+  }
+};
+// Infested: one hit in ten lets out one or two silverfish
+Game.prototype.infestedHurt = function (e) {
+  if (!e.effects || !e.effects.has('infested') || Math.random() > 0.1) return;
+  for (let k = 1 + Math.floor(Math.random() * 2); k > 0; k--) {
+    const m = createMob(this, 'silverfish', e.x, e.y + e.h / 2, e.z, {});
+    if (!m) continue;
+    const yaw = (e.yaw || 0) + (Math.random() - 0.5) * Math.PI, lk = e.look ? e.look() : [-Math.sin(e.yaw || 0), 0, Math.cos(e.yaw || 0)];
+    const lx = lk[0] * 0.3, lz = lk[2] * 0.3, c = Math.cos(yaw - (e.yaw || 0)), s = Math.sin(yaw - (e.yaw || 0));
+    m.vx = lx * c - lz * s; m.vy = lk[1] * 0.45; m.vz = lx * s + lz * c;
+    this.entities.push(m);
+    this.sound('silverfish', m.x, m.y, m.z);
+  }
+};
+// (when the body goes, a second after death: LivingEntity.remove with KILLED)
+Mob.prototype.afterDeath = function () { this.game.deathEffects(this); };
+const _mobHurtTR = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const r = _mobHurtTR.call(this, amount, source, attacker);
+  if (r && this.deathTime === 0) this.game.infestedHurt(this);
+  return r;
+};
+const _playerHurtTR = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  const r = _playerHurtTR.call(this, amount, source, attacker);
+  if (r && !this.dead) this.game.infestedHurt(this);
+  return r;
+};
+const _onDeathTR = Game.prototype.onDeath;
+Game.prototype.onDeath = function (source, silent) {
+  if (this.player) this.deathEffects(this.player);
+  return _onDeathTR.call(this, source, silent);
+};
+
+/* @file 122_pots.js */
+/* ===================================================================
+   DECORATED POTS — Java Edition 1.21: crafted from four bricks or
+   pottery sherds that show on its sides, a pot holds one stack of
+   items (put in by hand or by hoppers, read by comparators) and shatters
+   into its sherds when broken with a tool or hit by a projectile. Trial
+   chambers have pots with flow, guster and scrape sherds, some with loot.
+   =================================================================== */
+// the motif of each sherd (original pixel art, 12 x 12)
+const POT_GLYPHS = {
+  angler: ['......#.....', '......#.....', '......#.....', '......#.....', '......#.....', '......#.....', '.#....#.....', '.#....#.....', '.##..##.....', '..####......', '............', '............'],
+  archer: ['...##.......', '..#..#......', '.#....#.....', '.#.....#....', '#.......#...', '############', '#.......#...', '.#.....#....', '.#....#.....', '..#..#......', '...##.......', '............'],
+  arms_up: ['.#...##...#.', '.#..####..#.', '..#.####.#..', '...######...', '.....##.....', '....####....', '....####....', '....#..#....', '....#..#....', '...##..##...', '............', '............'],
+  blade: ['..........#.', '.........##.', '........##..', '.......##...', '......##....', '.....##.....', '..#.##......', '...##.......', '..#.#.......', '.#....#.....', '#...........', '............'],
+  brewer: ['....####....', '.....##.....', '.....##.....', '....#..#....', '...#....#...', '..#......#..', '..#.####.#..', '..#.####.#..', '..#.####.#..', '...######...', '............', '............'],
+  burn: ['.....#......', '....##......', '....###.....', '...####..#..', '..#####.##..', '..########..', '.#########..', '.##########.', '.####..####.', '..##....##..', '...######...', '............'],
+  danger: ['.....##.....', '....####....', '....#..#....', '...#.##.#...', '...#.##.#...', '..#..##..#..', '..#..##..#..', '.#........#.', '.#...##...#.', '############', '............', '............'],
+  explorer: ['.....#......', '.....#......', '....###.....', '...#.#.#....', '.#########..', '...#.#.#....', '....###.....', '.....#......', '.....#......', '............', '............', '............'],
+  flow: ['...######...', '..#......#..', '.#..####..#.', '.#.#....#.#.', '.#.#.##.#.#.', '.#.#.#..#.#.', '.#.#.####.#.', '.#.#......#.', '.#..######..', '..#.........', '...######...', '............'],
+  friend: ['..##....##..', '.####..####.', '.####..####.', '..##....##..', '............', '.####..####.', '############', '############', '.##......##.', '.##......##.', '............', '............'],
+  guster: ['..########..', '.#........#.', '#..######..#', '#.#......#.#', '#.#..###.#.#', '#.#.#..#.#.#', '#.#..#...#.#', '#..#..####.#', '.#..#......#', '..#..######.', '...#........', '....#####...'],
+  heart: ['............', '..##....##..', '.####..####.', '############', '############', '############', '.##########.', '..########..', '...######...', '....####....', '.....##.....', '............'],
+  heartbreak: ['............', '..##....##..', '.####..####.', '#####.#####.', '####.#######', '#####.######', '.####.#####.', '..####.###..', '...###.##...', '....##.#....', '.....#......', '............'],
+  howl: ['.#........#.', '.##......##.', '.###....###.', '.##########.', '.##########.', '.#..####..#.', '.##########.', '..########..', '...######...', '....#..#....', '....####....', '............'],
+  miner: ['..########..', '.#........#.', '#....##....#', '.....##.....', '.....##.....', '.....##.....', '.....##.....', '.....##.....', '.....##.....', '.....##.....', '............', '............'],
+  mourner: ['...######...', '..#......#..', '.#..#..#..#.', '.#........#.', '.#..#..#..#.', '.#........#.', '.#..####..#.', '.#.#....#.#.', '..#......#..', '...######...', '............', '............'],
+  plenty: ['............', '.##########.', '.#........#.', '.##########.', '.#...##...#.', '.#...##...#.', '.#........#.', '.#........#.', '.##########.', '............', '............', '............'],
+  prize: ['............', '...######...', '..#..##..#..', '.#..#..#..#.', '############', '.#..#..#..#.', '..#.#..#.#..', '...#.##.#...', '....#..#....', '.....##.....', '............', '............'],
+  scrape: ['....####....', '...#####....', '..######....', '..###.##....', '..##..##....', '......##....', '......##....', '......##....', '......##....', '......##....', '............', '............'],
+  sheaf: ['.#..#..#..#.', '..#.#..#.#..', '...######...', '....####....', '....####....', '...######...', '..#.#..#.#..', '.#..#..#..#.', '....#..#....', '....#..#....', '............', '............'],
+  shelter: ['.....##.....', '....####....', '...######...', '..########..', '.##########.', '....####....', '...######...', '..########..', '.....##.....', '.....##.....', '....####....', '............'],
+  skull: ['...######...', '..########..', '.##########.', '.##..##..##.', '.##..##..##.', '.##########.', '..###..###..', '...######...', '...#.##.#...', '............', '............', '............'],
+  snort: ['............', '..########..', '.#........#.', '.#.##..##.#.', '.#........#.', '.#..####..#.', '.#.#....#.#.', '.#.#.##.#.#.', '..#......#..', '...######...', '............', '............'],
+};
+// a pot's sides by its item names: [back, left, right, front] (vanilla's PotDecorations order)
+const POT_INGREDIENTS = ['brick', ...SHERDS.map(s => s + '_pottery_sherd')];
+const potSherds = be => (be && Array.isArray(be.sherds) && be.sherds.length === 4 ? be.sherds : null);
+const potPlain = sh => !sh || sh.every(n => n === 'brick');
+
+/* ---------------- textures ---------------- */
+TEXGEN.push(function texPots() {
+  const glyph = (d, g, ox, oy, col) => { for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (g[y][x] === '#') sp(d, ox + x, oy + y, col); };
+  // the side of a pot with the sherd's motif in the body (entity/decorated_pot/<sherd>_pottery_pattern)
+  for (const s of SHERDS) T(s + '_pottery_pattern', (d) => { d.set(copyOf('decorated_pot_side')); glyph(d, POT_GLYPHS[s], 2, 3, [72, 36, 26]); });
+  // the sherd items show their motif too
+  for (const s of SHERDS) {
+    const i = TEX.idx[s + '_pottery_sherd'];
+    if (i === undefined) continue;
+    const d = TEX.imgs[i], r = mulberry32(strHash(s));
+    fillPoly(d, [[1, 1], [14, 1], [15, 13], [8, 15], [1, 14]], () => mul([176, 98, 68], 0.9 + r() * 0.12));
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (POT_GLYPHS[s][y][x] === '#') sp(d, 2 + x, 2 + y, [84, 42, 30]);
+  }
+});
+// resource packs: the patterns are entity textures
+const _packTexMapPT = packTexMap;
+packTexMap = function () {
+  const m = _packTexMapPT();
+  for (const s of SHERDS) m[s + '_pottery_pattern'] = ['entity/decorated_pot/' + s + '_pottery_pattern'];
+  m.decorated_pot_side = ['entity/decorated_pot/decorated_pot_side', 'block/decorated_pot_side'];
+  return m;
+};
+
+/* ---------------- crafting ---------------- */
+// DecoratedPotRecipe: brick or sherds above, left, right and below the middle become the back, left, right and front
+for (let i = RECIPES.length - 1; i >= 0; i--) if (RECIPES[i].out === I.DECORATED_POT) RECIPES.splice(i, 1);
+shaped('decorated_pot', 1, [' B ', 'B B', ' B '], { B: POT_INGREDIENTS.map(itemOf) });
+RECIPES[RECIPES.length - 1].fn = (grid, out) => {
+  if (grid.length !== 9) return null;
+  const nm = k => ITEMS[grid[k].id].name, sherds = [nm(1), nm(3), nm(5), nm(7)];
+  if (!potPlain(sherds)) out.tag = { sherds };
+  return out;
+};
+// the sides are listed on the item
+const _tooltipLinesPT = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesPT(st);
+  if (st && st.id === I.DECORATED_POT && st.tag && st.tag.sherds) out.splice(1, 0, ...st.tag.sherds.map(n => [titleCase(n), '#aaaaaa']));
+  return out;
+};
+
+/* ---------------- placing, filling, breaking ---------------- */
+LOOT.pots_trial_chambers_corridor = [[[1, 1], [['emerald', 125, 1, 3], ['arrow', 100, 2, 8], ['iron_ingot', 100, 1, 2], ['trial_key', 10], ['music_disc_creator_music_box', 5], ['diamond', 5, 1, 2], ['emerald_block', 5], ['diamond_block', 1]]]];
+const potBE = (w, x, y, z) => {
+  let be = w.getBE(x, y, z);
+  if (!be || be.type !== 'pot') { be = Object.assign({ type: 'pot', kind: 'pot', items: [null] }, be && be.sherds ? { sherds: be.sherds } : {}); w.setBE(x, y, z, be); }
+  if (!be.items) be.items = [null];
+  return be;
+};
+// a placed pot keeps the sides of its item
+const _afterPlacePT = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  if (id === B.DECORATED_POT) {
+    const held = p.inv[p.sel] && p.inv[p.sel].id === I.DECORATED_POT ? p.inv[p.sel] : p.offhand[0];
+    const be = { type: 'pot', kind: 'pot', items: [null] };
+    if (held && held.tag && held.tag.sherds) be.sherds = held.tag.sherds.slice();
+    this.world.setBE(x, y, z, be);
+  }
+  return _afterPlacePT.call(this, p, x, y, z, id);
+};
+// DecoratedPotBlock.useItemOn / useWithoutItem: one more of the same item goes in, anything else makes it wobble
+const _useBlockPT = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit.id !== B.DECORATED_POT || p.sneaking && held) return _useBlockPT.call(this, p, hit, held);
+  const w = this.world, { x, y, z } = hit, be = potBE(w, x, y, z), cur = be.items[0];
+  if (held && (!cur || cur.id === held.id && JSON.stringify(cur.tag || null) === JSON.stringify(held.tag || null) && !cur.dmg && !held.dmg && cur.count < (ITEMS[cur.id].stack || 64))) {
+    if (cur) cur.count++; else be.items[0] = copyStack(held, 1);
+    if (p.mode !== 1) p.consumeHeld(1);
+    const now = be.items[0], f = now.count / (ITEMS[now.id].stack || 64);
+    AUDIO.play('pot_insert', x + 0.5, y + 0.5, z + 0.5, 0.7 + 0.5 * f);
+    for (let k = 0; k < 7; k++) this.particles.add({ x: x + 0.5 + (Math.random() - 0.5) * 0.4, y: y + 1.05, z: z + 0.5 + (Math.random() - 0.5) * 0.4, vx: 0, vy: 0.03, vz: 0, life: 14, anim: this.particles.gen(), u: 0, v: 0, us: 1, size: 0.07, g: -0.001, col: [0.75, 0.62, 0.5] });
+    be._wobble = [w.tick, 1];
+    w.setBE(x, y, z, be);
+    if (this.ui && this.ui.refreshHotbar) this.ui.refreshHotbar();
+    if (this.redstoneChanged) this.redstoneChanged(x, y, z);
+  } else {
+    this.sound('pot_fail', x + 0.5, y + 0.5, z + 0.5);
+    be._wobble = [w.tick, -1];
+  }
+  return true;
+};
+// DecoratedPotBlock.playerWillDestroy / getDrops: a sword, axe, pickaxe, shovel, hoe, trident or mace (without Silk Touch) shatters it
+// into its sherds and bricks; otherwise the pot comes off whole with its sides. What was inside always drops
+const POT_BREAKERS = new Set(['trident', 'mace']);
+const potBreaker = st => !!st && ITEMS[st.id] && (POT_BREAKERS.has(ITEMS[st.id].name) || /_(sword|axe|pickaxe|shovel|hoe)$/.test(ITEMS[st.id].name)) && !enchLevel(st, 'silk_touch');
+const _breakBlockPT = Game.prototype.breakBlock;
+Game.prototype.breakBlock = function (x, y, z, byPlayer, natural) {
+  const w = this.world;
+  if (w.getBlock(x, y, z) !== B.DECORATED_POT) return _breakBlockPT.call(this, x, y, z, byPlayer, natural);
+  const be = w.getBE(x, y, z), sherds = potSherds(be) || ['brick', 'brick', 'brick', 'brick'];
+  const shatter = this._potShatter || (byPlayer && potBreaker(byPlayer.inv ? byPlayer.inv[byPlayer.sel] : null));
+  const own = Object.prototype.hasOwnProperty.call(this, 'dropItem'), drop = this.dropItem;
+  this.dropItem = (px, py, pz, st, ...rest) => {
+    if (!st || st.id !== I.DECORATED_POT) return drop.call(this, px, py, pz, st, ...rest);
+    if (shatter) { for (const n of sherds) drop.call(this, px, py, pz, { id: ITEM_BY_NAME[n].id, count: 1 }); return null; }
+    return drop.call(this, px, py, pz, potPlain(sherds) ? st : Object.assign({}, st, { tag: Object.assign({}, st.tag || {}, { sherds: sherds.slice() }) }), ...rest);
+  };
+  try { return _breakBlockPT.call(this, x, y, z, byPlayer, natural); } finally {
+    if (own) this.dropItem = drop; else delete this.dropItem;
+    if (shatter) this.sound('pot_shatter', x + 0.5, y + 0.5, z + 0.5);
+  }
+};
+// DecoratedPotBlock.onProjectileHit: arrows, tridents, snowballs, eggs, fireballs and wind charges smash it (projectilesCanBreakBlocks)
+const POT_SMASHERS = new Set(['arrow', 'trident', 'snow', 'egg', 'fire', 'ghast', 'skull', 'wind']);
+const _impactPT = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  const g = this.game;
+  if (!e && POT_SMASHERS.has(this.kind) && (!g.rule || g.rule('projectilesCanBreakBlocks') !== false)) {
+    const w = g.world, l = Math.hypot(this.vx, this.vy, this.vz) || 1;
+    for (let k = 0; k <= 4; k++) {
+      const x = Math.floor(this.x + this.vx / l * k * 0.3), y = Math.floor(this.y + this.vy / l * k * 0.3), z = Math.floor(this.z + this.vz / l * k * 0.3);
+      if (w.getBlock(x, y, z) !== B.DECORATED_POT) continue;
+      g._potShatter = true;
+      try { g.breakBlock(x, y, z, null, true); } finally { g._potShatter = false; }
+      g.remeshNear(x, z);
+      break;
+    }
+  }
+  return _impactPT.call(this, e);
+};
+// hoppers fill and empty pots like any one-slot container; comparators read them
+const _containerSignalPT = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  if (w.getBlock(x, y, z) !== B.DECORATED_POT) return _containerSignalPT.call(this, w, x, y, z);
+  const be = w.getBE(x, y, z), s = be && be.items && be.items[0];
+  return s ? Math.floor(1 + s.count / (ITEMS[s.id].stack || 64) * 14) : 0;
+};
+// loot pots hold a single slot
+const _fillLootPT = fillLoot;
+fillLoot = function (be) {
+  if (be.kind !== 'pot') return _fillLootPT(be);
+  const l = rollLoot(be.loot, Math.random);
+  be.items = [l[0] || null];
+  delete be.loot;
+};
+
+/* ---------------- the sherds on the sides ---------------- */
+// drawn over the plain sides of the meshed pot, wobbling a little after it was used
+Game.prototype.drawPots = function (r) {
+  const p = this.player, w = this.world;
+  if (!p) return;
+  const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+  if (!this._potList || w.tick % 20 === 0 || this._potListT !== w.tick && this._potDirty) {
+    const list = [];
+    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+      const c = w.getChunk(pcx + dx, pcz + dz);
+      if (!c || c.state < 2) continue;
+      for (const [i, v] of c.be) if (v.type === 'pot' && !potPlain(potSherds(v))) list.push([c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), v]);
+    }
+    this._potList = list; this._potListT = w.tick; this._potDirty = false;
+  }
+  const e = 0.003, h0 = 0, h1 = 13 / 16, half = 7 / 16;
+  for (const [x, y, z, be] of this._potList) {
+    if (w.getBlock(x, y, z) !== B.DECORATED_POT) continue;
+    const fr = FRONT4[w.getMeta(x, y, z) & 3], n = [DX[fr], 0, DZ[fr]], left = [-n[2], 0, n[0]], right = [n[2], 0, -n[0]], back = [-n[0], 0, -n[2]];
+    const lr = w.getLightRaw(x, y, z), L = [lr >> 4, lr & 15];
+    [back, left, right, n].forEach((dir, k) => {
+      const s = be.sherds[k];
+      if (s === 'brick' || !ITEM_BY_NAME[s]) return;
+      const layer = texLayer(ITEMS[ITEM_BY_NAME[s].id].sherd + '_pottery_pattern', -1);
+      if (layer < 0) return;
+      // looking at this side from outside: its right is (-normal) x up
+      const rt = [dir[2], 0, -dir[0]];
+      const cx = x + 0.5 + dir[0] * (half + e), cz = z + 0.5 + dir[2] * (half + e), sh = dir[0] ? 0.6 : 0.8;
+      const pts = [[cx - rt[0] * half, y + h1, cz - rt[2] * half], [cx + rt[0] * half, y + h1, cz + rt[2] * half], [cx + rt[0] * half, y + h0, cz + rt[2] * half], [cx - rt[0] * half, y + h0, cz - rt[2] * half]];
+      const uv = [[1 / 16, 3 / 16], [15 / 16, 3 / 16], [15 / 16, 1], [1 / 16, 1]];
+      for (const order of [[0, 1, 2, 3], [1, 0, 3, 2]]) for (const q of order) r.dv(pts[q][0], pts[q][1], pts[q][2], uv[q][0], uv[q][1], layer, sh, sh, sh, 1, L[0], L[1]);
+    });
+  }
+};
+const _renderSpawnerMobsPT = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, a) { _renderSpawnerMobsPT.call(this, r, a); this.drawPots(r); };
+const _setBEPT = World.prototype.setBE;
+World.prototype.setBE = function (x, y, z, be) { _setBEPT.call(this, x, y, z, be); if (be && be.type === 'pot' && window.game) window.game._potDirty = true; };
+
+/* ---------------- sounds ---------------- */
+const _audioPlayPT = AUDIO.play;
+AUDIO.play = function (name, x, y, z, pitch) {
+  if (name !== 'pot_insert' && name !== 'pot_fail' && name !== 'pot_shatter') return _audioPlayPT.call(this, name, x, y, z, pitch);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const now = this.ctx.currentTime, k = pitch || 1;
+  if (name === 'pot_insert') { this.noiseHit(dst, 'bandpass', 900 * k, 3, 0.1, 0.35); this.tone(dst, 'sine', 300 * k, 200 * k, 0.12, 0.12); }
+  if (name === 'pot_fail') { this.noiseHit(dst, 'lowpass', 500, 2, 0.12, 0.3); this.tone(dst, 'triangle', 180, 140, 0.15, 0.1); }
+  if (name === 'pot_shatter') for (let i = 0; i < 4; i++) this.noiseHit(dst, 'bandpass', 1800 + i * 500, 2, 0.12, 0.3, now + i * 0.03);
+};
+
+/* @file 123_rules.js */
+/* ===================================================================
+   GAME RULES, FIRE, EXPLOSIONS AND WEATHER ON THE GROUND — the rest of
+   Java Edition 1.21's game rules and what they do; vanilla's fire (its
+   own ticks, ageing, each block's ignite and burn odds, rain, lava that
+   sets things alight); vanilla's explosions (rays stopped by blast
+   resistance, damage by exposure, drop decay, TNT chains, TNT that
+   drifts in water); snow layers, ice and cauldrons filling in the rain;
+   entity cramming; vanilla block hardness and blast resistance
+   =================================================================== */
+// FireBlock.bootStrap: [ignite odds (encouragement), burn odds (flammability)] -> blocks
+const FIRE_ODDS_LIST = [
+  [5, 5, "oak_log oak_wood stripped_oak_log stripped_oak_wood spruce_log spruce_wood stripped_spruce_log stripped_spruce_wood birch_log birch_wood stripped_birch_log stripped_birch_wood jungle_log jungle_wood stripped_jungle_log stripped_jungle_wood acacia_log acacia_wood stripped_acacia_log stripped_acacia_wood dark_oak_log dark_oak_wood stripped_dark_oak_log stripped_dark_oak_wood mangrove_log mangrove_wood stripped_mangrove_log stripped_mangrove_wood cherry_log cherry_wood stripped_cherry_log stripped_cherry_wood bamboo_block stripped_bamboo_block coal_block"],
+  [5, 20, "oak_planks oak_stairs oak_slab oak_fence oak_fence_gate spruce_planks spruce_stairs spruce_slab spruce_fence spruce_fence_gate birch_planks birch_stairs birch_slab birch_fence birch_fence_gate jungle_planks jungle_stairs jungle_slab jungle_fence jungle_fence_gate acacia_planks acacia_stairs acacia_slab acacia_fence acacia_fence_gate dark_oak_planks dark_oak_stairs dark_oak_slab dark_oak_fence dark_oak_fence_gate mangrove_planks mangrove_stairs mangrove_slab mangrove_fence mangrove_fence_gate cherry_planks cherry_stairs cherry_slab cherry_fence cherry_fence_gate bamboo_planks bamboo_mosaic bamboo_stairs bamboo_mosaic_stairs bamboo_slab bamboo_mosaic_slab bamboo_fence bamboo_fence_gate mangrove_roots composter beehive"],
+  [15, 20, "target"],
+  [15, 60, "cave_vines"],
+  [15, 100, "vine glow_lichen tnt"],
+  [30, 20, "bee_nest bookshelf lectern"],
+  [30, 60, "oak_leaves spruce_leaves birch_leaves jungle_leaves acacia_leaves dark_oak_leaves mangrove_leaves cherry_leaves azalea_leaves flowering_azalea_leaves azalea flowering_azalea white_wool light_gray_wool gray_wool black_wool brown_wool red_wool orange_wool yellow_wool lime_wool green_wool cyan_wool light_blue_wool blue_wool purple_wool magenta_wool pink_wool hanging_roots dried_kelp_block"],
+  [60, 20, "white_carpet light_gray_carpet gray_carpet black_carpet brown_carpet red_carpet orange_carpet yellow_carpet lime_carpet green_carpet cyan_carpet light_blue_carpet blue_carpet purple_carpet magenta_carpet pink_carpet hay_block"],
+  [60, 60, "bamboo scaffolding"],
+  [60, 100, "short_grass fern dead_bush dandelion poppy blue_orchid allium azure_bluet red_tulip orange_tulip white_tulip pink_tulip oxeye_daisy cornflower lily_of_the_valley torchflower wither_rose pink_petals spore_blossom tall_grass large_fern sunflower lilac rose_bush peony pitcher_plant big_dripleaf big_dripleaf_stem small_dripleaf sweet_berry_bush"],
+];
+// Block.getExplosionResistance where it is not the hardness
+const BLAST_RES_LIST = [
+  [0, "nether_portal"],
+  [0.75, "infested_cobblestone infested_deepslate"],
+  [0.8, "red_sandstone_slab cut_red_sandstone_slab quartz_slab"],
+  [1, "dripstone_block"],
+  [2.5, "dried_kelp_block"],
+  [3, "oak_planks oak_stairs oak_slab oak_fence oak_fence_gate spruce_planks spruce_stairs spruce_slab spruce_fence spruce_fence_gate birch_planks birch_stairs birch_slab birch_fence birch_fence_gate jungle_planks jungle_stairs jungle_slab jungle_fence jungle_fence_gate acacia_planks acacia_stairs acacia_slab acacia_fence acacia_fence_gate dark_oak_planks dark_oak_stairs dark_oak_slab dark_oak_fence dark_oak_fence_gate mangrove_planks mangrove_stairs mangrove_slab mangrove_fence mangrove_fence_gate cherry_planks cherry_stairs cherry_slab cherry_fence cherry_fence_gate bamboo_planks bamboo_mosaic bamboo_stairs bamboo_mosaic_stairs bamboo_slab bamboo_mosaic_slab bamboo_fence bamboo_fence_gate crimson_planks crimson_stairs crimson_slab crimson_fence crimson_fence_gate warped_planks warped_stairs warped_slab warped_fence warped_fence_gate packed_mud mud_bricks mud_brick_stairs mud_brick_slab mud_brick_wall pointed_dripstone deepslate_coal_ore deepslate_iron_ore deepslate_copper_ore deepslate_gold_ore deepslate_redstone_ore deepslate_emerald_ore deepslate_lapis_ore deepslate_diamond_ore cocoa"],
+  [3.5, "crafter"],
+  [4.2, "basalt smooth_basalt polished_basalt terracotta white_terracotta light_gray_terracotta gray_terracotta black_terracotta brown_terracotta red_terracotta orange_terracotta yellow_terracotta lime_terracotta green_terracotta cyan_terracotta light_blue_terracotta blue_terracotta purple_terracotta magenta_terracotta pink_terracotta"],
+  [4.8, "hopper"],
+  [6, "stone cobblestone stone_stairs stone_slab cobblestone_stairs cobblestone_slab cobblestone_wall mossy_cobblestone mossy_cobblestone_stairs mossy_cobblestone_slab mossy_cobblestone_wall smooth_stone smooth_stone_slab stone_bricks stone_brick_stairs stone_brick_slab stone_brick_wall cracked_stone_bricks chiseled_stone_bricks mossy_stone_bricks mossy_stone_brick_stairs mossy_stone_brick_slab mossy_stone_brick_wall granite granite_stairs granite_slab granite_wall polished_granite polished_granite_stairs polished_granite_slab diorite diorite_stairs diorite_slab diorite_wall polished_diorite polished_diorite_stairs polished_diorite_slab andesite andesite_stairs andesite_slab andesite_wall polished_andesite polished_andesite_stairs polished_andesite_slab deepslate cobbled_deepslate cobbled_deepslate_stairs cobbled_deepslate_slab cobbled_deepslate_wall chiseled_deepslate polished_deepslate polished_deepslate_stairs polished_deepslate_slab polished_deepslate_wall deepslate_bricks deepslate_brick_stairs deepslate_brick_slab deepslate_brick_wall cracked_deepslate_bricks deepslate_tiles deepslate_tile_stairs deepslate_tile_slab deepslate_tile_wall cracked_deepslate_tiles tuff tuff_stairs tuff_slab tuff_wall chiseled_tuff polished_tuff polished_tuff_stairs polished_tuff_slab polished_tuff_wall tuff_bricks tuff_brick_stairs tuff_brick_slab tuff_brick_wall chiseled_tuff_bricks bricks brick_stairs brick_slab brick_wall sandstone_slab smooth_sandstone smooth_sandstone_stairs smooth_sandstone_slab cut_sandstone_slab smooth_red_sandstone smooth_red_sandstone_stairs smooth_red_sandstone_slab prismarine prismarine_stairs prismarine_slab prismarine_wall prismarine_bricks prismarine_brick_stairs prismarine_brick_slab dark_prismarine dark_prismarine_stairs dark_prismarine_slab nether_bricks nether_brick_stairs nether_brick_slab nether_brick_wall cracked_nether_bricks chiseled_nether_bricks red_nether_bricks red_nether_brick_stairs red_nether_brick_slab red_nether_brick_wall blackstone blackstone_stairs blackstone_slab blackstone_wall gilded_blackstone chiseled_polished_blackstone polished_blackstone polished_blackstone_stairs polished_blackstone_slab polished_blackstone_wall polished_blackstone_bricks polished_blackstone_brick_stairs polished_blackstone_brick_slab polished_blackstone_brick_wall cracked_polished_blackstone_bricks purpur_block purpur_stairs purpur_slab purpur_pillar smooth_quartz smooth_quartz_stairs smooth_quartz_slab nether_brick_fence coal_block iron_block gold_block redstone_block emerald_block diamond_block raw_iron_block raw_copper_block raw_gold_block iron_bars chain copper_block chiseled_copper copper_grate cut_copper cut_copper_stairs cut_copper_slab copper_door copper_trapdoor copper_bulb exposed_copper exposed_chiseled_copper exposed_copper_grate exposed_cut_copper exposed_cut_copper_stairs exposed_cut_copper_slab exposed_copper_door exposed_copper_trapdoor exposed_copper_bulb weathered_copper weathered_chiseled_copper weathered_copper_grate weathered_cut_copper weathered_cut_copper_stairs weathered_cut_copper_slab weathered_copper_door weathered_copper_trapdoor weathered_copper_bulb oxidized_copper oxidized_chiseled_copper oxidized_copper_grate oxidized_cut_copper oxidized_cut_copper_stairs oxidized_cut_copper_slab oxidized_copper_door oxidized_copper_trapdoor oxidized_copper_bulb waxed_copper_block waxed_chiseled_copper waxed_copper_grate waxed_cut_copper waxed_cut_copper_stairs waxed_cut_copper_slab waxed_copper_door waxed_copper_trapdoor waxed_copper_bulb waxed_exposed_copper waxed_exposed_chiseled_copper waxed_exposed_copper_grate waxed_exposed_cut_copper waxed_exposed_cut_copper_stairs waxed_exposed_cut_copper_slab waxed_exposed_copper_door waxed_exposed_copper_trapdoor waxed_exposed_copper_bulb waxed_weathered_copper waxed_weathered_chiseled_copper waxed_weathered_copper_grate waxed_weathered_cut_copper waxed_weathered_cut_copper_stairs waxed_weathered_cut_copper_slab waxed_weathered_copper_door waxed_weathered_copper_trapdoor waxed_weathered_copper_bulb waxed_oxidized_copper waxed_oxidized_chiseled_copper waxed_oxidized_copper_grate waxed_oxidized_cut_copper waxed_oxidized_cut_copper_stairs waxed_oxidized_cut_copper_slab waxed_oxidized_copper_door waxed_oxidized_copper_trapdoor waxed_oxidized_copper_bulb tube_coral_block dead_tube_coral_block brain_coral_block dead_brain_coral_block bubble_coral_block dead_bubble_coral_block fire_coral_block dead_fire_coral_block horn_coral_block dead_horn_coral_block grindstone jukebox lightning_rod petrified_oak_slab"],
+  [9, "end_stone end_stone_bricks end_stone_brick_stairs end_stone_brick_slab end_stone_brick_wall dragon_egg"],
+  [600, "ender_chest"],
+  [1200, "reinforced_deepslate netherite_block obsidian crying_obsidian ancient_debris anvil chipped_anvil damaged_anvil enchanting_table respawn_anchor heavy_core"],
+  [3600000, "bedrock end_portal_frame end_portal end_gateway command_block chain_command_block repeating_command_block structure_block jigsaw"],
+  [3600000.8, "barrier light"],
+];
+const HARDNESS_FIX = {"stone_slab": 2.0, "stone_brick_slab": 2.0, "sandstone_slab": 2.0, "cut_sandstone_slab": 2.0, "red_sandstone_slab": 2.0, "cut_red_sandstone_slab": 2.0, "blackstone_slab": 2.0, "polished_blackstone_brick_slab": 2.0, "purpur_slab": 2.0, "quartz_slab": 2.0, "infested_cobblestone": 1.0};
+
+/* ---------------- the rest of the game rules ---------------- */
+Object.assign(GAMERULES, {
+  announceAdvancements: true, blockExplosionDropDecay: true, commandBlockOutput: true, commandModificationBlockLimit: 32768, disableElytraMovementCheck: false,
+  doEntityDrops: true, doFireTick: true, doImmediateRespawn: false, doLimitedCrafting: false, doMobLoot: true, doTileDrops: true, doVinesSpread: true, doWardenSpawning: true,
+  drowningDamage: true, enderPearlsVanishOnDeath: true, fallDamage: true, fireDamage: true, forgiveDeadPlayers: true, freezeDamage: true, globalSoundEvents: true,
+  lavaSourceConversion: false, logAdminCommands: true, maxCommandChainLength: 65536, maxCommandForkCount: 65536, maxEntityCramming: 24, mobExplosionDropDecay: true,
+  mobGriefing: true, naturalRegeneration: true, playersSleepingPercentage: 100, projectilesCanBreakBlocks: true, randomTickSpeed: 3, reducedDebugInfo: false,
+  sendCommandFeedback: true, showDeathMessages: true, snowAccumulationHeight: 1, spawnChunkRadius: 2, spawnRadius: 10, spectatorsGenerateChunks: true,
+  tntExplosionDropDecay: false, universalAnger: false, waterSourceConversion: true,
+});
+const GAMERULE_INT = new Set(['commandModificationBlockLimit', 'maxCommandChainLength', 'maxCommandForkCount', 'maxEntityCramming', 'playersSleepingPercentage', 'randomTickSpeed',
+  'snowAccumulationHeight', 'spawnChunkRadius', 'spawnRadius']);
+// /gamerule with the whole-number rules too; sendCommandFeedback false keeps everything but failures out of the chat
+const _onChatGR = Game.prototype.onChat;
+Game.prototype.onChat = function (msg) {
+  if (!this.world || !this.player || typeof msg !== 'string' || msg[0] !== '/') return _onChatGR.call(this, msg);
+  const ui = this.ui, m = /^\/gamerule(?:\s+(\S+))?(?:\s+(\S+))?\s*$/i.exec(msg.trim());
+  const run = () => {
+    if (!m) return _onChatGR.call(this, msg);
+    const say = (t, c) => ui.chat(t, c || '#ccc');
+    const name = Object.keys(GAMERULES).find(k => k.toLowerCase() === (m[1] || '').toLowerCase().replace(/^minecraft:/, ''));
+    if (!name) return say('Unknown game rule: ' + (m[1] || ''), '#f66');
+    if (m[2] === undefined) return say('Gamerule ' + name + ' is currently set to: ' + this.rule(name));
+    let v;
+    if (GAMERULE_INT.has(name)) { if (!/^-?\d+$/.test(m[2])) return say('Invalid integer \'' + m[2] + '\'', '#f66'); v = parseInt(m[2], 10); }
+    else { if (m[2] !== 'true' && m[2] !== 'false') return say('Invalid boolean, expected \'true\' or \'false\' but found \'' + m[2] + '\'', '#f66'); v = m[2] === 'true'; }
+    this.setRule(name, v);
+    return say('Gamerule ' + name + ' is now set to: ' + v);
+  };
+  if (this.cmdSource || this.rule('sendCommandFeedback')) return run();
+  const own = Object.prototype.hasOwnProperty.call(ui, 'chat'), chat = ui.chat;
+  ui.chat = (t, c) => { if (c === '#f66') chat.call(ui, t, c); };
+  try { return run(); } finally { if (own) ui.chat = chat; else delete ui.chat; }
+};
+// fallDamage, fireDamage, drowningDamage, freezeDamage (Player.isInvulnerableTo)
+const RULE_DAMAGE = { fall: 'fallDamage', fire: 'fireDamage', in_fire: 'fireDamage', lava: 'fireDamage', magma: 'fireDamage', fireball: 'fireDamage', drown: 'drowningDamage', freeze: 'freezeDamage' };
+const _playerHurtGR = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  const r = RULE_DAMAGE[source], g = this.game;
+  if (r && g.rule && !g.rule(r)) return false;
+  return _playerHurtGR.call(this, amount, source, attacker);
+};
+// doTileDrops, doMobLoot
+const _dropsForGR = Game.prototype.dropsFor;
+Game.prototype.dropsFor = function (id, meta, tool) { return this.rule && !this.rule('doTileDrops') ? [] : _dropsForGR.call(this, id, meta, tool); };
+const _dropLootGR = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () { if (this.game.rule && !this.game.rule('doMobLoot')) return; return _dropLootGR.call(this); };
+// on death: thrown pearls vanish, angry neutral mobs forgive, the death message goes to the chat, and maybe straight back
+DEATH_MSG.cramming = 'was squished too much';
+BYPASS_ARMOR.add('cramming');
+const _onDeathGR = Game.prototype.onDeath;
+Game.prototype.onDeath = function (source, silent) {
+  const p = this.player;
+  if (this.rule('enderPearlsVanishOnDeath')) for (const e of this.entities) if (e instanceof Projectile && e.kind === 'pearl' && e.owner === p) e.dead = true;
+  if (this.rule('forgiveDeadPlayers')) for (const e of this.entities) if (e instanceof Mob && e.T.neutral && e.target === p) { e.target = null; e.anger = 0; }
+  const r = _onDeathGR.call(this, source, silent);
+  if (!silent && this.rule('showDeathMessages')) this.ui.chat('Player ' + (DEATH_MSG[source] || 'died'), '#fff');
+  if (this.rule('doImmediateRespawn')) this.respawn();
+  return r;
+};
+// spawnRadius: without a bed you come back somewhere within that many blocks of the world spawn
+const _respawnGR = Game.prototype.respawn;
+Game.prototype.respawn = function () {
+  const p = this.player, noBed = !p.spawn;
+  const r = _respawnGR.apply(this, arguments);
+  const w = this.world, rad = this.rule('spawnRadius');
+  if (noBed && w && w.dim === 'overworld' && rad > 0 && this.meta && this.meta.spawn) {
+    for (let k = 0; k < 10; k++) {
+      const x = this.meta.spawn[0] + Math.floor(Math.random() * (2 * rad + 1)) - rad, z = this.meta.spawn[1] + Math.floor(Math.random() * (2 * rad + 1)) - rad;
+      if (!w.isLoadedAt(x, z)) continue;
+      const s = this.safeSpot(x, z);
+      if (!s) continue;
+      p.x = s[0]; p.y = s[1]; p.z = s[2]; p.savePrev();
+      break;
+    }
+  }
+  return r;
+};
+// maxEntityCramming: a creature with more than that many others in its box gets hurt, one tick in four
+const _pushEntitiesGR = Game.prototype.pushEntities;
+Game.prototype.pushEntities = function () {
+  _pushEntitiesGR.call(this);
+  const max = this.rule('maxEntityCramming');
+  if (max <= 0) return;
+  const list = this.livingList(), grid = new Map(), skip = e => e.dead || e.deathTime > 0 || e.T && (e.T.noPush || e.T.cat === 'misc');
+  for (const e of list) { if (skip(e)) continue; const k = (Math.floor(e.x) & 0xffff) << 16 | (Math.floor(e.z) & 0xffff); let b = grid.get(k); if (!b) grid.set(k, b = []); b.push(e); }
+  for (const e of list) {
+    if (skip(e) || e.riding || Math.random() >= 0.25 || e === this.player && this.player.mode === 1) continue;
+    const hw = e.w / 2;
+    let n = 0;
+    for (let ox = -2; ox <= 2 && n < max; ox++) for (let oz = -2; oz <= 2 && n < max; oz++) {
+      const b = grid.get(((Math.floor(e.x) + ox) & 0xffff) << 16 | ((Math.floor(e.z) + oz) & 0xffff));
+      if (b) for (const o of b) if (o !== e && !o.riding && Math.abs(o.x - e.x) < hw + o.w / 2 && Math.abs(o.z - e.z) < hw + o.w / 2 && o.y < e.y + e.h && e.y < o.y + o.h) n++;
+    }
+    if (n > max - 1) e.hurt(6, 'cramming');
+  }
+};
+
+/* ---------------- block hardness and blast resistance ---------------- */
+for (const n in HARDNESS_FIX) { const id = B[n.toUpperCase()]; if (id !== undefined) BLK[id].hard = HARDNESS_FIX[n]; }
+const BLAST_RES = new Float32Array(MAXB);
+for (let id = 1; id < BLOCK_NAMES.length; id++) { const d = BLK[id]; if (d) BLAST_RES[id] = d.hard < 0 ? 3600000 : d.hard; }
+for (const [v, names] of BLAST_RES_LIST) for (const n of names.split(' ')) { const id = B[n.toUpperCase()]; if (id !== undefined) BLAST_RES[id] = v; }
+BLAST_RES[B.WATER] = BLAST_RES[B.LAVA] = 100;
+if (B.LIT_FURNACE !== undefined) BLAST_RES[B.LIT_FURNACE] = BLAST_RES[B.FURNACE];
+
+/* ---------------- fire ---------------- */
+const FIRE_IGNITE = new Uint8Array(MAXB), FIRE_BURN = new Uint8Array(MAXB);
+for (const [ig, bu, names] of [...FIRE_ODDS_LIST, [5, 100, 'moss_block moss_carpet'], [30, 20, 'chiseled_bookshelf'], [15, 60, 'cave_vines_plant']])
+  for (const n of names.split(' ')) { const id = B[n.toUpperCase()]; if (id !== undefined) { FIRE_IGNITE[id] = ig; FIRE_BURN[id] = bu; } }
+// biomes where fire burns out faster (#increased_fire_burnout)
+const FIRE_BURNOUT = new Set(['bamboo_jungle', 'mushroom_fields', 'mangrove_swamp', 'snowy_slopes', 'frozen_peaks', 'jagged_peaks', 'swamp', 'jungle'].map(n => BI[n.toUpperCase()]).filter(v => v !== undefined));
+Object.assign(Game.prototype, {
+  // Level.isRainingAt: rain (not snow) falling on this block from open sky
+  rainingAt(x, y, z) {
+    const w = this.world;
+    if (w.dim !== 'overworld' || !w.raining || w.rainStrength < 0.2) return false;
+    const c = w.getChunk(x >> 4, z >> 4);
+    if (!c || !c.hmap || c.hmap[((z & 15) << 4) | (x & 15)] > y) return false;
+    const bi = c.biomes ? c.biomes[((z & 15) << 4) | (x & 15)] : -1;
+    return !DRY_BIOMES.has(bi) && !w.snowsAt(x, y, z, bi);
+  },
+  nearRain(x, y, z) { return this.rainingAt(x, y, z) || this.rainingAt(x - 1, y, z) || this.rainingAt(x + 1, y, z) || this.rainingAt(x, y, z - 1) || this.rainingAt(x, y, z + 1); },
+  // FireBlock.getIgniteOdds: an empty spot next to something that catches
+  fireOdds(x, y, z) {
+    const w = this.world;
+    if (w.getBlock(x, y, z) !== 0) return 0;
+    let o = 0;
+    for (let f = 0; f < 6; f++) o = Math.max(o, FIRE_IGNITE[w.getBlock(x + DX[f], y + DY[f], z + DZ[f])]);
+    return o;
+  },
+  fireCanBurnAround(x, y, z) { const w = this.world; for (let f = 0; f < 6; f++) if (FIRE_IGNITE[w.getBlock(x + DX[f], y + DY[f], z + DZ[f])]) return true; return false; },
+  // BaseFireBlock.getState: soul fire on soul sand and soul soil
+  placeFire(x, y, z, age) {
+    const w = this.world, below = w.getBlock(x, y - 1, z);
+    if (below === B.SOUL_SAND || below === B.SOUL_SOIL) w.setBlock(x, y, z, B.SOUL_FIRE, 0);
+    else w.setBlock(x, y, z, B.FIRE, age & 15);
+  },
+  // FireBlock.checkBurnOut: the block burns away, sometimes catching
+  fireBurnOut(x, y, z, chance, age) {
+    const w = this.world, R = Math.random, id = w.getBlock(x, y, z);
+    if (Math.floor(R() * chance) >= FIRE_BURN[id]) return;
+    if (Math.floor(R() * (age + 10)) < 5 && !this.rainingAt(x, y, z)) this.placeFire(x, y, z, Math.min(age + Math.floor(Math.floor(R() * 5) / 4), 15));
+    else w.setBlock(x, y, z, 0, 0);
+    if (id === B.TNT && this.primeTNT) this.primeTNT(x, y, z, 80);
+    this.remeshNear(x, z);
+  },
+  // FireBlock.tick: every 1.5 to 2 seconds the fire ages, may go out (in the rain, without fuel), burns its neighbours and spreads
+  fireTick(x, y, z) {
+    const w = this.world, R = Math.random;
+    if (w.getBlock(x, y, z) !== B.FIRE) return;
+    w.schedule(x, y, z, 30 + Math.floor(R() * 10), 'fire');
+    if (!this.rule('doFireTick')) return;
+    const below = w.getBlock(x, y - 1, z), sturdy = SOLID[below] && SHAPE[below] === SH.CUBE;
+    if (!sturdy && !this.fireCanBurnAround(x, y, z)) { w.setBlock(x, y, z, 0, 0); this.remeshNear(x, z); return; }
+    const infini = below === B.NETHERRACK || below === B.MAGMA_BLOCK || below === B.BEDROCK && w.dim === 'end', age = w.getMeta(x, y, z) & 15;
+    if (!infini && w.raining && this.nearRain(x, y, z) && R() < 0.2 + age * 0.03) { w.setBlock(x, y, z, 0, 0); this.remeshNear(x, z); return; }
+    const age2 = Math.min(15, age + Math.floor(Math.floor(R() * 3) / 2));
+    if (age2 !== age) w.setMeta(x, y, z, age2);
+    if (!infini) {
+      if (!this.fireCanBurnAround(x, y, z)) { if (!sturdy || age > 3) { w.setBlock(x, y, z, 0, 0); this.remeshNear(x, z); } return; }
+      if (age === 15 && R() < 0.25 && !FIRE_IGNITE[below]) { w.setBlock(x, y, z, 0, 0); this.remeshNear(x, z); return; }
+    }
+    const c = w.getChunk(x >> 4, z >> 4), bi = c && c.biomes ? c.biomes[((z & 15) << 4) | (x & 15)] : -1, humid = FIRE_BURNOUT.has(bi), k = humid ? -50 : 0;
+    this.fireBurnOut(x + 1, y, z, 300 + k, age); this.fireBurnOut(x - 1, y, z, 300 + k, age);
+    this.fireBurnOut(x, y - 1, z, 250 + k, age); this.fireBurnOut(x, y + 1, z, 250 + k, age);
+    this.fireBurnOut(x, y, z - 1, 300 + k, age); this.fireBurnOut(x, y, z + 1, 300 + k, age);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 4; dy++) {
+      if (!dx && !dy && !dz) continue;
+      const ig = this.fireOdds(x + dx, y + dy, z + dz);
+      if (ig <= 0) continue;
+      let n = Math.floor((ig + 40 + OPTIONS.difficulty * 7) / (age + 30));
+      if (humid) n = Math.floor(n / 2);
+      if (n > 0 && Math.floor(R() * (dy > 1 ? 100 + (dy - 1) * 100 : 100)) <= n && !(w.raining && this.nearRain(x + dx, y + dy, z + dz))) {
+        this.placeFire(x + dx, y + dy, z + dz, Math.min(15, age + Math.floor(Math.floor(R() * 5) / 4)));
+        this.remeshNear(x + dx, z + dz);
+      }
+    }
+  },
+  // LavaFluid.randomTick: lava sets fire to what is near it
+  lavaTick(x, y, z) {
+    if (!this.rule('doFireTick')) return;
+    const w = this.world, R = Math.random, n = Math.floor(R() * 3);
+    if (n > 0) {
+      let bx = x, by = y, bz = z;
+      for (let k = 0; k < n; k++) {
+        bx += Math.floor(R() * 3) - 1; by++; bz += Math.floor(R() * 3) - 1;
+        if (!w.isLoadedAt(bx, bz)) return;
+        const id = w.getBlock(bx, by, bz);
+        if (id === 0) { if (this.fireCanBurnAround(bx, by, bz)) { this.placeFire(bx, by, bz, 0); this.remeshNear(bx, bz); return; } }
+        else if (SOLID[id]) return;
+      }
+    } else for (let k = 0; k < 3; k++) {
+      const bx = x + Math.floor(R() * 3) - 1, bz = z + Math.floor(R() * 3) - 1;
+      if (w.isLoadedAt(bx, bz) && w.getBlock(bx, y + 1, bz) === 0 && FIRE_IGNITE[w.getBlock(bx, y, bz)]) { this.placeFire(bx, y + 1, bz, 0); this.remeshNear(bx, bz); }
+    }
+  },
+});
+// fire runs on its own ticks (FireBlock.onPlace schedules the first); random ticks only pick up fires that lost theirs
+const _setBlockGR = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  const r = _setBlockGR.call(this, x, y, z, id, meta, notify);
+  if (r && id === B.FIRE) this.schedule(x, y, z, 30 + Math.floor(Math.random() * 10), 'fire');
+  return r;
+};
+const _randomTickGR = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  if (id === B.FIRE) { this.world.schedule(x, y, z, 30 + Math.floor(Math.random() * 10), 'fire'); return; }
+  if (id === B.SOUL_FIRE) return;
+  if (id === B.LAVA) return this.lavaTick(x, y, z);
+  return _randomTickGR.call(this, x, y, z, id);
+};
+const _onScheduledGR = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind === 'fire') return this.fireTick(x, y, z);
+  return _onScheduledGR.call(this, kind, x, y, z);
+};
+
+/* ---------------- snow, ice and filling cauldrons ---------------- */
+// ServerLevel.tickPrecipitation: one chunk in sixteen each tick
+Game.prototype.tickPrecipitation = function () {
+  const w = this.world, p = this.player;
+  if (!p || w.dim !== 'overworld') return;
+  const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, R = Math.random, raining = w.raining && w.rainStrength > 0.2, acc = this.rule('snowAccumulationHeight');
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    if (R() >= 1 / 16) continue;
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.biomes) continue;
+    this.precipitateAt(c.cx * 16 + Math.floor(R() * 16), c.cz * 16 + Math.floor(R() * 16), raining, acc);
+  }
+};
+Game.prototype.precipitateAt = function (x, z, raining, acc) {
+  const w = this.world, R = Math.random, c = w.getChunk(x >> 4, z >> 4), lx = x & 15, lz = z & 15, bi = c.biomes[(lz << 4) | lx];
+  {
+    // the top block that stops movement or is a fluid (Heightmap.MOTION_BLOCKING; snow layers do not)
+    let y = Math.min(CH_TOP, (c.hmap ? c.hmap[(lz << 4) | lx] : CH_TOP) + 24);
+    while (y > 0) { const id = w.getBlock(x, y, z); if (SOLID[id] && !BLK[id].noCollide && id !== B.SNOW || BLK[id].liquid) break; y--; }
+    const top = y + 1, dark = yy => (w.getLightRaw(x, yy, z) & 15) < 10;
+    // Biome.shouldFreeze: still water at the edge of a cold pond turns to ice
+    if (w.getBlock(x, y, z) === B.WATER && w.getMeta(x, y, z) === 0 && w.snowsAt(x, y, z, bi) && dark(y) &&
+      !(w.getBlock(x - 1, y, z) === B.WATER && w.getBlock(x + 1, y, z) === B.WATER && w.getBlock(x, y, z - 1) === B.WATER && w.getBlock(x, y, z + 1) === B.WATER)) { w.setBlock(x, y, z, B.ICE, 0); this.remeshNear(x, z); }
+    if (!raining) return;
+    // Biome.shouldSnow: snow settles, layer on layer up to snowAccumulationHeight
+    if (acc > 0 && w.snowsAt(x, top, z, bi) && dark(top)) {
+      const cur = w.getBlock(x, top, z);
+      if (cur === B.SNOW) { const l = (w.getMeta(x, top, z) & 7) + 1; if (l < Math.min(acc, 8)) { w.setMeta(x, top, z, l); this.remeshNear(x, z); } }
+      else if (cur === 0 && w.canStay(B.SNOW, x, top, z, 0) && w.getBlock(x, y, z) !== B.ICE && w.getBlock(x, y, z) !== B.PACKED_ICE) { w.setBlock(x, top, z, B.SNOW, 0); this.remeshNear(x, z); }
+    }
+    // Block.handlePrecipitation: cauldrons fill with rain (1 in 20) or powder snow (1 in 10)
+    if (!DRY_BIOMES.has(bi) && w.getBlock(x, y, z) === B.CAULDRON) {
+      const snow = w.snowsAt(x, y, z, bi), m = w.getMeta(x, y, z), lv = m & 3, fl = m & 12;
+      if (R() < (snow ? 0.1 : 0.05) && lv < 3 && (lv === 0 || fl === (snow ? 8 : 0))) { w.setMeta(x, y, z, (lv + 1) | (snow ? 8 : 0)); this.remeshNear(x, z); }
+    }
+  }
+};
+const _gameTickGR = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const w = this.world;
+  if (w) { w.waterSources = this.rule('waterSourceConversion'); w.lavaSources = this.rule('lavaSourceConversion'); }
+  _gameTickGR.call(this);
+  if (w && this.player) this.tickPrecipitation();
+};
+
+/* ---------------- explosions ---------------- */
+// Level.ExplosionInteraction of each kind of explosion
+const EXPLOSION_KIND = { creeper: 'mob', fireball: 'mob', wither: 'mob', wither_blue: 'mob', bed: 'block', crystal: 'block', explosion: 'tnt', tnt: 'tnt' };
+const WITHER_IMMUNE = new Set(['barrier', 'bedrock', 'end_portal', 'end_portal_frame', 'end_gateway', 'command_block', 'repeating_command_block', 'chain_command_block', 'structure_block', 'jigsaw', 'moving_piston', 'light', 'reinforced_deepslate'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+// Level.clip with the blocks' collision boxes: does the line reach the point?
+function clipCollider(w, ax, ay, az, bx, by, bz) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+  if (len < 1e-7) return true;
+  const ux = dx / len, uy = dy / len, uz = dz / len, sx = ux > 0 ? 1 : -1, sy = uy > 0 ? 1 : -1, sz = uz > 0 ? 1 : -1;
+  let x = Math.floor(ax), y = Math.floor(ay), z = Math.floor(az);
+  const tdx = ux ? Math.abs(1 / ux) : Infinity, tdy = uy ? Math.abs(1 / uy) : Infinity, tdz = uz ? Math.abs(1 / uz) : Infinity;
+  let mx = ux ? (ux > 0 ? x + 1 - ax : ax - x) * tdx : Infinity, my = uy ? (uy > 0 ? y + 1 - ay : ay - y) * tdy : Infinity, mz = uz ? (uz > 0 ? z + 1 - az : az - z) * tdz : Infinity;
+  for (let i = 0; i < 256; i++) {
+    const id = w.getBlock(x, y, z);
+    if (id && SOLID[id] && !BLK[id].noCollide) {
+      if (SHAPE[id] === SH.CUBE) return false;
+      const b = selBox(id, w.getMeta(x, y, z), w, x, y, z), h = b && rayBox(ax - x, ay - y, az - z, ux, uy, uz, b);
+      if (h && h.t <= len) return false;
+    }
+    const t = Math.min(mx, my, mz);
+    if (t > len) return true;
+    if (mx === t) { x += sx; mx += tdx; } else if (my === t) { y += sy; my += tdy; } else { z += sz; mz += tdz; }
+  }
+  return true;
+}
+// Explosion.getSeenPercent: the share of points of the creature's box the blast reaches
+function seenPercent(w, cx, cy, cz, e) {
+  const x0 = e.x - e.w / 2, y0 = e.y, z0 = e.z - e.w / 2, sx = e.w, sy = e.h, sz = e.w;
+  const d0 = 1 / (sx * 2 + 1), d1 = 1 / (sy * 2 + 1), d2 = 1 / (sz * 2 + 1), ox = (1 - Math.floor(1 / d0) * d0) / 2, oz = (1 - Math.floor(1 / d2) * d2) / 2;
+  let hit = 0, n = 0;
+  for (let a = 0; a <= 1; a += d0) for (let b = 0; b <= 1; b += d1) for (let c = 0; c <= 1; c += d2) {
+    if (clipCollider(w, x0 + a * sx + ox, y0 + b * sy, z0 + c * sz + oz, cx, cy, cz)) hit++;
+    n++;
+  }
+  return n ? hit / n : 0;
+}
+// Explosion.explode + finalizeExplosion: 1352 rays from the centre lose strength in each block by its blast resistance; what they
+// reach is blown up (all of it dropping, or one block in `power` with drop decay); creatures are hurt and thrown by how much of
+// them the blast can see
+Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
+  const w = this.world, R = Math.random, kind = EXPLOSION_KIND[source || 'explosion'] || 'tnt';
+  let breaks = !noBlocks, decay;
+  if (kind === 'mob') { if (!this.rule('mobGriefing')) breaks = false; decay = this.rule('mobExplosionDropDecay'); }
+  else if (kind === 'block') decay = this.rule('blockExplosionDropDecay');
+  else decay = this.rule('tntExplosionDropDecay');
+  const fire = source === 'bed' || source === 'fireball' && this.rule('mobGriefing');
+  this.sound('explode', x, y, z);
+  this.particles.explosion(x, y, z);
+  const toBlow = new Map();
+  if (breaks) {
+    for (let j = 0; j < 16; j++) for (let k = 0; k < 16; k++) for (let l = 0; l < 16; l++) {
+      if (j !== 0 && j !== 15 && k !== 0 && k !== 15 && l !== 0 && l !== 15) continue;
+      let dx = j / 15 * 2 - 1, dy = k / 15 * 2 - 1, dz = l / 15 * 2 - 1;
+      const d = Math.hypot(dx, dy, dz); dx /= d; dy /= d; dz /= d;
+      let f = power * (0.7 + R() * 0.6), px = x, py = y, pz = z;
+      for (; f > 0; f -= 0.22500001) {
+        const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz);
+        if (by < 0 || by > CH_TOP) break;
+        const id = w.getBlock(bx, by, bz);
+        if (id) {
+          let res = BLAST_RES[id];
+          if (WATERY[id] && !BLK[id].liquid) res = Math.max(res, 100);
+          if (source === 'wither_blue' && !WITHER_IMMUNE.has(id)) res = Math.min(0.8, res);
+          f -= (res + 0.3) * 0.3;
+        }
+        if (f > 0) { const key = bx + ',' + by + ',' + bz; if (!toBlow.has(key)) toBlow.set(key, [bx, by, bz]); }
+        px += dx * 0.3; py += dy * 0.3; pz += dz * 0.3;
+      }
+    }
+  }
+  // the creatures and things around
+  const f2 = power * 2, p = this.player, scaled = kind === 'mob' || source === 'bed';
+  const things = this.entities.filter(e => !e.dead && (e instanceof Mob || e instanceof ItemEntity || e instanceof PrimedTNT || e instanceof FallingBlock));
+  if (p && !p.dead) things.push(p);
+  for (const e of things) {
+    const d11 = Math.hypot(e.x - x, e.y - y, e.z - z) / f2;
+    if (d11 > 1) continue;
+    let dx = e.x - x, dy = (e instanceof PrimedTNT ? e.y : e.y + (e.eyeH || e.h * 0.85)) - y, dz = e.z - z;
+    const l = Math.hypot(dx, dy, dz);
+    if (l === 0) continue;
+    dx /= l; dy /= l; dz /= l;
+    const seen = seenPercent(w, x, y, z, e), imp = (1 - d11) * seen;
+    let dmg = (imp * imp + imp) / 2 * 7 * f2 + 1;
+    if (e instanceof ItemEntity) {
+      // items have 5 health; nether stars are not hurt by explosions
+      if (e.stack.id !== I.NETHER_STAR && (e.ihp = (e.ihp === undefined ? 5 : e.ihp) - dmg) <= 0) { e.dead = true; continue; }
+    } else if (e.hurt && !(e instanceof PrimedTNT) && !(e instanceof FallingBlock)) {
+      if (e === p && scaled) { const df = OPTIONS.difficulty; dmg = df === 0 ? 0 : df === 1 ? Math.min(dmg / 2 + 1, dmg) : df === 3 ? dmg * 1.5 : dmg; }
+      if (dmg > 0) e.hurt(dmg, source || 'explosion', null);
+    }
+    if (e === p && (p.mode === 1 && p.flying)) continue;
+    // Blast Protection: 15% less knockback a level (explosion_knockback_resistance)
+    let kb = imp;
+    const armor = e === p ? p.armor : e.data && e.data.armor;
+    if (armor) { let bp = 0; for (const s of armor) bp += enchLevel(s, 'blast_protection'); kb *= Math.max(0, 1 - 0.15 * bp); }
+    e.vx += dx * kb; e.vy += dy * kb; e.vz += dz * kb;
+  }
+  if (!breaks) return;
+  // blow up the blocks, in random order
+  const list = [...toBlow.values()];
+  for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)), t = list[i]; list[i] = list[j]; list[j] = t; }
+  const changed = [];
+  for (const [bx, by, bz] of list) {
+    const id = w.getBlock(bx, by, bz);
+    if (!id || BLK[id].liquid) continue;
+    // TntBlock.wasExploded: a shorter fuse
+    if (id === B.TNT) { w.setBlock(bx, by, bz, 0, 0); this.entities.push(new PrimedTNT(this, bx, by, bz, 10 + Math.floor(R() * 20))); changed.push([bx, by, bz]); continue; }
+    const be = w.getBE(bx, by, bz), meta = w.getMeta(bx, by, bz);
+    if (!decay || R() < 1 / power) for (const st of this.dropsFor(id, meta)) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
+    if (be && be.items && !BLK[id].shulker) for (const st of be.items) if (st) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
+    if (be) { if (this.furnaces) this.furnaces.delete(this.beKey(bx, by, bz)); if (this.brewers) this.brewers.delete(this.beKey(bx, by, bz)); }
+    w.setBlock(bx, by, bz, 0, 0, false);
+    changed.push([bx, by, bz]);
+  }
+  for (const [bx, by, bz] of changed) w.notify(bx, by, bz);
+  // beds, respawn anchors and ghast fireballs set fire to a third of the blown spots that have a floor
+  if (fire) for (const [bx, by, bz] of list) {
+    const below = w.getBlock(bx, by - 1, bz);
+    if (R() < 1 / 3 && w.getBlock(bx, by, bz) === 0 && OPAQUE[below] && SHAPE[below] === SH.CUBE) this.placeFire(bx, by, bz, 0);
+  }
+  this.remeshNear(Math.floor(x), Math.floor(z));
+  for (const [bx, , bz] of changed) if (Math.abs(bx - x) > 12 || Math.abs(bz - z) > 12) this.remeshNear(bx, bz);
+};
+// PrimedTnt: bounces off the ground, drifts with water, and goes off just above its bottom
+PrimedTNT.prototype.tick = function () {
+  this.savePrev(); this.age++;
+  this.vy -= 0.04; this.physicsStep();
+  this.vx *= 0.98; this.vy *= 0.98; this.vz *= 0.98;
+  if (this.onGround) { this.vx *= 0.7; this.vz *= 0.7; this.vy *= -0.5; }
+  if (--this.fuse <= 0) { this.dead = true; this.game.explode(this.x, this.y + 0.06125, this.z, 4); return; }
+  this.updateFluids();
+  if (this.age % 5 === 0) this.game.particles.smoke(this.x, this.y + 1.1, this.z, 1);
+};
 
 </script>
 </body>
