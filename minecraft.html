@@ -92,6 +92,19 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 .slider .lab { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; text-shadow: 2px 2px 0 #3f3f3f; color: #e0e0e0; pointer-events: none; }
 .slider:hover .knob { background: #a2acdf; }
 .hint { color: #a0a0a0; font-size: 20px; margin: 6px; text-align: center; max-width: 620px; }
+/* commands: the sidebar, boss bars and titles */
+#sidebar { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); min-width: 120px; background: rgba(0,0,0,.3); font-size: 18px; line-height: 20px; pointer-events: none; }
+#sidebar .sbt { background: rgba(0,0,0,.4); text-align: center; padding: 1px 6px; }
+#sidebar .sbr { display: flex; justify-content: space-between; gap: 14px; padding: 0 4px; }
+#sidebar .sbr b { color: #ff5555; font-weight: normal; }
+#cbars { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); width: 364px; pointer-events: none; }
+.cbar { margin-bottom: 6px; text-align: center; font-size: 20px; text-shadow: 2px 2px 0 #3f3f3f; }
+.cbb { position: relative; height: 10px; background: rgba(0,0,0,.6); border: 2px solid #000; margin-top: 2px; }
+.cbf { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); }
+.cbb i { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(0,0,0,.6); }
+#ctitle { position: absolute; left: 0; right: 0; top: 30%; text-align: center; pointer-events: none; opacity: 0; text-shadow: 4px 4px 0 #3f3f3f; }
+#ctitle .tt { font-size: 72px; line-height: 1.1; }
+#ctitle .ts { font-size: 36px; margin-top: 8px; }
 /* the Create World tabs and its sub-screens */
 .cwtabs { display: flex; gap: 2px; margin-bottom: 10px; border-bottom: 2px solid #000; }
 .cwtab { width: 130px; height: 34px; border: 2px solid #000; border-bottom: none; background: #4a4a4a; color: #a0a0a0; font: inherit; font-size: 22px; text-shadow: 2px 2px 0 #222; cursor: pointer; box-shadow: inset 2px 2px 0 #777; }
@@ -27940,8 +27953,10 @@ Game.prototype.runCommandBlock = function (x, y, z) {
   const ui = this.ui, out = [];
   ui.chat = (msg, col) => out.push([String(msg), col]);
   this.cmdSource = [x, y, z];
-  try { this.onChat(cmdRelCoords(cmd, x, y - w.yOff, z)); } catch (e) { out.push([String(e && e.message || e), '#f66']); } finally { delete ui.chat; this.cmdSource = null; }
-  const ok = !out.some(o => o[1] === '#f66');
+  this.lastCmdOk = undefined;
+  // (commands with selectors and ^ coordinates read the block's position themselves)
+  try { this.onChat(this.cmdNew && this.cmdNew(cmd) ? cmd : cmdRelCoords(cmd, x, y - w.yOff, z)); } catch (e) { out.push([String(e && e.message || e), '#f66']); } finally { delete ui.chat; this.cmdSource = null; }
+  const ok = this.lastCmdOk !== undefined ? this.lastCmdOk : !out.some(o => o[1] === '#f66');
   be.success = ok ? 1 : 0; be.last = out.map(o => o[0]).join(' / ');
   w.setBE(x, y, z, be);
   if (out.length && this.rule('commandBlockOutput')) ui.chat('[@: ' + be.last + ']', '#aaa');
@@ -33604,6 +33619,2009 @@ Game.prototype.gameTick = function () {
     if (c && c.state >= 2) { m.bonusPending = false; this.bonusChestAt = this.placeBonusChest(); }
   }
   return _gameTickCW.call(this);
+};
+
+/* @file 129_commands.js */
+/* ===================================================================
+   COMMANDS LIKE JAVA 1.21 — a real parser in place of word splitting:
+   target selectors (@p @r @a @e @s @n and their arguments), relative
+   and local coordinates, rotations, items and blocks with their data,
+   SNBT and JSON text; an execution context (who runs a command, where,
+   facing which way, anchored at the feet or the eyes) that /execute
+   changes, with its conditions and stored results; scoreboards with the
+   sidebar and statistic criteria, tags, teams, boss bars, titles, the
+   world border, and the other commands of 1.21 with vanilla's feedback.
+   Command blocks run them from their own position. Commands this file
+   doesn't know still go to the older handlers.
+   =================================================================== */
+class CmdErr extends Error {}
+const cfail = m => { throw new CmdErr(m); };
+// (D2R, degrees to radians, comes from 118_hand.js)
+// yaw and pitch in Java's degrees (yaw 0 faces south, pitch 90 looks straight down) and back
+const toJYaw = a => { let d = 180 - a / D2R; d = ((d + 180) % 360 + 360) % 360 - 180; return d; };
+const fromJYaw = d => (180 - d) * D2R;
+const toJPitch = a => -a / D2R;
+const fromJPitch = d => -d * D2R;
+const fmt = v => (Math.round(v * 100) / 100).toFixed(Math.abs(v - Math.round(v)) < 1e-9 ? 1 : 2).replace(/(\.\d)0$/, '$1');
+const nsKey = s => String(s || '').toLowerCase().replace(/^minecraft:/, '');
+
+/* ---------------- reading ---------------- */
+class CmdReader {
+  constructor(s) { this.s = s; this.i = 0; }
+  ws() { while (this.i < this.s.length && this.s[this.i] === ' ') this.i++; }
+  end() { this.ws(); return this.i >= this.s.length; }
+  word() { this.ws(); const a = this.i; while (this.i < this.s.length && this.s[this.i] !== ' ') this.i++; return this.s.slice(a, this.i); }
+  peek() { const i = this.i, w = this.word(); this.i = i; return w; }
+  // a token whose brackets, braces and quotes may hold spaces
+  tok() {
+    this.ws();
+    const a = this.i, s = this.s;
+    let d = 0, q = null;
+    while (this.i < s.length) {
+      const c = s[this.i];
+      if (q) { if (c === '\\') this.i++; else if (c === q) q = null; }
+      else if (c === '"' || c === "'") q = c;
+      else if (c === '[' || c === '{') d++;
+      else if (c === ']' || c === '}') d--;
+      else if (c === ' ' && d <= 0) break;
+      this.i++;
+    }
+    return s.slice(a, this.i);
+  }
+  rest() { this.ws(); const r = this.s.slice(this.i); this.i = this.s.length; return r; }
+  need(what) { const t = this.tok(); if (!t) cfail('Expected ' + what); return t; }
+  lit(...opts) { const w = this.word(); if (!opts.includes(w)) cfail(w ? 'Incorrect argument for command: ' + w : 'Unknown or incomplete command'); return w; }
+  int(min, max) {
+    const t = this.word();
+    if (!/^[-+]?\d+$/.test(t)) cfail(t ? 'Invalid integer \'' + t + '\'' : 'Expected integer');
+    const v = parseInt(t, 10);
+    if (min !== undefined && v < min) cfail('Integer must not be less than ' + min + ', found ' + v);
+    if (max !== undefined && v > max) cfail('Integer must not be more than ' + max + ', found ' + v);
+    return v;
+  }
+  num(min, max) {
+    const t = this.word();
+    if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(t)) cfail(t ? 'Invalid float \'' + t + '\'' : 'Expected float');
+    const v = parseFloat(t);
+    if (min !== undefined && v < min) cfail('Float must not be less than ' + min + ', found ' + v);
+    if (max !== undefined && v > max) cfail('Float must not be more than ' + max + ', found ' + v);
+    return v;
+  }
+  bool() { const w = this.word(); if (w !== 'true' && w !== 'false') cfail('Invalid boolean, expected \'true\' or \'false\' but found \'' + w + '\''); return w === 'true'; }
+  str() { const t = this.tok(); if (/^"(.*)"$/.test(t) || /^'(.*)'$/.test(t)) return t.slice(1, -1).replace(/\\(.)/g, '$1'); return t; }
+}
+// ranges: 5, 1..5, ..5, 5..
+function parseRange(t, isInt) {
+  const N = '([-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))';
+  const m = String(t).match(new RegExp('^' + N + '?(\\.\\.)?' + N + '?$'));
+  if (!m || (!m[1] && !m[3])) cfail('Expected value or range of values');
+  const a = m[1] ? parseFloat(m[1]) : -Infinity, b = m[2] ? (m[3] ? parseFloat(m[3]) : Infinity) : a;
+  if (isInt && ((m[1] && !/^[-+]?\d+$/.test(m[1])) || (m[3] && !/^[-+]?\d+$/.test(m[3])))) cfail('Expected whole number range');
+  if (a > b) cfail('Min cannot be bigger than max');
+  return { min: a, max: b, test(v) { return v >= this.min && v <= this.max; } };
+}
+
+/* ---------------- SNBT ---------------- */
+// a lenient reader of Java's stringified NBT: compounds, lists, arrays, quoted and bare strings, numbers with their suffixes
+function parseSNBT(s) {
+  let i = 0;
+  const ws = () => { while (i < s.length && /\s/.test(s[i])) i++; };
+  const val = () => {
+    ws();
+    const c = s[i];
+    if (c === '{') {
+      i++; const o = {};
+      ws(); if (s[i] === '}') { i++; return o; }
+      for (;;) {
+        ws(); const k = key(); ws();
+        if (s[i] !== ':') cfail('Expected \':\' in NBT'); i++;
+        o[k] = val(); ws();
+        if (s[i] === ',') { i++; continue; }
+        if (s[i] === '}') { i++; return o; }
+        cfail('Expected \',\' or \'}\' in NBT');
+      }
+    }
+    if (c === '[') {
+      i++; ws();
+      if (/^[BIL];/.test(s.slice(i, i + 2))) i += 2;
+      const a = [];
+      ws(); if (s[i] === ']') { i++; return a; }
+      for (;;) {
+        a.push(val()); ws();
+        if (s[i] === ',') { i++; continue; }
+        if (s[i] === ']') { i++; return a; }
+        cfail('Expected \',\' or \']\' in NBT');
+      }
+    }
+    if (c === '"' || c === "'") return quoted();
+    const st = i;
+    while (i < s.length && !/[,}\]:\s]/.test(s[i])) i++;
+    const t = s.slice(st, i);
+    if (!t) cfail('Expected value in NBT');
+    if (/^(true|false)$/i.test(t)) return t.toLowerCase() === 'true' ? 1 : 0;
+    const n = t.match(/^([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)([bBsSlLfFdD])?$/);
+    if (n) return parseFloat(n[1]);
+    return t;
+  };
+  const quoted = () => { const q = s[i++]; let o = ''; while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; o += s[i++]; } i++; return o; };
+  const key = () => { ws(); if (s[i] === '"' || s[i] === "'") return quoted(); const st = i; while (i < s.length && /[A-Za-z0-9_.+\-]/.test(s[i])) i++; if (st === i) cfail('Expected key in NBT'); return s.slice(st, i); };
+  const v = val(); ws();
+  if (i < s.length) cfail('Trailing data in NBT');
+  return v;
+}
+
+/* ---------------- text components ---------------- */
+const TEXT_COLORS = { black: '#000000', dark_blue: '#0000aa', dark_green: '#00aa00', dark_aqua: '#00aaaa', dark_red: '#aa0000', dark_purple: '#aa00aa', gold: '#ffaa00', gray: '#aaaaaa',
+  dark_gray: '#555555', blue: '#5555ff', green: '#55ff55', aqua: '#55ffff', red: '#ff5555', light_purple: '#ff55ff', yellow: '#ffff55', white: '#ffffff' };
+// a JSON text (or a plain string) as spans: [{ t, color, bold, italic, underlined, strikethrough }]
+Game.prototype.textSpans = function (json, ctx, depth) {
+  let v = json;
+  if (typeof json === 'string') { try { v = JSON.parse(json); } catch (e) { cfail('Invalid chat component: ' + e.message); } }
+  const out = [], g = this;
+  const walk = (c, st) => {
+    if ((depth || 0) > 8) return;
+    if (c === null || c === undefined) return;
+    if (typeof c !== 'object') { out.push(Object.assign({}, st, { t: String(c) })); return; }
+    if (Array.isArray(c)) { if (!c.length) return; const base = Object.assign({}, st); walk(c[0], base); const s0 = Object.assign({}, st, styleOf(c[0])); for (let k = 1; k < c.length; k++) walk(c[k], s0); return; }
+    const s = Object.assign({}, st, styleOf(c));
+    let t = '';
+    if (c.text !== undefined) t = String(c.text);
+    else if (c.translate !== undefined) { const args = (c.with || []).map(a => g.textSpans(a, ctx, (depth || 0) + 1).map(x => x.t).join('')); let k = 0; t = String(c.fallback || c.translate).replace(/%(?:(\d+)\$)?s/g, (m, n) => args[n ? n - 1 : k++] || ''); }
+    else if (c.score) { const sb = g.scoreboard(), h = c.score.name === '*' ? (ctx && ctx.ent ? g.holderOf(ctx.ent) : '') : g.holderNames(c.score.name, ctx)[0]; const v = sb.get(h, c.score.objective); t = v === undefined ? '' : String(v); }
+    else if (c.selector) { const list = ctx ? g.select(c.selector, ctx) : []; t = list.map(e => g.entName(e)).join(c.separator !== undefined ? g.textSpans(c.separator, ctx, 1).map(x => x.t).join('') : ', '); }
+    else if (c.keybind) t = c.keybind.replace(/^key\./, '').replace(/\./g, ' ');
+    else if (c.nbt) t = '';
+    if (t) out.push(Object.assign({}, s, { t }));
+    if (Array.isArray(c.extra)) for (const e of c.extra) walk(e, s);
+  };
+  const styleOf = c => {
+    if (!c || typeof c !== 'object' || Array.isArray(c)) return {};
+    const o = {};
+    if (c.color) o.color = TEXT_COLORS[c.color] || (/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : undefined);
+    for (const k of ['bold', 'italic', 'underlined', 'strikethrough', 'obfuscated']) if (c[k] !== undefined) o[k] = !!c[k];
+    return o;
+  };
+  walk(v, {});
+  return out;
+};
+const spansText = sp => sp.map(s => s.t).join('');
+function spansHTML(sp) {
+  return sp.map(s => {
+    const st = [];
+    if (s.color) st.push('color:' + s.color);
+    if (s.bold) st.push('font-weight:bold');
+    if (s.italic) st.push('font-style:italic');
+    const dec = [s.underlined && 'underline', s.strikethrough && 'line-through'].filter(Boolean);
+    if (dec.length) st.push('text-decoration:' + dec.join(' '));
+    return '<span style="' + st.join(';') + '">' + escapeHTML(s.t) + '</span>';
+  }).join('');
+}
+UI.prototype.chatSpans = function (spans, color) {
+  // a command block's output goes into the block, not the chat
+  if (this.chat !== UI.prototype.chat) return this.chat(spansText(spans), color);
+  this.chat(spansText(spans), color);
+  const box = $('chat'), d = box.lastChild;
+  if (d) d.innerHTML = spansHTML(spans.map(s => Object.assign({ color }, s)));
+};
+
+/* ---------------- entities ---------------- */
+// what a selector can find: the player and the entities of the world
+Game.prototype.cmdEntities = function () {
+  const out = [];
+  if (this.player) out.push(this.player);
+  for (const e of this.entities) if (!e.dead) out.push(e);
+  return out;
+};
+const PROJ_TYPES = { arrow: 'arrow', spectral: 'spectral_arrow', trident: 'trident', snowball: 'snowball', egg: 'egg', pearl: 'ender_pearl', xpbottle: 'experience_bottle', potion: 'potion',
+  fireball: 'fireball', small_fireball: 'small_fireball', skull: 'wither_skull', dragon_fireball: 'dragon_fireball', wind_charge: 'wind_charge', breeze_wind_charge: 'breeze_wind_charge',
+  spit: 'llama_spit', shulker_bullet: 'shulker_bullet', firework: 'firework_rocket' };
+// the entity type id Java Edition uses
+Game.prototype.entType = function (e) {
+  if (e instanceof Player) return 'player';
+  if (e instanceof ItemFrame) return e.glow ? 'glow_item_frame' : 'item_frame';
+  if (e instanceof Painting) return 'painting';
+  if (e instanceof Mob) return e.type === 'crystal' ? 'end_crystal' : e.type;
+  if (e instanceof ItemEntity) return 'item';
+  if (e instanceof XPOrb) return 'experience_orb';
+  if (e instanceof FallingBlock) return 'falling_block';
+  if (e instanceof PrimedTNT) return 'tnt';
+  if (e instanceof Projectile) return PROJ_TYPES[e.kind] || e.kind || 'arrow';
+  if (e instanceof EyeEntity) return 'eye_of_ender';
+  if (typeof FishingHook !== 'undefined' && e instanceof FishingHook) return 'fishing_bobber';
+  if (typeof EffectCloud !== 'undefined' && e instanceof EffectCloud) return 'area_effect_cloud';
+  if (typeof OminousItemSpawner !== 'undefined' && e instanceof OminousItemSpawner) return 'ominous_item_spawner';
+  return 'marker';
+};
+// entity type tags selectors may name
+const ENT_TAGS = {
+  skeletons: ['skeleton', 'stray', 'wither_skeleton', 'skeleton_horse', 'bogged'], zombies: ['zombie', 'zombie_villager', 'husk', 'drowned', 'zombified_piglin', 'zombie_horse'],
+  raiders: ['evoker', 'pillager', 'ravager', 'vindicator', 'illusioner', 'witch'], illager: ['evoker', 'illusioner', 'pillager', 'vindicator'],
+  arrows: ['arrow', 'spectral_arrow'], impact_projectiles: ['arrow', 'firework_rocket', 'spectral_arrow', 'small_fireball', 'snowball', 'dragon_fireball', 'fireball', 'wither_skull', 'egg', 'trident', 'llama_spit', 'wind_charge', 'breeze_wind_charge'],
+  boat: ['boat', 'chest_boat'], aquatic: ['turtle', 'axolotl', 'guardian', 'elder_guardian', 'cod', 'pufferfish', 'salmon', 'tropical_fish', 'dolphin', 'squid', 'glow_squid', 'tadpole'],
+  undead: ['skeleton', 'stray', 'wither_skeleton', 'skeleton_horse', 'bogged', 'zombie', 'zombie_villager', 'husk', 'drowned', 'zombified_piglin', 'zombie_horse', 'wither', 'phantom', 'zoglin'],
+  arthropod: ['bee', 'endermite', 'silverfish', 'spider', 'cave_spider'], beehive_inhabitors: ['bee'], frog_food: ['slime', 'magma_cube'],
+};
+Game.prototype.entName = function (e) {
+  if (e instanceof Player) return 'Player';
+  if (e.customName) return e.customName;
+  const t = this.entType(e);
+  if (e instanceof ItemEntity && e.stack) return ITEMS[e.stack.id] ? ITEMS[e.stack.id].display : 'Item';
+  return typeof mobName === 'function' && MOB_TYPES[t] ? mobName(t) : t.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+};
+Game.prototype.entUUID = function (e) {
+  const d = e instanceof Mob ? e.data : e;
+  if (!d._uuidv && !d.uuid) {
+    const h = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0');
+    d.uuid = h() + h() + '-' + h() + '-4' + h().slice(1) + '-' + (8 + Math.floor(Math.random() * 4)).toString(16) + h().slice(1) + '-' + h() + h() + h();
+  }
+  return d.uuid;
+};
+Game.prototype.entTags = function (e) {
+  if (e instanceof Mob) return e.data.tags || (e.data.tags = []);
+  return e.tags || (e.tags = []);
+};
+Game.prototype.entEye = function (e) { return e instanceof Player ? e.y + e.eyeCur : e.eyeY ? e.eyeY() : e.y + (e.h || 0) * 0.85; };
+Game.prototype.entDim = function () { return this.world.dim; };
+
+/* ---------------- selectors ---------------- */
+// '@e[type=zombie,distance=..5]' -> { k: 'e', args: [[key, value, negated]...] }; a player name or a UUID otherwise
+function parseSelector(t) {
+  const m = String(t).match(/^@([parsen])(?:\[(.*)\])?$/s);
+  if (!m) {
+    if (/^[0-9a-f]{1,8}-[0-9a-f]{1,4}-[0-9a-f]{1,4}-[0-9a-f]{1,4}-[0-9a-f]{1,12}$/i.test(t)) return { k: 'uuid', v: t.toLowerCase() };
+    if (/^[A-Za-z0-9_]{1,16}$/.test(t)) return { k: 'name', v: t };
+    cfail('Invalid name or UUID');
+  }
+  const args = [];
+  if (m[2] !== undefined && m[2].trim()) {
+    // split on commas outside braces, brackets and quotes
+    const body = m[2];
+    let d = 0, q = null, st = 0;
+    const parts = [];
+    for (let i = 0; i <= body.length; i++) {
+      const c = body[i];
+      if (i === body.length || (c === ',' && !d && !q)) { parts.push(body.slice(st, i)); st = i + 1; continue; }
+      if (q) { if (c === '\\') i++; else if (c === q) q = null; }
+      else if (c === '"' || c === "'") q = c;
+      else if (c === '{' || c === '[') d++;
+      else if (c === '}' || c === ']') d--;
+    }
+    for (const p of parts) {
+      const e = p.indexOf('=');
+      if (e < 0) cfail('Expected value for option \'' + p.trim() + '\'');
+      const key = p.slice(0, e).trim();
+      let val = p.slice(e + 1).trim(), neg = false;
+      if (val[0] === '!') { neg = true; val = val.slice(1).trim(); }
+      if (/^".*"$/.test(val)) val = val.slice(1, -1);
+      args.push([key, val, neg]);
+    }
+  }
+  return { k: m[1], args };
+}
+// the entities a selector finds from a context, sorted and limited like Java's
+Game.prototype.select = function (text, ctx, opts) {
+  const sel = typeof text === 'string' ? parseSelector(text) : text, p = this.player;
+  if (sel.k === 'name') return p && sel.v === 'Player' ? [p] : [];
+  if (sel.k === 'uuid') return this.cmdEntities().filter(e => !(e instanceof Player) && (e instanceof Mob ? e.data.uuid : e.uuid) === sel.v);
+  if (sel.k === 's') return ctx.ent ? this.filterSel([ctx.ent], sel, ctx) : [];
+  let pool;
+  if (sel.k === 'a') pool = p ? [p] : [];
+  else if (sel.k === 'p' || sel.k === 'r') pool = p && !p.dead ? [p] : [];
+  else pool = this.cmdEntities().filter(e => !(e instanceof Player && e.dead));
+  // a type= that names players limits @e like @a
+  let list = this.filterSel(pool, sel, ctx);
+  let sort = sel.k === 'p' || sel.k === 'n' ? 'nearest' : sel.k === 'r' ? 'random' : 'arbitrary', limit = sel.k === 'p' || sel.k === 'r' || sel.k === 'n' ? 1 : Infinity;
+  const bx = this.selBase(sel, ctx);
+  for (const [k, v] of sel.args) {
+    if (k === 'sort') { if (!['nearest', 'furthest', 'random', 'arbitrary'].includes(v)) cfail('Invalid or unknown sort type \'' + v + '\''); if (sel.k === 'p' || sel.k === 'r' || sel.k === 's') cfail('Option \'sort\' isn\'t applicable here'); sort = v; }
+    if (k === 'limit') { const n = parseInt(v, 10); if (!(n >= 1)) cfail('Limit must be at least 1'); if (sel.k === 's') cfail('Option \'limit\' isn\'t applicable here'); limit = n; }
+  }
+  const d2 = e => (e.x - bx[0]) ** 2 + (e.y - bx[1]) ** 2 + (e.z - bx[2]) ** 2;
+  if (sort === 'nearest') list.sort((a, b) => d2(a) - d2(b));
+  else if (sort === 'furthest') list.sort((a, b) => d2(b) - d2(a));
+  else if (sort === 'random') for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+  if (list.length > limit) list = list.slice(0, limit);
+  if (opts && opts.single && list.length > 1) cfail('Only one entity is allowed, but the provided selector allows more than one');
+  if (opts && opts.players && list.some(e => !(e instanceof Player))) cfail('Only players may be affected by this command, but the provided selector includes entities');
+  return list;
+};
+// the point a selector measures from: its x, y, z or the context's position
+Game.prototype.selBase = function (sel, ctx) {
+  const b = [ctx.x, ctx.y, ctx.z], yo = this.world ? this.world.yOff : 0;
+  for (const [k, v] of sel.args) { if (k === 'x') b[0] = parseFloat(v); else if (k === 'y') b[1] = parseFloat(v) + yo; else if (k === 'z') b[2] = parseFloat(v); }
+  return b;
+};
+Game.prototype.filterSel = function (pool, sel, ctx) {
+  const b = this.selBase(sel, ctx), yo = this.world.yOff;
+  let vol = null;
+  const A = {};
+  for (const [k, v] of sel.args) if (k === 'dx' || k === 'dy' || k === 'dz') A[k] = parseFloat(v);
+  if (A.dx !== undefined || A.dy !== undefined || A.dz !== undefined) {
+    const dx = A.dx || 0, dy = A.dy || 0, dz = A.dz || 0;
+    vol = [Math.min(b[0], b[0] + dx), Math.min(b[1], b[1] + dy), Math.min(b[2], b[2] + dz), Math.max(b[0], b[0] + dx) + 1, Math.max(b[1], b[1] + dy) + 1, Math.max(b[2], b[2] + dz) + 1];
+  }
+  const tests = [];
+  for (const [k, v, neg] of sel.args) {
+    switch (k) {
+      case 'x': case 'y': case 'z': case 'dx': case 'dy': case 'dz': case 'sort': case 'limit': break;
+      case 'distance': { const r = parseRange(v); if (r.min < 0 && isFinite(r.min)) cfail('Distance cannot be negative'); tests.push(e => r.test(Math.sqrt((e.x - b[0]) ** 2 + (e.y - b[1]) ** 2 + (e.z - b[2]) ** 2))); break; }
+      case 'type': {
+        const tv = nsKey(v);
+        if (tv[0] === '#') { const list = ENT_TAGS[nsKey(tv.slice(1))]; if (!list) cfail('Unknown entity tag \'' + v + '\''); tests.push(e => list.includes(this.entType(e)) !== neg); }
+        else { if (!MOB_TYPES[tv] && !['player', 'item', 'experience_orb', 'falling_block', 'tnt', 'eye_of_ender', 'fishing_bobber', 'area_effect_cloud', 'item_frame', 'glow_item_frame', 'painting', 'marker', 'end_crystal', 'lightning_bolt'].includes(tv) && !Object.values(PROJ_TYPES).includes(tv)) cfail('Unknown entity type \'' + v + '\''); tests.push(e => (this.entType(e) === tv) !== neg); }
+        break;
+      }
+      case 'tag': tests.push(e => { const t = this.entTags(e); return (v === '' ? t.length === 0 : t.includes(v)) !== neg; }); break;
+      case 'name': tests.push(e => (this.entName(e) === v) !== neg); break;
+      case 'team': tests.push(e => ((this.teamOf(e) || '') === v) !== neg); break;
+      case 'level': { const r = parseRange(v, true); tests.push(e => e instanceof Player && r.test(e.xpLevel)); break; }
+      case 'gamemode': { const gm = { survival: 0, creative: 1, adventure: 2, spectator: 3 }[v]; if (gm === undefined) cfail('Invalid or unknown game mode \'' + v + '\''); tests.push(e => e instanceof Player && ((e.mode === gm) !== neg)); break; }
+      case 'x_rotation': { const r = parseRange(v); tests.push(e => r.test(toJPitch(e.pitch || 0))); break; }
+      case 'y_rotation': { const r = parseRange(v); tests.push(e => { let y = toJYaw(e.yaw || 0); if (r.min > y && r.min <= 180) y += 360; return r.test(y) || r.test(y - 360); }); break; }
+      case 'scores': {
+        const m = v.match(/^\{(.*)\}$/);
+        if (!m) cfail('Expected \'{\' for scores');
+        const sb = this.scoreboard(), conds = m[1].split(',').filter(s => s.trim()).map(s => { const [o, r] = s.split('='); return [o.trim(), parseRange(r.trim(), true)]; });
+        tests.push(e => conds.every(([o, r]) => { const val = sb.get(this.holderOf(e), o); return val !== undefined && r.test(val); }));
+        break;
+      }
+      case 'advancements': {
+        const m = v.match(/^\{(.*)\}$/);
+        if (!m) cfail('Expected \'{\' for advancements');
+        const conds = m[1].split(',').filter(s => s.trim()).map(s => { const [a, r] = s.split('='); return [nsKey(a.trim()), r.trim() === 'true']; });
+        tests.push(e => e instanceof Player && conds.every(([a, want]) => (e.advDone ? !!e.advDone(a) : false) === want));
+        break;
+      }
+      case 'nbt': { let nb; try { nb = parseSNBT(v); } catch (er) { cfail('Invalid NBT: ' + er.message); } tests.push(e => this.nbtMatches(e, nb) !== neg); break; }
+      case 'predicate': cfail('Unknown predicate \'' + v + '\'');
+      default: cfail('Unknown option \'' + k + '\'');
+    }
+  }
+  return pool.filter(e => {
+    if (vol) { const hw = (e.w || 0) / 2; if (e.x + hw < vol[0] || e.x - hw > vol[3] || e.y + (e.h || 0) < vol[1] || e.y > vol[4] || e.z + hw < vol[2] || e.z - hw > vol[5]) return false; }
+    for (const t of tests) if (!t(e)) return false;
+    return true;
+  });
+};
+// the parts of an entity's NBT a selector or /data can ask about
+Game.prototype.entNBT = function (e) {
+  const w = this.world, o = {};
+  o.Pos = [e.x, e.y - w.yOff, e.z]; o.Motion = [e.vx || 0, e.vy || 0, e.vz || 0]; o.Rotation = [toJYaw(e.yaw || 0), toJPitch(e.pitch || 0)];
+  o.OnGround = e.onGround ? 1 : 0; o.Fire = e.fireTicks || 0; o.FallDistance = e.fallDist || 0;
+  o.Tags = this.entTags(e).slice(); o.UUID = this.entUUID(e);
+  if (e.health !== undefined) o.Health = e.health;
+  if (e.customName) o.CustomName = JSON.stringify(e.customName);
+  if (e instanceof Mob) { o.NoAI = e.data.noAI ? 1 : 0; o.PersistenceRequired = e.persistent ? 1 : 0; o.Age = e.growth || 0; o.Invulnerable = e.data.invulnerable ? 1 : 0; o.Silent = e.data.silent ? 1 : 0; o.id = 'minecraft:' + this.entType(e); }
+  if (e instanceof ItemEntity && e.stack) o.Item = { id: 'minecraft:' + ITEMS[e.stack.id].name, count: e.stack.count };
+  if (e instanceof Player) {
+    o.XpLevel = e.xpLevel; o.foodLevel = e.food; o.foodSaturationLevel = e.sat; o.SelectedItemSlot = e.sel; o.playerGameType = e.mode; o.Dimension = 'minecraft:' + ({ overworld: 'overworld', nether: 'the_nether', end: 'the_end' }[w.dim]);
+    const st = e.inv[e.sel]; if (st) o.SelectedItem = { id: 'minecraft:' + ITEMS[st.id].name, count: st.count };
+    o.Inventory = e.inv.map((s, i) => s && { Slot: i, id: 'minecraft:' + ITEMS[s.id].name, count: s.count }).filter(Boolean);
+  }
+  return o;
+};
+// whether NBT b is a part of NBT a (compounds by key, lists by containing every element)
+function nbtSub(a, b) {
+  if (b === null || typeof b !== 'object') return a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 1e-6) || (typeof a === 'string' && typeof b === 'string' && nsKey(a) === nsKey(b));
+  if (Array.isArray(b)) { if (!Array.isArray(a)) return false; return b.every(x => a.some(y => nbtSub(y, x))); }
+  if (!a || typeof a !== 'object') return false;
+  return Object.keys(b).every(k => nbtSub(a[k], b[k]));
+}
+Game.prototype.nbtMatches = function (e, nb) { return nbtSub(this.entNBT(e), nb); };
+// the names of score holders an argument means: a selector's entities, a plain name, or * (every holder)
+Game.prototype.holderOf = function (e) { return e instanceof Player ? 'Player' : this.entUUID(e); };
+Game.prototype.holderNames = function (t, ctx, objective) {
+  if (t === '*') { const sb = this.scoreboard(); return [...new Set(Object.keys(sb.data.scores).filter(h => !objective || sb.data.scores[h][objective] !== undefined))]; }
+  if (t[0] === '@') { const list = this.select(t, ctx); if (!list.length) cfail('No entity was found'); return list.map(e => this.holderOf(e)); }
+  return [t];
+};
+
+/* ---------------- positions ---------------- */
+// a coordinate triple: absolute, ~relative or ^local (left, up, forward); block positions are floored, and
+// whole absolute x and z of entity positions centre on their block like Java's
+Game.prototype.readPos = function (r, ctx, kind) {
+  const a = [r.word(), r.word(), r.word()];
+  if (!a[2]) cfail('Incomplete (expected 3 coordinates)');
+  const yo = this.world.yOff;
+  if (a.some(s => s[0] === '^')) {
+    if (!a.every(s => s[0] === '^')) cfail('Cannot mix world & local coordinates (everything must either use ^ or not)');
+    const [l, u, f] = a.map(s => parseFloat(s.slice(1)) || 0);
+    const yaw = ctx.yaw, pitch = ctx.pitch, ey = ctx.anchor === 'eyes' && ctx.ent ? this.entEye(ctx.ent) - ctx.ent.y : 0;
+    // forward and up by the context's rotation, left by the cross product
+    const fw = [-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)];
+    const up = [Math.sin(yaw) * Math.sin(pitch), Math.cos(pitch), Math.cos(yaw) * Math.sin(pitch)];
+    // left is -(forward x up), as LocalCoordinates has it
+    const left = [-(fw[1] * up[2] - fw[2] * up[1]), -(fw[2] * up[0] - fw[0] * up[2]), -(fw[0] * up[1] - fw[1] * up[0])];
+    const v = [0, 1, 2].map(i => [ctx.x, ctx.y + ey, ctx.z][i] + left[i] * l + up[i] * u + fw[i] * f);
+    return kind === 'block' ? v.map(Math.floor) : v;
+  }
+  // (the anchor only moves local coordinates and facing, as in Java)
+  const base = [ctx.x, ctx.y, ctx.z];
+  const v = a.map((s, i) => {
+    if (s[0] === '~') return base[i] + (s.length > 1 ? (isNaN(parseFloat(s.slice(1))) ? cfail('Expected double') : parseFloat(s.slice(1))) : 0);
+    if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(s)) cfail('Invalid position \'' + s + '\'');
+    let n = parseFloat(s);
+    if (kind !== 'block' && i !== 1 && !s.includes('.')) n += 0.5;
+    return i === 1 ? n + yo : n;
+  });
+  return kind === 'block' ? v.map(Math.floor) : v;
+};
+// a rotation: yaw and pitch, absolute or ~relative (Java's degrees in, ours out)
+Game.prototype.readRot = function (r, ctx) {
+  const a = [r.word(), r.word()];
+  if (!a[1]) cfail('Incomplete (expected 2 coordinates)');
+  const yaw = a[0][0] === '~' ? toJYaw(ctx.yaw) + (parseFloat(a[0].slice(1)) || 0) : parseFloat(a[0]);
+  const pitch = a[1][0] === '~' ? toJPitch(ctx.pitch) + (parseFloat(a[1].slice(1)) || 0) : parseFloat(a[1]);
+  if (isNaN(yaw) || isNaN(pitch)) cfail('Invalid rotation');
+  return [fromJYaw(yaw), fromJPitch(Math.max(-90, Math.min(90, pitch)))];
+};
+const showPos = (g, v) => fmt(v[0]) + ', ' + fmt(v[1] - g.world.yOff) + ', ' + fmt(v[2]);
+const showBlock = (g, v) => v[0] + ', ' + (v[1] - g.world.yOff) + ', ' + v[2];
+
+/* ---------------- scoreboards ---------------- */
+// objectives { name: { crit, disp (JSON text), render } }, scores { holder: { objective: value } }, display slots,
+// the trigger objectives each holder may use, and teams
+class Scoreboard {
+  constructor(g, data) { this.g = g; this.data = data; }
+  obj(name) { return this.data.obj[name]; }
+  need(name) { const o = this.data.obj[name]; if (!o) cfail('Unknown scoreboard objective \'' + name + '\''); return o; }
+  get(h, o) { const s = this.data.scores[h]; return s ? s[o] : undefined; }
+  set(h, o, v) { v = Math.max(-2147483648, Math.min(2147483647, Math.trunc(v))); (this.data.scores[h] || (this.data.scores[h] = {}))[o] = v; this.g.sbDirty = true; }
+  add(h, o, d) { this.set(h, o, (this.get(h, o) || 0) + d); }
+  reset(h, o) { const s = this.data.scores[h]; if (!s) return; if (o) delete s[o]; else delete this.data.scores[h]; if (s && !Object.keys(s).length) delete this.data.scores[h]; this.g.sbDirty = true; }
+  // objectives that count a statistic (minecraft.mined:minecraft.stone -> mined:stone) or one of the built-in criteria
+  byCrit(c) { return Object.keys(this.data.obj).filter(k => this.data.obj[k].crit === c); }
+}
+Game.prototype.scoreboard = function () {
+  const m = this.meta || (this._sbMeta || (this._sbMeta = {}));
+  if (!m.sb) m.sb = { obj: {}, scores: {}, disp: {}, trig: {}, teams: {} };
+  if (!this._sb || this._sb.data !== m.sb) this._sb = new Scoreboard(this, m.sb);
+  return this._sb;
+};
+const SB_CRITERIA = ['dummy', 'trigger', 'deathCount', 'playerKillCount', 'totalKillCount', 'health', 'xp', 'level', 'food', 'air', 'armor'];
+const STAT_TYPES = ['custom', 'mined', 'crafted', 'used', 'broken', 'picked_up', 'dropped', 'killed', 'killed_by'];
+// minecraft.mined:minecraft.stone -> 'mined:stone' (the statistics' keys), custom stats by their own name
+function critStatKey(c) {
+  const m = String(c).match(/^(?:minecraft\.)?([a-z_]+):(?:minecraft\.)?([a-z_0-9]+)$/);
+  if (!m || !STAT_TYPES.includes(m[1])) return null;
+  return m[1] === 'custom' ? m[2] : m[1] + ':' + m[2];
+}
+function validCrit(c) { return SB_CRITERIA.includes(c) || critStatKey(c) !== null || /^(teamkill|killedByTeam)\.[a-z_]+$/.test(c); }
+// statistics move their objectives along
+if (typeof Player !== 'undefined' && Player.prototype.stat) {
+  const _statSB = Player.prototype.stat;
+  Player.prototype.stat = function (key, n) {
+    const r = _statSB.call(this, key, n);
+    const g = this.game, m = g && g.meta;
+    if (m && m.sb && Object.keys(m.sb.obj).length) {
+      const sb = g.scoreboard();
+      for (const k of Object.keys(m.sb.obj)) { const c = m.sb.obj[k].crit; if (critStatKey(c) === key) sb.add('Player', k, n === undefined ? 1 : n); }
+      if (key === 'mob_kills') for (const k of sb.byCrit('totalKillCount')) sb.add('Player', k, n === undefined ? 1 : n);
+      if (key === 'deaths') for (const k of sb.byCrit('deathCount')) sb.add('Player', k, n === undefined ? 1 : n);
+    }
+    return r;
+  };
+}
+// the criteria that follow the player's state
+Game.prototype.sbTick = function () {
+  const m = this.meta, p = this.player;
+  if (!m || !m.sb || !p) return;
+  const sb = this.scoreboard(), live = { health: Math.ceil(p.health), food: p.food, air: Math.max(0, Math.round((p.air === undefined ? 300 : p.air))), armor: p.armorPoints ? p.armorPoints() : 0, level: p.xpLevel, xp: p.totalXP !== undefined ? p.totalXP : xpTotalOf(p) };
+  for (const k of Object.keys(m.sb.obj)) { const c = m.sb.obj[k].crit; if (live[c] !== undefined && sb.get('Player', k) !== live[c]) sb.set('Player', k, live[c]); }
+};
+// the player's experience in points (xp holds the points into the current level)
+function xpTotalOf(p) { let t = p.xp || 0; for (let l = 0; l < (p.xpLevel || 0); l++) t += xpNeeded(l); return t; }
+Game.prototype.teamOf = function (e) {
+  const m = this.meta;
+  if (!m || !m.sb) return null;
+  const h = this.holderOf(e);
+  for (const [n, t] of Object.entries(m.sb.teams)) if (t.members.includes(h)) return n;
+  return null;
+};
+// the sidebar: the objective shown, its scores high to low (15 at most), names in their team's colour
+UI.prototype.renderSidebar = function () {
+  const g = this.game, m = g.meta, sbEl = $('sidebar') || (() => { const d = el('div'); d.id = 'sidebar'; document.getElementById('hud').appendChild(d); return d; })();
+  const name = m && m.sb && m.sb.disp.sidebar, o = name && m.sb.obj[name];
+  if (!o) { sbEl.style.display = 'none'; return; }
+  const rows = Object.entries(m.sb.scores).filter(([h, s]) => s[name] !== undefined && h[0] !== '#').map(([h, s]) => [h, s[name]]);
+  rows.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  const title = spansHTML(g.textSpans(o.disp || JSON.stringify(name), null));
+  const teamCol = h => { for (const t of Object.values(m.sb.teams)) if (t.members.includes(h)) return TEXT_COLORS[t.color] || null; return null; };
+  const label = h => { if (h === 'Player') return 'Player'; const e = g.entities.find(x => x instanceof Mob && x.data.uuid === h); return e ? g.entName(e) : h; };
+  sbEl.innerHTML = '<div class="sbt">' + title + '</div>' + rows.slice(0, 15).map(([h, v]) => '<div class="sbr"><span' + (teamCol(h) ? ' style="color:' + teamCol(h) + '"' : '') + '>' + escapeHTML(label(h)) + '</span><b>' + v + '</b></div>').join('');
+  sbEl.style.display = '';
+};
+
+/* ---------------- boss bars, titles ---------------- */
+const BAR_COLORS = { pink: '#ec00b8', blue: '#00b7ec', red: '#ec3500', green: '#1dec00', yellow: '#e9ec00', purple: '#7b00ec', white: '#ececec' };
+const BAR_STYLES = { progress: 0, notched_6: 6, notched_10: 10, notched_12: 12, notched_20: 20 };
+Game.prototype.bossbars = function () { const m = this.meta || {}; return m.bars || (m.bars = {}); };
+UI.prototype.renderBossbars = function () {
+  const g = this.game, box = $('cbars') || (() => { const d = el('div'); d.id = 'cbars'; document.getElementById('hud').appendChild(d); return d; })();
+  const bars = Object.entries((g.meta && g.meta.bars) || {}).filter(([, b]) => b.visible && b.players);
+  box.innerHTML = bars.map(([, b]) => {
+    const f = b.max > 0 ? Math.max(0, Math.min(1, b.value / b.max)) : 0, n = BAR_STYLES[b.style] || 0, col = BAR_COLORS[b.color] || BAR_COLORS.white;
+    const notches = n ? Array.from({ length: n - 1 }, (_, i) => '<i style="left:' + ((i + 1) * 100 / n) + '%"></i>').join('') : '';
+    return '<div class="cbar"><div class="cbn">' + spansHTML(g.textSpans(b.name, null)) + '</div><div class="cbb" style="--c:' + col + '"><div class="cbf" style="width:' + (f * 100) + '%"></div>' + notches + '</div></div>';
+  }).join('');
+};
+// titles: fade in, stay and fade out in ticks (10, 70, 20 unless /title times says otherwise)
+UI.prototype.showTitle = function (kind, spans) {
+  const g = this.game, T = g.titleTimes || [10, 70, 20];
+  const box = $('ctitle') || (() => { const d = el('div'); d.id = 'ctitle'; d.innerHTML = '<div class="tt"></div><div class="ts"></div>'; document.getElementById('hud').appendChild(d); return d; })();
+  if (kind === 'subtitle') { box.querySelector('.ts').innerHTML = spansHTML(spans); g._subtitle = true; return; }
+  if (kind === 'actionbar') { this.actionBar(spansText(spans)); const n = $('itemname'); if (n) n.innerHTML = spansHTML(spans); return; }
+  box.querySelector('.tt').innerHTML = spansHTML(spans);
+  if (!g._subtitle) box.querySelector('.ts').innerHTML = '';
+  g._subtitle = false;
+  g.titleT = { t: 0, T: T.slice() };
+};
+UI.prototype.clearTitle = function () { const box = $('ctitle'); if (box) box.style.opacity = 0; this.game.titleT = null; };
+Game.prototype.titleTick = function () {
+  const tt = this.titleT, box = $('ctitle');
+  if (!tt || !box) return;
+  const [a, b, c] = tt.T, t = ++tt.t;
+  box.style.opacity = t < a ? t / a : t < a + b ? 1 : t < a + b + c ? 1 - (t - a - b) / c : 0;
+  if (t >= a + b + c) this.titleT = null;
+};
+
+/* ---------------- the world border ---------------- */
+// centre, width, and a width it moves to over time; outside the border plus its buffer the player takes damage
+Game.prototype.border = function () {
+  const m = this.meta || {};
+  return m.border || (m.border = { cx: 0, cz: 0, size: 59999968, from: 59999968, to: 59999968, t0: 0, t1: 0, dmg: 0.2, buffer: 5, warnD: 5, warnT: 15 });
+};
+Game.prototype.borderSize = function () {
+  const b = this.border(), now = this.world ? this.world.tick : 0;
+  if (b.t1 > b.t0 && now < b.t1) return b.from + (b.to - b.from) * Math.max(0, (now - b.t0) / (b.t1 - b.t0));
+  return b.to;
+};
+Game.prototype.borderTick = function () {
+  const p = this.player, w = this.world;
+  // a world whose border was never touched has none to check
+  if (!p || !w || !this.meta || !this.meta.border) return;
+  const b = this.border();
+  const size = this.borderSize();
+  if (b.t1 && w.tick >= b.t1) { b.size = b.to; b.t0 = b.t1 = 0; }
+  // the nether's border is the overworld's divided by 8, like Java's coordinate scale
+  const k = w.dim === 'nether' ? 1 / 8 : 1, cx = b.cx * k, cz = b.cz * k, h = Math.min(size / 2, 29999984);
+  const x0 = cx - h, x1 = cx + h, z0 = cz - h, z1 = cz + h;
+  if (p.dead || p.mode === 3) return;
+  // the border stops the player like a wall
+  const hw = p.w / 2;
+  if (p.x - hw < x0 && p.px - hw >= x0 - 0.01) { p.x = x0 + hw; p.vx = Math.max(0, p.vx); }
+  if (p.x + hw > x1 && p.px + hw <= x1 + 0.01) { p.x = x1 - hw; p.vx = Math.min(0, p.vx); }
+  if (p.z - hw < z0 && p.pz - hw >= z0 - 0.01) { p.z = z0 + hw; p.vz = Math.max(0, p.vz); }
+  if (p.z + hw > z1 && p.pz + hw <= z1 + 0.01) { p.z = z1 - hw; p.vz = Math.min(0, p.vz); }
+  // LivingEntity.baseTick: damage by how far past the buffer
+  const d = Math.min(p.x - x0, x1 - p.x, p.z - z0, z1 - p.z) + b.buffer;
+  if (d < 0 && b.dmg > 0) p.hurt(Math.max(1, Math.floor(-d * b.dmg)), 'outside_border');
+};
+// the border's wall: translucent stripes on its sides near the player, blue (red while it shrinks, green while it grows),
+// stronger the closer the player stands, drawn with the other see-through things
+TEXGEN.push(function texForcefield() {
+  T('forcefield', (d) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = (x + y) & 7; sp(d, x, y, [255, 255, 255], k < 2 ? 230 : k === 2 ? 90 : 0); } });
+});
+const _renderBeamsWB = Game.prototype.renderBeams;
+Game.prototype.renderBeams = function (r, alpha) {
+  if (_renderBeamsWB) _renderBeamsWB.call(this, r, alpha);
+  const p = this.player, w = this.world;
+  if (!p || !w || !this.meta || !this.meta.border) return;
+  const b = this.border(), size = this.borderSize(), k = w.dim === 'nether' ? 1 / 8 : 1, h = Math.min(size / 2, 29999984);
+  const x0 = b.cx * k - h, x1 = b.cx * k + h, z0 = b.cz * k - h, z1 = b.cz * k + h, R = 16;
+  const near = Math.min(p.x - x0, x1 - p.x, p.z - z0, z1 - p.z);
+  if (near > R + 8) return;
+  const fade = Math.max(0.15, Math.min(1, 1 - near / (R + 8))), col = b.t1 > b.t0 && b.to < b.from ? [1, 0.19, 0.19] : b.t1 > b.t0 ? [0.25, 1, 0.5] : [0.125, 0.63, 1];
+  const L = texL('forcefield'), py = Math.floor(p.y);
+  for (const [fx, fixed] of [[true, x0], [true, x1], [false, z0], [false, z1]]) {
+    if ((fx ? Math.abs(p.x - fixed) : Math.abs(p.z - fixed)) > R + 8) continue;
+    const c = Math.floor(fx ? p.z : p.x), lo = fx ? z0 : x0, hi = fx ? z1 : x1;
+    for (let a = c - R; a <= c + R; a++) {
+      const a0 = Math.max(a, lo), a1 = Math.min(a + 1, hi);
+      if (a1 <= a0) continue;
+      for (let y = py - R; y <= py + R; y++) {
+        const q = [[a0, y], [a1, y], [a1, y + 1], [a0, y + 1]];
+        for (const [u, v] of q) { if (fx) r.dv(fixed, v, u, u - a, 1 - (v - y), L, col[0], col[1], col[2], fade, 15, 15); else r.dv(u, v, fixed, u - a, 1 - (v - y), L, col[0], col[1], col[2], fade, 15, 15); }
+      }
+    }
+  }
+};
+
+/* ---------------- running a command ---------------- */
+// the context: who runs it (ent), where (x, y, z in stored heights), which way (our yaw and pitch), where ^ and facing
+// measure from (anchor), and what started it (the player, a command block)
+class CmdCtx {
+  constructor(o) { Object.assign(this, o); }
+  at(o) { return new CmdCtx(Object.assign({}, this, o)); }
+  get name() { return this.ent ? this.g.entName(this.ent) : this.src === 'block' ? '@' : 'Server'; }
+}
+Game.prototype.playerCtx = function () { const p = this.player; return new CmdCtx({ g: this, ent: p, x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, anchor: 'feet', src: 'player' }); };
+// a command block runs from its centre, facing south
+Game.prototype.blockCtx = function (x, y, z) { return new CmdCtx({ g: this, ent: null, x: x + 0.5, y: y + 0.5, z: z + 0.5, yaw: fromJYaw(0), pitch: 0, anchor: 'feet', src: 'block', bx: x, by: y, bz: z }); };
+const CMDS = {};
+const CMD_ALIAS = { tp: 'teleport', w: 'msg', tell: 'msg', xp: 'experience', tm: 'teammsg' };
+// what a command reports back (sendCommandFeedback hides it from the player's chat; errors always show)
+Game.prototype.cmdSay = function (ctx, m, col) {
+  if (ctx.quiet) return;
+  if (ctx.src === 'player' && this.rule && !this.rule('sendCommandFeedback')) return;
+  this.ui.chat(m, col || '#ccc');
+};
+Game.prototype.runCmd = function (text, ctx) {
+  const r = new CmdReader(text.replace(/^\s*\//, ''));
+  const name = r.word().toLowerCase(), fn = CMDS[CMD_ALIAS[name] || name];
+  if (!fn) cfail('Unknown or incomplete command, see below for error');
+  const res = fn.call(this, r, ctx);
+  if (!r.end()) cfail('Incorrect argument for command');
+  return res === undefined ? 1 : res;
+};
+const one = (n, single, many) => n === 1 ? single : many.replace('%n', n);
+// the targets of an argument, or the executor when it's left out
+Game.prototype.targets = function (r, ctx, opts) {
+  const t = r.end() ? null : r.tok();
+  if (!t) { if (!ctx.ent) cfail('No entity was found'); return [ctx.ent]; }
+  const list = this.select(t, ctx, opts);
+  if (!list.length) cfail(opts && opts.players ? 'No player was found' : 'No entity was found');
+  return list;
+};
+Game.prototype.needTargets = function (r, ctx, opts) {
+  const t = r.tok();
+  if (!t) cfail('Expected entity selector');
+  const list = this.select(t, ctx, opts);
+  if (!list.length) cfail(opts && opts.players ? 'No player was found' : 'No entity was found');
+  return list;
+};
+const whoList = (g, list) => list.length === 1 ? g.entName(list[0]) : list.length + ' entities';
+// the names inside a message: selectors become who they find
+Game.prototype.expandSel = function (msg, ctx) {
+  return msg.replace(/@[parsen](\[[^\]]*\])?/g, m => { try { return this.select(m, ctx).map(e => this.entName(e)).join(', '); } catch (e) { return m; } });
+};
+
+/* ---------------- chat ---------------- */
+CMDS.say = function (r, ctx) { const m = r.rest(); if (!m) cfail('Expected message'); this.ui.chat('[' + ctx.name + '] ' + this.expandSel(m, ctx), '#fff'); return 1; };
+CMDS.me = function (r, ctx) { const m = r.rest(); if (!m) cfail('Expected message'); this.ui.chat('* ' + ctx.name + ' ' + this.expandSel(m, ctx), '#fff'); return 1; };
+CMDS.msg = function (r, ctx) {
+  const list = this.needTargets(r, ctx, { players: true }), m = r.rest();
+  if (!m) cfail('Expected message');
+  const text = this.expandSel(m, ctx);
+  for (const e of list) {
+    if (ctx.ent instanceof Player) this.ui.chat('You whisper to ' + this.entName(e) + ': ' + text, '#aaa');
+    this.ui.chat(ctx.name + ' whispers to you: ' + text, '#aaa');
+  }
+  return list.length;
+};
+CMDS.teammsg = function (r, ctx) {
+  const m = r.rest(), team = ctx.ent && this.teamOf(ctx.ent);
+  if (!m) cfail('Expected message');
+  if (!team) cfail('You must be on a team to message your team');
+  this.ui.chat('-> [' + team + '] <' + ctx.name + '> ' + this.expandSel(m, ctx), '#fff');
+  return 1;
+};
+CMDS.tellraw = function (r, ctx) {
+  const list = this.needTargets(r, ctx, { players: true }), j = r.rest();
+  if (!j) cfail('Expected text component');
+  const sp = this.textSpans(j, ctx);
+  for (const e of list) this.ui.chatSpans(sp, '#fff');
+  return list.length;
+};
+CMDS.title = function (r, ctx) {
+  const list = this.needTargets(r, ctx, { players: true }), sub = r.lit('clear', 'reset', 'title', 'subtitle', 'actionbar', 'times'), who = whoList(this, list);
+  if (sub === 'clear') { this.ui.clearTitle(); this.cmdSay(ctx, 'Cleared titles for ' + who); return list.length; }
+  if (sub === 'reset') { this.ui.clearTitle(); this.titleTimes = null; this.cmdSay(ctx, 'Reset title options for ' + who); return list.length; }
+  if (sub === 'times') { this.titleTimes = [r.int(0), r.int(0), r.int(0)]; this.cmdSay(ctx, 'Changed title display times for ' + who); return list.length; }
+  const j = r.rest(); if (!j) cfail('Expected text component');
+  this.ui.showTitle(sub, this.textSpans(j, ctx));
+  this.cmdSay(ctx, 'Showing new ' + (sub === 'title' ? 'title' : sub === 'subtitle' ? 'subtitle' : 'actionbar title') + ' for ' + who);
+  return list.length;
+};
+CMDS.list = function (r, ctx) { const uuids = r.word() === 'uuids'; this.ui.chat('There are 1 of a max of 1 players online: Player' + (uuids ? ' (' + this.entUUID(this.player) + ')' : ''), '#ccc'); return 1; };
+
+/* ---------------- tags, scoreboards, teams ---------------- */
+CMDS.tag = function (r, ctx) {
+  const list = this.needTargets(r, ctx), sub = r.lit('add', 'remove', 'list');
+  if (sub === 'list') {
+    const tags = [...new Set(list.flatMap(e => this.entTags(e)))];
+    this.cmdSay(ctx, list.length === 1 ? (tags.length ? this.entName(list[0]) + ' has ' + tags.length + ' tags: ' + tags.join(', ') : this.entName(list[0]) + ' has no tags') : (tags.length ? list.length + ' entities have ' + tags.length + ' total tags: ' + tags.join(', ') : list.length + ' entities have no tags'));
+    return tags.length;
+  }
+  const name = r.word();
+  if (!/^[A-Za-z0-9_.+\-]+$/.test(name)) cfail('Expected tag name');
+  let n = 0;
+  for (const e of list) { const t = this.entTags(e), i = t.indexOf(name); if (sub === 'add' && i < 0 && t.length < 1024) { t.push(name); n++; } else if (sub === 'remove' && i >= 0) { t.splice(i, 1); n++; } }
+  if (!n) cfail(sub === 'add' ? 'Nothing changed. The targets either already have the tag or have too many tags' : 'Nothing changed. The targets do not have this tag');
+  this.cmdSay(ctx, (sub === 'add' ? 'Added tag \'' + name + '\' to ' : 'Removed tag \'' + name + '\' from ') + (n === 1 && list.length === 1 ? this.entName(list[0]) : n + ' entities'));
+  return n;
+};
+const READONLY_CRIT = new Set(['health', 'xp', 'level', 'food', 'air', 'armor', 'deathCount', 'playerKillCount', 'totalKillCount']);
+const objRef = (sb, n) => '[' + spansText(sb.g.textSpans(sb.obj(n) ? sb.obj(n).disp : JSON.stringify(n), null)) + ']';
+CMDS.scoreboard = function (r, ctx) {
+  const sb = this.scoreboard(), D = sb.data, grp = r.lit('objectives', 'players');
+  if (grp === 'objectives') {
+    const sub = r.lit('add', 'remove', 'list', 'setdisplay', 'modify');
+    if (sub === 'list') { const ks = Object.keys(D.obj); this.cmdSay(ctx, ks.length ? 'There are ' + ks.length + ' objective(s): ' + ks.map(k => objRef(sb, k)).join(', ') : 'There are no objectives'); return ks.length; }
+    if (sub === 'add') {
+      const name = r.word(), crit = r.word(), disp = r.end() ? null : r.rest();
+      if (!/^[A-Za-z0-9_.+\-]{1,32}$/.test(name)) cfail('Invalid objective name \'' + name + '\'');
+      if (!validCrit(crit)) cfail('Invalid criterion \'' + crit + '\'');
+      if (D.obj[name]) cfail('An objective already exists by that name');
+      if (disp) this.textSpans(disp, ctx);
+      D.obj[name] = { crit, disp: disp || JSON.stringify(name), render: crit === 'health' ? 'hearts' : 'integer' };
+      this.cmdSay(ctx, 'Created new objective ' + objRef(sb, name)); this.sbDirty = true; return Object.keys(D.obj).length;
+    }
+    if (sub === 'remove') {
+      const name = r.word(); sb.need(name);
+      const ref = objRef(sb, name);
+      delete D.obj[name]; for (const h of Object.keys(D.scores)) sb.reset(h, name);
+      for (const s of Object.keys(D.disp)) if (D.disp[s] === name) delete D.disp[s];
+      this.cmdSay(ctx, 'Removed objective ' + ref); this.sbDirty = true; return Object.keys(D.obj).length;
+    }
+    if (sub === 'setdisplay') {
+      const slot = r.word();
+      if (!/^(list|sidebar|below_name|belowName|sidebar\.team\.[a-z_]+)$/.test(slot)) cfail('Unknown display slot \'' + slot + '\'');
+      if (r.end()) { if (!D.disp[slot]) cfail('Nothing changed. That display slot is already empty'); delete D.disp[slot]; this.cmdSay(ctx, 'Cleared any objectives in display slot ' + slot); this.sbDirty = true; return 0; }
+      const name = r.word(); sb.need(name);
+      if (D.disp[slot] === name) cfail('Nothing changed. That display slot is already showing that objective');
+      D.disp[slot] = name; this.cmdSay(ctx, 'Set display slot ' + slot + ' to show objective ' + objRef(sb, name)); this.sbDirty = true; return 0;
+    }
+    const name = r.word(), o = sb.need(name), what = r.lit('displayname', 'rendertype', 'displayautoupdate', 'numberformat');
+    if (what === 'displayname') { const j = r.rest(); this.textSpans(j, ctx); o.disp = j; this.cmdSay(ctx, 'Changed the display name of ' + JSON.stringify(name) + ' to ' + objRef(sb, name)); }
+    else if (what === 'rendertype') { o.render = r.lit('hearts', 'integer'); this.cmdSay(ctx, 'Changed the render type of objective ' + objRef(sb, name)); }
+    else if (what === 'displayautoupdate') { o.auto = r.bool(); this.cmdSay(ctx, (o.auto ? 'Enabled' : 'Disabled') + ' display auto-update for objective ' + objRef(sb, name)); }
+    else { o.format = r.rest() || null; this.cmdSay(ctx, (o.format ? 'Set' : 'Cleared') + ' default number format of objective ' + objRef(sb, name)); }
+    this.sbDirty = true; return 0;
+  }
+  const sub = r.lit('list', 'get', 'set', 'add', 'remove', 'reset', 'enable', 'operation', 'display');
+  if (sub === 'list') {
+    if (r.end()) { const hs = Object.keys(D.scores); this.cmdSay(ctx, hs.length ? 'There are ' + hs.length + ' tracked entity/entities: ' + hs.join(', ') : 'There are no tracked entities'); return hs.length; }
+    const h = this.holderNames(r.tok(), ctx)[0], s = D.scores[h] || {}, ks = Object.keys(s);
+    if (!ks.length) { this.cmdSay(ctx, h + ' has no scores'); return 0; }
+    this.cmdSay(ctx, h + ' has ' + ks.length + ' score(s):'); for (const k of ks) this.cmdSay(ctx, objRef(sb, k) + ': ' + s[k]);
+    return ks.length;
+  }
+  if (sub === 'get') {
+    const h = this.holderNames(r.tok(), ctx); if (h.length > 1) cfail('Only one entity is allowed, but the provided selector allows more than one');
+    const name = r.word(); sb.need(name);
+    const v = sb.get(h[0], name);
+    if (v === undefined) cfail('Can\'t get value of ' + name + ' for ' + h[0] + '; none is set');
+    this.cmdSay(ctx, h[0] + ' has ' + v + ' ' + objRef(sb, name)); return v;
+  }
+  if (sub === 'display') { r.rest(); return 0; }
+  const hs = this.holderNames(r.tok(), ctx, sub === 'reset' ? undefined : null);
+  if (sub === 'reset') {
+    const name = r.end() ? null : r.word();
+    if (name) sb.need(name);
+    for (const h of hs) sb.reset(h, name);
+    this.cmdSay(ctx, name ? 'Reset ' + objRef(sb, name) + ' for ' + (hs.length === 1 ? hs[0] : hs.length + ' entities') : 'Reset all scores for ' + (hs.length === 1 ? hs[0] : hs.length + ' entities'));
+    return hs.length;
+  }
+  const name = r.word(), o = sb.need(name);
+  if (sub === 'enable') {
+    if (o.crit !== 'trigger') cfail('Only trigger objectives may be enabled');
+    let n = 0; for (const h of hs) { const t = D.trig[h] || (D.trig[h] = []); if (!t.includes(name)) { t.push(name); n++; } }
+    if (!n) cfail('Nothing changed. That trigger is already enabled');
+    this.cmdSay(ctx, 'Enabled trigger ' + objRef(sb, name) + ' for ' + (hs.length === 1 ? hs[0] : hs.length + ' entities')); return n;
+  }
+  if (READONLY_CRIT.has(o.crit)) cfail('That objective is read-only');
+  if (sub === 'operation') {
+    const op = r.word(), src = this.holderNames(r.tok(), ctx), sname = r.word(); sb.need(sname);
+    if (!['+=', '-=', '*=', '/=', '%=', '=', '<', '>', '><'].includes(op)) cfail('Invalid operation');
+    let last = 0;
+    for (const h of hs) for (const sh of src) {
+      const a = sb.get(h, name) || 0, b = sb.get(sh, sname);
+      if (b === undefined) cfail('Can\'t get value of ' + sname + ' for ' + sh + '; none is set');
+      let v = a;
+      switch (op) {
+        case '+=': v = (a + b) | 0; break; case '-=': v = (a - b) | 0; break; case '*=': v = Math.imul(a, b); break;
+        case '/=': v = b === 0 ? a : Math.floor(a / b); break; case '%=': v = b === 0 ? a : ((a % b) + b) % b; break;
+        case '=': v = b; break; case '<': v = Math.min(a, b); break; case '>': v = Math.max(a, b); break;
+        case '><': sb.set(sh, sname, a); v = b; break;
+      }
+      sb.set(h, name, v); last = v;
+    }
+    this.cmdSay(ctx, hs.length === 1 ? 'Set ' + objRef(sb, name) + ' for ' + hs[0] + ' to ' + last : 'Set ' + objRef(sb, name) + ' for ' + hs.length + ' entities to ' + last);
+    return last;
+  }
+  const v = r.int(sub === 'set' ? undefined : 0);
+  let last = 0;
+  for (const h of hs) { sb.set(h, name, sub === 'set' ? v : (sb.get(h, name) || 0) + (sub === 'add' ? v : -v)); last = sb.get(h, name); }
+  if (sub === 'set') this.cmdSay(ctx, 'Set ' + objRef(sb, name) + ' for ' + (hs.length === 1 ? hs[0] : hs.length + ' entities') + ' to ' + v);
+  else this.cmdSay(ctx, (sub === 'add' ? 'Added ' + v + ' to ' : 'Removed ' + v + ' from ') + objRef(sb, name) + ' for ' + (hs.length === 1 ? hs[0] + ' (now ' + last + ')' : hs.length + ' entities'));
+  return hs.length === 1 ? last : hs.length;
+};
+CMDS.trigger = function (r, ctx) {
+  const sb = this.scoreboard(), name = r.word(), o = sb.need(name);
+  if (!(ctx.ent instanceof Player)) cfail('Only players can use /trigger');
+  if (o.crit !== 'trigger') cfail('You can only trigger objectives that are \'trigger\' type');
+  const t = sb.data.trig.Player || [];
+  if (!t.includes(name)) cfail('You cannot trigger this objective yet');
+  const sub = r.end() ? null : r.lit('add', 'set'), v = sub ? r.int() : 1;
+  sb.set('Player', name, sub === 'set' ? v : (sb.get('Player', name) || 0) + v);
+  t.splice(t.indexOf(name), 1);
+  this.cmdSay(ctx, 'Triggered ' + objRef(sb, name) + (sub === 'set' ? ' (set value to ' + v + ')' : sub === 'add' ? ' (added ' + v + ' to value)' : ''));
+  return sb.get('Player', name);
+};
+CMDS.team = function (r, ctx) {
+  const sb = this.scoreboard(), T = sb.data.teams, sub = r.lit('add', 'remove', 'empty', 'join', 'leave', 'list', 'modify');
+  if (sub === 'list') {
+    if (r.end()) { const ks = Object.keys(T); this.cmdSay(ctx, ks.length ? 'There are ' + ks.length + ' team(s): ' + ks.map(k => '[' + k + ']').join(', ') : 'There are no teams'); return ks.length; }
+    const n = r.word(), t = T[n]; if (!t) cfail('Unknown team \'' + n + '\'');
+    this.cmdSay(ctx, t.members.length ? 'Team [' + n + '] has ' + t.members.length + ' member(s): ' + t.members.join(', ') : 'There are no members on team [' + n + ']'); return t.members.length;
+  }
+  if (sub === 'leave') { const hs = this.holderNames(r.tok(), ctx); for (const h of hs) for (const t of Object.values(T)) { const i = t.members.indexOf(h); if (i >= 0) t.members.splice(i, 1); } this.cmdSay(ctx, 'Removed ' + (hs.length === 1 ? hs[0] : hs.length + ' members') + ' from any team'); this.sbDirty = true; return hs.length; }
+  const n = r.word();
+  if (sub === 'add') {
+    if (!/^[A-Za-z0-9_.+\-]{1,32}$/.test(n)) cfail('Invalid team name');
+    if (T[n]) cfail('A team already exists by that name');
+    T[n] = { members: [], color: 'reset', disp: r.end() ? JSON.stringify(n) : r.rest(), friendlyFire: true };
+    this.cmdSay(ctx, 'Created team [' + n + ']'); return Object.keys(T).length;
+  }
+  const t = T[n]; if (!t) cfail('Unknown team \'' + n + '\'');
+  if (sub === 'remove') { delete T[n]; this.cmdSay(ctx, 'Removed team [' + n + ']'); this.sbDirty = true; return Object.keys(T).length; }
+  if (sub === 'empty') { const k = t.members.length; if (!k) cfail('Nothing changed. That team is already empty'); t.members = []; this.cmdSay(ctx, 'Removed ' + k + ' member(s) from team [' + n + ']'); this.sbDirty = true; return k; }
+  if (sub === 'join') {
+    const hs = r.end() ? (ctx.ent ? [this.holderOf(ctx.ent)] : cfail('No entity was found')) : this.holderNames(r.tok(), ctx);
+    for (const h of hs) { for (const o of Object.values(T)) { const i = o.members.indexOf(h); if (i >= 0) o.members.splice(i, 1); } t.members.push(h); }
+    this.cmdSay(ctx, 'Added ' + (hs.length === 1 ? hs[0] : hs.length + ' members') + ' to team [' + n + ']'); this.sbDirty = true; return hs.length;
+  }
+  const opt = r.word(), val = r.rest();
+  if (opt === 'color') { if (!TEXT_COLORS[val] && val !== 'reset') cfail('Unknown color \'' + val + '\''); t.color = val; }
+  else if (['friendlyFire', 'seeFriendlyInvisibles'].includes(opt)) t[opt] = val === 'true';
+  else if (['nametagVisibility', 'deathMessageVisibility', 'collisionRule', 'displayName', 'prefix', 'suffix'].includes(opt)) t[opt] = val;
+  else cfail('Unknown team option \'' + opt + '\'');
+  this.cmdSay(ctx, 'Updated the ' + opt + ' of team [' + n + ']'); this.sbDirty = true;
+  return 0;
+};
+
+/* ---------------- items and blocks as arguments ---------------- */
+// an item with its 1.21 components: diamond_sword[enchantments={levels:{sharpness:5}},damage=10,custom_name='"Sword"']
+Game.prototype.readItem = function (t) {
+  const m = String(t).match(/^(?:minecraft:)?([a-z0-9_]+)(\[.*\])?$/s);
+  if (!m) cfail('Invalid item \'' + t + '\'');
+  const it = ITEM_BY_NAME[m[1]];
+  if (!it) cfail('Unknown item \'' + m[1] + '\'');
+  const st = { id: it.id, count: 1 };
+  if (m[2]) {
+    const comps = parseSNBT('{' + m[2].slice(1, -1).replace(/(^|,)\s*(?:minecraft:)?([a-z_]+)\s*=/g, '$1"$2":') + '}');
+    const tag = {};
+    for (const [k, v] of Object.entries(comps)) {
+      if (k === 'enchantments' || k === 'stored_enchantments') {
+        const lv = v && v.levels ? v.levels : v, o = {};
+        for (const [e, l] of Object.entries(lv || {})) { const ek = nsKey(e); if (typeof ENCHANTS !== 'undefined' && !ENCHANTS.some(d => d.key === ek)) cfail('Unknown enchantment \'' + e + '\''); o[ek] = l; }
+        tag[k === 'enchantments' ? 'ench' : 'stored'] = o;
+      } else if (k === 'damage') st.dmg = v | 0;
+      else if (k === 'custom_name' || k === 'item_name') { try { tag.name = spansText(this.textSpans(v, null)); } catch (e) { tag.name = String(v); } }
+      else if (k === 'potion_contents') tag.potion = nsKey(typeof v === 'string' ? v : v.potion);
+      else if (k === 'unbreakable') tag.unbreakable = 1;
+      else if (k === 'lore') tag.lore = (Array.isArray(v) ? v : [v]).map(x => { try { return spansText(this.textSpans(x, null)); } catch (e) { return String(x); } });
+      else if (k === 'dyed_color') tag.color = typeof v === 'number' ? v : v.rgb;
+    }
+    if (Object.keys(tag).length) st.tag = tag;
+  }
+  return st;
+};
+// an item predicate: an item, a #tag of ours or *
+const ITEM_TAGS = { swords: /_sword$/, pickaxes: /_pickaxe$/, axes: /_axe$/, shovels: /_shovel$/, hoes: /_hoe$/, logs: /_(log|wood|stem|hyphae)$/, planks: /_planks$/, wool: /_wool$/,
+  boats: /_boat$/, beds: /_bed$/, leaves: /_leaves$/, saplings: /_sapling$|^mangrove_propagule$/, coals: /^(coal|charcoal)$/, arrows: /^(arrow|spectral_arrow|tipped_arrow)$/, fishes: /^(cod|salmon|tropical_fish|pufferfish|cooked_cod|cooked_salmon)$/,
+  head_armor: /_helmet$|^turtle_helmet$/, chest_armor: /_chestplate$/, leg_armor: /_leggings$/, foot_armor: /_boots$/, music_discs: /^music_disc_/, candles: /candle$/, signs: /_sign$/ };
+Game.prototype.itemPred = function (t) {
+  if (t === '*') return () => true;
+  if (t[0] === '#') { const re = ITEM_TAGS[nsKey(t.slice(1))]; if (!re) cfail('Unknown item tag \'' + t + '\''); return st => !!st && re.test(ITEMS[st.id].name); }
+  const it = this.readItem(t.replace(/\[.*$/s, ''));
+  return st => !!st && st.id === it.id;
+};
+// a block with its states and data: oak_stairs[facing=east], chest{Items:[...]}
+const FACE_META = { south: 0, west: 1, north: 2, east: 3 }, FACE6 = { east: 0, west: 1, up: 2, down: 3, south: 4, north: 5 }, AXIS_META = { y: 0, x: 1, z: 2 };
+Game.prototype.readBlock = function (t) {
+  const m = String(t).match(/^(?:minecraft:)?([a-z0-9_]+)(\[[^\]]*\])?(\{.*\})?$/s);
+  if (!m) cfail('Invalid block \'' + t + '\'');
+  const id = B[m[1].toUpperCase()];
+  if (id === undefined || BLOCK_NAMES[id] !== m[1]) cfail('Unknown block type \'' + m[1] + '\'');
+  let meta = 0;
+  const states = {};
+  if (m[2]) for (const kv of m[2].slice(1, -1).split(',').filter(s => s.trim())) {
+    const [k, v] = kv.split('=').map(s => s.trim());
+    if (v === undefined) cfail('Expected value for property \'' + k + '\' on block ' + m[1]);
+    states[k] = v;
+  }
+  const fm = FMODE[id];
+  if (states.facing !== undefined) { if (fm === 2 && FACE_META[states.facing] !== undefined) meta = (meta & ~3) | FACE_META[states.facing]; else if ((fm === 3 || fm === 4) && FACE6[states.facing] !== undefined) meta = (meta & ~7) | FACE6[states.facing]; }
+  if (states.axis !== undefined && AXIS_META[states.axis] !== undefined) { if (fm === 1) meta = (meta & ~3) | AXIS_META[states.axis]; else if (fm === 4) meta = (meta & ~7) | [2, 0, 4][AXIS_META[states.axis]]; }
+  let nbt = null;
+  if (m[3]) nbt = parseSNBT(m[3]);
+  return { id, meta, states, nbt, name: m[1] };
+};
+// a block predicate for /execute if block, /fill ... replace and /clone ... filtered
+const BLOCK_TAGS = { logs: /_(log|wood|stem|hyphae)$/, planks: /_planks$/, wool: /_wool$/, leaves: /_leaves$/, stairs: /_stairs$/, slabs: /_slab$/, walls: /_wall$/, fences: /_fence$/,
+  doors: /_door$/, trapdoors: /_trapdoor$/, beds: /_bed$/, saplings: /_sapling$/, flowers: /^(dandelion|poppy|blue_orchid|allium|azure_bluet|red_tulip|orange_tulip|white_tulip|pink_tulip|oxeye_daisy|cornflower|lily_of_the_valley|wither_rose|torchflower|sunflower|lilac|rose_bush|peony|pink_petals)$/,
+  buttons: /_button$/, pressure_plates: /_pressure_plate$/, rails: /rail$/, signs: /_sign$/, candles: /candle$/, ice: /^(ice|packed_ice|blue_ice|frosted_ice)$/, sand: /^(sand|red_sand|suspicious_sand)$/,
+  dirt: /^(dirt|grass_block|podzol|coarse_dirt|mycelium|rooted_dirt|moss_block|mud|muddy_mangrove_roots)$/, base_stone_overworld: /^(stone|granite|diorite|andesite|tuff|deepslate)$/, air: /^(air|cave_air|void_air)$/ };
+Game.prototype.blockPred = function (t) {
+  if (t[0] === '#') {
+    const m = t.match(/^#(?:minecraft:)?([a-z_]+)/), re = m && BLOCK_TAGS[m[1]];
+    if (!re) cfail('Unknown block tag \'' + t + '\'');
+    return id => re.test(BLOCK_NAMES[id]);
+  }
+  const b = this.readBlock(t);
+  return (id, meta) => {
+    if (id !== b.id) return false;
+    const fm = FMODE[id];
+    if (b.states.facing !== undefined) { if (fm === 2 && (meta & 3) !== FACE_META[b.states.facing]) return false; if ((fm === 3 || fm === 4) && (meta & 7) !== FACE6[b.states.facing]) return false; }
+    if (b.states.axis !== undefined && fm === 1 && (meta & 3) !== AXIS_META[b.states.axis]) return false;
+    return true;
+  };
+};
+// a container's NBT items ({Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}) into its block entity
+Game.prototype.applyBlockNBT = function (x, y, z, nbt) {
+  if (!nbt) return;
+  const w = this.world, be = w.getBE(x, y, z) || {};
+  if (Array.isArray(nbt.Items)) {
+    const n = be.items ? be.items.length : 27, items = new Array(n).fill(null);
+    for (const e of nbt.Items) { const it = ITEM_BY_NAME[nsKey(e.id)]; if (it && e.Slot >= 0 && e.Slot < n) items[e.Slot] = { id: it.id, count: e.count || e.Count || 1 }; }
+    be.items = items; delete be.loot;
+  }
+  if (nbt.LootTable) { be.loot = lootTableKey(nbt.LootTable); delete be.items; }
+  if (nbt.Command !== undefined && be.type === 'command_block') be.cmd = String(nbt.Command);
+  if (nbt.CustomName) { try { be.name = spansText(this.textSpans(nbt.CustomName, null)); } catch (e) { } }
+  if (!be.type) be.type = BLOCK_NAMES[w.getBlock(x, y, z)];
+  w.setBE(x, y, z, be);
+};
+// a vanilla loot table id (chests/simple_dungeon) -> ours
+function lootTableKey(t) {
+  const k = nsKey(t), last = k.split('/').pop();
+  if (LOOT[k]) return k;
+  const tries = [last, k.replace(/\//g, '_'), last.replace(/^village_/, 'village_'), k.replace(/^chests\//, '').replace(/\//g, '_')];
+  for (const c of tries) if (LOOT[c]) return c;
+  return null;
+}
+
+/* ---------------- entities: tp, kill, give, clear, effect, xp, summon, damage ---------------- */
+const looksLikePos = t => /^[~^]|^[-+]?(\d|\.\d)/.test(t || '');
+Game.prototype.moveEntity = function (e, x, y, z, yaw, pitch) {
+  if (e instanceof Player && e.riding && this.dismount) this.dismount(e);
+  e.x = x; e.y = y; e.z = z;
+  if (yaw !== undefined) { e.yaw = yaw; if (e.bodyYaw !== undefined) e.bodyYaw = yaw; }
+  if (pitch !== undefined && e.pitch !== undefined) e.pitch = pitch;
+  e.vx = e.vy = e.vz = 0; e.fallDist = 0;
+  if (e.nav !== undefined) e.nav = null;
+  if (e.savePrev) e.savePrev();
+};
+CMDS.teleport = function (r, ctx) {
+  const first = r.tok();
+  if (!first) cfail('Unknown or incomplete command, see below for error');
+  let targets, dest, rot;
+  if (looksLikePos(first)) {
+    if (!ctx.ent) cfail('A player is required to run this command here');
+    r.i -= first.length; targets = [ctx.ent]; dest = this.readPos(r, ctx);
+  } else {
+    const list = this.select(first, ctx);
+    if (r.end()) {
+      // /tp <destination entity>
+      if (!list.length) cfail('No entity was found');
+      if (list.length > 1) cfail('Only one entity is allowed, but the provided selector allows more than one');
+      if (!ctx.ent) cfail('A player is required to run this command here');
+      targets = [ctx.ent]; const d = list[0]; dest = [d.x, d.y, d.z]; rot = [d.yaw, d.pitch];
+      this.moveEntity(ctx.ent, d.x, d.y, d.z, d.yaw, d.pitch);
+      this.cmdSay(ctx, 'Teleported ' + this.entName(ctx.ent) + ' to ' + this.entName(d)); return 1;
+    }
+    if (!list.length) cfail('No entity was found');
+    targets = list;
+    const nxt = r.peek();
+    if (looksLikePos(nxt)) dest = this.readPos(r, ctx);
+    else {
+      const d = this.select(r.tok(), ctx);
+      if (!d.length) cfail('No entity was found');
+      if (d.length > 1) cfail('Only one entity is allowed, but the provided selector allows more than one');
+      for (const e of targets) this.moveEntity(e, d[0].x, d[0].y, d[0].z, d[0].yaw, d[0].pitch);
+      this.cmdSay(ctx, 'Teleported ' + whoList(this, targets) + ' to ' + this.entName(d[0])); return targets.length;
+    }
+  }
+  // rotation: yaw pitch, or facing a position or an entity
+  if (!r.end()) {
+    if (r.peek() === 'facing') {
+      r.word();
+      let to;
+      if (r.peek() === 'entity') { r.word(); const d = this.select(r.tok(), ctx); if (!d.length) cfail('No entity was found'); const an = r.end() ? 'feet' : r.lit('eyes', 'feet'); to = [d[0].x, an === 'eyes' ? this.entEye(d[0]) : d[0].y, d[0].z]; }
+      else to = this.readPos(r, ctx);
+      for (const e of targets) { const ey = dest[1] + (e instanceof Player ? e.eyeCur : (e.h || 0) * 0.85), dx = to[0] - dest[0], dy = to[1] - ey, dz = to[2] - dest[2]; rot = [Math.atan2(-dx, -dz), Math.atan2(dy, Math.hypot(dx, dz))]; this.moveEntity(e, dest[0], dest[1], dest[2], rot[0], rot[1]); }
+      this.cmdSay(ctx, 'Teleported ' + whoList(this, targets) + ' to ' + showPos(this, dest)); return targets.length;
+    }
+    rot = this.readRot(r, ctx);
+  }
+  for (const e of targets) this.moveEntity(e, dest[0], dest[1], dest[2], rot ? rot[0] : undefined, rot ? rot[1] : undefined);
+  this.cmdSay(ctx, 'Teleported ' + whoList(this, targets) + ' to ' + showPos(this, dest));
+  return targets.length;
+};
+CMDS.kill = function (r, ctx) {
+  const list = this.targets(r, ctx);
+  for (const e of list) {
+    if (e instanceof Player) { if (e.dead) continue; if (e.mode === 1 || e.mode === 3) { e.health = 0; e.dead = true; this.onDeath('kill'); } else e.hurt(1e9, 'kill'); }
+    else if (e instanceof Mob) { if (e.data) e.data.invulnerable = false; e.invuln = 0; e.hurt(1e9, 'kill'); if (!(e.deathTime > 0) && !e.dead) e.dead = true; }
+    else e.dead = true;
+  }
+  this.cmdSay(ctx, 'Killed ' + whoList(this, list));
+  return list.length;
+};
+// (the older forms without targets still work: they mean the one running the command)
+const isTargetTok = t => /^@[parsen]/.test(t) || t === 'Player' || /^[0-9a-f]{1,8}-[0-9a-f]{1,4}-/i.test(t);
+CMDS.give = function (r, ctx) {
+  const first = r.peek(), oldForm = !isTargetTok(first) && !!ITEM_BY_NAME[nsKey(first).replace(/\[.*$/s, '')];
+  const list = oldForm ? (ctx.ent instanceof Player ? [ctx.ent] : cfail('No player was found')) : this.needTargets(r, ctx, { players: true }), st = this.readItem(r.need('item')), n = r.end() ? 1 : r.int(1, 2147483647), it = ITEMS[st.id];
+  const max = (it.stack || 64) * 100;
+  if (n > max) cfail('Can\'t give more than ' + max + ' of ' + it.display);
+  for (const p of list) {
+    let left = n;
+    while (left > 0) { const k = Math.min(left, it.stack || 64), s = Object.assign({}, st, { count: k }); if (st.tag) s.tag = JSON.parse(JSON.stringify(st.tag)); const rest = p.addItem(s); if (rest) this.dropItem(p.x, p.y + 1, p.z, Object.assign({}, s, { count: rest })); left -= k; }
+  }
+  this.ui.refreshHotbar();
+  if (this.ui.inv) this.ui.renderInv();
+  this.cmdSay(ctx, 'Gave ' + n + ' [' + (st.tag && st.tag.name || it.display) + '] to ' + (list.length === 1 ? this.entName(list[0]) : list.length + ' players'));
+  return list.length;
+};
+CMDS.clear = function (r, ctx) {
+  const list = this.targets(r, ctx, { players: true }), pred = r.end() ? () => true : this.itemPred(r.tok()), max = r.end() ? -1 : r.int(0);
+  let total = 0;
+  for (const p of list) {
+    let left = max < 0 ? Infinity : max;
+    for (const arr of [p.inv, p.armor, p.offhand, p.craft || []]) for (let i = 0; i < arr.length; i++) {
+      const s = arr[i]; if (!s || !pred(s)) continue;
+      if (max === 0) { total += s.count; continue; }
+      const k = Math.min(s.count, left); total += k; left -= k; s.count -= k; if (s.count <= 0) arr[i] = null;
+      if (left <= 0) break;
+    }
+  }
+  this.ui.refreshHotbar(); if (this.ui.inv) this.ui.renderInv();
+  const who = list.length === 1 ? 'player ' + this.entName(list[0]) : list.length + ' players';
+  if (!total) cfail('No items were found on ' + who);
+  this.cmdSay(ctx, max === 0 ? 'Found ' + total + ' matching item(s) on ' + who : 'Removed ' + total + ' item(s) from ' + who);
+  return total;
+};
+CMDS.effect = function (r, ctx) {
+  const sub = r.lit('give', 'clear');
+  if (sub === 'clear') {
+    const list = !r.end() && EFFECTS[nsKey(r.peek())] ? [ctx.ent] : this.targets(r, ctx), k = r.end() ? null : nsKey(r.word());
+    if (k && !EFFECTS[k]) cfail('Unknown effect \'' + k + '\'');
+    let n = 0;
+    for (const e of list) { if (!e.effects || !e.effects.size) continue; if (k) { if (e.effects.has(k)) { e.removeEffect(k); n++; } } else { e.clearEffects ? e.clearEffects() : e.effects.clear(); n++; } }
+    if (!n) cfail(k ? 'Target doesn\'t have the requested effect' : 'Target has no effects to remove');
+    this.cmdSay(ctx, k ? 'Removed effect ' + EFFECTS[k][0] + ' from ' + whoList(this, list) : 'Removed every effect from ' + whoList(this, list));
+    return n;
+  }
+  const list = !isTargetTok(r.peek()) && ctx.ent ? [ctx.ent] : this.needTargets(r, ctx), k = nsKey(r.word());
+  if (!EFFECTS[k]) cfail('Unknown effect \'' + k + '\'');
+  let secs = 30;
+  if (!r.end()) { const t = r.peek(); if (t === 'infinite') { r.word(); secs = Infinity; } else secs = r.int(1, 1000000); }
+  const amp = r.end() ? 0 : r.int(0, 255), hide = r.end() ? false : r.bool();
+  let n = 0;
+  for (const e of list) {
+    if (!e.addEffect) continue;
+    const before = e.effects && e.effects.get(k);
+    e.addEffect(k, secs === Infinity ? 1e9 : (EFFECTS[k][3] ? 1 : secs * 20), amp, hide);
+    if (EFFECTS[k][3] || (e.effects && e.effects.get(k) !== before)) n++;
+  }
+  if (!n) cfail('Unable to apply this effect (target is either immune to effects, or has something stronger)');
+  this.cmdSay(ctx, 'Applied effect ' + EFFECTS[k][0] + ' to ' + whoList(this, list));
+  return n;
+};
+CMDS.experience = function (r, ctx) {
+  const sub = r.lit('add', 'set', 'query');
+  if (sub === 'query') {
+    const p = r.end() || r.peek() === 'points' || r.peek() === 'levels' ? ctx.ent : this.select(r.need('player'), ctx, { players: true, single: true })[0];
+    if (!p) cfail('No player was found');
+    const kind = r.end() ? 'levels' : r.lit('points', 'levels'), v = kind === 'levels' ? p.xpLevel : p.xp | 0;
+    this.cmdSay(ctx, this.entName(p) + ' has ' + v + ' experience ' + kind); return v;
+  }
+  const list = /^[-+]?\d+$/.test(r.peek()) && ctx.ent instanceof Player ? [ctx.ent] : this.needTargets(r, ctx, { players: true }), n = r.int(sub === 'set' ? 0 : undefined), kind = r.end() ? 'points' : r.lit('points', 'levels');
+  for (const p of list) {
+    if (kind === 'levels') { p.xpLevel = Math.max(0, sub === 'set' ? n : p.xpLevel + n); p.xp = Math.min(p.xp, xpNeeded(p.xpLevel) - 1); }
+    else if (sub === 'set') { if (n < 0 || n >= xpNeeded(p.xpLevel)) cfail('Unable to set experience points above the maximum points for the player\'s current level'); p.xp = n; }
+    else {
+      // points go through the level thresholds both ways
+      let total = Math.max(0, xpTotalOf(p) + n);
+      p.xpLevel = 0;
+      while (total >= xpNeeded(p.xpLevel)) total -= xpNeeded(p.xpLevel++);
+      p.xp = total; this.sound('xp', p.x, p.y, p.z);
+    }
+  }
+  this.ui.refreshBars && this.ui.refreshBars();
+  const who = list.length === 1 ? this.entName(list[0]) : list.length + ' players';
+  this.cmdSay(ctx, sub === 'add' ? 'Gave ' + n + ' experience ' + kind + ' to ' + who : 'Set ' + (kind === 'levels' && list.length === 1 ? list[0].xpLevel : n) + ' experience ' + kind + ' on ' + who);
+  return list.length;
+};
+// SNBT applied to a summoned (or /data merged) entity
+Game.prototype.applyEntNBT = function (e, nb) {
+  if (!nb) return;
+  if (nb.CustomName !== undefined) { try { e.customName = spansText(this.textSpans(nb.CustomName, null)); } catch (er) { e.customName = String(nb.CustomName); } }
+  if (Array.isArray(nb.Tags)) { const t = this.entTags(e); for (const x of nb.Tags) if (!t.includes(String(x))) t.push(String(x)); }
+  if (nb.Health !== undefined) e.health = Math.min(e.maxHealth || nb.Health, nb.Health);
+  if (Array.isArray(nb.Motion)) { e.vx = nb.Motion[0]; e.vy = nb.Motion[1]; e.vz = nb.Motion[2]; }
+  if (Array.isArray(nb.Rotation)) { e.yaw = fromJYaw(nb.Rotation[0]); if (e.bodyYaw !== undefined) e.bodyYaw = e.yaw; if (nb.Rotation[1] !== undefined && e.pitch !== undefined) e.pitch = fromJPitch(nb.Rotation[1]); }
+  if (nb.Fire !== undefined) e.fireTicks = nb.Fire;
+  if (e instanceof Mob) {
+    const d = e.data;
+    if (nb.NoAI !== undefined) { e.noAI = !!nb.NoAI; d.noAI = !!nb.NoAI; }
+    if (nb.Invulnerable !== undefined) d.invulnerable = !!nb.Invulnerable;
+    if (nb.Silent !== undefined) d.silent = !!nb.Silent;
+    if (nb.PersistenceRequired !== undefined) e.persistent = !!nb.PersistenceRequired;
+    if (nb.CustomNameVisible !== undefined) d.nameVisible = !!nb.CustomNameVisible;
+    if (nb.IsBaby !== undefined) e.growth = nb.IsBaby ? -24000 : 0;
+    if (nb.Age !== undefined) e.growth = nb.Age | 0;
+    if (nb.Glowing !== undefined) d.glowing = !!nb.Glowing;
+  }
+  if (e instanceof PrimedTNT && nb.fuse !== undefined) e.fuse = nb.fuse;
+  if (e instanceof PrimedTNT && nb.Fuse !== undefined) e.fuse = nb.Fuse;
+};
+CMDS.summon = function (r, ctx) {
+  const t = nsKey(r.word());
+  if (!t) cfail('Expected entity type');
+  const pos = r.end() ? [ctx.x, ctx.y, ctx.z] : this.readPos(r, ctx), nb = r.end() ? null : parseSNBT(r.rest());
+  const w = this.world, [x, y, z] = pos;
+  if (y < 0 || y > CH_TOP + 64) cfail('Invalid position for summon');
+  let e = null;
+  if (t === 'lightning_bolt') { this.strikeAt(x, y, z); this.cmdSay(ctx, 'Summoned new Lightning Bolt'); return 1; }
+  // (a summoned TNT gets no kick, unlike one lit in the world)
+  if (t === 'tnt') { e = new PrimedTNT(this, x - 0.5, y, z - 0.5, 80); e.vx = e.vy = e.vz = 0; this.entities.push(e); }
+  else if (t === 'item') {
+    const it = nb && nb.Item && ITEM_BY_NAME[nsKey(nb.Item.id)];
+    if (!it) cfail('Unable to summon entity');
+    e = this.dropItem(x, y, z, { id: it.id, count: nb.Item.count || nb.Item.Count || 1 });
+  }
+  else if (t === 'experience_orb') { e = new XPOrb(this, x, y, z, nb && nb.Value ? nb.Value | 0 : 0); this.entities.push(e); }
+  else if (t === 'falling_block') { const n = nb && nb.BlockState && nsKey(nb.BlockState.Name), id = n ? B[n.toUpperCase()] : B.SAND; e = new FallingBlock(this, x, y, z, id === undefined ? B.SAND : id); this.entities.push(e); }
+  else if (t === 'end_crystal' && typeof EndCrystal !== 'undefined') { e = new EndCrystal(this, x, y, z, -1); this.entities.push(e); }
+  else if (t === 'ender_dragon' && typeof EnderDragon !== 'undefined') { e = new EnderDragon(this, x, y, z); this.entities.push(e); if (w.dim === 'end' && (!this.dragon || this.dragon.dead)) { this.dragon = e; e.persistent = true; } }
+  else if (MOB_TYPES[t] && !MOB_TYPES[t].hidden) { e = createMob(this, t, x, y, z, { baby: nb && nb.IsBaby }); this.entities.push(e); }
+  else if (t === 'player') cfail('Unable to summon entity');
+  else cfail('Unknown entity \'' + t + '\'');
+  if (e) { this.applyEntNBT(e, nb); if (e.savePrev) e.savePrev(); }
+  this.cmdSay(ctx, 'Summoned new ' + (e ? this.entName(e) : t));
+  return 1;
+};
+CMDS.damage = function (r, ctx) {
+  const list = this.select(r.need('entity'), ctx, { single: true });
+  if (!list.length) cfail('No entity was found');
+  const amt = r.num(0), type = r.end() ? 'generic' : nsKey(r.word());
+  let by = null;
+  if (!r.end()) { const k = r.lit('at', 'by'); if (k === 'at') this.readPos(r, ctx); else { by = this.select(r.tok(), ctx)[0] || null; if (!r.end() && r.peek() === 'from') { r.word(); r.tok(); } } }
+  const e = list[0];
+  if (!e.hurt || !e.hurt(amt, type === 'generic' ? 'generic' : type, by)) cfail('Target either cannot be damaged or is invulnerable to this damage type');
+  this.cmdSay(ctx, 'Applied ' + fmt(amt) + ' damage to ' + this.entName(e));
+  return 1;
+};
+CMDS.ride = function (r, ctx) {
+  const e = this.select(r.need('entity'), ctx, { single: true })[0];
+  if (!e) cfail('No entity was found');
+  const sub = r.lit('mount', 'dismount');
+  if (sub === 'dismount') {
+    if (!(e instanceof Player) || !e.riding) cfail(this.entName(e) + ' is not riding any vehicle');
+    const v = e.riding; this.dismount(e); this.cmdSay(ctx, this.entName(e) + ' stopped riding ' + this.entName(v)); return 1;
+  }
+  const v = this.select(r.need('vehicle'), ctx, { single: true })[0];
+  if (!v) cfail('No entity was found');
+  if (!(e instanceof Player)) cfail('Only players can ride here');
+  if (e.riding) cfail(this.entName(e) + ' is already riding ' + this.entName(e.riding));
+  if (v === e) cfail('Can\'t mount entity on itself');
+  if (!(v instanceof Mob) || !this.mount) cfail('Can\'t mount ' + this.entName(e) + ' on ' + this.entName(v));
+  this.mount(e, v); this.cmdSay(ctx, this.entName(e) + ' started riding ' + this.entName(v));
+  return 1;
+};
+
+/* ---------------- blocks: setblock, fill, clone, fillbiome ---------------- */
+Game.prototype.cmdBlockOk = function (x, y, z) { return y >= 0 && y <= CH_TOP && !!this.world.getChunk(x >> 4, z >> 4) && this.world.getChunk(x >> 4, z >> 4).blocks; };
+Game.prototype.cmdBreak = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  if (!id) return;
+  if (BLK[id].hard >= 0 && this.dropsFor) for (const st of this.dropsFor(id, w.getMeta(x, y, z), null) || []) this.dropItem(x + 0.5, y + 0.5, z + 0.5, st);
+  if (this.particles && this.particles.blockBreak) this.particles.blockBreak(x, y, z, id);
+};
+Game.prototype.remeshBox = function (x0, z0, x1, z1) { for (let cx = x0 >> 4; cx <= x1 >> 4; cx++) for (let cz = z0 >> 4; cz <= z1 >> 4; cz++) this.remeshNear(cx * 16 + 8, cz * 16 + 8); };
+CMDS.setblock = function (r, ctx) {
+  const [x, y, z] = this.readPos(r, ctx, 'block'), b = this.readBlock(r.need('block')), mode = r.end() ? 'replace' : r.lit('destroy', 'keep', 'replace'), w = this.world;
+  if (!this.cmdBlockOk(x, y, z)) cfail('That position is not loaded');
+  if (mode === 'keep' && w.getBlock(x, y, z)) cfail('Could not set the block');
+  if (w.getBlock(x, y, z) === b.id && w.getMeta(x, y, z) === b.meta && !b.nbt) cfail('Could not set the block');
+  if (mode === 'destroy') this.cmdBreak(x, y, z);
+  w.setBlock(x, y, z, b.id, b.meta);
+  this.applyBlockNBT(x, y, z, b.nbt);
+  this.remeshNear(x, z);
+  this.cmdSay(ctx, 'Changed the block at ' + showBlock(this, [x, y, z]));
+  return 1;
+};
+CMDS.fill = function (r, ctx) {
+  const a = this.readPos(r, ctx, 'block'), c = this.readPos(r, ctx, 'block'), b = this.readBlock(r.need('block')), w = this.world;
+  const mode = r.end() ? 'replace' : r.lit('destroy', 'hollow', 'keep', 'outline', 'replace'), filter = mode === 'replace' && !r.end() ? this.blockPred(r.tok()) : null;
+  const x0 = Math.min(a[0], c[0]), x1 = Math.max(a[0], c[0]), y0 = Math.min(a[1], c[1]), y1 = Math.max(a[1], c[1]), z0 = Math.min(a[2], c[2]), z1 = Math.max(a[2], c[2]);
+  const n = (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1), lim = this.rule('commandModificationBlockLimit');
+  if (n > lim) cfail('Too many blocks in the specified area (maximum ' + lim + ', specified ' + n + ')');
+  for (let cx = x0 >> 4; cx <= x1 >> 4; cx++) for (let cz = z0 >> 4; cz <= z1 >> 4; cz++) if (!w.getChunk(cx, cz) || !w.getChunk(cx, cz).blocks) cfail('That position is not loaded');
+  if (y0 < 0 || y1 > CH_TOP) cfail('That position is out of this world');
+  let changed = 0;
+  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    const edge = x === x0 || x === x1 || y === y0 || y === y1 || z === z0 || z === z1, old = w.getBlock(x, y, z);
+    if (mode === 'outline' && !edge) continue;
+    if (mode === 'keep' && old) continue;
+    if (filter && !filter(old, w.getMeta(x, y, z))) continue;
+    const want = mode === 'hollow' && !edge ? 0 : b.id, wm = mode === 'hollow' && !edge ? 0 : b.meta;
+    if (mode === 'destroy' && old && old !== want) this.cmdBreak(x, y, z);
+    if (w.setBlock(x, y, z, want, wm) || b.nbt) { changed++; if (want === b.id) this.applyBlockNBT(x, y, z, b.nbt); }
+  }
+  this.remeshBox(x0, z0, x1, z1);
+  if (!changed) cfail('No blocks were filled');
+  this.cmdSay(ctx, 'Successfully filled ' + changed + ' block(s)');
+  return changed;
+};
+CMDS.clone = function (r, ctx) {
+  const a = this.readPos(r, ctx, 'block'), c = this.readPos(r, ctx, 'block'), d = this.readPos(r, ctx, 'block'), w = this.world;
+  let mask = 'replace', filter = null, how = 'normal';
+  if (!r.end()) { mask = r.lit('replace', 'masked', 'filtered'); if (mask === 'filtered') filter = this.blockPred(r.tok()); }
+  if (!r.end()) how = r.lit('force', 'move', 'normal');
+  const x0 = Math.min(a[0], c[0]), x1 = Math.max(a[0], c[0]), y0 = Math.min(a[1], c[1]), y1 = Math.max(a[1], c[1]), z0 = Math.min(a[2], c[2]), z1 = Math.max(a[2], c[2]);
+  const sx = x1 - x0 + 1, sy = y1 - y0 + 1, sz = z1 - z0 + 1, n = sx * sy * sz, lim = this.rule('commandModificationBlockLimit');
+  if (n > lim) cfail('Too many blocks in the specified area (maximum ' + lim + ', specified ' + n + ')');
+  const overlap = d[0] <= x1 && d[0] + sx - 1 >= x0 && d[1] <= y1 && d[1] + sy - 1 >= y0 && d[2] <= z1 && d[2] + sz - 1 >= z0;
+  if (overlap && how !== 'force') cfail('The source and destination can not overlap');
+  for (const [p, q] of [[[x0, z0], [x1, z1]], [[d[0], d[2]], [d[0] + sx - 1, d[2] + sz - 1]]]) for (let cx = p[0] >> 4; cx <= q[0] >> 4; cx++) for (let cz = p[1] >> 4; cz <= q[1] >> 4; cz++) if (!w.getChunk(cx, cz) || !w.getChunk(cx, cz).blocks) cfail('That position is not loaded');
+  // copy first (with block entities), then write: overlapping force clones read the original
+  const buf = [];
+  for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) for (let x = 0; x < sx; x++) {
+    const id = w.getBlock(x0 + x, y0 + y, z0 + z), m = w.getMeta(x0 + x, y0 + y, z0 + z);
+    if (mask === 'masked' && !id) continue;
+    if (filter && !filter(id, m)) continue;
+    const be = w.getBE(x0 + x, y0 + y, z0 + z);
+    buf.push([x, y, z, id, m, be ? JSON.parse(JSON.stringify(be)) : null]);
+  }
+  if (how === 'move') for (const [x, y, z] of buf) w.setBlock(x0 + x, y0 + y, z0 + z, 0, 0);
+  let k = 0;
+  for (const [x, y, z, id, m, be] of buf) {
+    const tx = d[0] + x, ty = d[1] + y, tz = d[2] + z;
+    if (ty < 0 || ty > CH_TOP) continue;
+    w.setBlock(tx, ty, tz, id, m);
+    if (be) { be.x = tx; be.y = ty; be.z = tz; w.setBE(tx, ty, tz, be); }
+    k++;
+  }
+  this.remeshBox(Math.min(x0, d[0]), Math.min(z0, d[2]), Math.max(x1, d[0] + sx - 1), Math.max(z1, d[2] + sz - 1));
+  if (!k) cfail('No blocks were cloned');
+  this.cmdSay(ctx, 'Successfully cloned ' + k + ' block(s)');
+  return k;
+};
+CMDS.fillbiome = function (r, ctx) {
+  const a = this.readPos(r, ctx, 'block'), c = this.readPos(r, ctx, 'block'), bn = nsKey(r.word()), w = this.world, bi = worldBiomeId(bn);
+  if (bi < 0) cfail('There is no biome with type \'' + bn + '\'');
+  let filter = null;
+  if (!r.end()) { r.lit('replace'); const f = nsKey(r.word()), fi = worldBiomeId(f); if (fi < 0) cfail('There is no biome with type \'' + f + '\''); filter = fi; }
+  const x0 = Math.min(a[0], c[0]), x1 = Math.max(a[0], c[0]), z0 = Math.min(a[2], c[2]), z1 = Math.max(a[2], c[2]), y0 = Math.min(a[1], c[1]), y1 = Math.max(a[1], c[1]);
+  // biomes live in 4x4x4 cells; the 2D column biome follows the surface
+  let n = 0;
+  for (let qx = x0 >> 2; qx <= x1 >> 2; qx++) for (let qz = z0 >> 2; qz <= z1 >> 2; qz++) {
+    const ch = w.getChunk(qx >> 2, qz >> 2);
+    if (!ch || !ch.blocks) cfail('That position is not loaded');
+    for (let qy = y0 >> 2; qy <= y1 >> 2; qy++) {
+      if (ch.bio3) { const i = (Math.max(0, Math.min(95, qy)) << 4) | ((qz & 3) << 2) | (qx & 3); if (filter !== null && ch.bio3[i] !== filter) continue; ch.bio3[i] = bi; }
+      n++;
+    }
+    for (let lz = 0; lz < 4; lz++) for (let lx = 0; lx < 4; lx++) { const i = (((qz & 3) * 4 + lz) << 4) | ((qx & 3) * 4 + lx); if (filter === null || ch.biomes[i] === filter) ch.biomes[i] = bi; }
+    ch.modified = ch.unsaved = true; if (ch.dirty) ch.dirty.fill(1);
+  }
+  this.remeshBox(x0, z0, x1, z1);
+  this.cmdSay(ctx, n + ' biome entries set between ' + showBlock(this, [x0, y0, z0]) + ' and ' + showBlock(this, [x1, y1, z1]));
+  return n;
+};
+
+/* ---------------- particles and sounds ---------------- */
+const PARTICLE_FX = {
+  smoke: (P, x, y, z) => P.smoke(x, y, z, 1), large_smoke: (P, x, y, z) => P.smoke(x, y, z, 2), campfire_cosy_smoke: (P, x, y, z) => P.smoke(x, y, z, 2), poof: (P, x, y, z) => P.smoke(x, y, z, 1),
+  flame: (P, x, y, z) => P.flame(x, y, z), soul_fire_flame: (P, x, y, z) => P.flame(x, y, z), heart: (P, x, y, z) => P.heart(x, y, z), crit: (P, x, y, z) => P.crit(x, y, z),
+  enchanted_hit: (P, x, y, z) => P.crit(x, y, z), explosion: (P, x, y, z) => P.explosion(x, y, z), explosion_emitter: (P, x, y, z) => P.explosion(x, y, z), portal: (P, x, y, z) => P.portal(x, y, z),
+  bubble: (P, x, y, z) => P.bubble(x, y, z), splash: (P, x, y, z) => P.splash(x, y, z), lava: (P, x, y, z) => P.lava(x, y - 1, z), happy_villager: (P, x, y, z) => P.icon(x, y, z, 'happy_villager'),
+  angry_villager: (P, x, y, z) => P.icon(x, y, z, 'angry_villager'), note: (P, x, y, z) => P.icon(x, y, z, 'note'), sweep_attack: (P, x, y, z) => P.sweep(x, y, z, 0),
+};
+CMDS.particle = function (r, ctx) {
+  const name = nsKey(r.tok()).replace(/[\[{].*$/s, ''), P = this.particles;
+  if (!name) cfail('Expected particle');
+  const pos = r.end() ? [ctx.x, ctx.y, ctx.z] : this.readPos(r, ctx);
+  let dx = 0, dy = 0, dz = 0, count = 1;
+  if (!r.end()) { dx = r.num(); dy = r.num(); dz = r.num(); r.num(0); count = r.int(0); if (!r.end()) r.lit('force', 'normal'); if (!r.end()) this.select(r.tok(), ctx); }
+  const fx = PARTICLE_FX[name] || ((P2, x, y, z) => P2.poof ? P2.poof(x, y, z, null, 1) : P2.smoke(x, y, z, 1));
+  for (let i = 0; i < Math.min(Math.max(count, 1), 500); i++) {
+    const g = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2 / 3;
+    fx(P, pos[0] + g() * dx * (count ? 1 : 0), pos[1] + g() * dy * (count ? 1 : 0), pos[2] + g() * dz * (count ? 1 : 0));
+  }
+  this.cmdSay(ctx, 'Displaying particle ' + name);
+  return 1;
+};
+// vanilla sound events -> the game's sounds
+const SOUND_EVENTS = [
+  [/^entity\.experience_orb/, 'xp'], [/^entity\.player\.levelup/, 'levelup'], [/^entity\.generic\.explode|explode$/, 'explode'], [/^ui\.button\.click/, 'click'], [/^entity\.item\.pickup/, 'pop'],
+  [/^block\.note_block\.(\w+)/, m => ({ harp: 'pling', bass: 'bit', basedrum: 'basedrum', snare: 'snare', hat: 'hat', bell: 'bell', chime: 'chime', flute: 'flute', guitar: 'guitar', xylophone: 'xylophone', iron_xylophone: 'iron_xylophone', cow_bell: 'cow_bell', didgeridoo: 'didgeridoo', bit: 'bit', banjo: 'banjo', pling: 'pling' })[m[1]] || 'pling'],
+  [/^entity\.pig\./, 'oink'], [/^entity\.cow\./, 'moo'], [/^entity\.sheep\./, 'baa'], [/^entity\.chicken\./, 'cluck'], [/^entity\.zombie\./, 'groan'], [/^entity\.creeper\.primed|^entity\.tnt\.primed/, 'fuse'],
+  [/^entity\.creeper\./, 'creeper'], [/^entity\.enderman\.teleport|teleport$/, 'teleport'], [/^entity\.enderman\./, 'enderman'], [/^entity\.blaze\./, 'blaze'], [/^entity\.ghast\./, 'ghast'],
+  [/^entity\.wolf\./, 'wolf'], [/^entity\.cat\./, 'cat'], [/^entity\.villager\.yes/, 'villager_yes'], [/^entity\.villager\.no/, 'villager_no'], [/^entity\.villager\./, 'villager'],
+  [/^entity\.iron_golem\./, 'golem'], [/^entity\.warden\.sonic_boom/, 'sonic_boom'], [/^entity\.warden\./, 'warden'], [/^entity\.ender_dragon\./, 'ender_dragon'], [/^entity\.wither\./, 'warden_roar'],
+  [/^block\.anvil\.land/, 'anvil_land'], [/^block\.anvil\./, 'anvil'], [/^block\.bell\./, 'bell'], [/^block\.chest\./, 'chest'], [/^block\.\w*door\.open/, 'door_open'], [/^block\.\w*door\.close/, 'door_close'],
+  [/^block\.portal\.travel/, 'travel'], [/^block\.portal\.trigger/, 'portal_trigger'], [/^block\.portal\./, 'portal'], [/^block\.end_portal\.spawn/, 'end_portal_open'], [/^block\.piston\.extend/, 'piston_out'],
+  [/^block\.piston\.contract/, 'piston_in'], [/^item\.totem\.use/, 'totem'], [/^entity\.firework_rocket\./, 'fireworks'], [/^entity\.arrow\.shoot/, 'shoot'], [/^entity\.arrow\.hit/, 'arrow_hit'],
+  [/^entity\.player\.hurt|^entity\.generic\.hurt/, 'hurt'], [/^entity\.\w+\.hurt/, 'hurt_animal'], [/^entity\.generic\.eat|^entity\.player\.burp/, 'eat'], [/^entity\.generic\.drink/, 'drink'],
+  [/^block\.lava\./, 'lavapop'], [/^block\.fire\.extinguish/, 'fizz'], [/^entity\.generic\.splash|^entity\.player\.splash/, 'splash'], [/^block\.amethyst/, 'amethyst'], [/^block\.sculk_shrieker/, 'shriek'],
+  [/^block\.sculk/, 'sculk'], [/^entity\.breeze\./, 'breeze'], [/^entity\.wind_charge\./, 'wind'], [/^block\.vault\./, 'vault'], [/^block\.trial_spawner\./, 'spawner'], [/^block\.enchantment_table/, 'enchant'],
+  [/^block\.brewing_stand/, 'brew'], [/^block\.grindstone/, 'grindstone'], [/^block\.smithing_table/, 'smithing'], [/^entity\.horse\./, 'horse'], [/^entity\.bee\./, 'bee'], [/^entity\.slime\./, 'slime'],
+  [/^entity\.bat\./, 'bat'], [/^entity\.frog\./, 'frog'], [/^entity\.piglin\./, 'piglin'], [/^item\.shield\.block/, 'shield_block'], [/^item\.shield\.break/, 'shield_break'], [/^entity\.player\.attack\.crit/, 'crit'],
+  [/^entity\.player\.attack\.sweep/, 'sweep'], [/^entity\.player\.attack\.strong/, 'strong'], [/^entity\.player\.attack\.weak/, 'weak'], [/^entity\.player\.attack\.knockback/, 'knockback'],
+];
+function soundFor(ev) {
+  const k = nsKey(ev);
+  for (const [re, s] of SOUND_EVENTS) { const m = k.match(re); if (m) return typeof s === 'function' ? s(m) : s; }
+  return null;
+}
+CMDS.playsound = function (r, ctx) {
+  const ev = r.word(), src = r.end() ? 'master' : r.lit('master', 'music', 'record', 'weather', 'block', 'hostile', 'neutral', 'player', 'ambient', 'voice');
+  const list = r.end() ? (ctx.ent ? [ctx.ent] : []) : this.select(r.tok(), ctx, { players: true });
+  if (!list.length) cfail('No player was found');
+  const pos = r.end() ? [ctx.x, ctx.y, ctx.z] : this.readPos(r, ctx);
+  const vol = r.end() ? 1 : r.num(0), pitch = r.end() ? 1 : r.num(0, 2), minVol = r.end() ? 0 : r.num(0, 1);
+  const p = this.player, d = Math.hypot(pos[0] - p.x, pos[1] - p.y, pos[2] - p.z), hear = d <= Math.max(vol, 1) * 16 || minVol > 0;
+  const s = soundFor(ev);
+  if (!hear) cfail('The sound is too far away to be heard');
+  if (s) this.sound(s, d > Math.max(vol, 1) * 16 ? p.x : pos[0], d > Math.max(vol, 1) * 16 ? p.y : pos[1], d > Math.max(vol, 1) * 16 ? p.z : pos[2]);
+  this.cmdSay(ctx, 'Played sound ' + ev + ' to ' + (list.length === 1 ? this.entName(list[0]) : list.length + ' players'));
+  return list.length;
+};
+CMDS.stopsound = function (r, ctx) {
+  const list = this.needTargets(r, ctx, { players: true }), src = r.end() ? null : r.word(), ev = r.end() ? null : r.word();
+  if (AUDIO.stopAll && !ev) AUDIO.stopAll();
+  this.cmdSay(ctx, ev ? 'Stopped sound \'' + ev + '\'' + (src && src !== '*' ? ' on source \'' + src + '\'' : '') : src && src !== '*' ? 'Stopped source \'' + src + '\'' : 'Stopped all sounds');
+  return list.length;
+};
+
+/* ---------------- boss bars, the world border ---------------- */
+CMDS.bossbar = function (r, ctx) {
+  const bars = this.bossbars(), sub = r.lit('add', 'remove', 'list', 'get', 'set');
+  if (sub === 'list') { const ks = Object.keys(bars); this.cmdSay(ctx, ks.length ? 'There are ' + ks.length + ' custom bossbar(s) active: ' + ks.map(k => '[' + spansText(this.textSpans(bars[k].name, ctx)) + ']').join(', ') : 'There are no custom bossbars active'); return ks.length; }
+  const id = nsKey(r.word());
+  if (!id) cfail('Expected bossbar id');
+  const nm = () => '[' + spansText(this.textSpans(bars[id].name, ctx)) + ']';
+  if (sub === 'add') {
+    if (bars[id]) cfail('A bossbar already exists with the ID \'minecraft:' + id + '\'');
+    const j = r.rest(); if (!j) cfail('Expected text component'); this.textSpans(j, ctx);
+    bars[id] = { name: j, color: 'white', style: 'progress', value: 0, max: 100, visible: true, players: false };
+    this.cmdSay(ctx, 'Created custom bossbar ' + nm()); this.ui.renderBossbars(); return Object.keys(bars).length;
+  }
+  const b = bars[id];
+  if (!b) cfail('No bossbar exists with the ID \'minecraft:' + id + '\'');
+  if (sub === 'remove') { const n = nm(); delete bars[id]; this.cmdSay(ctx, 'Removed custom bossbar ' + n); this.ui.renderBossbars(); return Object.keys(bars).length; }
+  if (sub === 'get') {
+    const k = r.lit('max', 'value', 'visible', 'players');
+    if (k === 'max') { this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' has a maximum of ' + b.max); return b.max; }
+    if (k === 'value') { this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' has a value of ' + b.value); return b.value; }
+    if (k === 'visible') { this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' is currently ' + (b.visible ? 'shown' : 'hidden')); return b.visible ? 1 : 0; }
+    this.cmdSay(ctx, b.players ? 'Custom bossbar ' + nm() + ' has 1 player(s) currently online: Player' : 'Custom bossbar ' + nm() + ' has no players currently online'); return b.players ? 1 : 0;
+  }
+  const k = r.lit('color', 'max', 'name', 'players', 'style', 'value', 'visible');
+  if (k === 'color') { const c = r.lit(...Object.keys(BAR_COLORS)); if (c === b.color) cfail('Nothing changed. That\'s already the color of this bossbar'); b.color = c; this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' has changed color'); }
+  else if (k === 'max') { const v = r.int(1); if (v === b.max) cfail('Nothing changed. That\'s already the max of this bossbar'); b.max = v; this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' has changed maximum to ' + v); }
+  else if (k === 'value') { const v = r.int(0); if (v === b.value) cfail('Nothing changed. That\'s already the value of this bossbar'); b.value = v; this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' has changed value to ' + v); }
+  else if (k === 'name') { const j = r.rest(); this.textSpans(j, ctx); b.name = j; this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' has been renamed'); }
+  else if (k === 'style') { const s = r.lit(...Object.keys(BAR_STYLES)); if (s === b.style) cfail('Nothing changed. That\'s already the style of this bossbar'); b.style = s; this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' has changed style'); }
+  else if (k === 'visible') { const v = r.bool(); if (v === b.visible) cfail(v ? 'Nothing changed. The bossbar is already visible' : 'Nothing changed. The bossbar is already hidden'); b.visible = v; this.cmdSay(ctx, 'Custom bossbar ' + nm() + ' is now ' + (v ? 'visible' : 'hidden')); }
+  else { const list = r.end() ? [] : this.select(r.tok(), ctx, { players: true }); const v = list.length > 0; if (v === b.players) cfail('Nothing changed. Those players are already on the bossbar with nobody to add or remove'); b.players = v; this.cmdSay(ctx, v ? 'Custom bossbar ' + nm() + ' now has 1 player(s): Player' : 'Custom bossbar ' + nm() + ' no longer has any players'); }
+  this.ui.renderBossbars();
+  return 0;
+};
+CMDS.worldborder = function (r, ctx) {
+  const b = this.border(), w = this.world, sub = r.lit('add', 'set', 'center', 'damage', 'get', 'warning');
+  if (sub === 'get') { const s = Math.round(this.borderSize()); this.cmdSay(ctx, 'The world border is currently ' + s + ' block(s) wide'); return s; }
+  if (sub === 'center') {
+    const xs = r.word(), zs = r.word(); if (!zs) cfail('Incomplete (expected 2 coordinates)');
+    const x = xs[0] === '~' ? ctx.x + (parseFloat(xs.slice(1)) || 0) : parseFloat(xs) + (xs.includes('.') ? 0 : 0.5), z = zs[0] === '~' ? ctx.z + (parseFloat(zs.slice(1)) || 0) : parseFloat(zs) + (zs.includes('.') ? 0 : 0.5);
+    if (Math.abs(x) > 29999984 || Math.abs(z) > 29999984) cfail('Cannot place the center of the world border further than 29999984 blocks from the center of the world');
+    if (x === b.cx && z === b.cz) cfail('Nothing changed. The world border is already centered there');
+    b.cx = x; b.cz = z; this.cmdSay(ctx, 'Set the center of the world border to ' + fmt(x) + ', ' + fmt(z)); return 0;
+  }
+  if (sub === 'damage') {
+    const k = r.lit('amount', 'buffer'), v = r.num(0);
+    if (k === 'amount') { if (v === b.dmg) cfail('Nothing changed. The world border damage is already that amount'); b.dmg = v; this.cmdSay(ctx, 'Set the world border damage to ' + fmt(v) + ' per block each second'); }
+    else { if (v === b.buffer) cfail('Nothing changed. The world border damage buffer is already that distance'); b.buffer = v; this.cmdSay(ctx, 'Set the world border damage buffer to ' + fmt(v) + ' block(s)'); }
+    return 0;
+  }
+  if (sub === 'warning') {
+    const k = r.lit('distance', 'time'), v = r.int(0);
+    if (k === 'distance') { if (v === b.warnD) cfail('Nothing changed. The world border warning is already that distance'); b.warnD = v; this.cmdSay(ctx, 'Set the world border warning distance to ' + v + ' block(s)'); }
+    else { if (v === b.warnT) cfail('Nothing changed. The world border warning is already that amount of time'); b.warnT = v; this.cmdSay(ctx, 'Set the world border warning time to ' + v + ' second(s)'); }
+    return 0;
+  }
+  const cur = this.borderSize(), v = r.num(sub === 'set' ? 1 : -59999968), secs = r.end() ? 0 : r.int(0);
+  const to = sub === 'set' ? v : cur + v;
+  if (to > 59999968) cfail('Cannot make the world border wider than 59999968 blocks wide');
+  if (to < 1) cfail('Cannot make the world border smaller than 1 block wide');
+  if (to === cur) cfail('Nothing changed. The world border is already that size');
+  b.from = cur; b.to = to;
+  if (secs > 0) { b.t0 = w.tick; b.t1 = w.tick + secs * 20; this.cmdSay(ctx, (to < cur ? 'Shrinking' : 'Growing') + ' the world border to ' + fmt(to) + ' blocks wide over ' + secs + ' seconds'); }
+  else { b.size = to; b.t0 = b.t1 = 0; this.cmdSay(ctx, 'Set the world border to ' + fmt(to) + ' block(s) wide'); }
+  return Math.round(to - cur);
+};
+
+/* ---------------- spawn points, spreading, randomness, the tick rate, difficulty ---------------- */
+const DIM_ID = { overworld: 'minecraft:overworld', nether: 'minecraft:the_nether', end: 'minecraft:the_end' };
+CMDS.setworldspawn = function (r, ctx) {
+  const pos = r.end() ? [Math.floor(ctx.x), Math.floor(ctx.y), Math.floor(ctx.z)] : this.readPos(r, ctx, 'block'), ang = r.end() ? 0 : r.num();
+  if (this.world.dim !== 'overworld') cfail('Can only set the world spawn for overworld');
+  this.meta.spawn = [pos[0], pos[2]]; this.meta.spawnY = pos[1]; this.meta.spawnAngle = ang; this._vWS = null;
+  this.cmdSay(ctx, 'Set the world spawn point to ' + showBlock(this, pos) + ' [' + fmt(ang) + ']');
+  return 1;
+};
+CMDS.spawnpoint = function (r, ctx) {
+  const list = this.targets(r, ctx, { players: true }), pos = r.end() ? [Math.floor(ctx.x), Math.floor(ctx.y), Math.floor(ctx.z)] : this.readPos(r, ctx, 'block'), ang = r.end() ? 0 : r.num();
+  for (const p of list) { p.spawn = [pos[0] + 0.5, pos[1], pos[2] + 0.5]; p.spawnDim = this.world.dim; p.spawnForced = true; }
+  this.cmdSay(ctx, 'Set spawn point to ' + showBlock(this, pos) + ' [' + fmt(ang) + '] in ' + DIM_ID[this.world.dim] + ' for ' + whoList(this, list));
+  return list.length;
+};
+CMDS.spreadplayers = function (r, ctx) {
+  const cxs = r.word(), czs = r.word();
+  if (!czs) cfail('Incomplete (expected 2 coordinates)');
+  const cx = cxs[0] === '~' ? ctx.x + (parseFloat(cxs.slice(1)) || 0) : parseFloat(cxs), cz = czs[0] === '~' ? ctx.z + (parseFloat(czs.slice(1)) || 0) : parseFloat(czs);
+  const dist = r.num(0), range = r.num(1);
+  let maxY = CH_TOP;
+  if (r.peek() === 'under') { r.word(); maxY = r.int() + this.world.yOff; }
+  r.bool();
+  const list = this.needTargets(r, ctx), w = this.world, placed = [];
+  for (const e of list) {
+    let ok = false;
+    for (let tries = 0; tries < 200 && !ok; tries++) {
+      const x = Math.floor(cx + (Math.random() * 2 - 1) * range), z = Math.floor(cz + (Math.random() * 2 - 1) * range);
+      if (placed.some(([a, b]) => Math.hypot(a - x, b - z) < dist)) continue;
+      if (!w.getChunk(x >> 4, z >> 4) || !w.getChunk(x >> 4, z >> 4).blocks) continue;
+      let y = Math.min(maxY, CH_TOP - 1);
+      while (y > 1 && !SOLID[w.getBlock(x, y - 1, z)] && !BLK[w.getBlock(x, y - 1, z)].liquid) y--;
+      const ground = w.getBlock(x, y - 1, z);
+      if (BLK[ground].liquid || ground === B.LAVA || ground === B.FIRE || y <= 1) continue;
+      this.moveEntity(e, x + 0.5, y, z + 0.5); placed.push([x, z]); ok = true;
+    }
+    if (!ok) cfail('Could not spread ' + list.length + ' entities around ' + fmt(cx) + ', ' + fmt(cz) + ' (too many entities for space - try using spread of at most ' + fmt(range) + ')');
+  }
+  let avg = 0;
+  if (placed.length > 1) { let s = 0, n = 0; for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) { s += Math.hypot(placed[i][0] - placed[j][0], placed[i][1] - placed[j][1]); n++; } avg = s / n; }
+  this.cmdSay(ctx, 'Spread ' + list.length + ' entities around ' + fmt(cx) + ', ' + fmt(cz) + ' with an average distance of ' + fmt(avg) + ' block(s) apart');
+  return list.length;
+};
+CMDS.random = function (r, ctx) {
+  const sub = r.lit('value', 'roll', 'reset'), t = r.word();
+  if (sub === 'reset') { this.cmdSay(ctx, 'Reset random sequence ' + t); return 1; }
+  const rg = parseRange(t, true);
+  if (!isFinite(rg.min) || !isFinite(rg.max)) cfail('The range must be finite');
+  if (rg.max - rg.min > 2147483646) cfail('The range is too big (maximum 2147483646)');
+  const v = rg.min + Math.floor(Math.random() * (rg.max - rg.min + 1));
+  if (!r.end()) r.word();
+  this.ui.chat(sub === 'roll' ? ctx.name + ' rolled ' + v + ' (from ' + rg.min + ' to ' + rg.max + ')' : 'Random value: ' + v, '#ccc');
+  return v;
+};
+CMDS.tick = function (r, ctx) {
+  const sub = r.lit('query', 'rate', 'freeze', 'unfreeze', 'step', 'sprint');
+  const rate = () => 1 / (this.tickLen || 0.05);
+  if (sub === 'query') { this.cmdSay(ctx, (this.tickFrozen ? 'The game is frozen' : 'The game is running normally') + '. Target tick rate: ' + fmt(rate()) + ' per second'); return Math.round(rate()); }
+  if (sub === 'rate') { const v = r.num(1, 10000); this.tickLen = 1 / v; this.cmdSay(ctx, 'Set the target tick rate to ' + fmt(v) + ' per second'); return Math.round(v); }
+  if (sub === 'freeze') { this.tickFrozen = true; this.tickStep = 0; this.cmdSay(ctx, 'The game is frozen'); return 1; }
+  if (sub === 'unfreeze') { this.tickFrozen = false; this.cmdSay(ctx, 'The game is running normally'); return 1; }
+  if (sub === 'step') {
+    if (!this.tickFrozen) cfail('Can only step when the game is frozen (use /tick freeze first)');
+    const t = r.end() ? '1' : r.word();
+    if (t === 'stop') { this.tickStep = 0; this.cmdSay(ctx, 'Stepping stopped'); return 1; }
+    const n = parseInt(t, 10); if (!(n >= 1)) cfail('Invalid number of ticks');
+    this.tickStep = n; this.cmdSay(ctx, 'Stepping ' + n + ' tick(s)'); return n;
+  }
+  const t = r.word();
+  if (t === 'stop') { this.tickSprint = 0; this.cmdSay(ctx, 'Sprint stopped'); return 1; }
+  const n = parseInt(t, 10); if (!(n >= 1)) cfail('Invalid number of ticks');
+  this.tickSprint = n; this.cmdSay(ctx, 'Sprinting ' + n + ' tick(s)'); return n;
+};
+CMDS.difficulty = function (r, ctx) {
+  const names = ['peaceful', 'easy', 'normal', 'hard'];
+  if (r.end()) { const d = OPTIONS.difficulty; this.cmdSay(ctx, 'The difficulty is ' + names[d][0].toUpperCase() + names[d].slice(1)); return d; }
+  const t = r.word(), v = /^[0-3]$/.test(t) ? +t : names.indexOf(t);
+  if (v < 0) cfail('Invalid difficulty \'' + t + '\'');
+  if (this.meta && this.meta.hardcore) cfail('The difficulty did not change; it is already set to Hard');
+  if (OPTIONS.difficulty === v) cfail('The difficulty did not change; it is already set to ' + names[v][0].toUpperCase() + names[v].slice(1));
+  OPTIONS.difficulty = v; saveOptions();
+  this.cmdSay(ctx, 'The difficulty has been set to ' + names[v][0].toUpperCase() + names[v].slice(1));
+  return v;
+};
+CMDS.forceload = function (r, ctx) {
+  const m = this.meta, dim = this.world.dim, F = (m.forceload || (m.forceload = {}))[dim] || (m.forceload[dim] = []), sub = r.lit('add', 'remove', 'query');
+  const col = () => { const xs = r.word(), zs = r.word(); if (!zs) cfail('Incomplete (expected 2 coordinates)'); const x = xs[0] === '~' ? ctx.x + (parseFloat(xs.slice(1)) || 0) : parseFloat(xs), z = zs[0] === '~' ? ctx.z + (parseFloat(zs.slice(1)) || 0) : parseFloat(zs); return [Math.floor(x) >> 4, Math.floor(z) >> 4]; };
+  if (sub === 'query') {
+    if (r.end()) { this.cmdSay(ctx, F.length ? 'There are ' + F.length + ' force loaded chunks in ' + DIM_ID[dim] + ' at: ' + F.map(k => '[' + k.replace(',', ', ') + ']').join(', ') : 'No force loaded chunks were found in ' + DIM_ID[dim]); return F.length; }
+    const [cx, cz] = col();
+    if (!F.includes(cx + ',' + cz)) cfail('Chunk at [' + cx + ', ' + cz + '] in ' + DIM_ID[dim] + ' is not marked for force loading');
+    this.cmdSay(ctx, 'Chunk at [' + cx + ', ' + cz + '] in ' + DIM_ID[dim] + ' is marked for force loading'); return 1;
+  }
+  if (sub === 'remove' && r.peek() === 'all') { r.word(); const n = F.length; F.length = 0; this.cmdSay(ctx, 'Unmarked all force loaded chunks in ' + DIM_ID[dim]); return n; }
+  const a = col(), b = r.end() ? a : col(), list = [];
+  for (let cx = Math.min(a[0], b[0]); cx <= Math.max(a[0], b[0]); cx++) for (let cz = Math.min(a[1], b[1]); cz <= Math.max(a[1], b[1]); cz++) list.push(cx + ',' + cz);
+  if (list.length > 256) cfail('Too many chunks in the specified area (maximum 256, specified ' + list.length + ')');
+  let n = 0;
+  for (const k of list) { const i = F.indexOf(k); if (sub === 'add' && i < 0) { F.push(k); n++; } else if (sub === 'remove' && i >= 0) { F.splice(i, 1); n++; } }
+  if (!n) cfail(sub === 'add' ? 'No chunks were marked for force loading' : 'No chunks were removed from force loading');
+  const what = list.length === 1 ? 'chunk [' + list[0].replace(',', ', ') + ']' : n + ' chunks';
+  this.cmdSay(ctx, (sub === 'add' ? 'Marked ' : 'Unmarked ') + what + ' in ' + DIM_ID[dim] + (sub === 'add' ? ' to be force loaded' : ' for force loading'));
+  return n;
+};
+
+/* ---------------- data, items, loot, attributes ---------------- */
+// SNBT out: numbers with Java's suffixes where they matter, strings quoted
+function snbtOut(v, key) {
+  if (Array.isArray(v)) return '[' + v.map(x => snbtOut(x, key)).join(', ') + ']';
+  if (v && typeof v === 'object') return '{' + Object.entries(v).map(([k, x]) => (/^[A-Za-z0-9_.+\-]+$/.test(k) ? k : JSON.stringify(k)) + ': ' + snbtOut(x, k)).join(', ') + '}';
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (typeof v === 'number') {
+    if (['Pos', 'Motion', 'Rotation'].includes(key)) return (Number.isInteger(v) ? v.toFixed(1) : String(v)) + (key === 'Rotation' ? 'f' : 'd');
+    if (['Health', 'FallDistance', 'foodSaturationLevel'].includes(key)) return (Number.isInteger(v) ? v.toFixed(1) : String(+v.toFixed(4))) + 'f';
+    if (['OnGround', 'NoAI', 'Invulnerable', 'PersistenceRequired', 'Silent', 'Slot'].includes(key)) return v + 'b';
+    if (key === 'Fire') return v + 's';
+    return String(v);
+  }
+  return String(v);
+}
+function nbtPath(o, path) {
+  const parts = path.match(/[^.[\]]+|\[\d+\]/g) || [];
+  let v = o;
+  for (const p of parts) { if (v === undefined || v === null) return undefined; v = p[0] === '[' ? v[parseInt(p.slice(1), 10)] : v[p]; }
+  return v;
+}
+Game.prototype.blockNBT = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z), be = w.getBE(x, y, z);
+  if (!be) return null;
+  const o = { id: 'minecraft:' + BLOCK_NAMES[id], x, y: y - w.yOff, z };
+  if (be.items) o.Items = be.items.map((s, i) => s && { Slot: i, id: 'minecraft:' + ITEMS[s.id].name, count: s.count }).filter(Boolean);
+  if (be.cmd !== undefined) { o.Command = be.cmd; o.SuccessCount = be.success | 0; o.auto = be.auto ? 1 : 0; }
+  if (be.name) o.CustomName = JSON.stringify(be.name);
+  if (be.lines) o.front_text = { messages: be.lines.map(l => JSON.stringify(l)) };
+  return o;
+};
+CMDS.data = function (r, ctx) {
+  const sub = r.lit('get', 'merge', 'modify', 'remove'), kind = r.lit('entity', 'block', 'storage');
+  if (kind === 'storage') cfail('Storages are not supported');
+  let target, nbt, name;
+  if (kind === 'entity') { target = this.select(r.need('entity'), ctx, { single: true })[0]; if (!target) cfail('No entity was found'); nbt = this.entNBT(target); name = this.entName(target); }
+  else { target = this.readPos(r, ctx, 'block'); nbt = this.blockNBT(...target); if (!nbt) cfail('The target block is not a block entity'); name = showBlock(this, target); }
+  if (sub === 'get') {
+    if (r.end()) { this.cmdSay(ctx, name + ' has the following ' + kind + ' data: ' + snbtOut(nbt)); return 1; }
+    const path = r.word(), v = nbtPath(nbt, path), scale = r.end() ? 1 : r.num();
+    if (v === undefined) cfail('Found no elements matching ' + path);
+    this.cmdSay(ctx, name + ' has the following ' + kind + ' data: ' + snbtOut(v, path.replace(/\[\d+\]$/, '').split('.').pop()));
+    return typeof v === 'number' ? Math.floor(v * scale) : Array.isArray(v) ? v.length : typeof v === 'object' ? Object.keys(v).length : String(v).length;
+  }
+  if (sub === 'merge') {
+    const nb = parseSNBT(r.rest());
+    if (kind === 'entity') { if (target instanceof Player) cfail('Unable to modify player data'); this.applyEntNBT(target, nb); }
+    else this.applyBlockNBT(target[0], target[1], target[2], nb);
+    this.cmdSay(ctx, 'Modified ' + kind + ' data of ' + name);
+    return 1;
+  }
+  r.rest(); cfail('Only /data get and /data merge are supported here');
+};
+// slots by name: weapon.mainhand, armor.head, hotbar.0, inventory.0, container.0, enderchest.0
+function slotRef(g, e, name) {
+  const m = String(name).match(/^([a-z]+)(?:\.([a-z0-9]+))?$/);
+  if (!m) return null;
+  if (e instanceof Player) {
+    const k = m[1], i = parseInt(m[2], 10);
+    if (k === 'weapon') return m[2] === 'offhand' ? [e.offhand, 0] : [e.inv, e.sel];
+    if (k === 'armor') { const a = { head: 0, chest: 1, legs: 2, feet: 3 }[m[2]]; return a === undefined ? null : [e.armor, a]; }
+    if (k === 'hotbar' && i >= 0 && i < 9) return [e.inv, i];
+    if (k === 'inventory' && i >= 0 && i < 27) return [e.inv, 9 + i];
+    if (k === 'container' && i >= 0 && i < 36) return [e.inv, i];
+    if (k === 'enderchest' && i >= 0 && i < 27) return [e.ender, i];
+  }
+  return null;
+}
+CMDS.item = function (r, ctx) {
+  const sub = r.lit('replace', 'modify'), kind = r.lit('entity', 'block');
+  if (sub === 'modify') { r.rest(); cfail('Item modifiers are not supported'); }
+  let refs = [];
+  if (kind === 'entity') {
+    const list = this.needTargets(r, ctx), slot = r.word();
+    for (const e of list) { const ref = slotRef(this, e, slot); if (ref) refs.push(ref); }
+    if (!refs.length) cfail('No targets accepted item into slot ' + slot);
+  } else {
+    const pos = this.readPos(r, ctx, 'block'), slot = r.word(), be = this.world.getBE(...pos);
+    if (!be || !be.items) cfail('Target block is not a container');
+    const i = parseInt(slot.replace(/^container\./, ''), 10);
+    if (!(i >= 0 && i < be.items.length)) cfail('Target block doesn\'t have slot ' + slot);
+    refs.push([be.items, i]);
+  }
+  r.lit('with');
+  const st = this.readItem(r.need('item')), n = r.end() ? 1 : r.int(1, 99);
+  for (const [arr, i] of refs) arr[i] = Object.assign({}, st, { count: n });
+  this.ui.refreshHotbar(); if (this.ui.inv) this.ui.renderInv();
+  this.cmdSay(ctx, 'Replaced a slot on ' + refs.length + ' ' + (kind === 'entity' ? 'entities' : 'block') + ' with ' + n + ' [' + ITEMS[st.id].display + ']');
+  return refs.length;
+};
+CMDS.loot = function (r, ctx) {
+  const tk = r.lit('give', 'spawn', 'insert', 'replace');
+  let give = null, pos = null, ins = null;
+  if (tk === 'give') give = this.needTargets(r, ctx, { players: true });
+  else if (tk === 'spawn') pos = this.readPos(r, ctx);
+  else if (tk === 'insert') ins = this.readPos(r, ctx, 'block');
+  else { r.rest(); cfail('loot replace is not supported'); }
+  const src = r.lit('loot', 'mine', 'kill', 'fish');
+  let items = [];
+  if (src === 'loot') { const t = r.word(), key = lootTableKey(t); if (!key) cfail('Unknown loot table \'' + t + '\''); items = rollLoot(key, Math.random); }
+  else if (src === 'mine') { const b = this.readPos(r, ctx, 'block'); if (!r.end()) r.tok(); const w = this.world; items = (this.dropsFor(w.getBlock(...b), w.getMeta(...b), null) || []).slice(); }
+  else { r.rest(); cfail('This loot source is not supported'); }
+  const n = items.reduce((a, s) => a + s.count, 0);
+  if (give) for (const p of give) for (const s of items) { const rest = p.addItem(Object.assign({}, s)); if (rest) this.dropItem(p.x, p.y + 1, p.z, Object.assign({}, s, { count: rest })); }
+  else if (pos) for (const s of items) this.dropItem(pos[0], pos[1], pos[2], s);
+  else { const be = this.world.getBE(...ins); if (!be || !be.items) cfail('Target block is not a container'); for (const s of items) { const i = be.items.findIndex(x => !x); if (i >= 0) be.items[i] = s; } }
+  this.ui.refreshHotbar();
+  this.cmdSay(ctx, items.length === 1 ? 'Dropped ' + items[0].count + ' ' + ITEMS[items[0].id].display : 'Dropped ' + n + ' items');
+  return n;
+};
+// /attribute: what the game has of Java's attributes
+const ATTRS = {
+  max_health: { get: e => e.maxHealth, set: (e, v) => { e.maxHealth = v; if (e.health > v) e.health = v; }, base: e => e instanceof Player ? 20 : (e.T ? e.T.hp : 20) },
+  movement_speed: { get: e => e.speedAttr !== undefined ? e.speedAttr : e instanceof Player ? 0.1 : (e.T && e.T.walk) || 0.25, set: (e, v) => { e.speedAttr = v; }, base: e => e instanceof Player ? 0.1 : (e.T && e.T.walk) || 0.25 },
+  armor: { get: e => e.armorPoints ? e.armorPoints() : 0, base: () => 0 },
+  attack_damage: { get: e => e instanceof Player ? 1 : (e.T && e.T.dmg) || 0, base: e => e instanceof Player ? 1 : (e.T && e.T.dmg) || 0 },
+  scale: { get: e => e.scaleAttr || 1, set: (e, v) => { e.scaleAttr = v; }, base: () => 1 },
+  gravity: { get: e => e.gravityAttr !== undefined ? e.gravityAttr : 0.08, set: (e, v) => { e.gravityAttr = v; }, base: () => 0.08 },
+  jump_strength: { get: e => e.jumpAttr !== undefined ? e.jumpAttr : 0.42, set: (e, v) => { e.jumpAttr = v; }, base: () => 0.42 },
+  step_height: { get: e => e.stepH, set: (e, v) => { e.stepH = v; }, base: e => e instanceof Player ? 0.6 : 0.6 },
+};
+CMDS.attribute = function (r, ctx) {
+  const e = this.select(r.need('target'), ctx, { single: true })[0];
+  if (!e) cfail('No entity was found');
+  const an = nsKey(r.word()).replace(/^generic\.|^player\./, ''), A = ATTRS[an];
+  if (!A) cfail('Entity ' + this.entName(e) + ' has no attribute ' + an);
+  const sub = r.lit('get', 'base', 'modifier');
+  if (sub === 'get') { const sc = r.end() ? 1 : r.num(); const v = A.get(e); this.cmdSay(ctx, 'Value of attribute ' + an + ' for entity ' + this.entName(e) + ' is ' + fmt(v)); return Math.floor(v * sc); }
+  if (sub === 'modifier') { r.rest(); cfail('Attribute modifiers are not supported'); }
+  const k = r.lit('get', 'set', 'reset');
+  if (k === 'get') { const sc = r.end() ? 1 : r.num(); const v = A.base(e); this.cmdSay(ctx, 'Base value of attribute ' + an + ' for entity ' + this.entName(e) + ' is ' + fmt(v)); return Math.floor(v * sc); }
+  if (!A.set) cfail('Attribute ' + an + ' can\'t be changed here');
+  const v = k === 'reset' ? A.base(e) : r.num();
+  A.set(e, v);
+  this.cmdSay(ctx, (k === 'reset' ? 'Reset' : 'Set') + ' base value of attribute ' + an + ' for entity ' + this.entName(e) + ' to ' + fmt(v));
+  return 1;
+};
+CMDS.enchant = function (r, ctx) {
+  const list = !isTargetTok(r.peek()) && typeof ENCHANTS !== 'undefined' && ENCHANTS.some(d => d.key === nsKey(r.peek())) && ctx.ent ? [ctx.ent] : this.needTargets(r, ctx), rest = r.rest();
+  let n = 0;
+  for (const e of list) {
+    if (!(e instanceof Player)) { if (list.length === 1) cfail(this.entName(e) + ' is not holding any item'); continue; }
+    // the player's held item: the older command does the enchanting
+    const ui = this.ui, out = [], save = ui.chat;
+    ui.chat = (m, c) => out.push([m, c]);
+    try { this.onChatOld('/enchant ' + rest); } finally { ui.chat = save; }
+    for (const [m, c] of out) { if (c === '#f66') cfail(m); }
+    if (out.length) this._enchMsg = out[out.length - 1][0];
+    n++;
+  }
+  this.cmdSay(ctx, list.length === 1 && this._enchMsg ? this._enchMsg : 'Applied enchantment ' + rest.split(' ')[0].replace(/^minecraft:/, '') + ' to ' + n + ' entities');
+  return n;
+};
+CMDS.spectate = function (r, ctx) {
+  const p = this.player;
+  if (r.end()) { if (this.spectating) { this.spectating = null; this.cmdSay(ctx, 'Stopped spectating entity'); return 1; } cfail('No entity was found'); }
+  const t = this.select(r.tok(), ctx, { single: true })[0];
+  if (!t) cfail('No entity was found');
+  if (p.mode !== 3) cfail('Player ' + this.entName(p) + ' must be in spectator mode');
+  if (t === p) cfail('Cannot spectate self');
+  if (this.spectate) this.spectate(t); else this.spectating = t;
+  this.cmdSay(ctx, 'Now spectating ' + this.entName(t));
+  return 1;
+};
+CMDS.function = function (r) { const f = r.word(); cfail('Unknown function \'' + f + '\''); };
+CMDS.schedule = function (r) { r.rest(); cfail('There are no functions to schedule'); };
+
+/* ---------------- /execute ---------------- */
+const HEIGHTMAPS = ['world_surface', 'motion_blocking', 'motion_blocking_no_leaves', 'ocean_floor'];
+Game.prototype.heightmapAt = function (kind, x, z) {
+  const w = this.world;
+  let y = CH_TOP;
+  while (y > 0) {
+    const id = w.getBlock(x, y - 1, z), b = BLK[id];
+    if (id && (kind === 'world_surface' || (kind === 'ocean_floor' ? SOLID[id] : (SOLID[id] || b.liquid) && !(kind === 'motion_blocking_no_leaves' && b.leaves)))) break;
+    y--;
+  }
+  return y;
+};
+// a condition of /execute if|unless, tried in one context: how many things matched (0 = failed)
+Game.prototype.execCond = function (r, ctx) {
+  const k = r.lit('block', 'blocks', 'entity', 'score', 'biome', 'dimension', 'loaded', 'items', 'data', 'predicate', 'function'), w = this.world;
+  switch (k) {
+    case 'block': { const p = this.readPos(r, ctx, 'block'), pred = this.blockPred(r.need('block')); return this.cmdBlockOk(...p) && pred(w.getBlock(...p), w.getMeta(...p)) ? 1 : 0; }
+    case 'blocks': {
+      const a = this.readPos(r, ctx, 'block'), c = this.readPos(r, ctx, 'block'), d = this.readPos(r, ctx, 'block'), mode = r.lit('all', 'masked');
+      const x0 = Math.min(a[0], c[0]), y0 = Math.min(a[1], c[1]), z0 = Math.min(a[2], c[2]), sx = Math.abs(a[0] - c[0]) + 1, sy = Math.abs(a[1] - c[1]) + 1, sz = Math.abs(a[2] - c[2]) + 1;
+      if (sx * sy * sz > 32768) cfail('Too many blocks in the specified area (maximum 32768, specified ' + sx * sy * sz + ')');
+      let n = 0;
+      for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) for (let x = 0; x < sx; x++) {
+        const id = w.getBlock(x0 + x, y0 + y, z0 + z), m = w.getMeta(x0 + x, y0 + y, z0 + z);
+        if (mode === 'masked' && !id) continue;
+        if (id !== w.getBlock(d[0] + x, d[1] + y, d[2] + z) || m !== w.getMeta(d[0] + x, d[1] + y, d[2] + z)) return 0;
+        n++;
+      }
+      return n || (mode === 'masked' ? 1 : 0);
+    }
+    case 'entity': return this.select(r.need('entity'), ctx).length;
+    case 'score': {
+      const sb = this.scoreboard(), h = this.holderNames(r.tok(), ctx)[0], o = r.word(); sb.need(o);
+      const a = sb.get(h, o), op = r.word();
+      if (op === 'matches') { const rg = parseRange(r.word(), true); return a !== undefined && rg.test(a) ? 1 : 0; }
+      const h2 = this.holderNames(r.tok(), ctx)[0], o2 = r.word(); sb.need(o2);
+      const b = sb.get(h2, o2);
+      if (a === undefined || b === undefined) return 0;
+      const ok = op === '<' ? a < b : op === '<=' ? a <= b : op === '=' ? a === b : op === '>' ? a > b : op === '>=' ? a >= b : cfail('Invalid operation');
+      return ok ? 1 : 0;
+    }
+    case 'biome': {
+      const p = this.readPos(r, ctx, 'block'), t = r.word(), cur = this.biomeAtCmd(p);
+      if (t[0] === '#') { const tag = nsKey(t.slice(1)); return (tag === 'is_overworld' && w.dim === 'overworld') || (tag === 'is_nether' && w.dim === 'nether') || (tag === 'is_end' && w.dim === 'end') || (tag === 'is_ocean' && OCEAN_BIOMES.has(cur)) || (tag === 'is_badlands' && BADLANDS_BIOMES.has(cur)) || (tag === 'is_jungle' && JUNGLE_BIOMES.has(cur)) ? 1 : 0; }
+      return cur === worldBiomeId(t) ? 1 : 0;
+    }
+    case 'dimension': { const d = nsKey(r.word()); return DIM_ID[w.dim] === 'minecraft:' + d ? 1 : 0; }
+    case 'loaded': { const p = this.readPos(r, ctx, 'block'); return this.cmdBlockOk(...p) ? 1 : 0; }
+    case 'items': {
+      const where = r.lit('entity', 'block');
+      let arrs = [];
+      if (where === 'entity') { for (const e of this.select(r.need('entity'), ctx)) if (e instanceof Player) arrs.push(e); }
+      else { const p = this.readPos(r, ctx, 'block'), be = w.getBE(...p); if (be && be.items) arrs.push(be); }
+      const slots = r.word(), pred = this.itemPred(r.need('item'));
+      let n = 0;
+      for (const o of arrs) {
+        const list = o instanceof Player ? (slots === 'weapon.mainhand' || slots === 'weapon' ? [o.inv[o.sel]] : slots === 'weapon.offhand' ? [o.offhand[0]] : /^armor\./.test(slots) ? (slots === 'armor.*' ? o.armor : [o.armor[{ head: 0, chest: 1, legs: 2, feet: 3 }[slots.split('.')[1]]]]) : /^(container|inventory|hotbar)\.\*$/.test(slots) ? o.inv : (() => { const ref = slotRef(this, o, slots); return ref ? [ref[0][ref[1]]] : []; })()) : (slots === 'container.*' ? o.items : [o.items[parseInt(slots.replace(/^container\./, ''), 10)]]);
+        for (const s of list) if (s && pred(s)) n += s.count;
+      }
+      return n;
+    }
+    case 'data': {
+      const where = r.lit('entity', 'block', 'storage');
+      let nbt = null;
+      if (where === 'entity') { const e = this.select(r.need('entity'), ctx, { single: true })[0]; nbt = e ? this.entNBT(e) : null; }
+      else if (where === 'block') { const p = this.readPos(r, ctx, 'block'); nbt = this.blockNBT(...p); }
+      else r.word();
+      const v = nbt ? nbtPath(nbt, r.word()) : undefined;
+      return v === undefined ? 0 : Array.isArray(v) ? v.length : 1;
+    }
+    default: { r.word(); cfail(k === 'predicate' ? 'Unknown predicate' : 'Unknown function'); }
+  }
+};
+Game.prototype.biomeAtCmd = function (p) {
+  const w = this.world;
+  if (w.vanilla && w.dim === 'overworld') return this.genInfo().biomeAt(p[0], p[1] - w.yOff, p[2]);
+  const c = w.getChunk(p[0] >> 4, p[2] >> 4);
+  return c && c.biomes ? c.biomes[((p[2] & 15) << 4) | (p[0] & 15)] : -1;
+};
+// the entities related to one: on attacker / controller / leasher / origin / owner / passengers / target / vehicle
+Game.prototype.related = function (e, rel) {
+  switch (rel) {
+    case 'attacker': return e.lastAttacker && !e.lastAttacker.dead ? [e.lastAttacker] : [];
+    case 'target': return e.target && !e.target.dead ? [e.target] : [];
+    case 'owner': return e.data && e.data.owner && this.player ? [this.player] : [];
+    case 'origin': return e.owner && !e.owner.dead ? [e.owner] : [];
+    case 'vehicle': return e.riding ? [e.riding] : [];
+    case 'passengers': case 'controller': return e.rider ? [e.rider] : [];
+    case 'leasher': return e.data && e.data.leash === 'player' && this.player ? [this.player] : [];
+  }
+  return [];
+};
+CMDS.execute = function (r, ctx) {
+  let ctxs = [ctx];
+  const stores = [];
+  for (;;) {
+    if (r.end()) cfail('Unknown or incomplete command, see below for error');
+    const k = r.word(), next = [];
+    switch (k) {
+      case 'as': { const t = r.need('targets'); for (const c of ctxs) for (const e of this.select(t, c)) next.push(c.at({ ent: e })); break; }
+      case 'at': { const t = r.need('targets'); for (const c of ctxs) for (const e of this.select(t, c)) next.push(c.at({ x: e.x, y: e.y, z: e.z, yaw: e.yaw || 0, pitch: e.pitch || 0 })); break; }
+      case 'positioned': {
+        if (r.peek() === 'as') { r.word(); const t = r.need('targets'); for (const c of ctxs) for (const e of this.select(t, c)) next.push(c.at({ x: e.x, y: e.y, z: e.z })); }
+        else if (r.peek() === 'over') { r.word(); const hm = r.lit(...HEIGHTMAPS); for (const c of ctxs) next.push(c.at({ y: this.heightmapAt(hm, Math.floor(c.x), Math.floor(c.z)) })); }
+        else { const i0 = r.i; for (const c of ctxs) { r.i = i0; const p = this.readPos(r, c); next.push(c.at({ x: p[0], y: p[1], z: p[2], anchor: 'feet' })); } }
+        break;
+      }
+      case 'rotated': {
+        if (r.peek() === 'as') { r.word(); const t = r.need('targets'); for (const c of ctxs) for (const e of this.select(t, c)) next.push(c.at({ yaw: e.yaw || 0, pitch: e.pitch || 0 })); }
+        else { const i0 = r.i; for (const c of ctxs) { r.i = i0; const [yaw, pitch] = this.readRot(r, c); next.push(c.at({ yaw, pitch })); } }
+        break;
+      }
+      case 'facing': {
+        const face = (c, to) => { const ey = c.anchor === 'eyes' && c.ent ? this.entEye(c.ent) : c.y, dx = to[0] - c.x, dy = to[1] - ey, dz = to[2] - c.z; return c.at({ yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) }); };
+        if (r.peek() === 'entity') { r.word(); const t = r.need('targets'), an = r.lit('eyes', 'feet'); for (const c of ctxs) for (const e of this.select(t, c)) next.push(face(c, [e.x, an === 'eyes' ? this.entEye(e) : e.y, e.z])); }
+        else { const i0 = r.i; for (const c of ctxs) { r.i = i0; next.push(face(c, this.readPos(r, c))); } }
+        break;
+      }
+      case 'anchored': { const a = r.lit('eyes', 'feet'); for (const c of ctxs) next.push(c.at({ anchor: a })); break; }
+      case 'align': {
+        const ax = r.word();
+        if (!/^[xyz]{1,3}$/.test(ax) || new Set(ax).size !== ax.length) cfail('Invalid swizzle, expected combination of \'x\', \'y\' and \'z\'');
+        for (const c of ctxs) next.push(c.at({ x: ax.includes('x') ? Math.floor(c.x) : c.x, y: ax.includes('y') ? Math.floor(c.y - this.world.yOff) + this.world.yOff : c.y, z: ax.includes('z') ? Math.floor(c.z) : c.z }));
+        break;
+      }
+      case 'in': {
+        const d = nsKey(r.word()), cur = DIM_ID[this.world.dim];
+        if (!['overworld', 'the_nether', 'the_end'].includes(d)) cfail('Unknown dimension \'' + d + '\'');
+        if ('minecraft:' + d !== cur) cfail('Running commands in another dimension than the one loaded isn\'t supported');
+        next.push(...ctxs); break;
+      }
+      case 'on': { const rel = r.lit('attacker', 'controller', 'leasher', 'origin', 'owner', 'passengers', 'target', 'vehicle'); for (const c of ctxs) if (c.ent) for (const e of this.related(c.ent, rel)) next.push(c.at({ ent: e })); break; }
+      case 'summon': {
+        const t = r.word(), i0 = r.i;
+        for (const c of ctxs) {
+          const before = this.entities.length;
+          this.runCmd('summon ' + t + ' ' + c.x + ' ' + (c.y - this.world.yOff) + ' ' + c.z, c.at({ quiet: true }));
+          const e = this.entities[this.entities.length - 1];
+          if (this.entities.length > before && e) next.push(c.at({ ent: e }));
+        }
+        r.i = i0; break;
+      }
+      case 'if': case 'unless': {
+        const i0 = r.i;
+        let lastN = 0;
+        for (const c of ctxs) { r.i = i0; const n = this.execCond(r, c); lastN = n; if ((n > 0) === (k === 'if')) next.push(c); }
+        if (r.end()) {
+          // the condition ends the command: it passes or fails
+          if (!next.length) cfail('Test failed');
+          const cnt = k === 'if' && ctxs.length === 1 ? lastN : next.length;
+          this.cmdSay(ctx, cnt > 1 ? 'Test passed, count: ' + cnt : 'Test passed');
+          for (const s of stores) for (const c of next) this.execStore(s, c, cnt, 1);
+          return cnt;
+        }
+        break;
+      }
+      case 'store': {
+        const what = r.lit('result', 'success'), kind = r.lit('score', 'bossbar', 'entity', 'block', 'storage');
+        const s = { what, kind };
+        if (kind === 'score') { s.t = r.tok(); s.o = r.word(); }
+        else if (kind === 'bossbar') { s.id = nsKey(r.word()); s.f = r.lit('value', 'max'); }
+        else { s.target = kind === 'entity' ? r.tok() : kind === 'block' ? [r.word(), r.word(), r.word()].join(' ') : r.word(); s.path = r.word(); s.type = r.word(); s.scale = r.num(); }
+        stores.push(s); next.push(...ctxs); break;
+      }
+      case 'run': {
+        const sub = r.rest();
+        if (!sub) cfail('Unknown or incomplete command, see below for error');
+        let total = 0, okN = 0, lastErr = null;
+        for (const c of ctxs) {
+          let res = 0, ok = 0;
+          try { res = this.runCmd(sub, c); ok = 1; okN++; total += res; }
+          catch (e) { if (!(e instanceof CmdErr)) throw e; lastErr = e; if (ctxs.length === 1 || !stores.length) this.ui.chat(e.message, '#f66'); }
+          for (const s of stores) this.execStore(s, c, res, ok);
+        }
+        if (!okN && lastErr) { this._execQuietFail = true; throw new CmdErr(''); }
+        return ctxs.length === 1 ? total : okN;
+      }
+      default: cfail('Incorrect argument for command: ' + k);
+    }
+    ctxs = next;
+    if (!ctxs.length) {
+      // nothing left to run on: the rest of the command still has to read right, but does nothing
+      r.rest();
+      return 0;
+    }
+  }
+};
+Game.prototype.execStore = function (s, c, res, ok) {
+  const v = s.what === 'success' ? ok : res;
+  if (s.kind === 'score') { const sb = this.scoreboard(); sb.need(s.o); for (const h of this.holderNames(s.t, c)) sb.set(h, s.o, v); }
+  else if (s.kind === 'bossbar') { const b = this.bossbars()[s.id]; if (b) { b[s.f] = Math.max(s.f === 'max' ? 1 : 0, v | 0); this.ui.renderBossbars(); } }
+  else if (s.kind === 'entity') {
+    const e = this.select(s.target, c, { single: true })[0];
+    if (!e) return;
+    const val = v * s.scale;
+    if (s.path === 'Health') e.health = Math.max(0, Math.min(e.maxHealth || val, val));
+    else if (/^Motion\[[012]\]$/.test(s.path)) e[['vx', 'vy', 'vz'][+s.path[7]]] = val;
+    else if (/^Pos\[[012]\]$/.test(s.path)) { const i = +s.path[4]; if (i === 1) e.y = val + this.world.yOff; else e[i ? 'z' : 'x'] = val; }
+    else if (s.path === 'Fire') e.fireTicks = val | 0;
+  }
+};
+
+/* ---------------- the dispatcher ---------------- */
+const _onChatC2 = Game.prototype.onChat;
+Game.prototype.onChatOld = function (msg) { return _onChatC2.call(this, msg); };
+Game.prototype.cmdNew = function (msg) { const n = String(msg).replace(/^\s*\//, '').trim().split(/\s+/)[0].toLowerCase(); return !!CMDS[CMD_ALIAS[n] || n]; };
+Game.prototype.onChat = function (msg) {
+  if (typeof msg !== 'string' || msg[0] !== '/' || !this.world || !this.player || !this.cmdNew(msg)) return _onChatC2.call(this, msg);
+  const name = msg.slice(1).trim().split(/\s+/)[0].toLowerCase();
+  // without Allow Commands only a few commands work (the older handler says so)
+  if (!this.cmdSource && this.cheatsOn && !this.cheatsOn() && !(typeof FREE_COMMANDS !== 'undefined' && FREE_COMMANDS.has(name))) return _onChatC2.call(this, msg);
+  const ctx = this.cmdSource ? this.blockCtx(this.cmdSource[0], this.cmdSource[1], this.cmdSource[2]) : this.playerCtx();
+  try { const n = this.runCmd(msg, ctx); this.lastCmdResult = n; this.lastCmdOk = n > 0; }
+  catch (e) {
+    if (!(e instanceof CmdErr)) throw e;
+    if (e.message) this.ui.chat(e.message, '#f66');
+    this.lastCmdResult = 0; this.lastCmdOk = false;
+  }
+};
+// tab completion knows the new commands too
+if (typeof COMMAND_NAMES !== 'undefined') for (const k of Object.keys(CMDS).concat(Object.keys(CMD_ALIAS))) if (!COMMAND_NAMES.includes(k)) COMMAND_NAMES.push(k);
+if (typeof COMMAND_NAMES !== 'undefined') COMMAND_NAMES.sort();
+
+/* ---------------- every tick ---------------- */
+const _gameTickC2 = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  // /tick freeze: everything but the players stands still (a /tick step lets a few ticks through)
+  if (this.tickFrozen && !(this.tickStep > 0) && this.player && this.world) {
+    this.player.tick(this.input);
+    this.borderTick();
+    return;
+  }
+  if (this.tickStep > 0) this.tickStep--;
+  _gameTickC2.call(this);
+  if (!this.world || !this.player) return;
+  this.sbTick();
+  this.titleTick();
+  this.borderTick();
+  const w = this.world, m = this.meta;
+  if (this.sbDirty || w.tick % 20 === 0) { this.sbDirty = false; this.ui.renderSidebar(); }
+  // forced chunks load and stay
+  const F = m && m.forceload && m.forceload[w.dim];
+  if (F && F.length && w.tick % 10 === 0) for (const k of F) {
+    const [cx, cz] = k.split(',').map(Number);
+    if (!w.chunks.has(w.key(cx, cz))) { const c = new Chunk(cx, cz); w.chunks.set(w.key(cx, cz), c); this.requestChunk(c); }
+  }
+};
+// /tick rate and /tick sprint: the length of a tick, and ticks run as fast as they can
+const _playFrameC2 = Game.prototype.playFrame;
+Game.prototype.playFrame = function (dt) {
+  if (this.tickSprint > 0 && this.state === 'playing' && !this.ui.screen) {
+    const t0 = performance.now();
+    while (this.tickSprint > 0 && performance.now() - t0 < 40) { this.gameTick(); this.tickSprint--; }
+    if (!this.tickSprint) this.ui.chat('Sprint completed', '#ccc');
+  }
+  if (this.tickLen && this.tickLen !== 0.05) dt = dt * 0.05 / this.tickLen;
+  return _playFrameC2.call(this, dt);
+};
+// the world border also keeps the player from building past it
+const _useItemC2 = Game.prototype.placeBlock;
+Game.prototype.placeBlock = function (p, hit, id) {
+  if (this.meta && this.meta.border && hit) {
+    const b = this.border(), h = this.borderSize() / 2, k = this.world.dim === 'nether' ? 1 / 8 : 1, x = hit.x + DX[hit.face], z = hit.z + DZ[hit.face];
+    if (x < b.cx * k - h || x >= b.cx * k + h || z < b.cz * k - h || z >= b.cz * k + h) return false;
+  }
+  return _useItemC2.call(this, p, hit, id);
+};
+
+/* ---------------- saving ---------------- */
+// the player's tags and UUID ride in the save; the scoreboard, bars and border live in the world's meta
+const _playerDataC2 = Game.prototype.playerData;
+Game.prototype.playerData = function () {
+  const d = _playerDataC2.call(this), p = this.player;
+  if (d && p) { if (p.tags && p.tags.length) d.tags = p.tags.slice(); if (p.uuid) d.uuid = p.uuid; if (p.spawnForced) d.spawnForced = true; }
+  return d;
+};
+const _startWorldC2 = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) {
+  const r = _startWorldC2.call(this, meta, saved), s = meta.player, p = this.player;
+  if (p && s) { if (s.tags) p.tags = s.tags.slice(); if (s.uuid) p.uuid = s.uuid; }
+  this.titleT = null; this.titleTimes = null; this.tickLen = 0.05; this.tickFrozen = false; this.tickStep = 0; this.tickSprint = 0;
+  setTimeout(() => { if (this.ui) { this.ui.renderSidebar(); this.ui.renderBossbars(); } }, 0);
+  return r;
+};
+
+/* ---------------- /help ---------------- */
+const CMD_USAGE = {
+  advancement: '(grant|revoke) <targets> (everything|only|from|through|until) [<advancement>]', attribute: '<target> <attribute> (get [<scale>]|base (get|set <value>|reset))',
+  bossbar: '(add|get|list|remove|set) ...', clear: '[<targets>] [<item>] [<maxCount>]', clone: '<begin> <end> <destination> [replace|masked|filtered <filter>] [force|move|normal]',
+  damage: '<target> <amount> [<damageType>] [at <location>|by <entity>]', data: '(get|merge) (entity <target>|block <pos>) [<path>|<nbt>]', defaultgamemode: '<gamemode>',
+  difficulty: '[peaceful|easy|normal|hard]', effect: '(clear [<targets>] [<effect>]|give <targets> <effect> [<seconds>|infinite] [<amplifier>] [<hideParticles>])',
+  enchant: '<targets> <enchantment> [<level>]', execute: '(align|anchored|as|at|facing|if|in|on|positioned|rotated|store|summon|unless|run) ...', experience: '(add|set|query) <targets> ...',
+  fill: '<from> <to> <block> [destroy|hollow|keep|outline|replace [<filter>]]', fillbiome: '<from> <to> <biome> [replace <filter>]', forceload: '(add|remove|query) ...',
+  gamemode: '<gamemode> [<target>]', gamerule: '<rule> [<value>]', give: '<targets> <item> [<count>]', help: '[<command>]', item: 'replace (entity <targets>|block <pos>) <slot> with <item> [<count>]',
+  kill: '[<targets>]', list: '[uuids]', locate: '(structure|biome) <what>', loot: '(give <players>|spawn <pos>|insert <pos>) (loot <table>|mine <pos>)', me: '<action>', msg: '<targets> <message>',
+  particle: '<name> [<pos>] [<delta> <speed> <count> [force|normal] [<viewers>]]', playsound: '<sound> [<source>] [<targets>] [<pos>] [<volume>] [<pitch>] [<minVolume>]', random: '(value|roll) <range>',
+  recipe: '(give|take) <targets> (*|<recipe>)', ride: '<target> (mount <vehicle>|dismount)', say: '<message>', scoreboard: '(objectives|players) ...', seed: '', setblock: '<pos> <block> [destroy|keep|replace]',
+  setworldspawn: '[<pos>] [<angle>]', spawnpoint: '[<targets>] [<pos>] [<angle>]', spectate: '[<target>]', spreadplayers: '<center> <spreadDistance> <maxRange> [under <maxHeight>] <respectTeams> <targets>',
+  stopsound: '<targets> [<source>] [<sound>]', summon: '<entity> [<pos>] [<nbt>]', tag: '<targets> (add <name>|list|remove <name>)', team: '(add|empty|join|leave|list|modify|remove) ...',
+  teammsg: '<message>', teleport: '(<location>|<destination>|<targets> (<location> [<rotation>|facing ...]|<destination>))', tellraw: '<targets> <message>', tick: '(query|rate <rate>|freeze|unfreeze|step [<time>]|sprint <time>)',
+  time: '(add|query|set) ...', title: '<targets> (clear|reset|title <title>|subtitle <title>|actionbar <title>|times <fadeIn> <stay> <fadeOut>)', trigger: '<objective> [add|set <value>]',
+  weather: '(clear|rain|thunder) [<duration>]', worldborder: '(add|center|damage|get|set|warning) ...',
+};
+CMDS.help = function (r, ctx) {
+  if (!r.end()) {
+    const n = r.word().replace(/^\//, ''), k = CMD_ALIAS[n] || n;
+    if (CMD_USAGE[k] === undefined) cfail('Unknown command or insufficient permissions');
+    this.ui.chat('/' + n + ' ' + CMD_USAGE[k], '#ccc');
+    return 1;
+  }
+  const names = Object.keys(CMD_USAGE).concat(Object.keys(CMD_ALIAS)).sort();
+  for (const n of names) this.ui.chat('/' + n + ' ' + (CMD_USAGE[CMD_ALIAS[n] || n] || ''), '#ccc');
+  return names.length;
 };
 
 </script>

@@ -65,33 +65,43 @@ place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots
 
 ### Commands
 
-| Command | What it does |
-| --- | --- |
-| `/gamemode survival\|creative\|adventure\|spectator` | Switch game mode |
-| `/defaultgamemode <mode>` | The world's default game mode |
-| `/recipe give\|take @s <item\|*>` | Unlock or lock recipes in the recipe book |
-| `/advancement grant\|revoke @s everything\|only\|from\|through\|until [advancement]` | Give or take advancements (ids like `story/mine_diamond`) |
-| `/time set day\|noon\|night\|midnight\|<n>`, `/time add <n>` | Change the time |
-| `/weather clear\|rain\|thunder` | Change the weather |
-| `/tp <x> <y> <z>` | Teleport (`~` means relative) |
-| `/give <item> [count]` | Give yourself items, by their Java Edition names |
-| `/summon <mob> [x y z]` | Spawn any mob, the Ender Dragon or an end crystal |
-| `/kill`, `/kill @e[type=<mob>]` | Kill yourself, or every entity (of one type) |
-| `/effect give <effect> [seconds\|infinite] [amplifier]`, `/effect clear [effect]` | Status effects |
-| `/enchant <enchantment> [level]` | Enchant the item in your hand |
-| `/xp add\|set <amount> [points\|levels]`, `/xp query` | Experience |
-| `/gamerule <rule> [value]` | All of Java Edition 1.21's game rules (saved with the world), see [Game rules](#game-rules) |
-| `/locate <structure\|biome>` | Find the nearest structure or biome (vanilla ids such as `monument` or `village_plains` work) |
-| `/setblock <x> <y> <z> <block>`, `/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [replace\|keep\|hollow\|outline\|destroy]` | Edit blocks |
-| `/say <message>` | Say something in chat |
-| `/spawnpoint`, `/clear`, `/seed`, `/difficulty <0-3>`, `/dim overworld\|nether\|end`, `/help` | Everything else |
+Commands work like Java Edition 1.21's, with its syntax and its feedback:
 
-Target selectors such as `@p` and `@s` are accepted where the player is meant. Commands also run
-from command blocks (see [Redstone](#redstone-and-automation)).
+- **Target selectors** `@p`, `@r`, `@a`, `@e`, `@s` and `@n` with their arguments (`type`, `tag`,
+  `name`, `distance`, `x`/`y`/`z`/`dx`/`dy`/`dz`, `limit`, `sort`, `scores`, `level`, `gamemode`,
+  `x_rotation`, `y_rotation`, `advancements`, `nbt`), negation (`type=!zombie`) and entity tags
+  (`#skeletons`, `#raiders`...).
+- **Coordinates**: absolute, relative `~` and local `^ ^ ^` (left, up, forward); rotations.
+- **`/execute`** with `as`, `at`, `positioned` (also `as` and `over`), `rotated`, `facing`,
+  `anchored`, `align`, `in`, `on`, `summon`, `if`/`unless` (`block`, `blocks`, `entity`, `score`,
+  `biome`, `dimension`, `loaded`, `items`, `data`), `store result|success` (scores, boss bars,
+  entity health and motion) and `run`.
+- **Scoreboards**: objectives with `dummy`, `trigger`, `deathCount`, `totalKillCount`, `health`,
+  `food`, `air`, `armor`, `level`, `xp` and every statistic (`minecraft.mined:minecraft.stone`,
+  `minecraft.custom:minecraft.jump`...), the sidebar, `/scoreboard players` with `operation`,
+  `/trigger`, and teams.
+- **Text**: `/tellraw` and `/title` (title, subtitle, action bar, times) with JSON text (colours,
+  bold, italic, `selector` and `score` parts), `/say`, `/me`, `/msg`, `/teammsg`.
+- **The world border** (`/worldborder` set, add over time, center, damage, warning) with its striped
+  wall, its push-back and its damage.
+- And: `/tp` (to entities, with rotation or `facing`), `/kill`, `/give` (with 1.21 item components
+  like `diamond_sword[enchantments={levels:{sharpness:5}}]`), `/clear`, `/effect`, `/enchant`,
+  `/xp`, `/summon` (with NBT such as `{NoAI:1b,Tags:["a"],CustomName:'"Bob"'}`), `/setblock`,
+  `/fill` (with `replace <filter>`), `/clone` (`masked`, `filtered`, `move`, `force`),
+  `/fillbiome`, `/data get|merge`, `/item replace`, `/loot`, `/particle`, `/playsound`,
+  `/stopsound`, `/bossbar`, `/tag`, `/team`, `/spawnpoint`, `/setworldspawn`, `/spreadplayers`,
+  `/ride`, `/damage`, `/attribute`, `/random`, `/tick` (rate, freeze, step, sprint), `/forceload`,
+  `/spectate`, `/difficulty`, `/list`, `/time`, `/weather`, `/gamemode`, `/defaultgamemode`,
+  `/gamerule`, `/locate`, `/recipe`, `/advancement`, `/seed` and `/help`.
+
+Command blocks (impulse, chain, repeating, conditional) run them from their own position, so
+selectors and `~` count from the block (see [Redstone](#redstone-and-automation)). There are no
+data packs, so `/function` and `/schedule` have nothing to run.
 
 Commands need **Allow Commands**, set when the world is created like in Java Edition: off for
 Survival, on for Creative, always off for Hardcore (Quick Play worlds and worlds from earlier
-versions of Blockcraft have it on). Without it, only `/help` and `/seed` are there.
+versions of Blockcraft have it on). Without it, only the commands any Java player has are there
+(`/help`, `/seed`, `/me`, `/msg`, `/list`, `/random`, `/trigger`, `/teammsg`).
 
 ## What's in the game
 
