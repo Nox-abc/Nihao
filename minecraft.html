@@ -255,7 +255,9 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <div class="field"><label>Seed for the world generator (leave blank for random)</label><input id="in-seed"></div>
   <button class="btn" id="b-mode">Game Mode: Survival</button>
   <div class="hint" id="mode-hint">Search for resources, craft, gain levels, health and hunger</div>
-  <button class="btn" id="b-cheats">Allow Commands: ON</button>
+  <button class="btn" id="b-cdiff">Difficulty: Normal</button>
+  <button class="btn" id="b-cheats">Allow Commands: OFF</button>
+  <div class="hint">Whether commands like /gamemode, /experience can be used</div>
   <div class="sep"></div>
   <div class="row"><button class="btn half" id="b-docreate">Create New World</button><button class="btn half" id="b-cback">Cancel</button></div>
 </div>
@@ -290,8 +292,9 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
 </div>
 
 <div id="scr-death" class="screen hidden">
-  <div class="big">You Died!</div>
+  <div class="big" id="death-title">You Died!</div>
   <div class="hint" id="death-msg" style="color:#fff"></div>
+  <div class="hint" id="death-score" style="color:#fff">Score: <span style="color:#ffff55">0</span></div>
   <div class="sep"></div>
   <button class="btn" id="b-respawn">Respawn</button>
   <button class="btn" id="b-dtitle">Title Screen</button>
@@ -11427,7 +11430,7 @@ class Projectile extends Entity {
       const d = this.dir, l = Math.hypot(d[0], d[1], d[2]) || 1;
       if (this.kind === 'trident' && this.loyalty && this.age > 20) { this.returning = true; return; }
       if (!SOLID[w.getBlock(Math.floor(this.x + d[0] / l * 0.2), Math.floor(this.y + d[1] / l * 0.2), Math.floor(this.z + d[2] / l * 0.2))]) { this.stuck = false; return; }
-      if (this.pickup && pl && !pl.dead && Math.abs(pl.x - this.x) < 1.2 && Math.abs(pl.z - this.z) < 1.2 && this.y > pl.y - 0.5 && this.y < pl.y + 2.3) {
+      if (this.pickup && pl && !pl.dead && pl.mode !== 3 && Math.abs(pl.x - this.x) < 1.2 && Math.abs(pl.z - this.z) < 1.2 && this.y > pl.y - 0.5 && this.y < pl.y + 2.3) {
         const st = this.kind === 'trident' ? this.stack : (this.arrowStack || { id: I.ARROW, count: 1 });
         if (!pl.addItem(copyStack(st, 1))) { this.dead = true; g.sound('pop', this.x, this.y, this.z); g.ui.refreshHotbar(); }
       }
@@ -13658,7 +13661,7 @@ class Mob extends Entity {
     // brain
     this.move = null;
     if (this.anger > 0) this.anger--;
-    if (this.target && (this.target.dead || this.target.deathTime > 0 || (this.target instanceof Player && (this.target.mode !== 0 || this.target.dead)))) this.target = null;
+    if (this.target && (this.target.dead || this.target.deathTime > 0 || (this.target instanceof Player && (!this.target.survival || this.target.dead)))) this.target = null;
     if (this.rider && this.T.rideable) this.riddenTick();
     else if (!this.data.noAI) this.think();
     if (--this.ambientT <= 0) { this.ambientT = 240 + Math.random() * 480; if (this.T.sounds && !this.data.silent) g.sound(this.T.sounds[0], this.x, this.y + this.h / 2, this.z); }
@@ -14017,13 +14020,13 @@ const GOALS = {
   // look at the player now and then
   look(m) {
     const p = m.game.player;
-    if (p && !p.dead && m.distTo(p) < 8) { if (!m._lookT || m._lookT < m.age) { if (Math.random() < 0.02) m._lookT = m.age + 40 + Math.random() * 40; } if (m._lookT > m.age) m.lookAt(p.x, p.y + 1.6, p.z); }
+    if (p && !p.dead && p.mode !== 3 && m.distTo(p) < 8) { if (!m._lookT || m._lookT < m.age) { if (Math.random() < 0.02) m._lookT = m.age + 40 + Math.random() * 40; } if (m._lookT > m.age) m.lookAt(p.x, p.y + 1.6, p.z); }
     return false;
   },
   // follow a player holding food it likes
   tempt(m) {
     const T = m.T, p = m.game.player;
-    if (!p || p.dead || !T.tempt && !T.breed) return false;
+    if (!p || p.dead || p.mode === 3 || !T.tempt && !T.breed) return false;
     const list = T.tempt || T.breed, has = s => s && list.includes(ITEMS[s.id].name);
     if (!has(p.held) && !has(p.offhand[0])) return false;
     const d = m.distTo(p);
@@ -14066,7 +14069,7 @@ const GOALS = {
   },
   avoidPlayer(m) {
     const p = m.game.player;
-    if (!p || p.dead || p.mode !== 0 || p.sneaking || m.data.tame || m.data.trusting) return false;
+    if (!p || p.dead || !p.survival || p.sneaking || m.data.tame || m.data.trusting) return false;
     const d = m.distTo(p);
     if (d > (m.type === 'rabbit' ? 6 : 8)) return false;
     const away = Math.atan2(m.x - p.x, m.z - p.z);
@@ -14078,7 +14081,7 @@ const GOALS = {
     const T = m.T, g = m.game, p = g.player;
     if (m.target) {
       const t = m.target, d = m.distTo(t);
-      if (d > T.follow * 1.3 || (t instanceof Player && (t.mode !== 0 || t.dead)) || t.dead || t.deathTime > 0) m.target = null;
+      if (d > T.follow * 1.3 || (t instanceof Player && (!t.survival || t.dead)) || t.dead || t.deathTime > 0) m.target = null;
       else if (T.neutral && m.anger <= 0 && t instanceof Player) m.target = null;
       else if (T.neutralDay && t instanceof Player && m.anger <= 0 && g.isDay() && m.lightLevel() > 11 && Math.random() < 0.01) m.target = null;
       if (m.target) return false;
@@ -14092,7 +14095,7 @@ const GOALS = {
     }
     // the player
     const hostile = T.cat === 'monster' && !T.neutral && !(T.neutralDay && g.isDay() && m.lightLevel() > 11) && m.type !== 'piglin';
-    if (p && !p.dead && p.mode === 0 && hostile) {
+    if (p && !p.dead && p.survival && hostile) {
       let range = T.follow;
       if (p.effectLevel('invisibility')) range *= 0.07;
       if (p.sneaking) range *= 0.8;
@@ -14179,7 +14182,7 @@ const GOALS = {
   },
   enderStare(m) {
     const p = m.game.player;
-    if (!p || p.dead || p.mode !== 0 || m.target === p) return false;
+    if (!p || p.dead || !p.survival || m.target === p) return false;
     if (p.armor[0] && p.armor[0].id === B.CARVED_PUMPKIN) return false;
     const e = p.eye(), lk = p.look(), dx = m.x - e[0], dy = m.y + m.h * 0.9 - e[1], dz = m.z - e[2], d = Math.hypot(dx, dy, dz);
     if (d > 64) return false;
@@ -14241,7 +14244,7 @@ const GOALS = {
     return true;
   },
   phantom(m) {
-    const p = m.game.player, t = m.target && m.target instanceof Player ? m.target : (p && p.mode === 0 && !p.dead && m.distTo(p) < 64 ? p : null);
+    const p = m.game.player, t = m.target && m.target instanceof Player ? m.target : (p && p.survival && !p.dead && m.distTo(p) < 64 ? p : null);
     m.target = t;
     if (!m.data.anchor) m.data.anchor = [m.x, m.y, m.z];
     const an = t ? [t.x, t.y + 18, t.z] : m.data.anchor;
@@ -14316,13 +14319,13 @@ const GOALS = {
     }
     if ((m.data.ramCd = (m.data.ramCd === undefined ? 600 : m.data.ramCd) - 1) > 0) return false;
     const p = m.game.player;
-    if (p && p.mode === 0 && !p.dead && m.distTo(p) < 12 && m.distTo(p) > 4 && m.canSee(p)) { m.data.ramTarget = p; m.data.ramT = 60; m.data.ram = 1; return true; }
+    if (p && p.survival && !p.dead && m.distTo(p) < 12 && m.distTo(p) > 4 && m.canSee(p)) { m.data.ramTarget = p; m.data.ramT = 60; m.data.ram = 1; return true; }
     m.data.ramCd = 200;
     return false;
   },
   roll(m) {
     const p = m.game.player;
-    const threat = (p && p.mode === 0 && !p.dead && m.distTo(p) < 7 && (p.sprinting || m.age - (m.lastHurtAge || -999) < 200)) || m.game.entities.some(e => e instanceof Mob && e.T.cat === 'monster' && m.distTo(e) < 7);
+    const threat = (p && p.survival && !p.dead && m.distTo(p) < 7 && (p.sprinting || m.age - (m.lastHurtAge || -999) < 200)) || m.game.entities.some(e => e instanceof Mob && e.T.cat === 'monster' && m.distTo(e) < 7);
     m.data.roll = Math.max(0, Math.min(1, (m.data.roll || 0) + (threat ? 0.1 : -0.02)));
     if (m.data.roll > 0.5) { m.nav = null; return true; }
     return false;
@@ -14907,6 +14910,11 @@ class Player extends Entity {
     this.lastAttack = -100; this.using = null; this.gliding = false; this.boost = 0; this.pearlCd = 0; this.freeze = 0;
   }
   get held() { return this.inv[this.sel]; }
+  // game modes: 0 survival, 1 creative, 2 adventure, 3 spectator
+  get survival() { return this.mode === 0 || this.mode === 2; }  // hurt, hungry, hunted, pays for things
+  get creative() { return this.mode === 1; }
+  get spectator() { return this.mode === 3; }
+  get mayBuild() { return this.mode === 0 || this.mode === 1; }  // may break and place blocks
   // what the held tool does to drops: silk touch, fortune, shears
   toolInfo() {
     const h = this.inv[this.sel], o = { silk: false, fortune: 0, shears: false };
@@ -14992,7 +15000,7 @@ class Player extends Entity {
   }
   // ---------- damage ----------
   hurt(amount, source, attacker) {
-    if (this.dead || (this.mode === 1 && source !== 'void' && source !== 'kill')) return false;
+    if (this.dead || ((this.mode === 1 || this.mode === 3) && source !== 'void' && source !== 'kill')) return false;
     const fire = source === 'fire' || source === 'lava' || source === 'magma' || source === 'fireball' || source === 'in_fire';
     if (fire && this.effectLevel('fire_resistance')) return false;
     if (this.invuln > 0 && source !== 'kill' && source !== 'void') return false;
@@ -15224,7 +15232,7 @@ class Player extends Entity {
     // footsteps
     if (this.onGround && !this.sneaking && Math.floor(this.walkDist * 1.4) !== Math.floor(this.pwalkDist * 1.4)) {
       const b = w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z));
-      if (b) { g.sound('step_' + BLK[b].sound, this.x, this.y, this.z); if (!this.sneaking && this.mode === 0) g.vibrate(this.x, this.y, this.z, 'step', this); }
+      if (b) { g.sound('step_' + BLK[b].sound, this.x, this.y, this.z); if (!this.sneaking && this.survival) g.vibrate(this.x, this.y, this.z, 'step', this); }
     }
     if (this.inWater && !this.wasInWater && prevVy < -0.3) { g.sound('splash', this.x, this.y, this.z); g.particles.splash(this.x, this.y + 0.5, this.z); }
     this.wasInWater = this.inWater;
@@ -15268,7 +15276,7 @@ class Player extends Entity {
     }
     this.vx *= 0.99; this.vy *= 0.98; this.vz *= 0.99;
     this.fallDist = 0;
-    if (this.age % 20 === 0 && this.mode === 0) { this.armor[1] = this.wear(this.armor[1], 1); if (!this.armor[1]) this.gliding = false; }
+    if (this.age % 20 === 0 && this.survival) { this.armor[1] = this.wear(this.armor[1], 1); if (!this.armor[1]) this.gliding = false; }
   }
   survivalTick() {
     const g = this.game, w = g.world;
@@ -15387,7 +15395,7 @@ class Player extends Entity {
       const qc = enchLevel(st, 'quick_charge'), need = 25 - 5 * qc;
       if (u.t === need) {
         g.sound('click', this.x, this.y, this.z);
-        if (this.mode === 0) { const i = this.findArrow(); if (i >= 0) { const a = this.arrowStack(i); st.tag = Object.assign({}, st.tag || {}, { charged: { id: a.id, tag: a.tag } }); this.useArrow(i, st); } }
+        if (this.survival) { const i = this.findArrow(); if (i >= 0) { const a = this.arrowStack(i); st.tag = Object.assign({}, st.tag || {}, { charged: { id: a.id, tag: a.tag } }); this.useArrow(i, st); } }
         else st.tag = Object.assign({}, st.tag || {}, { charged: { id: I.ARROW } });
         g.ui.refreshHotbar();
       }
@@ -15460,11 +15468,11 @@ class Player extends Entity {
     const i = this.findArrow(), a = i >= 0 || i === -2 ? this.arrowStack(i) : { id: I.ARROW };
     const e = this.eye(), d = this.look(), v = f * 3;
     const pr = g.spawnProjectile('arrow', e[0], e[1] - 0.1, e[2], d[0] * v, d[1] * v, d[2] * v, this);
-    pr.crit = f >= 1; pr.pickup = this.mode === 0 && !(enchLevel(bow, 'infinity') && a.id === I.ARROW);
+    pr.crit = f >= 1; pr.pickup = this.survival && !(enchLevel(bow, 'infinity') && a.id === I.ARROW);
     pr.power = enchLevel(bow, 'power'); pr.punch = enchLevel(bow, 'punch'); pr.flame = enchLevel(bow, 'flame') > 0;
     pr.arrowStack = { id: a.id, count: 1, tag: a.tag };
     g.sound('bow', this.x, this.y + 1.5, this.z);
-    if (this.mode === 0) { if (i !== -1) this.useArrow(i, bow); this.damageHand(hand, 1); }
+    if (this.survival) { if (i !== -1) this.useArrow(i, bow); this.damageHand(hand, 1); }
     g.ui.refreshHotbar();
   }
   shootCrossbow(st, hand) {
@@ -15474,7 +15482,7 @@ class Player extends Entity {
       const c = Math.cos(off), s = Math.sin(off), dx = d[0] * c - d[2] * s, dz = d[0] * s + d[2] * c;
       if (ch.id === I.FIREWORK_ROCKET) { const pr = g.spawnProjectile('fire', e[0], e[1] - 0.1, e[2], dx * 1.6, d[1] * 1.6, dz * 1.6, this); pr.firework = true; continue; }
       const pr = g.spawnProjectile('arrow', e[0], e[1] - 0.1, e[2], dx * 3.15, d[1] * 3.15, dz * 3.15, this);
-      pr.crit = true; pr.pickup = this.mode === 0 && off === 0; pr.pierce = enchLevel(st, 'piercing'); pr.arrowStack = { id: ch.id, count: 1, tag: ch.tag };
+      pr.crit = true; pr.pickup = this.survival && off === 0; pr.pierce = enchLevel(st, 'piercing'); pr.arrowStack = { id: ch.id, count: 1, tag: ch.tag };
     }
     delete st.tag.charged; if (!Object.keys(st.tag).length) delete st.tag;
     g.sound('bow', this.x, this.y + 1.5, this.z);
@@ -15493,8 +15501,8 @@ class Player extends Entity {
     }
     const pr = g.spawnProjectile('trident', e[0], e[1] - 0.1, e[2], d[0] * 2.5, d[1] * 2.5, d[2] * 2.5, this);
     pr.stack = copyStack(st, 1); pr.loyalty = enchLevel(st, 'loyalty'); pr.impaling = enchLevel(st, 'impaling'); pr.channeling = enchLevel(st, 'channeling') > 0;
-    if (this.mode === 0) { pr.stack = this.wear(pr.stack, 1) || pr.stack; if (hand === 'off') this.offhand[0] = null; else this.inv[this.sel] = null; }
-    pr.pickup = this.mode === 0;
+    if (this.survival) { pr.stack = this.wear(pr.stack, 1) || pr.stack; if (hand === 'off') this.offhand[0] = null; else this.inv[this.sel] = null; }
+    pr.pickup = this.survival;
     g.sound('throw', this.x, this.y + 1.5, this.z);
     g.ui.refreshHotbar();
   }
@@ -15644,17 +15652,19 @@ class UI {
   }
   refreshBars() {
     const p = this.game.player; if (!p) return;
-    const surv = p.mode === 0;
+    const surv = p.survival, hc = this.game.meta && this.game.meta.hardcore ? 'Hc' : '';
     $('bars').style.visibility = surv ? 'visible' : 'hidden';
     $('xpbar').style.visibility = surv ? 'visible' : 'hidden';
     if (!surv) return;
     const poison = p.effectLevel('poison'), wither = p.effectLevel('wither'), hunger = p.effectLevel('hunger');
-    const key = Math.ceil(p.health) + '|' + p.maxHealth + '|' + Math.ceil(p.absorb) + '|' + p.food + '|' + Math.ceil(p.air / 30) + '|' + p.xpLevel + '|' + p.xp + '|' + p.armorPoints() + '|' + poison + wither + hunger;
+    const key = Math.ceil(p.health) + '|' + p.maxHealth + '|' + Math.ceil(p.absorb) + '|' + p.food + '|' + Math.ceil(p.air / 30) + '|' + p.xpLevel + '|' + p.xp + '|' + p.armorPoints() + '|' + poison + wither + hunger + hc;
     if (key === this._bk) return;
     this._bk = key;
     const hp = Math.ceil(p.health), kind = wither ? 'wither' : poison ? 'poison' : 'heart';
     let h = '';
-    for (let i = 0; i < Math.ceil(p.maxHealth / 2); i++) h += `<div class="icon18" style="background-image:url(${hp >= i * 2 + 2 ? HUD_ICONS[kind] : hp === i * 2 + 1 ? HUD_ICONS[kind + 'Half'] : HUD_ICONS.empty})"></div>`;
+    // hardcore worlds have their own hearts
+    const hk = k => HUD_ICONS[k + hc] || HUD_ICONS[k];
+    for (let i = 0; i < Math.ceil(p.maxHealth / 2); i++) h += `<div class="icon18" style="background-image:url(${hp >= i * 2 + 2 ? hk(kind) : hp === i * 2 + 1 ? hk(kind + 'Half') : hk('empty')})"></div>`;
     const ab = Math.ceil(p.absorb);
     for (let i = 0; i < Math.ceil(ab / 2); i++) h += `<div class="icon18" style="background-image:url(${ab >= i * 2 + 2 ? HUD_ICONS.absorb : HUD_ICONS.absorbHalf})"></div>`;
     $('hearts').innerHTML = h;
@@ -15690,7 +15700,7 @@ class UI {
     const p = this.game.player, c = $('cooldown');
     if (!p || p.dead || this.hudHidden) { c.style.display = 'none'; return; }
     const k = p.attackStrength(0);
-    c.style.display = k < 1 && p.mode === 0 ? 'block' : 'none';
+    c.style.display = k < 1 && p.mode !== 3 ? 'block' : 'none';
     if (k < 1) c.firstChild.style.width = Math.round(k * 16) * 2 + 'px';
   }
   totemFlash() {
@@ -15734,11 +15744,12 @@ class UI {
     click('b-controls', () => { this.back = 'scr-title'; this.show('scr-controls'); });
     click('b-kback', () => this.show(this.back || 'scr-title'));
     click('b-wback', () => this.show('scr-title'));
-    click('b-create', () => { this.newMode = 0; this.updateModeBtn(); $('in-name').value = 'New World'; $('in-seed').value = ''; this.show('scr-create'); });
+    click('b-create', () => { this.newMode = 0; this.newCheats = null; this.newDiff = OPTIONS.difficulty; this.updateModeBtn(); $('in-name').value = 'New World'; $('in-seed').value = ''; this.show('scr-create'); });
     click('b-cback', () => this.openWorlds());
-    click('b-mode', () => { this.newMode = (this.newMode + 1) % 2; this.updateModeBtn(); });
-    click('b-cheats', () => { });
-    click('b-docreate', () => g.createWorld({ name: $('in-name').value.trim() || 'New World', seed: $('in-seed').value.trim(), mode: this.newMode }));
+    click('b-mode', () => { this.newMode = (this.newMode + 1) % 3; this.updateModeBtn(); });
+    click('b-cdiff', () => { this.newDiff = (this.newDiff + 1) % 4; this.updateModeBtn(); });
+    click('b-cheats', () => { this.newCheats = !this.newCheatsOn(); this.updateModeBtn(); });
+    click('b-docreate', () => g.createWorld({ name: $('in-name').value.trim() || 'New World', seed: $('in-seed').value.trim(), mode: this.newMode === 2 ? 1 : 0, hardcore: this.newMode === 1, cheats: this.newCheatsOn(), difficulty: this.newMode === 1 ? 3 : this.newDiff }));
     click('b-play', () => { if (this.selWorld) g.loadWorld(this.selWorld); });
     click('b-delete', async () => {
       if (!this.selWorld) return;
@@ -15772,9 +15783,16 @@ class UI {
     if (hit.length === 1) inp.value = v.slice(0, v.length - m[2].length) + hit[0] + ' ';
     else if (hit.length) this.chat(hit.slice(0, 30).join(', '), '#aaa');
   }
+  // newMode: 0 Survival, 1 Hardcore, 2 Creative (the order of the vanilla button)
+  newCheatsOn() { return this.newMode === 1 ? false : this.newCheats !== null && this.newCheats !== undefined ? this.newCheats : this.newMode === 2; }
   updateModeBtn() {
-    $('b-mode').textContent = 'Game Mode: ' + (this.newMode ? 'Creative' : 'Survival');
-    $('mode-hint').textContent = this.newMode ? 'Unlimited resources, free flying and destroy blocks instantly' : 'Search for resources, craft, gain levels, health and hunger';
+    const m = this.newMode || 0;
+    $('b-mode').textContent = 'Game Mode: ' + ['Survival', 'Hardcore', 'Creative'][m];
+    $('mode-hint').textContent = ['Search for resources, craft, gain levels, health and hunger', 'Same as Survival Mode, locked at hardest difficulty, and one life only', 'Unlimited resources, free flying and destroy blocks instantly'][m];
+    $('b-cdiff').textContent = 'Difficulty: ' + ['Peaceful', 'Easy', 'Normal', 'Hard'][m === 1 ? 3 : this.newDiff === undefined ? 2 : this.newDiff];
+    $('b-cdiff').disabled = m === 1;
+    $('b-cheats').textContent = 'Allow Commands: ' + (this.newCheatsOn() ? 'ON' : 'OFF');
+    $('b-cheats').disabled = m === 1;
   }
   async openWorlds() {
     this.show('scr-worlds');
@@ -15786,7 +15804,7 @@ class UI {
     this.selWorld = null; $('b-play').disabled = true; $('b-delete').disabled = true;
     if (!worlds.length) list.innerHTML = '<div class="hint">No worlds yet. Create one!</div>';
     for (const w of worlds) {
-      const d = el('div', 'world', `<div class="wn">${escapeHTML(w.name)}</div><div class="wd">${new Date(w.lastPlayed || w.created).toLocaleString()} — ${w.hardcore ? 'Hardcore' : w.mode ? 'Creative' : 'Survival'} — seed ${w.seed}</div>`);
+      const d = el('div', 'world', `<div class="wn">${escapeHTML(w.name)}</div><div class="wd">${new Date(w.lastPlayed || w.created).toLocaleString()} — ${worldModeLabel(w)} — seed ${w.seed}</div>`);
       d.onclick = () => { for (const x of list.children) x.classList.remove('sel'); d.classList.add('sel'); this.selWorld = w; $('b-play').disabled = false; $('b-delete').disabled = false; };
       d.ondblclick = () => this.game.loadWorld(w);
       list.appendChild(d);
@@ -18362,7 +18380,7 @@ class Game {
   async createWorld(o) {
     // the seed as Java Edition reads it: a whole number in the long range, or else the text's hash
     const seed64 = javaSeed(o.seed), seed = Number(BigInt.asIntN(32, BigInt(seed64)));
-    const meta = { id: 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: o.name, seed, seed64, gen: 'vanilla', h: CH_H, mode: o.mode, created: Date.now(), lastPlayed: Date.now(), time: 1000, player: null };
+    const meta = { id: 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: o.name, seed, seed64, gen: 'vanilla', h: CH_H, mode: o.mode, hardcore: !!o.hardcore, cheats: o.cheats !== undefined ? !!o.cheats : !o.hardcore, difficulty: o.hardcore ? 3 : o.difficulty, created: Date.now(), lastPlayed: Date.now(), time: 1000, player: null };
     this.noSave = false;
     try { await DB.putWorld(meta); } catch (e) { this.noSave = true; }
     this.startWorld(meta, new Set());
@@ -18409,7 +18427,7 @@ class Game {
       p.savePrev();
       this.waitSpawn = false;
       if (s.dead) { p.health = 0; }
-    } else if (p.mode === 0) {
+    } else if (p.mode !== 1) {
       // nothing in hands — punch a tree!
     } else {
       const starter = ['grass_block', 'dirt', 'stone', 'cobblestone', 'oak_planks', 'oak_log', 'glass', 'torch', 'tnt'];
@@ -18861,10 +18879,10 @@ class Game {
         case 'KeyT': inp.reset(); this.ui.openChat(''); e.preventDefault(); break;
         case 'Slash': inp.reset(); this.ui.openChat('/'); e.preventDefault(); break;
         case 'KeyQ': this.dropHeld(e.ctrlKey); break;
-        case 'KeyF': { const a = p.inv[p.sel]; p.inv[p.sel] = p.offhand[0]; p.offhand[0] = a; p.using = null; p.equip = 1; p.lastAttack = p.age; this.ui.refreshHotbar(); this.ui.showItemName(p.held); break; }
+        case 'KeyF': { if (p.mode === 3) break; const a = p.inv[p.sel]; p.inv[p.sel] = p.offhand[0]; p.offhand[0] = a; p.using = null; p.equip = 1; p.lastAttack = p.age; this.ui.refreshHotbar(); this.ui.showItemName(p.held); break; }
         case 'F1': this.ui.hudHidden = !this.ui.hudHidden; $('hud').classList.toggle('hidden', this.ui.hudHidden); break;
         case 'F2': this.screenshot = true; break;
-        case 'F3': this.ui.debug = !this.ui.debug; if (!this.ui.debug) { $('debug').innerHTML = ''; $('debugR').innerHTML = ''; } break;
+        case 'F3': this.f3Down = true; this.f3Used = false; break;
         case 'F5': this.thirdPerson = (this.thirdPerson + 1) % 3; break;
         case 'Escape': this.releasePointer(); this.ui.show('scr-pause'); $('pause-hint').textContent = ''; break;
       }
@@ -18960,7 +18978,7 @@ class Game {
   isDay() { const t = this.world.time % 24000; return t < 12300 || t > 23700; }
   difficultyDmg(d) { return [0, d * 0.5 + 1, d, d * 1.5][OPTIONS.difficulty] || d; }
   get difficulty() { return OPTIONS.difficulty; }
-  mobsAndPlayer() { const a = this.entities.filter(e => e instanceof Mob); if (this.player && !this.player.dead) a.push(this.player); return a; }
+  mobsAndPlayer() { const a = this.entities.filter(e => e instanceof Mob); if (this.player && !this.player.dead && this.player.mode !== 3) a.push(this.player); return a; }
   gameTick() {
     const w = this.world, p = this.player;
     w.tick++; w.time++;
@@ -18982,7 +19000,8 @@ class Game {
     this.displayTicks();
     if (w.tick % 20 === 0) { this.spawnMobs(); if (w.dim === 'end') this.ensureExitPortal(); }
     if (this.spawnQueue && this.spawnQueue.length) { const q = this.spawnQueue; for (let i = q.length - 1; i >= 0; i--) { const c = q[i]; if (c.state >= 2 || !w.chunks.has(w.key(c.cx, c.cz))) { q.splice(i, 1); if (c.state >= 2 && w.chunks.get(w.key(c.cx, c.cz)) === c) this.initialSpawn(c); } } }
-    if (!this.sleeping && p.mode === 0 && w.dim === 'overworld') p.awake = (p.awake || 0) + 1;
+    // the time since rest statistic counts in every mode and dimension
+    if (!this.sleeping && !p.dead) p.awake = (p.awake || 0) + 1;
     this.pathBudget = 6;
     if (this.ui.inv && ['furnace', 'smoker', 'blast_furnace', 'brewing'].includes(this.ui.inv.type) && w.tick % 2 === 0) this.ui.renderInv();
     this.input.endTick();
@@ -19100,7 +19119,7 @@ class Game {
         }
       }
     }
-    if (OPTIONS.difficulty > 0 && hostile < 8 && p.mode === 0) {
+    if (OPTIONS.difficulty > 0 && hostile < 8 && p.survival) {
       const dark = this.skyDarken();
       for (let k = 0; k < 3; k++) {
         const pos = tryPos(24, 56);
@@ -19121,7 +19140,7 @@ class Game {
   }
   spawnOther(hostile, tryPos) {
     const w = this.world, p = this.player, nether = w.dim === 'nether';
-    if (OPTIONS.difficulty === 0 || p.mode !== 0 || hostile >= (nether ? 10 : 12)) return;
+    if (OPTIONS.difficulty === 0 || !p.survival || hostile >= (nether ? 10 : 12)) return;
     const minY = nether ? 31 : 20;
     for (let k = 0; k < 4; k++) {
       const pos = tryPos(nether ? 20 : 16, nether ? 56 : 64);
@@ -19301,7 +19320,7 @@ class Game {
       for (let i = 0; i < 4; i++) drop(p.armor, i);
       drop(p.offhand, 0);
       const xp = Math.min(100, p.xpLevel * 7);
-      if (xp > 0 && p.mode === 0) this.spawnXP(p.x, p.y + 0.5, p.z, xp);
+      if (xp > 0 && p.mode !== 3) this.spawnXP(p.x, p.y + 0.5, p.z, xp);
       p.xpLevel = 0; p.xp = 0;
     }
     p.clearEffects(); p.fireTicks = 0; p.freeze = 0;
@@ -20160,7 +20179,7 @@ Object.assign(Game.prototype, {
       this.tryToSleep(p, hit); return true;
     }
     if (id === B.CAKE) {
-      if (p.food >= 20 && p.mode === 0) return false;
+      if (p.food >= 20 && p.survival) return false;
       p.food = Math.min(20, p.food + 2); p.sat = Math.min(p.food, p.sat + 0.4);
       this.sound('eat', x + 0.5, y + 0.5, z + 0.5);
       if ((m & 7) >= 6) w.setBlock(x, y, z, 0, 0); else w.setMeta(x, y, z, m + 1);
@@ -20180,15 +20199,15 @@ Object.assign(Game.prototype, {
     }
     if (id === B.CAULDRON && it) {
       const lv = m & 3, fluid = m & 12;
-      if (held.id === I.WATER_BUCKET) { w.setMeta(x, y, z, 3); if (p.mode === 0) p.inv[p.sel] = { id: I.BUCKET, count: 1 }; this.sound('bucket', x + 0.5, y + 1, z + 0.5); return done(); }
-      if (held.id === I.LAVA_BUCKET) { w.setMeta(x, y, z, 3 | 4); if (p.mode === 0) p.inv[p.sel] = { id: I.BUCKET, count: 1 }; this.sound('bucket', x + 0.5, y + 1, z + 0.5); return done(); }
-      if (held.id === I.POWDER_SNOW_BUCKET) { w.setMeta(x, y, z, 3 | 8); if (p.mode === 0) p.inv[p.sel] = { id: I.BUCKET, count: 1 }; return done(); }
+      if (held.id === I.WATER_BUCKET) { w.setMeta(x, y, z, 3); if (p.survival) p.inv[p.sel] = { id: I.BUCKET, count: 1 }; this.sound('bucket', x + 0.5, y + 1, z + 0.5); return done(); }
+      if (held.id === I.LAVA_BUCKET) { w.setMeta(x, y, z, 3 | 4); if (p.survival) p.inv[p.sel] = { id: I.BUCKET, count: 1 }; this.sound('bucket', x + 0.5, y + 1, z + 0.5); return done(); }
+      if (held.id === I.POWDER_SNOW_BUCKET) { w.setMeta(x, y, z, 3 | 8); if (p.survival) p.inv[p.sel] = { id: I.BUCKET, count: 1 }; return done(); }
       if (held.id === I.BUCKET && lv === 3) {
         const full = fluid === 4 ? I.LAVA_BUCKET : fluid === 8 ? I.POWDER_SNOW_BUCKET : I.WATER_BUCKET;
         w.setMeta(x, y, z, 0); this.giveOrReplace(p, { id: full, count: 1 }); this.sound('bucket', x + 0.5, y + 1, z + 0.5); return done();
       }
       if (held.id === I.GLASS_BOTTLE && lv > 0 && !fluid) { w.setMeta(x, y, z, lv - 1); this.giveOrReplace(p, { id: I.POTION, count: 1, tag: { potion: 'water' } }); this.sound('splash', x + 0.5, y + 1, z + 0.5); return done(); }
-      if (held.id === I.POTION && held.tag && held.tag.potion === 'water' && lv < 3 && !fluid) { w.setMeta(x, y, z, lv + 1); if (p.mode === 0) p.inv[p.sel] = { id: I.GLASS_BOTTLE, count: 1 }; this.sound('splash', x + 0.5, y + 1, z + 0.5); return done(); }
+      if (held.id === I.POTION && held.tag && held.tag.potion === 'water' && lv < 3 && !fluid) { w.setMeta(x, y, z, lv + 1); if (p.survival) p.inv[p.sel] = { id: I.GLASS_BOTTLE, count: 1 }; this.sound('splash', x + 0.5, y + 1, z + 0.5); return done(); }
       if (lv > 0 && !fluid && it.dyeable && held.tag && held.tag.color !== undefined) { delete held.tag.color; if (!Object.keys(held.tag).length) delete held.tag; w.setMeta(x, y, z, lv - 1); return done(); }
       return false;
     }
@@ -20215,7 +20234,7 @@ Object.assign(Game.prototype, {
       if (m) {
         const plant = POTTABLE[m - 1];
         w.setMeta(x, y, z, 0);
-        if (p.mode === 0 || !p.held) this.giveOrDrop(p, { id: itemOf(plant), count: 1 });
+        if (p.survival || !p.held) this.giveOrDrop(p, { id: itemOf(plant), count: 1 });
         return done();
       }
       if (it && it.block && POTTABLE.includes(BLK[it.block].name)) { w.setMeta(x, y, z, POTTABLE.indexOf(BLK[it.block].name) + 1); p.consumeHeld(1); this.sound('place_grass', x + 0.5, y + 0.5, z + 0.5); return done(); }
@@ -20375,7 +20394,7 @@ Object.assign(Game.prototype, {
         this.sound('fizz', x + 0.5, y + 0.5, z + 0.5); this.particles.smoke(x + 0.5, y + 0.3, z + 0.5, 10);
       } else w.setBlock(x, y, z, fluid, 0);
       if (it.fishBucket && this.spawnMob) this.spawnMob(it.fishBucket, x + 0.5, y + 0.2, z + 0.5);
-      if (p.mode === 0) p.inv[p.sel] = { id: I.BUCKET, count: 1 };
+      if (p.survival) p.inv[p.sel] = { id: I.BUCKET, count: 1 };
       this.sound('bucket', x, y, z); return done(x, z);
     }
     // ---- lily pads float on water
@@ -20599,7 +20618,7 @@ Object.assign(Game.prototype, {
     this.particles.blockBreak(x, y, z, id);
     this.sound('break_' + d.sound, x + 0.5, y + 0.5, z + 0.5);
     const tool = byPlayer && byPlayer.toolInfo ? byPlayer.toolInfo() : null;
-    if (natural || (byPlayer && byPlayer.mode === 0 && byPlayer.canHarvest(id))) {
+    if (natural || (byPlayer && byPlayer.survival && byPlayer.canHarvest(id))) {
       const head = d.bed ? !!(meta & 4) : false;
       for (const st of this.dropsFor(id, head ? meta & ~4 : meta, tool)) this.dropItem(x + 0.5, y + 0.3, z + 0.5, st);
     }
@@ -20608,7 +20627,7 @@ Object.assign(Game.prototype, {
     if (be && be.type === 'furnace') this.furnaces.delete(this.beKey(x, y, z));
     if (be && this.brewers) this.brewers.delete(this.beKey(x, y, z));
     if (d.log || d.leaves) this.scheduleLeafDecay(x, y, z);
-    if (d.infested && byPlayer && byPlayer.mode === 0 && this.spawnMob) this.spawnMob('silverfish', x + 0.5, y, z + 0.5);
+    if (d.infested && byPlayer && byPlayer.survival && this.spawnMob) this.spawnMob('silverfish', x + 0.5, y, z + 0.5);
     if (this.onBroken) this.onBroken(x, y, z, id, meta);
   },
   playerBreak(x, y, z) {
@@ -20616,7 +20635,7 @@ Object.assign(Game.prototype, {
     if (!id || d.hard < 0) return;
     const harvest = p.canHarvest(id);
     // shulker boxes keep their contents
-    if (d.shulker && p.mode === 0) {
+    if (d.shulker && p.survival) {
       const be = w.getBE(x, y, z), st = { id, count: 1 };
       if (be && be.items && be.items.some(s => s)) st.tag = { items: be.items.map(saveStack) };
       w.setBlock(x, y, z, 0, 0); this.dropItem(x + 0.5, y + 0.5, z + 0.5, st);
@@ -20624,7 +20643,7 @@ Object.assign(Game.prototype, {
       this.remeshNear(x, z); return;
     }
     this.breakBlock(x, y, z, p, false);
-    if (p.mode === 0) {
+    if (p.survival) {
       const it = ITEMS[p.heldId()];
       if (it && it.tool && d.hard > 0) p.damageHeld(it.tool.type === 'sword' ? 2 : 1);
       p.exh += 0.005;
@@ -21133,7 +21152,7 @@ SCREEN_LOGIC.enchant = {
     const p = ui.game.player, lapis = ui.inv.local[1] ? ui.inv.local[1].count : 0;
     const [ek, el2] = o.list[0];
     let h = `<div class="tt0" style="color:#fff">${escapeHTML(enchantName(ek, el2))} . . . ?</div>`;
-    if (p.mode === 0) {
+    if (p.survival) {
       h += `<div style="color:${lapis >= k + 1 ? '#aaaaaa' : '#ff5555'}">${k + 1} Lapis Lazuli</div>`;
       h += `<div style="color:${p.xpLevel >= o.level ? '#aaaaaa' : '#ff5555'}">${k + 1} Enchantment Level${k ? 's' : ''}</div>`;
       if (p.xpLevel < o.level) h += `<div style="color:#ff5555">Level Requirement: ${o.level}</div>`;
@@ -21143,12 +21162,12 @@ SCREEN_LOGIC.enchant = {
   choose(ui, k) {
     const opt = this.options(ui), o = opt && opt[k], p = ui.game.player, st = ui.inv.local[0], lap = ui.inv.local[1];
     if (!o || !o.list.length || !st) return;
-    if (p.mode === 0 && (p.xpLevel < o.level || !lap || lap.count < k + 1)) return;
+    if (p.survival && (p.xpLevel < o.level || !lap || lap.count < k + 1)) return;
     const ench = {};
     for (const [ek, l] of o.list) ench[ek] = l;
     if (st.id === I.BOOK) { ui.inv.local[0] = { id: I.ENCHANTED_BOOK, count: 1, tag: { stored: ench } }; }
     else st.tag = Object.assign({}, st.tag || {}, { ench });
-    if (p.mode === 0) { p.takeLevels(k + 1); lap.count -= k + 1; if (lap.count <= 0) ui.inv.local[1] = null; }
+    if (p.survival) { p.takeLevels(k + 1); lap.count -= k + 1; if (lap.count <= 0) ui.inv.local[1] = null; }
     p.enchSeed = (Math.random() * 1e9) | 0;
     ui.game.sound('enchant', p.x, p.y + 1, p.z);
     ui.game.ui.refreshBars();
@@ -21221,16 +21240,16 @@ SCREEN_LOGIC.anvil = {
   },
   changed(ui, c, i) { if (c === 'local' && i === 0) { const st = ui.inv.local[0]; ui.inv.name = st ? (st.tag && st.tag.name || ITEMS[st.id].display) : ''; if (ui._an) ui._an.value = ui.inv.name; } },
   calc(ui) { const [l, r] = ui.inv.local; return anvilResult(l, r, ui.inv.name, ui.game.player.mode === 1); },
-  result(ui) { const r = this.calc(ui), p = ui.game.player; if (!r) return null; if (p.mode === 0 && (r.cost >= 40 || p.xpLevel < r.cost)) return null; return r.out; },
+  result(ui) { const r = this.calc(ui), p = ui.game.player; if (!r) return null; if (p.survival && (r.cost >= 40 || p.xpLevel < r.cost)) return null; return r.out; },
   take(ui) {
     const r = this.calc(ui), p = ui.game.player, d = ui.inv.data;
-    if (p.mode === 0) p.takeLevels(r.cost);
+    if (p.survival) p.takeLevels(r.cost);
     ui.inv.local[0] = null;
     const rr = ui.inv.local[1];
     if (rr) { rr.count -= r.used; if (rr.count <= 0) ui.inv.local[1] = null; }
     // anvils wear out
     const w = ui.game.world, cur = w.getBlock(d.x, d.y, d.z);
-    if (p.mode === 0 && Math.random() < 0.12) {
+    if (p.survival && Math.random() < 0.12) {
       const next = cur === B.ANVIL ? B.CHIPPED_ANVIL : cur === B.CHIPPED_ANVIL ? B.DAMAGED_ANVIL : 0;
       w.setBlock(d.x, d.y, d.z, next, next ? w.getMeta(d.x, d.y, d.z) : 0);
       ui.game.remeshNear(d.x, d.z);
@@ -21242,7 +21261,7 @@ SCREEN_LOGIC.anvil = {
     const r = this.calc(ui), p = ui.game.player, c = ui._ac;
     if (!c) return;
     if (!r) { c.textContent = ''; return; }
-    if (p.mode === 0 && r.cost >= 40) { c.textContent = 'Too Expensive!'; c.style.color = '#ff6060'; }
+    if (p.survival && r.cost >= 40) { c.textContent = 'Too Expensive!'; c.style.color = '#ff6060'; }
     else { c.textContent = 'Enchantment Cost: ' + r.cost; c.style.color = p.mode === 1 || p.xpLevel >= r.cost ? '#80ff20' : '#ff6060'; }
     c.style.textShadow = '2px 2px 0 #3f3f3f';
   },
@@ -21288,7 +21307,7 @@ class XPOrb extends Entity {
     this.savePrev(); this.age++;
     const g = this.game, p = g.player;
     this.updateFluids();
-    if (p && !p.dead) {
+    if (p && !p.dead && p.mode !== 3) {
       const dx = p.x - this.x, dy = p.y + 0.9 - this.y, dz = p.z - this.z, d = Math.hypot(dx, dy, dz);
       if (d < 8) { const k = (1 - d / 8) ** 2 * 0.1; this.vx += dx / d * k; this.vy += dy / d * k; this.vz += dz / d * k; }
       if (d < 1.2 && this.age > 8 && (p.orbCd || 0) <= p.age) { p.orbCd = p.age + 2; this.dead = true; p.addXP(this.value); g.ui.refreshBars(); return; }
@@ -21590,13 +21609,13 @@ Object.assign(GOALS, {
     const g = m.game, p = g.player;
     const gold = g.entities.find(e => e instanceof ItemEntity && !e.dead && e.stack.id === I.GOLD_INGOT && m.distTo(e) < 10);
     if (gold && !m.target) { m.goTo(gold.x, gold.y, gold.z, m.T.walk * 1.2, 1); return true; }
-    if (p && !p.dead && p.mode === 0 && m.distTo(p) < 8 && p.held && (p.held.id === I.GOLD_INGOT || ITEMS[p.held.id].name.startsWith('golden_') || ITEMS[p.held.id].name === 'gold_block') && !m.target) { m.lookAt(p.x, p.y + 1.5, p.z); m.nav = null; return true; }
+    if (p && !p.dead && p.survival && m.distTo(p) < 8 && p.held && (p.held.id === I.GOLD_INGOT || ITEMS[p.held.id].name.startsWith('golden_') || ITEMS[p.held.id].name === 'gold_block') && !m.target) { m.lookAt(p.x, p.y + 1.5, p.z); m.nav = null; return true; }
     return false;
   },
   piglinCombat(m) {
     const g = m.game, p = g.player;
     // players in gold armour are left alone
-    if (!m.target && p && !p.dead && p.mode === 0 && m.distTo(p) < 16 && !m.baby && !p.armor.some(s => s && ITEMS[s.id].name.startsWith('golden_')) && m.canSee(p)) { m.target = p; m.anger = 600; }
+    if (!m.target && p && !p.dead && p.survival && m.distTo(p) < 16 && !m.baby && !p.armor.some(s => s && ITEMS[s.id].name.startsWith('golden_')) && m.canSee(p)) { m.target = p; m.anger = 600; }
     if (m.target instanceof Player && m.anger <= 0 && p.armor.some(s => s && ITEMS[s.id].name.startsWith('golden_'))) m.target = null;
     if (!m.target) return false;
     if (m.data.hand && m.data.hand.id === I.CROSSBOW) return GOALS.ranged(m);
@@ -22138,7 +22157,7 @@ Object.assign(Game.prototype, {
     if (!this.sensors) this.sensors = new Map();
     if ((this.sensors.get(key) || 0) > now) return;
     this.sensors.set(key, now + 90);
-    if (!p || p.mode !== 0) return;
+    if (!p || !p.survival) return;
     // the player's warning level: shared by all shriekers, it fades after 10 minutes of quiet
     if (p.wardenCd > now) return;
     p.wardenCd = now + 200;
@@ -22203,7 +22222,7 @@ class Warden extends Mob {
   save() { const o = super.save(); o.d = Object.assign({}, this.data, { state: this.state === 'emerge' ? 'idle' : this.state }); return o; }
   keepWhenUnloaded() { return true; }
   immune(source) { return this.state === 'emerge' || this.state === 'dig' || source === 'fire' || source === 'lava' || source === 'in_fire'; }
-  angerAt(e, n) { if (!e || e === this || e instanceof Warden || (e instanceof Player && e.mode !== 0)) return; const v = Math.min(150, (this.anger.get(e) || 0) + n); this.anger.set(e, v); if (v >= 80 && this.state === 'idle' && !this.target) { this.target = e; this.setState('roar', 84); } }
+  angerAt(e, n) { if (!e || e === this || e instanceof Warden || (e instanceof Player && !e.survival)) return; const v = Math.min(150, (this.anger.get(e) || 0) + n); this.anger.set(e, v); if (v >= 80 && this.state === 'idle' && !this.target) { this.target = e; this.setState('roar', 84); } }
   hear(x, y, z, src, kind) {
     this.investigate = [x, y, z];
     if (src) this.angerAt(src, kind === 'projectile' ? 35 : 10);
@@ -22219,7 +22238,7 @@ class Warden extends Mob {
     // heartbeat speeds up with anger
     const maxA = Math.max(0, ...this.anger.values()), beat = Math.max(10, 40 - maxA / 5);
     if (++this.heart >= beat) { this.heart = 0; g.sound('heartbeat', this.x, this.y + 2, this.z); }
-    if (this.age % 120 === 0) for (const p of [g.player]) if (p && !p.dead && this.distTo(p) < 20 && p.mode === 0) p.addEffect('darkness', 260, 0);
+    if (this.age % 120 === 0) for (const p of [g.player]) if (p && !p.dead && this.distTo(p) < 20 && p.survival) p.addEffect('darkness', 260, 0);
     if (this.stateT > 0) this.stateT--;
     switch (this.state) {
       case 'emerge':
@@ -22239,7 +22258,7 @@ class Warden extends Mob {
         return;
       case 'sniff':
         this.move = null;
-        if (this.stateT === 20) { const near = [g.player, ...g.entities.filter(e => e instanceof Mob && e !== this && e.T.cat !== 'ambient')].filter(e => e && !e.dead && this.distTo(e) < 12 && !(e instanceof Player && e.mode !== 0)); near.sort((a, b) => this.distTo(a) - this.distTo(b)); if (near[0]) this.angerAt(near[0], 35); g.sound('warden_sniff', this.x, this.y + 2, this.z); }
+        if (this.stateT === 20) { const near = [g.player, ...g.entities.filter(e => e instanceof Mob && e !== this && e.T.cat !== 'ambient')].filter(e => e && !e.dead && this.distTo(e) < 12 && !(e instanceof Player && !e.survival)); near.sort((a, b) => this.distTo(a) - this.distTo(b)); if (near[0]) this.angerAt(near[0], 35); g.sound('warden_sniff', this.x, this.y + 2, this.z); }
         if (this.stateT <= 0) this.setState(this.target ? 'fight' : 'idle');
         return;
     }
@@ -22428,7 +22447,7 @@ class EnderDragon extends Mob {
     this.healers = g.entities.filter(e => e instanceof EndCrystal && !e.dead && Math.hypot(e.x - this.x, e.y - this.y, e.z - this.z) < 32);
     if (this.healers.length && this.age % 10 === 0) this.health = Math.min(this.maxHealth, this.health + 1);
     let tx, ty, tz, sp = 0.42;
-    const engaged = pl && !pl.dead && pl.mode === 0 && g.world.dim === 'end' && Math.hypot(pl.x, pl.z) < 180;
+    const engaged = pl && !pl.dead && pl.survival && g.world.dim === 'end' && Math.hypot(pl.x, pl.z) < 180;
     if (this.phase === 'swoop' && engaged) {
       this.phaseT++;
       tx = pl.x; ty = pl.y + 0.6; tz = pl.z; sp = 0.75;
@@ -22500,7 +22519,7 @@ class Wither extends Mob {
   }
   think() {
     const g = this.game, p = g.player;
-    if (!this.target || this.target.dead) this.target = p && p.mode === 0 && !p.dead && this.distTo(p) < 64 ? p : g.entities.find(e => e instanceof Mob && !e.dead && !e.T.undead && e.T.cat !== 'misc' && this.distTo(e) < 20) || null;
+    if (!this.target || this.target.dead) this.target = p && p.survival && !p.dead && this.distTo(p) < 64 ? p : g.entities.find(e => e instanceof Mob && !e.dead && !e.T.undead && e.T.cat !== 'misc' && this.distTo(e) < 20) || null;
     const t = this.target;
     let tx = this.x, ty = this.y, tz = this.z;
     if (t) { tx = t.x + Math.sin(this.age * 0.02) * 6; tz = t.z + Math.cos(this.age * 0.02) * 6; ty = t.y + 5; this.lookAt(t.x, t.y + t.h, t.z); }
@@ -25347,6 +25366,7 @@ class ArmorStand extends Mob {
     const g = this.game, p = g.player;
     if (source === 'fall' || source === 'drown') return false;
     if (attacker === p && p.mode === 1) { this.breakApart(true); return true; }
+    if (attacker === p && !p.mayBuild) return false;
     if (source === 'fire' || source === 'lava' || source === 'in_fire') { this.health -= amount; if (this.health <= 0) this.breakApart(false); return true; }
     // two quick punches break it; one makes it wobble
     if (this.age - this.lastPunch < 5 || source === 'explosion') { this.breakApart(false); return true; }
@@ -26936,7 +26956,7 @@ AUDIO.play = function (name, x, y, z) {
 // every minute each elder guardian within 50 blocks lays Mining Fatigue III on the player, with its ghostly face
 Game.prototype.tickElders = function () {
   const w = this.world, p = this.player;
-  if (!p || p.dead || p.mode === 1 || w.tick % 20) return;
+  if (!p || p.dead || !p.survival || w.tick % 20) return;
   for (const e of this.entities) {
     if (e.type !== 'elder_guardian' || e.dead || e.deathTime > 0) continue;
     e.data.curse = (e.data.curse === undefined ? 1200 : e.data.curse) + 20;
@@ -27091,7 +27111,7 @@ Game.prototype.onChat = function (msg) {
   const args = from => { const r = a.slice(from); if (r[0] && /^@[spar]$/.test(r[0])) r.shift(); return r; };
   switch (cmd) {
     case 'help':
-      say('Commands: /gamemode <survival|creative>, /time <set|add|query>, /weather <clear|rain|thunder>, /tp <x y z>, /give <item> [count], /summon <mob>, /kill, /effect <give|clear>, /enchant <enchantment> [level], /xp <add|set|query>, /gamerule <rule> [value], /locate <structure|biome>, /setblock <x y z block>, /fill <x1 y1 z1 x2 y2 z2 block>, /say <message>, /spawnpoint, /clear, /seed, /difficulty <0-3>, /dim <overworld|nether|end>');
+      say('Commands: /gamemode <survival|creative|adventure|spectator>, /defaultgamemode <mode>, /time <set|add|query>, /weather <clear|rain|thunder>, /tp <x y z>, /give <item> [count], /summon <mob>, /kill, /effect <give|clear>, /enchant <enchantment> [level], /xp <add|set|query>, /gamerule <rule> [value], /locate <structure|biome>, /setblock <x y z block>, /fill <x1 y1 z1 x2 y2 z2 block>, /say <message>, /spawnpoint, /clear, /seed, /difficulty <0-3>, /dim <overworld|nether|end>');
       return;
     case 'effect': {
       const sub = key(a[1]), r = args(2);
@@ -27183,7 +27203,7 @@ UI.prototype.tabComplete = function () {
     [/^\/gamerule\s+(\S*)$/, () => Object.keys(GAMERULES)],
     [/^\/gamerule\s+\S+\s+(\S*)$/, () => ['true', 'false']],
     [/^\/weather\s+(\S*)$/, () => ['clear', 'rain', 'thunder']],
-    [/^\/(?:gamemode|gm)\s+(\S*)$/, () => ['survival', 'creative']],
+    [/^\/(?:gamemode|gm|defaultgamemode)\s+(\S*)$/, () => ['survival', 'creative', 'adventure', 'spectator']],
     [/^\/(?:dim|dimension)\s+(\S*)$/, () => ['overworld', 'nether', 'end']],
     [/^\/time\s+(\S*)$/, () => ['set', 'add', 'query']],
     [/^\/time\s+set\s+(\S*)$/, () => ['day', 'noon', 'night', 'midnight']],
@@ -28207,12 +28227,13 @@ Game.prototype.computeEnv = function (eye, look) {
 const _playerTickVR = Player.prototype.tick;
 Player.prototype.tick = function (inp) {
   if (this.exh > 40) this.exh = 40;
-  const peaceful = OPTIONS.difficulty === 0 && this.mode === 0 && !this.dead, food = this.food;
+  const peaceful = OPTIONS.difficulty === 0 && this.survival && !this.dead, food = this.food;
   const r = _playerTickVR.call(this, inp);
   if (peaceful && !this.dead) {
     // food never runs down on Peaceful; hearts come back every second and food every half second
     this.food = Math.max(this.food, food);
-    if (this.health < this.maxHealth && this.age % 20 === 0) this.heal(1);
+    // (Player.aiStep: only with naturalRegeneration)
+    if (this.health < this.maxHealth && this.age % 20 === 0 && (!this.game.rule || this.game.rule('naturalRegeneration'))) this.heal(1);
     if (this.food < 20 && this.age % 10 === 0) this.food++;
   }
   return r;
@@ -30838,7 +30859,7 @@ Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
   // the creatures and things around
   const f2 = power * 2, p = this.player, scaled = kind === 'mob' || source === 'bed';
   const things = this.entities.filter(e => !e.dead && (e instanceof Mob || e instanceof ItemEntity || e instanceof PrimedTNT || e instanceof FallingBlock));
-  if (p && !p.dead) things.push(p);
+  if (p && !p.dead && p.mode !== 3) things.push(p);
   for (const e of things) {
     const d11 = Math.hypot(e.x - x, e.y - y, e.z - z) / f2;
     if (d11 > 1) continue;
@@ -30897,6 +30918,506 @@ PrimedTNT.prototype.tick = function () {
   if (--this.fuse <= 0) { this.dead = true; this.game.explode(this.x, this.y + 0.06125, this.z, 4); return; }
   this.updateFluids();
   if (this.age % 5 === 0) this.game.particles.smoke(this.x, this.y + 1.1, this.z, 1);
+};
+
+/* @file 124_modes.js */
+/* ===================================================================
+   GAME MODES — Java Edition's four: Survival, Creative, Adventure (no
+   breaking or placing blocks, the rest like Survival) and Spectator
+   (flying through blocks, unseen and untouchable, looking into
+   containers and through other creatures' eyes); /gamemode,
+   /defaultgamemode, F3+N and the F3+F4 switcher; Allow Commands;
+   Hardcore worlds (locked on Hard, one life, then spectating) with
+   their own hearts; each world's own difficulty; the death screen's
+   score
+   =================================================================== */
+const GAME_MODE_NAMES = ['survival', 'creative', 'adventure', 'spectator'];
+const gameModeTitle = m => ['Survival', 'Creative', 'Adventure', 'Spectator'][m] + ' Mode';
+// the line under a world's name in the world list (LevelSummary.getInfo)
+function worldModeLabel(w) {
+  if (w.hardcore) return '<span style="color:#ff0000">Hardcore Mode!</span>';
+  return gameModeTitle((w.mode | 0) & 3) + (w.cheats !== false ? ', Cheats' : '');
+}
+function parseGameMode(s) {
+  s = String(s || '').toLowerCase().replace(/^minecraft:/, '');
+  const i = GAME_MODE_NAMES.indexOf(s);
+  if (i >= 0) return i;
+  const short = { s: 0, c: 1, a: 2, sp: 3, 0: 0, 1: 1, 2: 2, 3: 3 }[s];
+  return short === undefined ? -1 : short;
+}
+
+/* ---------------- each world's difficulty ---------------- */
+// the setting on the title screen is the default for new worlds; in a world it reads and sets that
+// world's own, and a hardcore world is always on Hard
+{
+  let stored = OPTIONS.difficulty;
+  const inWorld = () => { const g = window.game; return g && g.meta && g.world && g.state !== 'title' ? g.meta : null; };
+  Object.defineProperty(OPTIONS, 'difficulty', {
+    enumerable: true, configurable: true,
+    get() { const m = inWorld(); return m ? (m.hardcore ? 3 : m.difficulty !== undefined && m.difficulty !== null ? m.difficulty : stored) : stored; },
+    set(v) { const m = inWorld(); if (m) { if (!m.hardcore) m.difficulty = v; } else stored = v; },
+  });
+  Object.defineProperty(OPTIONS, 'toJSON', { enumerable: false, configurable: true, value() { const o = {}; for (const k of Object.keys(this)) o[k] = this[k]; o.difficulty = stored; return o; } });
+}
+
+/* ---------------- Allow Commands ---------------- */
+// worlds from before the setting had commands, and keep them
+Game.prototype.cheatsOn = function () { return !this.meta || this.meta.cheats !== false; };
+// what a player without operator rights may still run in single player
+const FREE_COMMANDS = new Set(['help', 'seed', 'me', 'msg', 'tell', 'w', 'list', 'random', 'trigger', 'teammsg', 'tm']);
+COMMAND_NAMES.push('defaultgamemode');
+COMMAND_NAMES.sort();
+
+/* ---------------- switching modes ---------------- */
+// ServerPlayer.setGameMode: false when nothing changes
+Game.prototype.setGameMode = function (mode) {
+  const p = this.player;
+  if (!p || p.mode === mode || !(mode >= 0 && mode <= 3)) return false;
+  const old = p.mode;
+  if (old === 3) this.stopSpectating();
+  if (mode === 3) {
+    if (p.riding && this.dismount) this.dismount(p, true);
+    p.using = null; p.gliding = false; p.sneaking = false; p.sprinting = false; p.mining = null; p.mineProgress = 0;
+    p.flying = true;
+    if (this.ui.inv) this.ui.closeInv();
+  } else if (mode !== 1) p.flying = false;   // creative keeps flying if it was
+  if (mode !== 1 && this.ui.inv && this.ui.inv.type === 'creative') this.ui.closeInv();
+  p.prevMode = old; p.mode = mode; p.fallDist = 0;
+  if (this.meta) this.meta.mode = mode;
+  this.ui._bk = null; this.ui.refreshBars(); this.ui.refreshHotbar();
+  return true;
+};
+
+const _onChatGM = Game.prototype.onChat;
+Game.prototype.onChat = function (msg) {
+  if (typeof msg !== 'string' || msg[0] !== '/' || !this.world || !this.player) return _onChatGM.call(this, msg);
+  const a = msg.slice(1).trim().split(/\s+/), cmd = (a[0] || '').toLowerCase();
+  const say = m => this.ui.chat(m, '#ccc'), bad = m => this.ui.chat(m, '#ff5555');
+  // without Allow Commands only the commands every player has are there
+  if (!this.cheatsOn() && !FREE_COMMANDS.has(cmd)) {
+    bad('Unknown or incomplete command, see below for error');
+    bad(msg.slice(1).trim() + '<--[HERE]');
+    return;
+  }
+  if (cmd === 'gamemode' || cmd === 'gm') {
+    const m = parseGameMode(a[1]);
+    if (m < 0) return bad('Usage: /gamemode <survival|creative|adventure|spectator>');
+    if (this.setGameMode(m) && this.rule('sendCommandFeedback') !== false) say('Set own game mode to ' + gameModeTitle(m));
+    return;
+  }
+  if (cmd === 'defaultgamemode') {
+    const m = parseGameMode(a[1]);
+    if (m < 0) return bad('Usage: /defaultgamemode <survival|creative|adventure|spectator>');
+    this.meta.defaultMode = m;
+    return say('The default game mode is now ' + gameModeTitle(m));
+  }
+  return _onChatGM.call(this, msg);
+};
+const _tabCompleteGM = UI.prototype.tabComplete;
+UI.prototype.tabComplete = function () {
+  const g = this.game, inp = $('chatin'), v = inp.value;
+  if (!g || g.cheatsOn()) return _tabCompleteGM.call(this);
+  const m = v.match(/^\/(\S*)$/);
+  if (!m) return;
+  const hit = [...FREE_COMMANDS].filter(n => n.startsWith(m[1].toLowerCase())).sort();
+  if (hit.length === 1) inp.value = '/' + hit[0] + ' ';
+  else if (hit.length) this.chat(hit.join(', '), '#aaa');
+};
+
+/* ---------------- F3+N and the F3+F4 switcher ---------------- */
+// the order of GameModeSwitcherScreen's icons (F4 moves to the next)
+const SWITCHER_ORDER = [1, 0, 2, 3];
+const SWITCHER_ICON = { 1: 'grass_block', 0: 'iron_sword', 2: 'map', 3: 'ender_eye' };
+const debugFeedback = (g, m) => g.ui.chat('[Debug]: ' + m, '#ffff55');
+Game.prototype.f3ToggleSpectator = function () {
+  const p = this.player;
+  if (!p || !this.cheatsOn()) return debugFeedback(this, 'Unable to switch game mode; no permission');
+  const to = p.mode === 3 ? (p.prevMode !== undefined && p.prevMode !== 3 ? p.prevMode : 1) : 3;
+  this.onChat('/gamemode ' + GAME_MODE_NAMES[to]);
+};
+Game.prototype.openModeSwitcher = function () {
+  const p = this.player;
+  if (!p || !this.cheatsOn()) return debugFeedback(this, 'Unable to open game mode switcher; no permission');
+  if (this.gmSwitch) this.gmSwitch.sel = SWITCHER_ORDER[(SWITCHER_ORDER.indexOf(this.gmSwitch.sel) + 1) % 4];
+  else this.gmSwitch = { sel: p.prevMode !== undefined && p.prevMode !== p.mode ? p.prevMode : p.mode === 1 ? 0 : 1 };
+  let box = $('gm-switch');
+  if (!box) {
+    box = el('div'); box.id = 'gm-switch';
+    box.style.cssText = 'position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.25);padding:10px 14px 8px;z-index:40;text-align:center;color:#fff;font-size:15px;text-shadow:2px 2px 0 #3f3f3f;pointer-events:none';
+    document.body.appendChild(box);
+  }
+  const s = this.gmSwitch.sel;
+  box.innerHTML = `<div style="margin-bottom:8px">${gameModeTitle(s)}</div><div style="display:flex;gap:10px;justify-content:center">` +
+    SWITCHER_ORDER.map(m => `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.4);outline:${m === s ? '2px solid #fff' : '1px solid rgba(255,255,255,.2)'}"><img src="${iconFor(itemOf(SWITCHER_ICON[m]))}" style="width:32px;height:32px;image-rendering:pixelated"></div>`).join('') +
+    '</div><div style="margin-top:8px"><span style="color:#55ffff">[ F4 ]</span> Next</div>';
+  box.style.display = '';
+};
+Game.prototype.closeModeSwitcher = function (apply) {
+  const s = this.gmSwitch;
+  this.gmSwitch = null;
+  const box = $('gm-switch'); if (box) box.style.display = 'none';
+  if (apply && s && this.player && s.sel !== this.player.mode) this.onChat('/gamemode ' + GAME_MODE_NAMES[s.sel]);
+};
+window.addEventListener('keydown', e => {
+  const g = window.game;
+  if (!g || !g.f3Down || g.state !== 'playing' || e.repeat || g.ui.chatOpen) return;
+  if (e.code !== 'KeyN' && e.code !== 'F4') return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  g.f3Used = true;
+  if (e.code === 'KeyN') g.f3ToggleSpectator(); else g.openModeSwitcher();
+}, true);
+document.addEventListener('keyup', e => {
+  const g = window.game;
+  if (!g || e.code !== 'F3' || !g.f3Down) return;
+  g.f3Down = false;
+  if (g.gmSwitch) return g.closeModeSwitcher(true);
+  if (!g.f3Used) { g.ui.debug = !g.ui.debug; if (!g.ui.debug) { $('debug').innerHTML = ''; $('debugR').innerHTML = ''; } }
+});
+window.addEventListener('blur', () => { const g = window.game; if (g) { g.f3Down = false; if (g.gmSwitch) g.closeModeSwitcher(false); } });
+
+/* ---------------- Spectator ---------------- */
+// flying through everything at the flying speed the mouse wheel sets
+const _playerTickGM = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  if (this.mode !== 3 || this !== this.game.player) return _playerTickGM.call(this, inp);
+  return this.spectatorTick(inp);
+};
+Player.prototype.spectatorTick = function (inp) {
+  this.savePrev();
+  this.pwalkDist = this.walkDist; this.pbob = this.bob; this.bob *= 0.6;
+  if (this.dead) return;
+  const g = this.game;
+  this.age++;
+  if (this.invuln > 0) this.invuln--;
+  if (this.hurtTime > 0) this.hurtTime--;
+  if (this.pearlCd > 0) this.pearlCd--;
+  this.tickEffects();
+  this.flying = true; this.sneaking = false; this.gliding = false; this.onGround = false; this.fallDist = 0; this.using = null;
+  this.inWater = this.inLava = this.headInWater = false;
+  this.fireTicks = 0; this.freeze = 0; this.air = 300; this.h = 1.8;
+  this.eyeCur += (1.62 - this.eyeCur) * 0.5;
+  if (this.swingT > 0) this.swingT--;
+  // looking through another creature's eyes until sneak is pressed
+  const cam = g.camEnt;
+  if (cam) {
+    if (cam.dead || cam.deathTime > 0 || !g.entities.includes(cam) || (inp.enabled && (inp.pressed('ShiftLeft') || inp.pressed('ShiftRight')))) g.stopSpectating();
+    else {
+      this.x = cam.x; this.z = cam.z; this.y = cam.eyeY() - this.eyeCur;
+      this.yaw = (cam.bodyYaw || 0) + (cam.headYaw || 0) - Math.PI; this.pitch = -(cam.headPitch || 0);
+      this.vx = this.vy = this.vz = 0;
+      if (this.y < -64) this.hurt(4, 'void');
+      return;
+    }
+  }
+  let fwd = 0, str = 0;
+  if (inp.enabled) {
+    if (inp.key('KeyW')) fwd += 1;
+    if (inp.key('KeyS')) fwd -= 1;
+    if (inp.key('KeyA')) str -= 1;
+    if (inp.key('KeyD')) str += 1;
+  }
+  const up = inp.enabled && inp.key('Space'), down = inp.enabled && (inp.key('ShiftLeft') || inp.key('ShiftRight'));
+  if (inp.pressed('KeyW')) { if (this.age - this.lastW < 7) this.sprintReq = true; this.lastW = this.age; }
+  if (inp.enabled && (inp.key('ControlLeft') || inp.key('ControlRight'))) this.sprintReq = true;
+  if (this.sprintReq && fwd > 0) this.sprinting = true;
+  if (fwd <= 0) { this.sprinting = false; this.sprintReq = false; }
+  // Player.getFlyingSpeed (doubled when sprinting); LocalPlayer.aiStep adds 3x it going up or down
+  const fs = this.flySpeed !== undefined ? this.flySpeed : 0.05, speed = fs * (this.sprinting ? 2 : 1);
+  const len = Math.hypot(fwd, str);
+  if (len > 0) {
+    fwd /= len; str /= len;
+    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+    this.vx += (-s * fwd + c * str) * speed; this.vz += (-c * fwd - s * str) * speed;
+  }
+  const j = (up ? 1 : 0) - (down ? 1 : 0);
+  if (j) this.vy += j * fs * 3;
+  // no physics: straight through blocks
+  this.x += this.vx; this.y += this.vy; this.z += this.vz;
+  this.vx *= 0.91; this.vz *= 0.91; this.vy *= 0.6;
+  // the void still takes spectators (it bypasses invulnerability)
+  if (this.y < -64) this.hurt(4, 'void');
+  this.spectatorInteract(inp);
+};
+// left click a creature to look through its eyes, right click a container to look inside
+Player.prototype.spectatorInteract = function (inp) {
+  const g = this.game;
+  this.mining = null; this.mineProgress = 0;
+  if (this.useCd > 0) this.useCd--;
+  if (!inp.enabled) return;
+  const hit = g.target, ent = g.targetEntity;
+  if (inp.mousePressed(0) && ent && ent instanceof Mob && !(ent instanceof Hanging)) g.spectate(ent);
+  else if (inp.mouse[2] && this.useCd === 0 && hit && !ent) { if (g.spectatorOpen(hit)) this.useCd = 4; }
+  if (!inp.mouse[2]) this.useCd = 0;
+};
+// the camera effects of GameRenderer.checkEntityPostEffect
+const SPECTATE_FILTER = { creeper: 'grayscale(1) sepia(1) saturate(4) hue-rotate(50deg) contrast(1.15)', spider: 'blur(1.6px) saturate(0.85)', cave_spider: 'blur(1.6px) saturate(0.85)', enderman: 'invert(1)' };
+Game.prototype.spectate = function (m) {
+  this.camEnt = m;
+  this.canvas.style.filter = SPECTATE_FILTER[m.type] || '';
+};
+Game.prototype.stopSpectating = function () {
+  if (!this.camEnt) return;
+  this.camEnt = null;
+  this.canvas.style.filter = '';
+};
+// what has a menu (BlockBehaviour.getMenuProvider) opens for a spectator, who cannot change it
+const SPECTATOR_CONTAINERS = ['chest', 'barrel', 'shulker', 'furnace', 'smoker', 'blast_furnace', 'dispenser', 'dropper', 'hopper', 'brewing'];
+const spectatorMenu = id => { const u = BLK[id] && BLK[id].use; return !!u && u !== 'ender_chest' && id !== B.CAULDRON && id !== B.COMPOSTER && (u === 'craft' || SPECTATOR_CONTAINERS.includes(u) || !!SCREENS[u]); };
+Game.prototype.spectatorOpen = function (hit) {
+  const w = this.world, id = hit.id, use = BLK[id].use;
+  if (!spectatorMenu(id)) return false;
+  if (use === 'craft') { this.ui.openInv('craft'); return true; }
+  if (SPECTATOR_CONTAINERS.includes(use)) {
+    // no sound and no open lid for someone nobody can see
+    const m0 = w.getMeta(hit.x, hit.y, hit.z), own = Object.prototype.hasOwnProperty.call(this, 'sound'), snd = this.sound;
+    this.sound = () => { };
+    try { this.openContainer(hit, use); } finally { if (own) this.sound = snd; else delete this.sound; }
+    if (use === 'barrel' && w.getMeta(hit.x, hit.y, hit.z) !== m0) w.setMeta(hit.x, hit.y, hit.z, m0);
+    return true;
+  }
+  this.ui.openInv(use, { x: hit.x, y: hit.y, z: hit.z, id, meta: w.getMeta(hit.x, hit.y, hit.z) });
+  return true;
+};
+// the mouse wheel sets the flying speed (MouseHandler.onScroll)
+window.addEventListener('wheel', e => {
+  const g = window.game, p = g && g.player;
+  if (!g || !g.locked || g.state !== 'playing' || !p || p.mode !== 3 || g.ui.inv || g.ui.screen) return;
+  e.stopImmediatePropagation();
+  const k = -Math.sign(e.deltaY);
+  p.flySpeed = Math.max(0, Math.min(0.2, Math.round(((p.flySpeed !== undefined ? p.flySpeed : 0.05) + k * 0.005) * 1000) / 1000));
+}, { capture: true, passive: true });
+// looking through a creature's eyes, the mouse does not turn the view
+window.addEventListener('mousemove', e => {
+  const g = window.game, p = g && g.player;
+  if (g && g.camEnt && p && p.mode === 3 && g.locked && !g.ui.inv) e.stopImmediatePropagation();
+}, true);
+// containers are only for looking at
+for (const ev of ['mousedown', 'dblclick']) window.addEventListener(ev, e => {
+  const g = window.game, p = g && g.player;
+  if (!g || !g.ui.inv || !p || p.mode !== 3) return;
+  if (e.target && e.target.closest && (e.target.closest('.vwin') || e.target.closest('.cwrap'))) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+const _invKeyGM = UI.prototype.invKey;
+UI.prototype.invKey = function (e) { const p = this.game.player; if (p && p.mode === 3) return true; return _invKeyGM.call(this, e); };
+const _dropHeldGM = Game.prototype.dropHeld;
+Game.prototype.dropHeld = function (all) { if (this.player && this.player.mode === 3) return; return _dropHeldGM.call(this, all); };
+const _pickBlockGM = Game.prototype.pickBlock;
+Game.prototype.pickBlock = function () { if (this.player && this.player.mode === 3) return; return _pickBlockGM.call(this); };
+
+// spectators keep out of the world's eye: no hand, no body, no overlays, the crosshair only over what they can use
+const _renderHandGM = Game.prototype.renderHand;
+Game.prototype.renderHand = function (alpha, env) { if (this.player && this.player.mode === 3) return; return _renderHandGM.call(this, alpha, env); };
+const _renderPlayerModelGM = Game.prototype.renderPlayerModel;
+Game.prototype.renderPlayerModel = function (r, p, alpha) { if (p && p.mode === 3) return; return _renderPlayerModelGM.call(this, r, p, alpha); };
+const _renderWorldGM = Game.prototype.renderWorld;
+Game.prototype.renderWorld = function (alpha, dt, panorama) {
+  const p = this.player, cam = this.camEnt;
+  let r;
+  if (cam && !panorama && !this.thirdPerson) {
+    // the creature being looked through is not drawn over the camera
+    const ents = this.entities;
+    this.entities = ents.filter(e => e !== cam);
+    try { r = _renderWorldGM.call(this, alpha, dt, panorama); } finally { this.entities = ents; }
+  } else r = _renderWorldGM.call(this, alpha, dt, panorama);
+  if (p && p.mode === 3 && !panorama) { $('fx-water').classList.add('hidden'); $('fx-lava').classList.add('hidden'); }
+  return r;
+};
+// FogRenderer: spectators see much further in lava
+const _underFluidGM = Game.prototype.underFluid;
+Game.prototype.underFluid = function (env, eye, k) {
+  _underFluidGM.call(this, env, eye, k);
+  if (env.under === 'lava' && this.player && this.player.mode === 3) { env.fogStart = 0; env.fogEnd = OPTIONS.renderDist * 16 * 0.5; }
+};
+// GameRenderer.shouldRenderBlockOutline: adventure players see no outline, spectators only on what opens
+const _renderSelectionGM = Game.prototype.renderSelection;
+Game.prototype.renderSelection = function (eye, env) {
+  const p = this.player, t = this.target;
+  if (p && t && (p.mode === 2 || (p.mode === 3 && !spectatorMenu(t.id)))) return;
+  return _renderSelectionGM.call(this, eye, env);
+};
+const _updateTargetGM = Game.prototype.updateTarget;
+Game.prototype.updateTarget = function () {
+  _updateTargetGM.call(this);
+  const p = this.player;
+  // looking through a creature's eyes there is nothing to point at
+  if (p && p.mode === 3 && this.camEnt) { this.target = null; this.targetEntity = null; }
+  const show = !p || p.mode !== 3 || !!this.targetEntity || !!(this.target && spectatorMenu(this.target.id));
+  if (this._chShow !== show) { this._chShow = show; $('crosshair').style.visibility = show ? '' : 'hidden'; }
+};
+const _refreshBarsGM = UI.prototype.refreshBars;
+UI.prototype.refreshBars = function () {
+  const p = this.game.player;
+  if (p) { const v = p.mode === 3 ? 'hidden' : ''; if (this._botV !== v) { this._botV = v; $('bottom').style.visibility = v; } }
+  return _refreshBarsGM.call(this);
+};
+// chunks a spectator flies to are only loaded, not made, when spectatorsGenerateChunks is off
+const _genChunkGM = Game.prototype.genChunk;
+Game.prototype.genChunk = function (c) {
+  const p = this.player;
+  if (p && p.mode === 3 && this.state === 'playing' && this.rule && !this.rule('spectatorsGenerateChunks')) {
+    this.inflight--; c.withheld = true;
+    (this._withheld || (this._withheld = new Set())).add(c);
+    return;
+  }
+  return _genChunkGM.call(this, c);
+};
+const _gameTickGM = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const r = _gameTickGM.call(this), w = this.world, p = this.player;
+  if (w && this._withheld && this._withheld.size && w.tick % 10 === 0) {
+    const release = !p || p.mode !== 3 || this.rule('spectatorsGenerateChunks');
+    for (const c of this._withheld) {
+      const k = w.key(c.cx, c.cz);
+      if (w.chunks.get(k) !== c) { this._withheld.delete(c); continue; }
+      if (release) { w.chunks.delete(k); this._withheld.delete(c); }
+    }
+  }
+  if (this.camEnt && (!p || p.mode !== 3)) this.stopSpectating();
+  return r;
+};
+
+// a spectator has no physics, so portals and gateways never notice one (Entity.move with noPhysics)
+const _portalTickGM = Game.prototype.portalTick;
+Game.prototype.portalTick = function () { if (this.player && this.player.mode === 3) { this.player.portalTime = 0; return; } return _portalTickGM.call(this); };
+const _touchGatewayGM = Game.prototype.touchGateway;
+Game.prototype.touchGateway = function () { if (this.player && this.player.mode === 3) return false; return _touchGatewayGM.call(this); };
+
+/* ---------------- Adventure ---------------- */
+// Player.blockActionRestricted: no breaking
+const _breakTicksGM = Player.prototype.breakTicks;
+Player.prototype.breakTicks = function (id) { return this.mode === 2 || this.mode === 3 ? Infinity : _breakTicksGM.call(this, id); };
+// and no placing (abilities.mayBuild)
+const _placeBlockGM = Game.prototype.placeBlock;
+Game.prototype.placeBlock = function (p, hit, id) { if (p && (p.mode === 2 || p.mode === 3)) return false; return _placeBlockGM.call(this, p, hit, id); };
+// blocks still open and switch, but the ones a builder adjusts do not
+const _useBlockGM = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (p && p.mode === 3) return false;
+  if (p && p.mode === 2) {
+    const id = hit.id, d = BLK[id];
+    if (SHAPE[id] === SH.DIODE || id === B.REDSTONE_WIRE || id === B.DAYLIGHT_DETECTOR || d.sign) return false;
+    if (d.candle && !held) return false;
+    // an item used on a block (ItemStack.useOn): eyes into frames, spawn eggs into spawners
+    if (held && ((held.id === I.ENDER_EYE && id === B.END_PORTAL_FRAME) || ITEMS[held.id].egg)) return false;
+  }
+  return _useBlockGM.call(this, p, hit, held);
+};
+// what an item does in the air (Item.use) still works; what it does to a block (Item.useOn) needs a builder
+function adventureItemUse(p, hit, held, it) {
+  const id = held.id;
+  if (it.throw && it.throw !== 'trident') return true;
+  if (id === I.ENDER_EYE) return !(hit && hit.id === B.END_PORTAL_FRAME);
+  if (it.fireworks) return !!p.gliding;
+  if (it.boat || it.armor || it.wearable) return true;
+  if (id === I.SHEARS) return !!(hit && hit.id === B.PUMPKIN);   // PumpkinBlock.useItemOn
+  return [I.CROSSBOW, I.GOAT_HORN, I.GLASS_BOTTLE, I.FISHING_ROD, I.MAP, I.WRITABLE_BOOK, I.WRITTEN_BOOK, I.KNOWLEDGE_BOOK, B.LILY_PAD, B.FROGSPAWN].includes(id);
+}
+const _useItemSpecialGM = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (p && p.mode === 3) return false;
+  if (p && p.mode === 2 && held && it && !adventureItemUse(p, hit, held, it)) return false;
+  return _useItemSpecialGM.call(this, p, hit, held, it);
+};
+// a brush only works on blocks
+const _useKindGM = Player.prototype.useKind;
+Player.prototype.useKind = function (st) {
+  if (this.mode === 3) return null;
+  if (this.mode === 2 && st && st.id === I.BRUSH) return null;
+  return _useKindGM.call(this, st);
+};
+
+/* ---------------- Hardcore ---------------- */
+// its own hearts: a shine on both halves
+const _makeHudIconsGM = makeHudIcons;
+makeHudIcons = function () {
+  _makeHudIconsGM();
+  const heart = ['.oo...oo.', 'owho.owho', 'ohdhohdho', 'ohhhhhhho', '.ohhhhho.', '..ohhho..', '...oho...', '....o....', '.........'];
+  const half = heart.map(r => r.split('').map((ch, x) => (ch === 'h' || ch === 'w' || ch === 'd') && x > 4 ? 'e' : ch).join(''));
+  const emp = heart.map(r => r.replace(/[hwd]/g, 'e'));
+  const set = (name, h, w, d, o) => { const pal = { o: o || '#1a0000', h, w, d, e: '#3a1010' }; HUD_ICONS[name + 'Hc'] = pixelIcon(heart, pal); HUD_ICONS[name + 'HalfHc'] = pixelIcon(half, pal); };
+  set('heart', '#e01818', '#ffd0d0', '#8a0606'); set('poison', '#8db030', '#e8ffb0', '#4a6a10'); set('wither', '#2c2c2c', '#a0a0a0', '#0c0c0c', '#000');
+  HUD_ICONS.emptyHc = pixelIcon(emp, { o: '#1a0000', e: '#3a1010' });
+};
+// resource packs: their hardcore, poisoned and withered hearts
+const _applyPackGUIGM = applyPackGUI;
+applyPackGUI = function (img, first) {
+  const r = _applyPackGUIGM.call(this, img, first);
+  const cut = (im, x, y) => { const s = im.width / 256, c = document.createElement('canvas'); c.width = c.height = Math.round(9 * s); const q = c.getContext('2d'); q.imageSmoothingEnabled = false; q.drawImage(im, x * s, y * s, 9 * s, 9 * s, 0, 0, c.width, c.height); return c; };
+  const whole = im => { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const q = c.getContext('2d'); q.imageSmoothingEnabled = false; q.drawImage(im, 0, 0); return c; };
+  const stack = (...parts) => { const c = document.createElement('canvas'); c.width = parts[0].width; c.height = parts[0].height; const q = c.getContext('2d'); q.imageSmoothingEnabled = false; for (const p of parts) if (p) q.drawImage(p, 0, 0, c.width, c.height); return c.toDataURL(); };
+  const icons = img('gui/icons');
+  const spr = (name, x, y) => { const im = img('gui/sprites/hud/heart/' + name); return im ? whole(im) : icons ? cut(icons, x, y) : null; };
+  const def = PACKS.defHud || {};
+  // [icon, full sprite, half sprite, x and y in the old gui/icons.png (hardcore is the row 45 down)]
+  const T = [['heart', 'full', 'half', 52, 0, ''], ['poison', 'poisoned_full', 'poisoned_half', 88, 0, ''], ['wither', 'withered_full', 'withered_half', 124, 0, ''],
+    ['heart', 'hardcore_full', 'hardcore_half', 52, 45, 'Hc'], ['poison', 'poisoned_hardcore_full', 'poisoned_hardcore_half', 88, 45, 'Hc'], ['wither', 'withered_hardcore_full', 'withered_hardcore_half', 124, 45, 'Hc']];
+  const cn = spr('container', 16, 0), ch = spr('container_hardcore', 16, 45);
+  for (const [k, fs, hs, x, y, hc] of T) {
+    const box = hc ? ch : cn, f = spr(fs, x, y), h = spr(hs, x + 9, y), fk = k + hc, hk = k + 'Half' + hc;
+    if (box && f && h) { HUD_ICONS[fk] = stack(box, f); HUD_ICONS[hk] = stack(box, h); } else { HUD_ICONS[fk] = def[fk]; HUD_ICONS[hk] = def[hk]; }
+  }
+  HUD_ICONS.emptyHc = ch ? stack(ch) : def.emptyHc;
+  return r;
+};
+// the death screen: Game Over and Spectate World in hardcore, the score, buttons awake after a second
+const _onDeathGM = Game.prototype.onDeath;
+Game.prototype.onDeath = function (source, silent) {
+  const p = this.player, hc = !!(this.meta && this.meta.hardcore);
+  this.stopSpectating();
+  // ServerPlayer.die resets the time since rest
+  if (p) p.awake = 0;
+  const r = _onDeathGM.call(this, source, silent);
+  $('death-title').textContent = hc ? 'Game Over!' : 'You Died!';
+  $('b-respawn').textContent = hc ? 'Spectate World' : 'Respawn';
+  $('death-score').innerHTML = 'Score: <span style="color:#ffff55">' + ((p && p.score) | 0) + '</span>';
+  if (this.ui.screen === 'scr-death') {
+    for (const id of ['b-respawn', 'b-dtitle']) $(id).disabled = true;
+    clearTimeout(this._deathT);
+    this._deathT = setTimeout(() => { for (const id of ['b-respawn', 'b-dtitle']) $(id).disabled = false; }, 1000);
+  }
+  return r;
+};
+// after a hardcore death the world goes on, to be watched
+const _respawnGM = Game.prototype.respawn;
+Game.prototype.respawn = function () {
+  const p = this.player, hc = !!(this.meta && this.meta.hardcore);
+  for (const id of ['b-respawn', 'b-dtitle']) $(id).disabled = false;
+  const r = _respawnGM.call(this);
+  if (p && !this.rule('keepInventory')) p.score = 0;
+  if (hc && p) { this.setGameMode(3); this.setRule('spectatorsGenerateChunks', false); }
+  return r;
+};
+// the score is the experience gathered since the last death
+const _addXPGM = Player.prototype.addXP;
+Player.prototype.addXP = function (n) { if (n > 0) this.score = (this.score || 0) + n; return _addXPGM.call(this, n); };
+// hardcore worlds show Hard and keep it
+const _openOptionsGM = UI.prototype.openOptions;
+UI.prototype.openOptions = function (back) {
+  const r = _openOptionsGM.call(this, back), g = this.game;
+  if (g && g.state === 'playing' && g.meta && g.meta.hardcore) for (const b of $('opts').querySelectorAll('button')) if (/^Difficulty:/.test(b.textContent)) { b.textContent = 'Difficulty: Hard'; b.disabled = true; }
+  return r;
+};
+
+/* ---------------- what the save keeps ---------------- */
+const _playerDataGM = Game.prototype.playerData;
+Game.prototype.playerData = function () {
+  const d = _playerDataGM.call(this), p = this.player;
+  if (p.flySpeed !== undefined) d.flySpeed = p.flySpeed;
+  if (p.prevMode !== undefined) d.prevMode = p.prevMode;
+  if (p.score) d.score = p.score;
+  return d;
+};
+const _startWorldGM = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) {
+  this.stopSpectating();
+  const r = _startWorldGM.call(this, meta, saved), s = meta.player, p = this.player;
+  if (s && p) {
+    if (s.flySpeed !== undefined) p.flySpeed = s.flySpeed;
+    if (s.prevMode !== undefined) p.prevMode = s.prevMode;
+    p.score = s.score || 0;
+  }
+  this.ui._bk = null; this._chShow = undefined; this.ui._botV = undefined;
+  return r;
 };
 
 </script>

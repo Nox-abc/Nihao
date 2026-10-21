@@ -16,7 +16,9 @@ No install, no server, no build step: the whole game is a single self-contained 
 
 1. Download `minecraft.html` (on GitHub: open the file, then click **Download raw file**).
 2. Double-click it to open it in Chrome, Edge, Firefox or Safari (any browser with WebGL2).
-3. Click **Singleplayer** to create or load a world, or **Quick Play** for a random world.
+3. Click **Singleplayer** to create or load a world, or **Quick Play** for a random world. A new
+   world can be Survival, Hardcore or Creative, with its own difficulty and **Allow Commands**
+   (see [Game modes](#game-modes)).
 4. Click inside the game to capture the mouse.
 
 Worlds are saved automatically in your browser (IndexedDB), including the Nether and the End.
@@ -34,12 +36,13 @@ terrain style; new worlds get Java Edition's terrain, see [Terrain](#java-editio
 | Left click (hold) | Break block / attack |
 | Right click | Place / use / eat / open / trade / ride (hold to draw a bow, load a crossbow or raise a shield) |
 | Middle click | Pick block |
-| 1–9 / mouse wheel | Select hotbar slot |
+| 1–9 / mouse wheel | Select hotbar slot (the wheel sets the flying speed in spectator mode) |
 | F | Swap the items in your main hand and offhand |
 | E | Inventory (creative menu in creative mode) |
 | Q / Ctrl+Q | Drop item / drop stack |
 | T or / | Chat and commands (Tab completes command names and arguments) |
 | F1 / F2 / F3 / F5 | Hide HUD / screenshot / debug screen / camera perspective |
+| F3+N / F3+F4 | Switch to spectator mode and back / the game mode switcher (hold F3, press F4 to pick, let go of F3); both need Allow Commands |
 | Esc | Pause menu |
 
 In inventories: shift-click moves a stack across, right-click takes half a stack or places one
@@ -61,7 +64,8 @@ place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots
 
 | Command | What it does |
 | --- | --- |
-| `/gamemode survival\|creative` | Switch game mode |
+| `/gamemode survival\|creative\|adventure\|spectator` | Switch game mode |
+| `/defaultgamemode <mode>` | The world's default game mode |
 | `/time set day\|noon\|night\|midnight\|<n>`, `/time add <n>` | Change the time |
 | `/weather clear\|rain\|thunder` | Change the weather |
 | `/tp <x> <y> <z>` | Teleport (`~` means relative) |
@@ -79,6 +83,10 @@ place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots
 
 Target selectors such as `@p` and `@s` are accepted where the player is meant. Commands also run
 from command blocks (see [Redstone](#redstone-and-automation)).
+
+Commands need **Allow Commands**, set when the world is created like in Java Edition: off for
+Survival, on for Creative, always off for Hardcore (Quick Play worlds and worlds from earlier
+versions of Blockcraft have it on). Without it, only `/help` and `/seed` are there.
 
 ## What's in the game
 
@@ -162,6 +170,28 @@ block-for-block like Java Edition, and worlds made before this version keep thei
 - **Enchanting**: all 42 enchantments, including 1.21's Density, Breach and Wind Burst, from the
   enchanting table (with bookshelves), anvils, enchanted books and villager trades; the
   grindstone takes them off again.
+
+### Game modes
+
+- **Survival** and **Creative** as you know them.
+- **Adventure**: everything Survival has, but blocks can't be broken or placed. Doors, buttons,
+  levers, chests, crafting tables, beds, villagers, vaults and other things you use still work,
+  and so do food, bows, tridents, snowballs, ender pearls, armor and boats; items that do
+  something to a block (buckets, bone meal, hoes, flint and steel, spawn eggs, item frames,
+  minecarts) don't, nor do repeaters, comparators, daylight detectors and signs, and armor stands
+  can't be knocked down. There is no block outline.
+- **Spectator**: fly through everything at the speed the mouse wheel sets (shift goes down).
+  Nothing can hurt you but the void, mobs don't see you, arrows and explosions pass you by, you
+  pick nothing up and set off no pressure plates or portals. Right-click a chest, furnace,
+  crafting table or anything else with a menu to look inside (without taking anything);
+  left-click a mob to see through its eyes (a creeper's are green, a spider's blurry, an
+  enderman's inverted) and sneak to come back. No hotbar, hearts or hand; the crosshair only
+  shows over a mob or something you can open, and inside the ground you see the caves.
+- **Hardcore**: Survival locked on Hard with its own hearts and no commands. When you die it is
+  **Game Over**, and **Spectate World** brings you back as a spectator.
+- Each world keeps its own **difficulty** (the Options setting changes the world you are in;
+  on the title screen it is the one new worlds start with). The death screen shows your score
+  (the experience collected since your last death).
 
 ### Mobs
 
