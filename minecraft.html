@@ -2564,6 +2564,42 @@ addStructure('desert_well', 224, { salt: 9651, avoid: 70, chance: 0.18, biomes: 
   W.set(2, -2, 1, B.SUSPICIOUS_SAND); W.be(2, -2, 1, { type: 'brushable', table: 'desert_well_archaeology' });
 });
 
+// ocean monument: a prismarine temple on legs in the deep ocean, with two wings, a gold core, sponge rooms,
+// guardians and three elder guardians (one up top, one in each wing)
+addStructure('ocean_monument', 512, { salt: 9711, chance: 0.6, size: [45, 45], flat: 26, margin: 40,
+  biomes: new Set([BI.DEEP_OCEAN, BI.DEEP_COLD_OCEAN, BI.DEEP_LUKEWARM_OCEAN, BI.DEEP_FROZEN_OCEAN]),
+  level: (col) => col.h < SEA - 16 ? SEA - 25 : null }, (W, R, p) => {
+  const P = B.PRISMARINE, PB = B.PRISMARINE_BRICKS, DP = B.DARK_PRISMARINE, SL = B.SEA_LANTERN, WA = B.WATER;
+  const box = (x0, y0, z0, x1, y1, z1, wall, fill) => { for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) W.set(x, y, z, x === x0 || x === x1 || z === z0 || z === z1 || y === y0 || y === y1 ? wall : fill); };
+  // legs reach down to the sea floor, the platform lies across them
+  for (let lx = 1; lx < 44; lx += 7) for (let lz = 1; lz < 44; lz += 7) W.foundation(lx, lz, lx + 1, lz + 1, PB);
+  for (let lz = 0; lz < 45; lz++) for (let lx = 0; lx < 45; lx++) W.set(lx, 0, lz, (lx + lz) % 9 === 0 ? DP : PB);
+  // the wings, the central hall, an upper storey and the penthouse on top
+  box(0, 1, 8, 12, 9, 44, P, WA); box(32, 1, 8, 44, 9, 44, P, WA);
+  box(2, 9, 34, 10, 13, 44, PB, WA); box(34, 9, 34, 42, 13, 44, PB, WA);
+  box(12, 1, 0, 32, 12, 44, PB, WA);
+  box(16, 12, 14, 28, 17, 40, P, WA);
+  box(19, 17, 22, 25, 22, 32, DP, WA);
+  // floors inside, with gaps to swim through
+  for (let lz = 1; lz < 44; lz++) for (let lx = 13; lx < 32; lx++) if ((lx < 18 || lx > 26) && lz > 4) W.set(lx, 6, lz, (lx + lz) % 4 ? PB : DP);
+  for (let lz = 9; lz < 44; lz++) for (const [a, b] of [[1, 11], [33, 43]]) for (let lx = a; lx <= b; lx++) if (lz % 8 > 1) W.set(lx, 5, lz, P);
+  // openings: the front gate and the doorways from the hall into the wings
+  for (let ly = 1; ly <= 6; ly++) for (let lx = 19; lx <= 25; lx++) W.set(lx, ly, 0, WA);
+  for (let ly = 1; ly <= 4; ly++) for (let lz = 20; lz <= 24; lz++) { W.set(12, ly, lz, WA); W.set(32, ly, lz, WA); }
+  // light: sea lanterns in the walls, a dark band round the outside
+  for (let i = 2; i < 44; i += 5) for (const ly of [3, 8]) { W.set(i, ly, 44, SL); if (i > 12 && i < 32) W.set(i, ly, 0, ly === 3 && i >= 19 && i <= 25 ? WA : SL); W.set(0, ly, Math.max(9, i), SL); W.set(44, ly, Math.max(9, i), SL); }
+  for (let i = 0; i < 45; i++) { W.set(i, 10, 44, DP); if (i < 12 || i > 32) { W.set(i, 9, 8, DP); } }
+  // the core: eight gold blocks walled in dark prismarine
+  box(20, 1, 29, 23, 4, 32, DP, B.GOLD_BLOCK);
+  // sponge rooms up in the wings
+  for (const x0 of [3, 35]) for (let k = 0; k < 6; k++) W.set(x0 + Math.floor(W.rand(x0, k, 9, 5) * 7), 8, 12 + Math.floor(W.rand(x0, k, 10, 5) * 10), B.WET_SPONGE);
+  // spikes along the roof edges
+  for (let i = 12; i <= 32; i += 4) { W.set(i, 13, 0, PB); W.set(i, 14, 0, P); }
+  // who lives here
+  W.spawn('elder_guardian', 22, 19, 27, { persistent: true }); W.spawn('elder_guardian', 6, 2, 26, { persistent: true }); W.spawn('elder_guardian', 38, 2, 26, { persistent: true });
+  for (let k = 0; k < 7; k++) W.spawn('guardian', 14 + Math.floor(R() * 16), 2 + Math.floor(R() * 8), 3 + Math.floor(R() * 38));
+});
+
 // trail ruins: the buried remains of an old settlement, terracotta and mud brick walls filled with gravel, things to brush out
 addStructure('trail_ruins', 448, { salt: 9701, avoid: 100, chance: 0.5, size: [15, 15], flat: 4, surface: false,
   biomes: new Set([BI.TAIGA, BI.SNOWY_TAIGA, BI.OLD_GROWTH_PINE_TAIGA, BI.OLD_GROWTH_SPRUCE_TAIGA, BI.OLD_GROWTH_BIRCH_FOREST, BI.BIRCH_FOREST, BI.JUNGLE]),
@@ -9817,7 +9853,7 @@ defSkin('entity/phantom_eyes', 64, 64, () => skinParts(64, 64, [MM.phantom.parts
 function guardianSkin(base, spike, dark) {
   return skinParts(64, 64, MM.guardian.parts, {
     head: (f, x, y, W, H, R, ci) => nz((x + y) % 5 === 0 ? dark : vnoise(x / 3, y / 3 + FACE_I[f] * 5, 31) > 0.62 ? shd(base, 1.15) : base, R, 0.06),
-    eye: (f, x, y) => f === 'front' ? [240, 240, 220] : [200, 190, 160],
+    eye: (f, x, y) => f === 'front' ? (x === 0 && y === 0 ? [255, 250, 235] : [226, 120, 84]) : [200, 190, 160],
     tail0: (f, x, y, W, H, R) => nz(base, R), tail1: (f, x, y, W, H, R) => nz(shd(base, 0.9), R), tail2: (f, x, y, W, H, R, ci) => nz(ci ? spike : shd(base, 0.85), R),
     '*': (f, x, y, W, H, R) => nz(y < 3 ? shd(spike, 1.2) : spike, R),
   }, 381);
@@ -18194,7 +18230,7 @@ Object.assign(Game.prototype, {
       let tries = 16; while (tries-- > 0 && y > 1 && !(SOLID[w.getBlock(x, y - 1, z)] && !SOLID[w.getBlock(x, y, z)] && !SOLID[w.getBlock(x, y + 1, z)])) y--;
       if (y <= 1 || tries <= 0) continue;
       const below = w.getBlock(x, y - 1, z);
-      if (!OPAQUE[below] || below === B.BEDROCK && w.dim === 'overworld' || BLK[w.getBlock(x, y, z)].liquid) continue;
+      if (!OPAQUE[below] || below === B.BEDROCK && w.dim === 'overworld' || BLK[w.getBlock(x, y, z)].liquid || WATERY[w.getBlock(x, y, z)]) continue;
       const l = w.getLightRaw(x, y, z), sky = (l >> 4) - this.skyDarken(), blk = l & 15;
       const key = w.dim === 'nether' ? (inFortress(w.seed, x, z) ? 'fortress' : biomeKey(bi)) : w.dim === 'end' ? 'end' : bi === BI.DESERT ? 'desert' : SNOWY_BIOMES.has(bi) ? 'snowy' : bi === BI.SWAMP || bi === BI.MANGROVE_SWAMP ? 'swamp' : 'default';
       if (w.dim === 'overworld' && (blk > 0 || sky > Math.floor(R() * 8))) continue;
@@ -18211,7 +18247,7 @@ Object.assign(Game.prototype, {
         const sx = x + Math.floor(R() * 5) - 2, sz = z + Math.floor(R() * 5) - 2;
         let sy = y + 1; while (sy > y - 3 && !SOLID[w.getBlock(sx, sy - 1, sz)]) sy--;
         const T = MOB_TYPES[type];
-        if (!NAV.stand(w, sx, sy, sz, { h: T.h, T: { fireproof: T.fireproof } })) continue;
+        if (WATERY[w.getBlock(sx, sy, sz)] || BLK[w.getBlock(sx, sy, sz)].liquid || !NAV.stand(w, sx, sy, sz, { h: T.h, T: { fireproof: T.fireproof } })) continue;
         if (Math.hypot(sx - p.x, sy - p.y, sz - p.z) < 24) continue;
         if (type === 'spider' && (SOLID[w.getBlock(sx + 1, sy, sz)] || SOLID[w.getBlock(sx, sy, sz + 1)])) continue;
         const m = createMob(this, type, sx + 0.5, sy, sz + 0.5);
@@ -23292,6 +23328,501 @@ AUDIO.play = function (name, x, y, z) {
   if (!dst) return;
   if (name === 'brush_done') { this.noiseHit(dst, 'bandpass', 1500, 0.8, 0.3, 0.3); this.tone(dst, 'sine', 700, 1050, 0.18, 0.08); }
   else this.noiseHit(dst, name === 'brush_sand' ? 'highpass' : 'bandpass', name === 'brush_sand' ? 2600 : 1300, 0.8, 0.22, 0.22);
+};
+
+/* @file 107_crafter.js */
+/* ===================================================================
+   THE CRAFTER — keeps a 3x3 grid, slots can be switched off, and every
+   redstone pulse crafts one result and throws it out of the front (or
+   into a container there); hoppers fill it evenly, comparators count it
+   =================================================================== */
+TEXGEN.push(function texCrafter() {
+  T('crafter_top_triggered', (d) => { d.set(copyOf('crafter_top')); for (let k = 3; k < 13; k++) { sp(d, k, 7, [255, 90, 60]); sp(d, 7, k, [255, 90, 60]); } });
+  T('crafter_east_triggered', (d) => { d.set(copyOf('crafter_east')); for (let y = 5; y <= 10; y++) for (let x = 5; x <= 10; x++) sp(d, x, y, [230, 80, 50]); });
+  T('crafter_north_crafting', (d) => { d.set(copyOf('crafter_north')); for (let y = 5; y <= 10; y++) for (let x = 5; x <= 10; x++) sp(d, x, y, (x + y) % 2 ? [255, 210, 120] : [255, 150, 80]); });
+});
+// meta bit 4 shows the crafter busy (lit textures); bit 8 remembers it is powered
+const _resolveFaceTexturesCR = resolveFaceTextures;
+resolveFaceTextures = function () {
+  _resolveFaceTexturesCR();
+  const id = B.CRAFTER, o = id * 6;
+  ALTMASK[id] = 4;
+  for (const k of [0, 1, 5]) FACETEX_ALT[o + k] = texLayer('crafter_east_triggered', FACETEX[o + k]);
+  FACETEX_ALT[o + 2] = texLayer('crafter_top_triggered', FACETEX[o + 2]);
+  FACETEX_ALT[o + 4] = texLayer('crafter_north_crafting', FACETEX[o + 4]);
+};
+BLK[B.CRAFTER].use = 'crafter';
+SCREENS.crafter = {
+  size: [176, 166], title: 'Crafter', pack: 'crafter', labels: [['Inventory', 8, 72]],
+  slots: [...[0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => ['be', i, 26 + (i % 3) * 18, 17 + Math.floor(i / 3) * 18]), ['out', 0, 134, 35, 'big'], ...INV_ROWS(84)], local: 0,
+  deco(g) { guiArrow(g, 90, 35); },
+};
+Game.prototype.crafterBE = function (x, y, z) {
+  const w = this.world;
+  let be = w.getBE(x, y, z);
+  if (!be || be.type !== 'crafter') { be = { type: 'crafter', kind: 'crafter', items: new Array(9).fill(null), disabled: new Array(9).fill(false) }; w.setBE(x, y, z, be); }
+  if (!be.disabled) be.disabled = new Array(9).fill(false);
+  return be;
+};
+// what the grid makes right now (switched-off slots count as empty)
+function crafterResult(be) {
+  const grid = be.items.map((s, i) => be.disabled[i] ? null : s);
+  const r = matchRecipe(grid.map(s => s ? s.id : 0), 3);
+  if (!r) return null;
+  const out = { id: r.out, count: r.count };
+  if (r.tag) out.tag = JSON.parse(JSON.stringify(r.tag));
+  return r.fn ? r.fn(grid, out) : out;
+}
+Game.prototype.crafterCraft = function (x, y, z) {
+  const w = this.world, be = this.crafterBE(x, y, z), m = w.getMeta(x, y, z), res = crafterResult(be);
+  const f = FRONT4[m & 3], fx = x + DX[f], fz = z + DZ[f];
+  if (!res) { this.sound('crafter_fail', x + 0.5, y + 0.5, z + 0.5); this.particles.smoke(x + 0.5 + DX[f] * 0.6, y + 0.6, z + 0.5 + DZ[f] * 0.6, 4); return; }
+  // use up one of each ingredient; buckets and bottles stay behind in the grid
+  const spare = [];
+  be.items.forEach((s, i) => {
+    if (!s || be.disabled[i]) return;
+    const it = ITEMS[s.id], rem = it.bucket || s.id === I.MILK_BUCKET ? I.BUCKET : s.id === I.HONEY_BOTTLE || s.id === I.DRAGON_BREATH ? I.GLASS_BOTTLE : 0;
+    s.count--;
+    if (s.count <= 0) be.items[i] = rem ? { id: rem, count: 1 } : null;
+    else if (rem) spare.push({ id: rem, count: 1 });
+  });
+  // out of the front: into a container there, or flying out
+  for (const st of [res, ...spare]) {
+    const tgt = w.getBE(fx, y, fz);
+    let left = st;
+    if (tgt && tgt.items && tgt.type !== 'crafter') { left = this.insertItem(tgt, st); w.setBE(fx, y, fz, tgt); }
+    if (left) { const e = this.dropItem(x + 0.5 + DX[f] * 0.7, y + 0.35, z + 0.5 + DZ[f] * 0.7, left); e.vx = DX[f] * 0.15; e.vy = 0.05; e.vz = DZ[f] * 0.15; e.pickupDelay = 10; }
+  }
+  w.setBE(x, y, z, be);
+  this.sound('crafter_craft', x + 0.5, y + 0.5, z + 0.5);
+  w.setMeta(x, y, z, w.getMeta(x, y, z) | 4); this.remeshNear(x, z);
+  w.schedule(x, y, z, 6, 'crafter_idle');
+  if (this.ui.inv && this.ui.inv.type === 'crafter' && this.ui.inv.data === be) this.ui.renderInv();
+  if (this.redstoneChanged) this.redstoneChanged(x, y, z);
+};
+// redstone: a rising edge crafts after 4 ticks
+RS_CON[B.CRAFTER] = 16; RS_ANY[B.CRAFTER] = 1;
+const _reactCR = RS.react;
+RS.react = function (w, x, y, z) {
+  if (w.getBlock(x, y, z) !== B.CRAFTER) return _reactCR.call(this, w, x, y, z);
+  const m = w.getMeta(x, y, z), on = this.powered(w, x, y, z);
+  if (on && !(m & 8)) { w.setBlock(x, y, z, B.CRAFTER, m | 8, false); w.schedule(x, y, z, 4, 'crafter_craft'); }
+  else if (!on && (m & 8)) w.setBlock(x, y, z, B.CRAFTER, m & ~8, false);
+};
+const _onScheduledCR = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  const w = this.world;
+  if (kind === 'crafter_craft') { if (w.getBlock(x, y, z) === B.CRAFTER) this.crafterCraft(x, y, z); return; }
+  if (kind === 'crafter_idle') { if (w.getBlock(x, y, z) === B.CRAFTER) { w.setMeta(x, y, z, w.getMeta(x, y, z) & ~4); this.remeshNear(x, z); } return; }
+  return _onScheduledCR.call(this, kind, x, y, z);
+};
+// comparators count the slots that are filled or switched off
+const _containerSignalCR = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  if (w.getBlock(x, y, z) === B.CRAFTER) { const be = w.getBE(x, y, z); if (!be || !be.items) return 0; return be.items.filter((s, i) => s || (be.disabled && be.disabled[i])).length; }
+  return _containerSignalCR.call(this, w, x, y, z);
+};
+// hoppers put each item in the emptiest slot that can take it, and never pull from a crafter
+const _insertItemCR = Game.prototype.insertItem;
+Game.prototype.insertItem = function (be, st, slots) {
+  if (!be || be.type !== 'crafter') return _insertItemCR.call(this, be, st, slots);
+  let left = st.count;
+  const max = maxStack(st.id), same = s => s.id === st.id && !s.dmg && JSON.stringify(s.tag || null) === JSON.stringify(st.tag || null);
+  while (left > 0) {
+    let best = -1, bc = Infinity;
+    be.items.forEach((s, i) => { if (be.disabled[i]) return; const c = s ? (same(s) && s.count < max ? s.count : Infinity) : 0; if (c < bc) { bc = c; best = i; } });
+    if (best < 0) break;
+    if (be.items[best]) be.items[best].count++; else be.items[best] = Object.assign({}, st, { count: 1 });
+    left--;
+  }
+  return left ? Object.assign({}, st, { count: left }) : null;
+};
+const _tickHopperCR = Game.prototype.tickHopper;
+Game.prototype.tickHopper = function (x, y, z) {
+  const w = this.world;
+  if (w.getBlock(x, y + 1, z) === B.CRAFTER) {
+    const be = w.getBE(x, y + 1, z);
+    if (be && be.items) { const keep = be.items; be.items = null; try { return _tickHopperCR.call(this, x, y, z); } finally { be.items = keep; } }
+  }
+  return _tickHopperCR.call(this, x, y, z);
+};
+
+/* ---------------- the crafter screen ---------------- */
+const _useBlockCR = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit.id === B.CRAFTER && !p.sneaking) { const be = this.crafterBE(hit.x, hit.y, hit.z); this.ui.openInv('crafter', be); this.ui._crafterPos = [hit.x, hit.y, hit.z]; return true; }
+  return _useBlockCR.call(this, p, hit, held);
+};
+const CRAFTER_X = (() => { let u; return () => u || (u = (() => { const c = document.createElement('canvas'); c.width = c.height = 16; const g = c.getContext('2d'); g.strokeStyle = '#d03030'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(3, 3); g.lineTo(13, 13); g.moveTo(13, 3); g.lineTo(3, 13); g.stroke(); return c.toDataURL(); })()); })();
+SCREEN_LOGIC.crafter = {
+  result(ui) { return ui.inv.data ? crafterResult(ui.inv.data) : null; },
+  take() { },
+  accept(ui, c, i) { return c !== 'be' || !ui.inv.data.disabled[i]; },
+  update(ui) {
+    const be = ui.inv.data, win = ui.winEl;
+    if (!win) return;
+    for (const s of win.querySelectorAll('.slot')) {
+      if (s.dataset.c !== 'be') continue;
+      const off = be.disabled[+s.dataset.i];
+      s.style.backgroundImage = off ? `url(${CRAFTER_X()})` : ''; s.style.backgroundSize = '100% 100%'; s.style.backgroundColor = off ? 'rgba(80,0,0,0.25)' : '';
+    }
+    // the little redstone mark lights while the crafter is powered
+    if (!ui._crIcon || ui._crIcon.parentNode !== win) { ui._crIcon = el('div', 'vsp'); win.appendChild(ui._crIcon); }
+    const pos = ui._crafterPos, on = pos && (ui.game.world.getMeta(pos[0], pos[1], pos[2]) & 8);
+    Object.assign(ui._crIcon.style, { position: 'absolute', left: 94 * GS + 'px', top: 55 * GS + 'px', width: 8 * GS + 'px', height: 8 * GS + 'px', borderRadius: '50%', background: on ? '#ff3020' : '#5a1a14', boxShadow: on ? `0 0 ${3 * GS}px #ff5030` : 'none' });
+  },
+};
+// the output can't be taken by hand; clicking an empty slot with nothing held switches it off or on
+const _takeOutputCR = UI.prototype.takeOutput;
+UI.prototype.takeOutput = function (shift, btn) { if (this.inv && this.inv.type === 'crafter') return; return _takeOutputCR.call(this, shift, btn); };
+const _slotDownCR = UI.prototype.slotDown;
+UI.prototype.slotDown = function (c, i, btn, shift, e) {
+  const inv = this.inv;
+  if (inv && inv.type === 'crafter' && c === 'be' && !inv.data.items[i] && !this.cursor && btn === 0) {
+    inv.data.disabled[i] = !inv.data.disabled[i];
+    AUDIO.play('click');
+    this.game.markBEDirty && this.game.markBEDirty(inv.data);
+    if (this._crafterPos && this.game.redstoneChanged) this.game.redstoneChanged(...this._crafterPos);
+    this.renderInv();
+    return;
+  }
+  return _slotDownCR.call(this, c, i, btn, shift, e);
+};
+const _audioPlayCR = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  if (name !== 'crafter_craft' && name !== 'crafter_fail') return _audioPlayCR.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  if (name === 'crafter_craft') { this.noiseHit(dst, 'bandpass', 1200, 2, 0.08, 0.3); this.tone(dst, 'square', 300, 450, 0.06, 0.08); this.noiseHit(dst, 'bandpass', 700, 1.5, 0.12, 0.2, this.ctx.currentTime + 0.08); }
+  else { this.tone(dst, 'square', 220, 160, 0.12, 0.08); this.noiseHit(dst, 'lowpass', 500, 1, 0.15, 0.2); }
+};
+
+/* @file 108_weather.js */
+/* ===================================================================
+   THUNDERSTORMS — some rain turns into storms: darker skies (monsters
+   can come out by day), thunder, and lightning that sets fires, charges
+   creepers, turns pigs and villagers, and is drawn to lightning rods
+   =================================================================== */
+// the storm clock runs beside the rain: off for 10 minutes to 2.5 hours, on for 3 to 13 minutes
+Game.prototype.thunderState = function () {
+  if (!this.storm) this.storm = { on: false, time: 12000 + Math.floor(Math.random() * 168000), level: 0, flash: 0 };
+  return this.storm;
+};
+Game.prototype.thundering = function () { const s = this.thunderState(), w = this.world; return s.on && w.raining && w.dim === 'overworld'; };
+const _startWorldWT = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) {
+  const r = _startWorldWT.call(this, meta, saved);
+  this.storm = null;
+  const s = this.thunderState();
+  if (meta.thundering !== undefined) s.on = !!meta.thundering;
+  if (meta.thunderTime) s.time = meta.thunderTime;
+  s.level = this.thundering() ? 1 : 0;
+  this.bolts = [];
+  return r;
+};
+const _saveAllWT = Game.prototype.saveAll;
+Game.prototype.saveAll = function () {
+  if (this.meta && this.storm) { this.meta.thundering = this.storm.on; this.meta.thunderTime = this.storm.time; }
+  return _saveAllWT.call(this);
+};
+// rain and storms take daylight away: that is what lets monsters spawn under a storm
+const _skyDarkenWT = Game.prototype.skyDarken;
+Game.prototype.skyDarken = function () {
+  const base = _skyDarkenWT.call(this), w = this.world;
+  if (w.dim !== 'overworld') return base;
+  const s = this.thunderState(), rain = w.rainStrength || 0, th = s.level || 0;
+  const bright = (1 - base / 11) * (1 - rain * 5 / 16) * (1 - th * 5 / 16);
+  return Math.round((1 - bright) * 11);
+};
+const _computeEnvWT = Game.prototype.computeEnv;
+Game.prototype.computeEnv = function (eye, look) {
+  const env = _computeEnvWT.call(this, eye, look), w = this.world;
+  if (w.dim !== 'overworld') return env;
+  const s = this.thunderState(), th = s.level || 0;
+  if (th > 0.001) {
+    const k = 1 - 0.45 * th;
+    env.skyTop = env.skyTop.map(v => v * k); env.fogCol = env.fogCol.map(v => v * k); env.day *= 1 - 0.3 * th;
+    if (env.cloudCol) env.cloudCol = env.cloudCol.map(v => v * (1 - 0.35 * th));
+  }
+  // a lightning flash lights up the whole sky for a moment
+  if (s.flash > 0) {
+    const f = Math.min(1, s.flash / 2);
+    env.skyTop = env.skyTop.map(v => v + (0.9 - v) * 0.6 * f); env.fogCol = env.fogCol.map(v => v + (0.85 - v) * 0.5 * f); env.day = Math.min(1, env.day + 0.5 * f);
+  }
+  return env;
+};
+const _gameTickWT = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickWT.call(this);
+  const w = this.world, p = this.player;
+  if (!w || !p) return;
+  const s = this.thunderState();
+  if (--s.time <= 0) { s.on = !s.on; s.time = s.on ? 3600 + Math.floor(Math.random() * 12000) : 12000 + Math.floor(Math.random() * 168000); }
+  s.level += ((this.thundering() ? 1 : 0) - s.level) * 0.01;
+  if (s.flash > 0) s.flash--;
+  if (this.bolts && this.bolts.length) { for (const b of this.bolts) b.age++; this.bolts = this.bolts.filter(b => b.age < 12); }
+  // about one strike per hundred thousand ticks for each loaded chunk around the player
+  if (this.thundering() && Math.random() < 289 / 100000) {
+    const cx = (Math.floor(p.x) >> 4) + Math.floor(Math.random() * 17) - 8, cz = (Math.floor(p.z) >> 4) + Math.floor(Math.random() * 17) - 8;
+    const c = w.getChunk(cx, cz);
+    if (c && c.state >= 2 && c.hmap) {
+      const lx = Math.floor(Math.random() * 16), lz = Math.floor(Math.random() * 16);
+      this.strikeNear(cx * 16 + lx, c.hmap[(lz << 4) | lx], cz * 16 + lz);
+    }
+  }
+};
+// lightning goes for a rod close by, else for something alive standing in the open, else where it was headed
+Game.prototype.strikeNear = function (x, y, z) {
+  const w = this.world, sky = (bx, by, bz) => { const c = w.getChunk(bx >> 4, bz >> 4); return c && c.hmap && by >= c.hmap[((bz & 15) << 4) | (bx & 15)] - 1; };
+  let best = null, bd = Infinity;
+  for (let dz = -32; dz <= 32; dz++) for (let dx = -32; dx <= 32; dx++) {
+    const c = w.getChunk((x + dx) >> 4, (z + dz) >> 4);
+    if (!c || !c.hmap) continue;
+    const top = c.hmap[(((z + dz) & 15) << 4) | ((x + dx) & 15)];
+    for (let yy = Math.max(1, top - 2); yy <= top; yy++) if (w.getBlock(x + dx, yy, z + dz) === B.LIGHTNING_ROD) { const d = dx * dx + dz * dz; if (d < bd) { bd = d; best = [x + dx, yy, z + dz]; } }
+  }
+  if (best) return this.strikeAt(best[0] + 0.5, best[1] + 1, best[2] + 0.5, best);
+  const near = this.mobsAndPlayer().filter(e => !e.dead && Math.abs(e.x - x - 0.5) < 3 && Math.abs(e.z - z - 0.5) < 3 && sky(Math.floor(e.x), Math.floor(e.y + e.h), Math.floor(e.z)) && !(e === this.player && e.mode === 1));
+  if (near.length) { const e = near[Math.floor(Math.random() * near.length)]; return this.strikeAt(e.x, e.y, e.z, null); }
+  return this.strikeAt(x + 0.5, y, z + 0.5, null);
+};
+Game.prototype.strikeAt = function (x, y, z, rod) {
+  const w = this.world, p = this.player, s = this.thunderState();
+  this.bolts = this.bolts || [];
+  this.bolts.push({ x, y, z, age: 0, seed: Math.floor(Math.random() * 1e9) });
+  s.flash = 2;
+  const d = Math.hypot(p.x - x, p.z - z);
+  if (d < 160) {
+    // the crack nearby, the rumble arriving later the further away it is
+    if (d < 40) this.sound('lightning_impact', x, y, z);
+    setTimeout(() => this.sound('thunder', p.x + (x - p.x) * Math.min(1, 12 / Math.max(d, 1)), p.y, p.z + (z - p.z) * Math.min(1, 12 / Math.max(d, 1))), Math.min(2500, d * 12));
+  }
+  if (rod) {
+    // the rod takes the strike, glows with power for 8 ticks and doesn't burn
+    const m = w.getMeta(rod[0], rod[1], rod[2]);
+    w.setMeta(rod[0], rod[1], rod[2], m | 8); if (this.redstoneChanged) this.redstoneChanged(rod[0], rod[1], rod[2]);
+    w.schedule(rod[0], rod[1], rod[2], 8, 'rod_off');
+    for (let k = 0; k < 8; k++) this.particles.add({ x: rod[0] + 0.5 + (Math.random() - 0.5), y: rod[1] + 0.5 + Math.random(), z: rod[2] + 0.5 + (Math.random() - 0.5), vx: 0, vy: 0.02, vz: 0, life: 10, layer: texL('particle_generic_0'), u: 0, v: 0, us: 1, size: 0.08, g: 0, col: [0.8, 0.85, 1], bright: true });
+  } else if (OPTIONS.difficulty >= 2) {
+    // fire where it lands (on normal and hard)
+    const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z);
+    for (let k = 0; k < 5; k++) {
+      const bx = fx + (k ? Math.floor(Math.random() * 3) - 1 : 0), bz = fz + (k ? Math.floor(Math.random() * 3) - 1 : 0);
+      for (let by = fy + 1; by >= fy - 1; by--) if (w.getBlock(bx, by, bz) === 0 && SOLID[w.getBlock(bx, by - 1, bz)] && w.canStay(B.FIRE, bx, by, bz, 0)) { w.setBlock(bx, by, bz, B.FIRE, 0); break; }
+    }
+  }
+  // everything within three blocks is burned and some things change
+  for (const e of [...this.mobsAndPlayer(), ...this.entities.filter(q => q instanceof ItemEntity)]) {
+    if (e.dead || Math.abs(e.x - x) > 3 || Math.abs(e.z - z) > 3 || e.y < y - 3 || e.y > y + 6) continue;
+    if (e instanceof ItemEntity) { if (!ITEMS[e.stack.id].fireproof) e.dead = true; continue; }
+    if (e === p && p.mode === 1) continue;
+    if (e instanceof Mob) {
+      const t = e.type;
+      if (t === 'creeper') { e.data.charged = true; }
+      else if (t === 'pig') { this.convertMob(e, 'zombified_piglin'); continue; }
+      else if (t === 'villager' && OPTIONS.difficulty >= 2) { this.convertMob(e, 'witch'); continue; }
+      else if (t === 'mooshroom') { e.data.variant = e.data.variant === 'brown' ? 'red' : 'brown'; }
+    }
+    if (e.hurt) e.hurt(5, 'lightning');
+    e.fireTicks = Math.max(e.fireTicks || 0, 160);
+  }
+  this.remeshNear(Math.floor(x), Math.floor(z));
+};
+Game.prototype.convertMob = function (m, type) {
+  const n = this.spawnMob(type, m.x, m.y, m.z);
+  if (!n) return;
+  n.yaw = n.bodyYaw = m.yaw; n.persistent = m.persistent || !!m.customName; if (m.customName) n.customName = m.customName;
+  if (type === 'zombified_piglin') n.data.hand = { id: I.GOLDEN_SWORD, count: 1 };
+  m.dead = true;
+  this.particles.poof(m.x, m.y + 0.8, m.z, [0.8, 0.8, 0.9], 10);
+};
+const _onScheduledWT = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind === 'rod_off') { const w = this.world; if (w.getBlock(x, y, z) === B.LIGHTNING_ROD) { w.setMeta(x, y, z, w.getMeta(x, y, z) & ~8); if (this.redstoneChanged) this.redstoneChanged(x, y, z); } return; }
+  return _onScheduledWT.call(this, kind, x, y, z);
+};
+// a struck rod gives full redstone power for those 8 ticks
+RS_SRC[B.LIGHTNING_ROD] = 15; RS_ANY[B.LIGHTNING_ROD] = 1;
+const _emitWT = RS.emit;
+RS.emit = function (w, x, y, z, f, strong) {
+  if (w.getBlock(x, y, z) === B.LIGHTNING_ROD) return (w.getMeta(x, y, z) & 8) ? 15 : 0;
+  return _emitWT.call(this, w, x, y, z, f, strong);
+};
+// /weather thunder
+const _onChatWT = Game.prototype.onChat;
+Game.prototype.onChat = function (msg) {
+  const a = msg.trim().split(/\s+/);
+  if (a[0] !== '/weather' || !this.world) return _onChatWT.call(this, msg);
+  const s = this.thunderState(), w = this.world;
+  if (a[1] === 'thunder') { w.raining = true; w.rainTime = 6000 + Math.floor(Math.random() * 6000); s.on = true; s.time = w.rainTime; this.ui.chat('Changing to rain and thunder', '#ccc'); return; }
+  s.on = false; s.time = 12000 + Math.floor(Math.random() * 168000);
+  return _onChatWT.call(this, msg);
+};
+
+/* ---------------- the bolt ---------------- */
+// jagged layered ribbons from high in the sky down to the strike, flickering for a few ticks
+Game.prototype.drawBolts = function (r, alpha) {
+  if (!this.bolts || !this.bolts.length) return;
+  const eye = r.org, layer = texL('white_wool');
+  for (const b of this.bolts) {
+    if (b.age > 6 && b.age % 2) continue;
+    const R = mulberry32(b.seed), pts = [[b.x, b.y, b.z]];
+    let x = b.x, z = b.z;
+    for (let y = b.y; y < b.y + 128;) { y += 2 + R() * 5; x += (R() - 0.5) * 4; z += (R() - 0.5) * 4; pts.push([x, y, z]); }
+    const branches = [];
+    for (let k = 0; k < 3; k++) {
+      const i = 2 + Math.floor(R() * (pts.length - 4)), br = [pts[i]];
+      let [bx, by, bz] = pts[i];
+      for (let s = 0; s < 4; s++) { by -= 3 + R() * 5; bx += (R() - 0.5) * 5; bz += (R() - 0.5) * 5; br.push([bx, by, bz]); }
+      branches.push(br);
+    }
+    for (const line of [pts, ...branches]) for (const [wd, al] of [[0.05, 0.95], [0.12, 0.45], [0.22, 0.18]]) {
+      for (let i = 0; i + 1 < line.length; i++) {
+        const a = line[i], c = line[i + 1], sx = c[0] - a[0], sy = c[1] - a[1], sz = c[2] - a[2];
+        const vx = a[0] - eye[0], vy = a[1] - eye[1], vz = a[2] - eye[2];
+        let nx = sy * vz - sz * vy, ny = sz * vx - sx * vz, nz = sx * vy - sy * vx;
+        const nl = Math.hypot(nx, ny, nz) || 1; nx = nx / nl * wd; ny = ny / nl * wd; nz = nz / nl * wd;
+        const q = [[a[0] - nx, a[1] - ny, a[2] - nz], [c[0] - nx, c[1] - ny, c[2] - nz], [c[0] + nx, c[1] + ny, c[2] + nz], [a[0] + nx, a[1] + ny, a[2] + nz]];
+        for (const v of q) r.dv(v[0], v[1], v[2], 0.5, 0.5, layer, 0.85, 0.88, 1.0, al, 15, 15);
+      }
+    }
+  }
+};
+const _renderBeamsWT = Game.prototype.renderBeams;
+Game.prototype.renderBeams = function (r, alpha) { _renderBeamsWT.call(this, r, alpha); this.drawBolts(r, alpha); };
+const _audioPlayWT = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  if (name !== 'thunder' && name !== 'lightning_impact') return _audioPlayWT.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t = this.ctx.currentTime;
+  if (name === 'lightning_impact') { this.noiseHit(dst, 'highpass', 1800, 0.6, 0.35, 0.8); this.noiseHit(dst, 'lowpass', 400, 0.7, 0.6, 0.7, t + 0.02); }
+  else for (let k = 0; k < 4; k++) this.noiseHit(dst, 'lowpass', 140 + Math.random() * 120, 0.8, 1.4 + Math.random() * 1.2, 0.55 - k * 0.1, t + k * (0.25 + Math.random() * 0.4));
+};
+
+/* @file 109_monument.js */
+/* ===================================================================
+   OCEAN MONUMENTS IN PLAY — elder guardians curse nearby players with
+   mining fatigue, guardians keep spawning inside a monument, and sponges
+   soak up the water around them (wet ones dry out in the Nether)
+   =================================================================== */
+// every minute each elder guardian within 50 blocks lays Mining Fatigue III on the player, with its ghostly face
+Game.prototype.tickElders = function () {
+  const w = this.world, p = this.player;
+  if (!p || p.dead || p.mode === 1 || w.tick % 20) return;
+  for (const e of this.entities) {
+    if (e.type !== 'elder_guardian' || e.dead || e.deathTime > 0) continue;
+    e.data.curse = (e.data.curse === undefined ? 1200 : e.data.curse) + 20;
+    if (e.data.curse < 1200 || (e.x - p.x) ** 2 + (e.y - p.y) ** 2 + (e.z - p.z) ** 2 > 2500) continue;
+    e.data.curse = 0;
+    const fx = p.effects && p.effects.get('mining_fatigue');
+    if (fx && fx.amp >= 2 && fx.ticks > 1200) continue;
+    p.addEffect('mining_fatigue', 6000, 2);
+    this.sound('elder_curse', p.x, p.y + 1.6, p.z);
+    this.elderFace = 40;
+    break;
+  }
+};
+// the face fades in and out over the screen
+Game.prototype.drawElderFace = function () {
+  let d = document.getElementById('fx-elder');
+  if (!this.elderFace) { if (d) d.style.opacity = 0; return; }
+  if (!d) {
+    d = document.createElement('div'); d.id = 'fx-elder';
+    d.style.cssText = 'position:fixed;left:50%;top:50%;width:60vmin;height:60vmin;transform:translate(-50%,-50%);pointer-events:none;image-rendering:pixelated;background-size:100% 100%;transition:none;z-index:5';
+    document.body.appendChild(d);
+  }
+  if (!d.style.backgroundImage) {
+    const vt = VTEX['entity/guardian_elder'], c = document.createElement('canvas'); c.width = c.height = 20;
+    // the front of the head with the eye in the middle and spikes standing out all round
+    if (vt && ATLAS.canvas) {
+      const k = vt.reg.w / vt.tw, g = c.getContext('2d');
+      const src = (sx, sy, sw, sh, dx, dy, dw, dh) => g.drawImage(ATLAS.canvas, vt.reg.x + sx * k, vt.reg.y + sy * k, sw * k, sh * k, dx, dy, dw, dh);
+      g.imageSmoothingEnabled = false;
+      for (const a of [6, 12]) { src(2, 2, 2, 4, a, 0, 2, 4); src(2, 2, 2, 4, a, 16, 2, 4); src(2, 2, 2, 4, 0, a, 4, 2); src(2, 2, 2, 4, 16, a, 4, 2); }
+      src(16, 16, 12, 12, 4, 4, 12, 12);
+      src(9, 1, 2, 2, 9, 9, 2, 2);
+    }
+    d.style.backgroundImage = `url(${c.toDataURL()})`;
+  }
+  const t = this.elderFace, a = t > 30 ? (40 - t) / 10 : t < 15 ? t / 15 : 1;
+  d.style.opacity = (a * 0.7).toFixed(2);
+  this.elderFace--;
+};
+// inside a monument guardians come back over time
+Game.prototype.tickMonumentSpawns = function () {
+  const w = this.world, p = this.player;
+  if (!p || w.dim !== 'overworld' || w.tick % 40) return;
+  const S = STRUCTURES.find(q => q.name === 'ocean_monument');
+  if (!S) return;
+  const key = (Math.floor(p.x / S.region)) + ',' + (Math.floor(p.z / S.region));
+  if (this._monKey !== key) { this._monKey = key; this._mon = structurePlan(this.genInfo(), S, Math.floor(p.x / S.region), Math.floor(p.z / S.region)); }
+  const m = this._mon;
+  if (!m) return;
+  const [x0, z0, x1, z1] = m.rect;
+  if (p.x < x0 - 16 || p.x > x1 + 16 || p.z < z0 - 16 || p.z > z1 + 16) return;
+  const n = this.entities.filter(e => e.type === 'guardian' && !e.dead && e.x >= x0 && e.x <= x1 && e.z >= z0 && e.z <= z1).length;
+  if (n >= 10) return;
+  const x = x0 + Math.floor(Math.random() * (x1 - x0 + 1)), z = z0 + Math.floor(Math.random() * (z1 - z0 + 1)), y = m.y + 1 + Math.floor(Math.random() * 16);
+  if (w.getBlock(x, y, z) === B.WATER && w.getBlock(x, y + 1, z) === B.WATER && (x - p.x) ** 2 + (z - p.z) ** 2 > 64) this.spawnMob('guardian', x + 0.5, y, z + 0.5);
+};
+const _gameTickMN = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickMN.call(this); if (this.world && this.player) { this.tickElders(); this.tickMonumentSpawns(); this.drawElderFace(); } };
+
+/* ---------------- sponges ---------------- */
+// a dry sponge drinks the water around it: up to 65 blocks within 6 steps, then it is wet
+Game.prototype.soak = function (x, y, z) {
+  const w = this.world;
+  if (w.getBlock(x, y, z) !== B.SPONGE) return false;
+  const seen = new Set([x + ',' + y + ',' + z]), q = [[x, y, z, 0]];
+  let n = 0;
+  while (q.length && n < 65) {
+    const [cx, cy, cz, d] = q.shift();
+    for (let f = 0; f < 6; f++) {
+      const nx = cx + DX[f], ny = cy + DY[f], nz = cz + DZ[f], k = nx + ',' + ny + ',' + nz;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const id = w.getBlock(nx, ny, nz);
+      if (id !== B.WATER && !(WATERY[id] === 1 && !SOLID[id])) continue;
+      w.setBlock(nx, ny, nz, 0, 0); n++;
+      if (d < 6) q.push([nx, ny, nz, d + 1]);
+      if (n >= 65) break;
+    }
+  }
+  if (!n) return false;
+  w.setBlock(x, y, z, B.WET_SPONGE, 0);
+  this.sound('splash', x + 0.5, y + 0.5, z + 0.5);
+  this.remeshNear(x, z);
+  return true;
+};
+const _afterPlaceMN = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const r = _afterPlaceMN.call(this, p, x, y, z, id), w = this.world;
+  if (id === B.SPONGE) this.soak(x, y, z);
+  // wet sponges steam dry at once in the Nether
+  if (id === B.WET_SPONGE && w.dim === 'nether') { w.setBlock(x, y, z, B.SPONGE, 0); this.sound('fizz', x + 0.5, y + 0.5, z + 0.5); this.particles.smoke(x + 0.5, y + 1, z + 0.5, 8); this.remeshNear(x, z); }
+  // water poured next to a dry sponge is drunk too
+  if (id === B.WATER || BLK[id].water) for (let f = 0; f < 6; f++) if (w.getBlock(x + DX[f], y + DY[f], z + DZ[f]) === B.SPONGE) { this.soak(x + DX[f], y + DY[f], z + DZ[f]); break; }
+  return r;
+};
+const _useItemSpecialMN = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  const r = _useItemSpecialMN.call(this, p, hit, held, it);
+  if (r && held && it && it.bucket === 'water' && hit) {
+    const x = hit.x + DX[hit.face], y = hit.y + DY[hit.face], z = hit.z + DZ[hit.face], w = this.world;
+    for (const [bx, by, bz] of [[x, y, z], [hit.x, hit.y, hit.z]]) for (let f = 0; f < 6; f++) if (w.getBlock(bx + DX[f], by + DY[f], bz + DZ[f]) === B.SPONGE) { this.soak(bx + DX[f], by + DY[f], bz + DZ[f]); return r; }
+  }
+  return r;
+};
+const _audioPlayMN = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  if (name !== 'elder_curse') return _audioPlayMN.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  this.tone(dst, 'sawtooth', 180, 90, 1.4, 0.12); this.tone(dst, 'sine', 360, 170, 1.4, 0.1); this.noiseHit(dst, 'lowpass', 500, 1, 1.2, 0.2);
 };
 
 </script>
