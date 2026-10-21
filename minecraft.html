@@ -10337,7 +10337,8 @@ MDL[SH.DIODE] = (d, m) => {
   const on = m & 8, top = d.diode + (on ? '_on' : ''), torch = on ? 'redstone_torch' : 'redstone_torch_off';
   const tb = (x, z, h) => BX(x, 2, z, x + 2, 2 + (h || 5), z + 2, torch, UV6([7, 6, 9, 11]));
   const ps = [BX(0, 0, 0, 16, 2, 16, { top, bottom: 'smooth_stone', side: 'smooth_stone' })];
-  if (d.diode === 'repeater') { ps.push(tb(7, 12)); ps.push(tb(7, 2 + ((m >> 4) & 3) * 2)); }
+  // a locked repeater shows a bedrock bar where its delay torch was
+  if (d.diode === 'repeater') { ps.push(tb(7, 12)); const z = 2 + ((m >> 4) & 3) * 2; ps.push((m & 64) ? BX(2, 2, z, 14, 4, z + 2, 'bedrock') : tb(7, z)); }
   else { ps.push(tb(4, 2), tb(10, 2), tb(7, 12, (m & 4) ? 4 : 3)); }
   return rotParts(ps, m & 3);
 };
@@ -10382,7 +10383,9 @@ const BOX_MODELS = {
   cake: (d, m) => { const x0 = 1 + 2 * Math.min(6, m & 7); return [BX(x0, 0, 1, 15, 8, 15, { top: 'cake_top', bottom: 'cake_bottom', side: 'cake_side', west: x0 > 1 ? 'cake_inner' : 'cake_side' })]; },
   heavy_core: () => [BX(4, 0, 4, 12, 8, 12)],
   tripwire_hook: (d, m) => rotParts([BX(6, 1, 0, 10, 9, 2, 'oak_planks'), BX(7.5, 6, 2, 8.5, 7, 9, 'tripwire_hook', UV6([7, 4, 8, 13])), BX(7, 6, 9, 9, 8, 11, 'iron_block')], m & 3),
-  hopper: () => [BX(0, 10, 0, 16, 11, 16, { top: 'hopper_inside', bottom: 'hopper_outside', side: 'hopper_outside' }), BX(0, 11, 0, 2, 16, 16), BX(14, 11, 0, 16, 16, 16), BX(2, 11, 0, 14, 16, 2), BX(2, 11, 14, 14, 16, 16), BX(4, 4, 4, 12, 10, 12), BX(6, 0, 6, 10, 4, 10)],
+  hopper: (d, m) => [BX(0, 10, 0, 16, 11, 16, { top: 'hopper_inside', bottom: 'hopper_outside', side: 'hopper_outside' }), BX(0, 11, 0, 2, 16, 16), BX(14, 11, 0, 16, 16, 16), BX(2, 11, 0, 14, 16, 2), BX(2, 11, 14, 14, 16, 16), BX(4, 4, 4, 12, 10, 12),
+    // the spout points down or out of a side
+    [BX(6, 0, 6, 10, 4, 10), BX(12, 4, 6, 16, 8, 10), BX(0, 4, 6, 4, 8, 10), null, null, BX(6, 4, 12, 10, 8, 16), BX(6, 4, 0, 10, 8, 4)][m & 7] || BX(6, 0, 6, 10, 4, 10)],
 };
 // models whose geometry depends only on (id, meta) are cached
 const MODEL_CACHE = new Map();
@@ -20029,6 +20032,8 @@ Object.assign(Game.prototype, {
         break;
       }
       case SH.DIODE: meta = look; break;
+      // hoppers point into the block clicked, or down when placed on a top or bottom face
+      case SH.BOX: if (id === B.HOPPER) meta = face === 2 || face === 3 ? 0 : (face ^ 1) + 1; break;
       case SH.RAIL: meta = look & 1; break;
       case SH.CANDLE: meta = 0; break;
     }
@@ -22835,6 +22840,14 @@ for (const n of BLOCK_NAMES) {
 const RS_ANY = new Uint8Array(MAXB);
 for (let i = 0; i < MAXB; i++) if (RS_SRC[i] || RS_CON[i]) RS_ANY[i] = 1;
 const conductive = id => OPAQUE[id] === 1 && SHAPE[id] === SH.CUBE;
+// blocks a piston breaks instead of pushing (PushReaction.DESTROY): melons and pumpkins (so melon and pumpkin farms work),
+// beds, doors, heads, pots, candles, lanterns, amethyst buds, dripstone, eggs, cobwebs and the like
+const PISTON_DESTROY = new Uint8Array(MAXB);
+for (let i = 1; i < MAXB; i++) {
+  const d = BLK[i];
+  if (!d || !d.name) continue;
+  if (/^(pumpkin|carved_pumpkin|jack_o_lantern|melon|cobweb|dragon_egg|flower_pot|decorated_pot|cocoa|cake|lantern|soul_lantern|pointed_dripstone|chorus_plant|chorus_flower|turtle_egg|sniffer_egg|frogspawn|small_amethyst_bud|medium_amethyst_bud|large_amethyst_bud|amethyst_cluster|big_dripleaf|scaffolding|conduit)$|^potted_|_bed$|_door$|_head$|_skull$|_wall_head$|_wall_skull$|candle|_banner$|_sign$/.test(d.name)) PISTON_DESTROY[i] = 1;
+}
 const IMMOVABLE = new Set([B.OBSIDIAN, B.CRYING_OBSIDIAN, B.BEDROCK, B.END_PORTAL_FRAME, B.REINFORCED_DEEPSLATE, B.END_GATEWAY, B.END_PORTAL, B.NETHER_PORTAL,
   B.RESPAWN_ANCHOR, B.ENCHANTING_TABLE, B.ENDER_CHEST, B.SPAWNER, B.TRIAL_SPAWNER, B.VAULT, B.BEACON, B.PISTON_HEAD, B.JUKEBOX, B.LODESTONE]);
 
@@ -23019,12 +23032,37 @@ const RS = {
       case C_RAIL: { const on = this.powered(w, x, y, z); if (on !== !!(m & 8)) this.set(w, x, y, z, id, on ? m | 8 : m & ~8); break; }
       case C_HOPPER: { const on = this.powered(w, x, y, z); if (on !== !!(m & 8)) w.setBlock(x, y, z, id, on ? m | 8 : m & ~8, false); break; }
       case C_TORCH: { const off = this.torchOff(w, x, y, z, m); if (off !== !!(m & 8)) w.schedule(x, y, z, 2, 'rs_torch'); break; }
-      case C_REPEATER: { const on = this.repeaterIn(w, x, y, z, m); if (on !== !!(m & 8)) w.schedule(x, y, z, (((m >> 4) & 3) + 1) * 2, 'rs_repeater'); break; }
+      case C_REPEATER: {
+        // a powered repeater or comparator pointing into its side locks it (bit 64) in its state
+        const lock = this.repeaterLocked(w, x, y, z, m);
+        if (lock !== !!(m & 64)) this.set(w, x, y, z, id, lock ? m | 64 : m & ~64);
+        if (lock) break;
+        const on = this.repeaterIn(w, x, y, z, m);
+        if (on !== !!(m & 8)) w.schedule(x, y, z, (((m >> 4) & 3) + 1) * 2, 'rs_repeater');
+        break;
+      }
       case C_COMPARATOR: if (this.comparatorOut(w, x, y, z, m) !== m >> 4) w.schedule(x, y, z, 2, 'rs_comparator'); break;
     }
   },
   torchOff(w, x, y, z, m) { const f = TORCH_ATT[m & 7], ax = x + DX[f], ay = y + DY[f], az = z + DZ[f]; return conductive(w.getBlock(ax, ay, az)) && this.blockPower(w, ax, ay, az, false) > 0; },
   repeaterIn(w, x, y, z, m) { return this.inputFrom(w, x, y, z, FACE_OF_LOOK[m & 3] ^ 1) > 0; },
+  repeaterLocked(w, x, y, z, m) {
+    for (const g of [FACE_OF_LOOK[(m + 1) & 3], FACE_OF_LOOK[(m + 3) & 3]]) {
+      const nx = x + DX[g], ny = y + DY[g], nz = z + DZ[g], id = w.getBlock(nx, ny, nz);
+      if ((id === B.REPEATER || id === B.COMPARATOR) && this.emit(w, nx, ny, nz, g ^ 1, false) > 0) return true;
+    }
+    return false;
+  },
+  // redstone torches that turned off 8 times in the last 3 seconds burn out (RedstoneTorchBlock.RECENT_TOGGLES)
+  toggles: [],
+  torchToggles(w, x, y, z, log) {
+    const k = x + ',' + y + ',' + z, T = this.toggles;
+    while (T.length && w.tick - T[0][1] > 60) T.shift();
+    if (log) T.push([k, w.tick]);
+    let n = 0;
+    for (const t of T) if (t[0] === k) n++;
+    return n >= 8;
+  },
   // comparators: the rear signal (or how full a container behind is), against the stronger side
   comparatorOut(w, x, y, z, m) {
     const out = FACE_OF_LOOK[m & 3], back = out ^ 1;
@@ -23062,8 +23100,22 @@ Game.prototype.onScheduled = function (kind, x, y, z) {
   if (!kind.startsWith('rs_')) return _onScheduledRS.call(this, kind, x, y, z);
   const id = w.getBlock(x, y, z), m = w.getMeta(x, y, z);
   switch (kind) {
-    case 'rs_torch': if (id === B.REDSTONE_TORCH) { const off = RS.torchOff(w, x, y, z, m); if (off !== !!(m & 8)) RS.set(w, x, y, z, id, off ? m | 8 : m & ~8); } break;
-    case 'rs_repeater': if (id === B.REPEATER) { const on = RS.repeaterIn(w, x, y, z, m); if (on !== !!(m & 8)) { RS.set(w, x, y, z, id, on ? m | 8 : m & ~8); const f = FACE_OF_LOOK[m & 3]; RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); } } break;
+    case 'rs_torch': if (id === B.REDSTONE_TORCH) {
+      const off = RS.torchOff(w, x, y, z, m);
+      if (!(m & 8)) {
+        if (off) {
+          RS.set(w, x, y, z, id, m | 8);
+          // burnt out: it fizzles and tries again 8 seconds later
+          if (RS.torchToggles(w, x, y, z, true)) { this.sound('fizz', x + 0.5, y + 0.5, z + 0.5); if (this.particles) this.particles.smoke(x + 0.5, y + 0.7, z + 0.5, 5); w.schedule(x, y, z, 160, 'rs_torch'); }
+        }
+      } else if (!off && !RS.torchToggles(w, x, y, z, false)) RS.set(w, x, y, z, id, m & ~8);
+    } break;
+    case 'rs_repeater': if (id === B.REPEATER && !RS.repeaterLocked(w, x, y, z, m)) {
+      // DiodeBlock.tick: it turns off when the input is gone; it turns on even for a pulse shorter than its delay, and stays on that long
+      const on = RS.repeaterIn(w, x, y, z, m), was = !!(m & 8), f = FACE_OF_LOOK[m & 3];
+      if (was && !on) { RS.set(w, x, y, z, id, m & ~8); RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); }
+      else if (!was) { RS.set(w, x, y, z, id, m | 8); RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); if (!on) w.schedule(x, y, z, (((m >> 4) & 3) + 1) * 2, 'rs_repeater'); }
+    } break;
     case 'rs_comparator': if (id === B.COMPARATOR) { const o = RS.comparatorOut(w, x, y, z, m); if (o !== m >> 4) { RS.set(w, x, y, z, id, (m & 7) | (o ? 8 : 0) | (o << 4)); const f = FACE_OF_LOOK[m & 3]; RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); } } break;
     case 'rs_lamp': if (id === B.REDSTONE_LAMP && (m & 1) && !RS.powered(w, x, y, z)) RS.set(w, x, y, z, id, m & ~1); break;
     case 'rs_obs_on': if (id === B.OBSERVER && !(m & 8)) { RS.set(w, x, y, z, id, m | 8); const f = (m & 7) ^ 1; RS.queue.push([w, x + DX[f], y + DY[f], z + DZ[f]]); w.schedule(x, y, z, 2, 'rs_obs_off'); } break;
@@ -23092,7 +23144,7 @@ Game.prototype.movePiston = function (x, y, z, extend) {
     for (;;) {
       if (cy < 0 || cy > CH_TOP) return;
       const b = w.getBlock(cx, cy, cz);
-      if (b === 0 || BLK[b].liquid || REPL[b] || (BLK[b].needs && !SOLID[b])) break;
+      if (b === 0 || BLK[b].liquid || REPL[b] || (BLK[b].needs && !SOLID[b]) || PISTON_DESTROY[b]) break;
       if (line.length >= 12 || !movable(b) || w.getBE(cx, cy, cz) || (BLK[b].piston && (w.getMeta(cx, cy, cz) & 8))) return;
       line.push([cx, cy, cz, b, w.getMeta(cx, cy, cz)]);
       cx += dx; cy += dy; cz += dz;
@@ -23116,7 +23168,7 @@ Game.prototype.movePiston = function (x, y, z, extend) {
     w.setBlock(x, y, z, id, m & ~8, false);
     if (sticky) {
       const fx = hx + dx, fy = hy + dy, fz = hz + dz, b = w.getBlock(fx, fy, fz);
-      if (b && movable(b) && !BLK[b].liquid && !REPL[b] && !w.getBE(fx, fy, fz) && !(BLK[b].needs && !SOLID[b]) && !(BLK[b].piston && (w.getMeta(fx, fy, fz) & 8))) {
+      if (b && movable(b) && !BLK[b].liquid && !REPL[b] && !PISTON_DESTROY[b] && !w.getBE(fx, fy, fz) && !(BLK[b].needs && !SOLID[b]) && !(BLK[b].piston && (w.getMeta(fx, fy, fz) & 8))) {
         w.setBlock(hx, hy, hz, b, w.getMeta(fx, fy, fz), false); w.setBlock(fx, fy, fz, 0, 0, false); w.notify(fx, fy, fz);
       }
     }
@@ -23200,7 +23252,7 @@ Game.prototype.tickRedstone = function () {
   this.pressPlate(p);
   const t = w.tick, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
   if (t % 4 !== 0) return;
-  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+  for (let dz = -8; dz <= 8; dz++) for (let dx = -8; dx <= 8; dx++) {
     const c = w.getChunk(pcx + dx, pcz + dz);
     if (!c || c.state < 2) continue;
     for (const i of rsTickers(c)) {
@@ -23234,7 +23286,7 @@ Game.prototype.checkPlate = function (x, y, z) {
     this.sound('click', x + 0.5, y + 0.1, z + 0.5);
     RS.changed(w, x, y, z); RS.changed(w, x, y - 1, z);
   }
-  if (level) w.schedule(x, y, z, 10, 'rs_plate');
+  if (level) w.schedule(x, y, z, weighted ? 10 : 20, 'rs_plate');
 };
 Game.prototype.tickDaylight = function (x, y, z) {
   const w = this.world, m = w.getMeta(x, y, z), sky = w.getLightRaw(x, y, z) >> 4;
@@ -23245,23 +23297,26 @@ Game.prototype.tickDaylight = function (x, y, z) {
   lvl = Math.max(0, Math.min(15, lvl));
   if (lvl !== m >> 4) { RS.set(w, x, y, z, B.DAYLIGHT_DETECTOR, (m & 15) | (lvl << 4)); RS.changed(w, x, y, z); }
 };
-// hoppers: pull from the container above (or items lying on top), push into the container below
+// hoppers: pull from the container above (or items lying on top), push into the container they point into:
+// meta & 7 holds the way they point, 0 down or 1 + a side face; bit 8 is the redstone lock
+const hopperFace = m => (m & 7) ? (m & 7) - 1 : 3;
 Game.prototype.tickHopper = function (x, y, z) {
   const w = this.world;
   if (w.getMeta(x, y, z) & 8) return;
   let be = w.getBE(x, y, z);
   if (!be || !be.items) { be = { type: 'hopper', kind: 'hopper', items: new Array(5).fill(null) }; }
   let moved = false;
-  // push down first
-  const below = w.getBE(x, y - 1, z), bid = w.getBlock(x, y - 1, z);
+  // push where it points first (down, or sideways: into the side of a furnace goes the fuel)
+  const f = hopperFace(w.getMeta(x, y, z)), tx = x + DX[f], ty = y + DY[f], tz = z + DZ[f], side = f !== 3;
+  const below = w.getBE(tx, ty, tz), bid = w.getBlock(tx, ty, tz);
   if (below && below.items) {
     for (let i = 0; i < be.items.length && !moved; i++) {
       const s = be.items[i];
       if (!s) continue;
-      const slots = below.type === 'furnace' ? [0] : below.type === 'brewing' ? (ITEMS[s.id].name === 'blaze_powder' ? [4] : [3]) : null;
-      if (!this.insertItem(below, { id: s.id, count: 1, tag: s.tag, dmg: s.dmg }, slots)) { s.count--; if (!s.count) be.items[i] = null; moved = true; w.setBE(x, y - 1, z, below); if (below.type === 'furnace') this.furnaces.set(this.beKey(x, y - 1, z), { x, y: y - 1, z, be: below }); }
+      const blaze = ITEMS[s.id].name === 'blaze_powder', slots = below.type === 'furnace' ? [side ? 1 : 0] : below.type === 'brewing' ? (side ? (blaze ? [4] : [0, 1, 2]) : blaze ? [4] : [3]) : null;
+      if (!this.insertItem(below, { id: s.id, count: 1, tag: s.tag, dmg: s.dmg }, slots)) { s.count--; if (!s.count) be.items[i] = null; moved = true; w.setBE(tx, ty, tz, below); if (below.type === 'furnace') this.furnaces.set(this.beKey(tx, ty, tz), { x: tx, y: ty, z: tz, be: below }); }
     }
-  } else if (bid === B.COMPOSTER) {
+  } else if (bid === B.COMPOSTER && !side) {
     for (let i = 0; i < be.items.length && !moved; i++) { const s = be.items[i]; if (s && this.compost && this.compost(x, y - 1, z, s)) { s.count--; if (!s.count) be.items[i] = null; moved = true; } }
   }
   // then pull from above
@@ -23314,6 +23369,14 @@ Game.prototype.useBlock = function (p, hit, held) {
     if (id === B.COMPARATOR) { RS.set(w, x, y, z, id, m ^ 4); this.sound('click', x + 0.5, y + 0.5, z + 0.5); w.schedule(x, y, z, 2, 'rs_comparator'); return true; }
   }
   return _useBlockRS.call(this, p, hit, held);
+};
+
+// observers see plants grow: random ticks change crops, stems, berries, cocoa and farmland without block updates
+const _randomTickRS = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  const w = this.world, m0 = w.getMeta(x, y, z);
+  _randomTickRS.call(this, x, y, z, id);
+  if (w.getBlock(x, y, z) !== id || w.getMeta(x, y, z) !== m0) RS.observe(w, x, y, z);
 };
 
 /* @file 100_vehicles.js */
@@ -29444,7 +29507,8 @@ Game.prototype.gameTick = function () {
     m.x = mt.x; m.y = mt.y + mt.h - 0.3; m.z = mt.z; m.vx = m.vy = m.vz = 0; m.fallDist = 0; m.bodyYaw = mt.bodyYaw;
   }
 };
-Game.prototype.spawnMobs = (base => function () { base.call(this); if (this.player && this.world) this.vPatrols(20); })(Game.prototype.spawnMobs);
+// (like the other custom spawners, patrols need doMobSpawning)
+Game.prototype.spawnMobs = (base => function () { base.call(this); if (this.player && this.world && (!this.rule || this.rule('doMobSpawning'))) this.vPatrols(20); })(Game.prototype.spawnMobs);
 // raids are saved with the world
 const _saveAllRD = Game.prototype.saveAll;
 Game.prototype.saveAll = function () { if (this.meta) this.meta.raids = (this.raids || []).filter(r => r.status !== 'stopped'); return _saveAllRD.apply(this, arguments); };
@@ -29493,6 +29557,64 @@ tooltipLines = function (st) {
   if (st && st.id === I.OMINOUS_BOTTLE) out.splice(1, 0, ['Bad Omen' + (st.tag && st.tag.amp ? ' ' + (ROMAN[st.tag.amp + 1] || st.tag.amp + 1) : '') + ' (100:00)', '#5555ff']);
   return out;
 };
+
+/* ---------------- sieges and village cats ---------------- */
+Object.assign(Game.prototype, {
+  // VillageSiege: one midnight in ten, 20 zombies come into the village the player is in, from 32 blocks out
+  vSiege() {
+    const w = this.world, p = this.player, R = Math.random, s = this._siege || (this._siege = { state: 'done' });
+    if (w.dim !== 'overworld' || OPTIONS.difficulty === 0 || this.isDay()) { s.state = 'done'; s.setup = false; return; }
+    if (w.time % 24000 === 18000) { s.state = Math.floor(R() * 10) === 0 ? 'tonight' : 'done'; s.setup = false; }
+    if (s.state === 'done') return;
+    // a spot in the village the zombies can come from (Monster.checkMonsterSpawnRules)
+    const spot = (x, y, z) => {
+      for (let i = 0; i < 10; i++) {
+        const sx = x + Math.floor(R() * 16) - 8, sz = z + Math.floor(R() * 16) - 8, c = w.getChunk(sx >> 4, sz >> 4);
+        if (!c || c.state < 2 || !c.blocks) continue;
+        const sy = this.vSurface(c, ((sz & 15) << 4) | (sx & 15));
+        if (this.nearVillage(sx, sy, sz, 1) && this.vSpawnRules('zombie', sx, sy, sz, R)) return [sx + 0.5, sy, sz + 0.5];
+      }
+      return null;
+    };
+    if (!s.setup) {
+      if (p.dead || p.mode === 3 || !this.nearVillage(p.x, p.y, p.z, 1) || biomeAt(this, p.x, p.z) === BI.MUSHROOM_FIELDS) return;
+      for (let i = 0; i < 10; i++) {
+        const f = R() * Math.PI * 2, x = Math.floor(p.x) + Math.floor(Math.cos(f) * 32), z = Math.floor(p.z) + Math.floor(Math.sin(f) * 32);
+        if (spot(x, Math.floor(p.y), z)) { Object.assign(s, { x, y: Math.floor(p.y), z, left: 20, next: 0 }); break; }
+      }
+      s.setup = true;
+    }
+    if (s.next > 0) { s.next--; return; }
+    s.next = 2;
+    if (s.left > 0) { const at = spot(s.x, s.y, s.z); if (at) { const m = this.spawnMob('zombie', at[0], at[1], at[2]); if (m) m.yaw = m.bodyYaw = R() * Math.PI * 2; } s.left--; }
+    else s.state = 'done';
+  },
+  // CatSpawner: once a minute a cat may turn up 8 to 32 blocks away, at the player's height: in villages with five
+  // claimed beds and fewer than five cats around, or a black one at a swamp hut with no cat
+  vCats() {
+    const w = this.world, p = this.player, R = Math.random;
+    if (w.dim !== 'overworld' || p.dead || p.mode === 3) return;
+    if ((this._catT = (this._catT === undefined ? 1200 : this._catT) - 20) > 0) return;
+    this._catT = 1200;
+    const x = Math.floor(p.x) + (8 + Math.floor(R() * 24)) * (R() < 0.5 ? -1 : 1), y = Math.floor(p.y), z = Math.floor(p.z) + (8 + Math.floor(R() * 24)) * (R() < 0.5 ? -1 : 1);
+    if (!w.isLoadedAt(x - 10, z - 10) || !w.isLoadedAt(x + 10, z + 10) || !this.vPlacementOk('cat', x, y, z)) return;
+    const cats = (r, h) => this.entities.filter(e => e.type === 'cat' && !e.dead && Math.abs(e.x - x) <= r + 1 && Math.abs(e.z - z) <= r + 1 && Math.abs(e.y - y) <= h + 1).length;
+    let black = false;
+    if (this.nearVillage(x, y, z, 2)) {
+      const beds = new Set(this.entities.filter(e => e.type === 'villager' && !e.dead && e.data.bed && (e.data.bed[0] - x) ** 2 + (e.data.bed[1] - y) ** 2 + (e.data.bed[2] - z) ** 2 <= 2304).map(e => e.data.bed.join(','))).size;
+      if (beds <= 4 || cats(48, 8) >= 5) return;
+    } else {
+      const hut = structureAt(this.genInfo(), 'swamp_hut', x, z);
+      if (!hut || cats(16, 8) >= 1) return;
+      black = true;
+    }
+    const m = this.spawnMob('cat', x + 0.5, y, z + 0.5);
+    if (m && black) { m.data.variant = 'all_black'; m.persistent = true; }
+  },
+});
+Game.prototype.spawnMobs = (base => function () { base.call(this); if (this.player && this.world && (!this.rule || this.rule('doMobSpawning'))) this.vCats(); })(Game.prototype.spawnMobs);
+const _gameTickSG = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickSG.call(this); if (this.world && this.player && (!this.rule || this.rule('doMobSpawning'))) this.vSiege(); };
 
 </script>
 </body>

@@ -213,6 +213,8 @@ Java tutorials work:
   call an iron golem when three of them panic (a zombie nearby) or five gossip. XP and
   player-only drops come only from mobs you hurt in their last 5 seconds.
 - Phantoms come after three sleepless days, and wandering traders on vanilla's daily odds.
+- **Zombie sieges**: one midnight in ten, twenty zombies come into the village you are in. Cats
+  turn up in villages with five claimed beds, and black cats at swamp huts.
 
 ### Raids and patrols
 
@@ -236,6 +238,13 @@ Java tutorials work:
 - Lamps, doors, trapdoors, fence gates, TNT, pistons and sticky pistons, dispensers and droppers,
   hoppers, note blocks, bells, copper bulbs and the crafter all respond. Pistons, dispensers and
   droppers have Java Edition's quasi-connectivity: power reaching the block above them counts.
+- Java Edition timings and quirks: repeaters stretch a short pulse to their delay and lock when a
+  powered repeater or comparator points into their side, redstone torches burn out when switched
+  off eight times in three seconds, pressure plates stay down for a second (weighted ones half a
+  second), and observers see crops grow.
+- Hoppers point down or sideways into whatever they were placed against (into a furnace's side
+  goes fuel), and pistons break melons, pumpkins, beds, doors, pots and other fragile blocks
+  instead of pushing them, so automatic farms built from Java designs work.
 - **Command blocks**: impulse, chain and repeating, conditional or not, needing redstone or always
   active. Type any of the commands above into the command block screen; `~` coordinates count
   from the block, chains run in the same tick and comparators read whether the command worked.
