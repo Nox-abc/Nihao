@@ -469,10 +469,21 @@ const CH_H = 256, SEA = 64;
 const BIOME_NAMES = ['Ocean','Deep Ocean','Frozen Ocean','Beach','Snowy Beach','River','Frozen River','Plains','Forest','Birch Forest',
   'Taiga','Snowy Plains','Snowy Taiga','Desert','Badlands','Savanna','Meadow','Cherry Grove','Grove','Snowy Slopes',
   'Stony Peaks','Jagged Peaks','Windswept Hills','Swamp',
-  'Nether Wastes','Crimson Forest','Warped Forest','Soul Sand Valley','Basalt Deltas','The End'];
+  'Nether Wastes','Crimson Forest','Warped Forest','Soul Sand Valley','Basalt Deltas','The End',
+  // added later: new ids only ever go at the end so saved chunks keep their biomes
+  'Jungle','Bamboo Jungle','Sparse Jungle','Dark Forest','Mushroom Fields','Flower Forest','Sunflower Plains','Old Growth Pine Taiga',
+  'Old Growth Spruce Taiga','Old Growth Birch Forest','Ice Spikes','Warm Ocean','Lukewarm Ocean','Cold Ocean','Deep Lukewarm Ocean','Deep Cold Ocean',
+  'Deep Frozen Ocean','Mangrove Swamp','Stony Shore','Eroded Badlands','Wooded Badlands','Windswept Savanna','Savanna Plateau','Windswept Forest',
+  'Windswept Gravelly Hills','Frozen Peaks','Lush Caves','Dripstone Caves','Deep Dark','End Highlands','End Midlands','Small End Islands','End Barrens','The Void'];
 const BI = {};
 BIOME_NAMES.forEach((n, i) => { BI[n.toUpperCase().replace(/ /g, '_')] = i; });
-const SNOWY_BIOMES = new Set([BI.SNOWY_BEACH, BI.SNOWY_PLAINS, BI.SNOWY_TAIGA, BI.GROVE, BI.SNOWY_SLOPES, BI.JAGGED_PEAKS, BI.FROZEN_RIVER, BI.FROZEN_OCEAN]);
+const SNOWY_BIOMES = new Set([BI.SNOWY_BEACH, BI.SNOWY_PLAINS, BI.SNOWY_TAIGA, BI.GROVE, BI.SNOWY_SLOPES, BI.JAGGED_PEAKS, BI.FROZEN_RIVER, BI.FROZEN_OCEAN,
+  BI.ICE_SPIKES, BI.FROZEN_PEAKS, BI.DEEP_FROZEN_OCEAN]);
+const OCEAN_BIOMES = new Set([BI.OCEAN, BI.DEEP_OCEAN, BI.FROZEN_OCEAN, BI.WARM_OCEAN, BI.LUKEWARM_OCEAN, BI.COLD_OCEAN, BI.DEEP_LUKEWARM_OCEAN, BI.DEEP_COLD_OCEAN, BI.DEEP_FROZEN_OCEAN]);
+const BADLANDS_BIOMES = new Set([BI.BADLANDS, BI.ERODED_BADLANDS, BI.WOODED_BADLANDS]);
+const JUNGLE_BIOMES = new Set([BI.JUNGLE, BI.BAMBOO_JUNGLE, BI.SPARSE_JUNGLE]);
+// biomes where it never rains
+const DRY_BIOMES = new Set([BI.DESERT, BI.BADLANDS, BI.ERODED_BADLANDS, BI.WOODED_BADLANDS, BI.SAVANNA, BI.SAVANNA_PLATEAU, BI.WINDSWEPT_SAVANNA]);
 
 // ---------- deterministic randomness ----------
 function mulberry32(a) {
@@ -570,7 +581,10 @@ function spline(x, pts) {
 }
 
 // ---------- trees (used by the generator and by sapling growth) ----------
-// set(x,y,z,id,isLog) must ignore out-of-range writes. r() is a seeded random.
+// set(x,y,z,id,isLog,meta) must ignore out-of-range writes. r() is a seeded random.
+const TRUNK_2X2 = [[0, 0], [1, 0], [0, 1], [1, 1]];
+const COCOA_SIDES = [[-1, 0, 3], [1, 0, 1], [0, -1, 0], [0, 1, 2]];                        // [dx, dz, cocoa facing toward the trunk]
+const MEGA_VINES = [[-1, 0, 1], [-1, 1, 1], [2, 0, 2], [2, 1, 2], [0, -1, 16], [1, -1, 16], [0, 2, 32], [1, 2, 32]]; // around a 2x2 trunk
 function leafBlob(set, x, y, z, rx, ry, leaf, r) {
   const R = Math.ceil(rx), RY = Math.ceil(ry);
   for (let dy = -RY; dy <= RY; dy++) for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
@@ -591,6 +605,7 @@ function growTree(type, x, y, z, r, set) {
       }
     }
     for (let i = 0; i < hgt; i++) set(x, y + i, z, log, true);
+    return hgt;
   } else if (type === 'bigoak') {
     const hgt = 6 + Math.floor(r() * 4);
     leafBlob(set, x, y + hgt - 1, z, 3.2, 2.4, B.OAK_LEAVES, r);
@@ -648,7 +663,7 @@ function growTree(type, x, y, z, r, set) {
     leafBlob(set, x, y + hgt + 1, z, 2.6, 1.5, B.CHERRY_LEAVES, r);
   } else if (type === 'jungle' || type === 'azalea') {
     const azalea = type === 'azalea', log = azalea ? B.OAK_LOG : B.JUNGLE_LOG;
-    const hgt = azalea ? 4 + Math.floor(r() * 2) : 5 + Math.floor(r() * 6), top = y + hgt;
+    const hgt = azalea ? 4 + Math.floor(r() * 2) : 5 + Math.floor(r() * 7), top = y + hgt;
     const leaf = () => azalea ? (r() < 0.3 ? B.FLOWERING_AZALEA_LEAVES : B.AZALEA_LEAVES) : B.JUNGLE_LEAVES;
     for (let dy = -3; dy <= 0; dy++) {
       const rad = dy >= -1 ? 1 : 2;
@@ -658,6 +673,78 @@ function growTree(type, x, y, z, r, set) {
       }
     }
     for (let i = 0; i < hgt; i++) set(x, y + i, z, log, true);
+    // cocoa pods on the lower trunk: [dx, dz, facing toward the log]
+    if (!azalea) for (let i = 2; i < hgt - 3; i++) for (const [dx, dz, f] of COCOA_SIDES) if (r() < 0.07) set(x + dx, y + i, z + dz, B.COCOA, false, f | 8);
+  } else if (type === 'megajungle') {
+    const hgt = 14 + Math.floor(r() * 10), top = y + hgt;
+    for (let i = 0; i < hgt; i++) for (const [ox, oz] of TRUNK_2X2) set(x + ox, y + i, z + oz, B.JUNGLE_LOG, true);
+    leafBlob(set, x, top, z, 3.6, 2.2, B.JUNGLE_LEAVES, r); leafBlob(set, x + 1, top, z + 1, 3.6, 2.2, B.JUNGLE_LEAVES, r);
+    // side branches with their own small crowns
+    const nb = 2 + Math.floor(r() * 3);
+    for (let b = 0; b < nb; b++) {
+      const a = r() * Math.PI * 2, by = y + Math.floor(hgt * (0.45 + r() * 0.35)), dx = Math.cos(a), dz = Math.sin(a);
+      let bx = x, bz = z, yy = by;
+      for (let t = 1; t <= 3; t++) { bx = x + Math.round(dx * (t + 0.5)); bz = z + Math.round(dz * (t + 0.5)); if (t > 1) yy++; set(bx, yy, bz, B.JUNGLE_LOG, true, Math.abs(dx) > Math.abs(dz) ? 1 : 2); }
+      leafBlob(set, bx, yy + 1, bz, 2.4, 1.3, B.JUNGLE_LEAVES, r);
+    }
+    // vines climbing the trunk
+    for (let i = 0; i < hgt - 2; i++) for (const [vx, vz, m] of MEGA_VINES) if (r() < 0.3) set(x + vx, y + i, z + vz, B.VINE, false, m);
+  } else if (type === 'bush') {
+    set(x, y, z, B.JUNGLE_LOG, true);
+    leafBlob(set, x, y + 1, z, 2.4, 1.4, B.OAK_LEAVES, r);
+    set(x, y + 1, z, B.OAK_LEAVES, false);
+  } else if (type === 'tallbirch') {
+    const hgt = 9 + Math.floor(r() * 5), top = y + hgt;
+    for (let dy = -4; dy <= 0; dy++) {
+      const rad = dy >= -1 ? 1 : 2;
+      for (let dx = -rad; dx <= rad; dx++) for (let dz = -rad; dz <= rad; dz++) {
+        if (Math.abs(dx) === rad && Math.abs(dz) === rad && (dy === 0 || r() < 0.5)) continue;
+        set(x + dx, top + dy, z + dz, B.BIRCH_LEAVES, false);
+      }
+    }
+    for (let i = 0; i < hgt; i++) set(x, y + i, z, B.BIRCH_LOG, true);
+  } else if (type === 'megaspruce' || type === 'megapine') {
+    const pine = type === 'megapine', hgt = 16 + Math.floor(r() * 12), top = y + hgt;
+    const crown = pine ? 4 + Math.floor(r() * 3) : Math.floor(hgt * (0.55 + r() * 0.15));
+    for (let k = 0; k <= crown; k++) {
+      const yy = top - k + 1;
+      // the crown widens downward in rings, pines only at the very top
+      const rad = Math.min(pine ? 2.6 : 4.2, 0.5 + k * (pine ? 0.55 : 0.42) - (k % 3 === 2 ? 0.8 : 0));
+      const R = Math.ceil(rad);
+      for (let dx = -R; dx <= R + 1; dx++) for (let dz = -R; dz <= R + 1; dz++) {
+        const ex = dx <= 0 ? dx : dx - 1, ez = dz <= 0 ? dz : dz - 1;
+        if (ex * ex + ez * ez <= rad * rad) set(x + dx, yy, z + dz, B.SPRUCE_LEAVES, false);
+      }
+    }
+    for (let i = 0; i < hgt; i++) for (const [ox, oz] of TRUNK_2X2) set(x + ox, y + i, z + oz, B.SPRUCE_LOG, true);
+  } else if (type === 'red_mushroom' || type === 'brown_mushroom') {
+    const red = type === 'red_mushroom', hgt = (red ? 4 : 5) + Math.floor(r() * 3), cap = red ? B.RED_MUSHROOM_BLOCK : B.BROWN_MUSHROOM_BLOCK;
+    if (red) {
+      for (let dy = -3; dy <= 0; dy++) {
+        const rad = dy === 0 ? 1 : 2;
+        for (let dx = -rad; dx <= rad; dx++) for (let dz = -rad; dz <= rad; dz++) {
+          if (dy < 0 && Math.abs(dx) < 2 && Math.abs(dz) < 2) continue;
+          if (dy < 0 && Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
+          set(x + dx, y + hgt + dy, z + dz, cap, false);
+        }
+      }
+    } else {
+      for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) if (!(Math.abs(dx) === 3 && Math.abs(dz) === 3)) set(x + dx, y + hgt, z + dz, cap, false);
+    }
+    for (let i = 0; i < hgt; i++) set(x, y + i, z, B.MUSHROOM_STEM, true);
+  } else if (type === 'icespike' || type === 'bigicespike') {
+    const big = type === 'bigicespike', hgt = big ? 28 + Math.floor(r() * 24) : 5 + Math.floor(r() * 9), rad = big ? 2.6 + r() * 0.8 : 1.1 + r() * 0.9;
+    for (let i = -3; i < hgt; i++) {
+      const rr = rad * Math.pow(1 - Math.max(0, i) / hgt, 0.7) + 0.35, R = Math.ceil(rr);
+      for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) if (dx * dx + dz * dz <= rr * rr) set(x + dx, y + i, z + dz, B.PACKED_ICE, true);
+    }
+  } else if (type === 'boulder') {
+    const rad = 1.2 + r() * 1.2;
+    for (let n = 0; n < 3; n++) {
+      const ox = Math.round((r() - 0.5) * 3), oz = Math.round((r() - 0.5) * 3), R = Math.ceil(rad);
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++)
+        if (dx * dx + dy * dy + dz * dz <= rad * rad) set(x + ox + dx, y + dy, z + oz + dz, B.MOSSY_COBBLESTONE, true);
+    }
   } else if (type === 'acacia') {
     const hgt = 5 + Math.floor(r() * 3), lean = Math.floor(r() * 4), lx = [1, -1, 0, 0][lean], lz = [0, 0, 1, -1][lean];
     const bend = hgt - 1 - Math.floor(r() * 3);
@@ -702,6 +789,8 @@ function Generator(seed) {
   this.nC = P(1); this.nE = P(2); this.nR = P(3); this.nHill = P(4); this.nRiv = P(5);
   this.nT = P(6); this.nH = P(7); this.nS = P(8); this.nW = P(9);
   this.nCa = P(10); this.nCb = P(11); this.nCc = P(12); this.nCd = P(13); this.nBand = P(14);
+  this.nV = P(15); this.nCave = P(16); this.nDD = P(17);
+  this.latCache = new Map(); this.plans = new Map(); this._sf = [0, 0, 0, 0, 0];
 }
 const CONT_SPLINE = [-1.0, 22, -0.55, 32, -0.3, 46, -0.16, 56, -0.08, 62, -0.02, 65, 0.08, 67, 0.3, 72, 0.55, 80, 1.0, 92];
 
@@ -722,6 +811,27 @@ Generator.prototype.column = function (wx, wz) {
   this.climate(wx, wz, p, 0);
   return this.columnFrom(p, wx, wz);
 };
+// exactly the column genChunk produces: the climate lattice sits on multiples of 4 and is interpolated
+Generator.prototype.latticePoint = function (x, z) {
+  const k = x + ',' + z;
+  let v = this.latCache.get(k);
+  if (!v) {
+    if (this.latCache.size > 30000) this.latCache.clear();
+    v = new Float32Array(NCLIM); this.climate(x, z, v, 0); this.latCache.set(k, v);
+  }
+  return v;
+};
+const _pvA = new Float32Array(NCLIM);
+Generator.prototype.columnAt = function (wx, wz) {
+  wx = Math.floor(wx); wz = Math.floor(wz);
+  const x0 = wx - (wx & 3), z0 = wz - (wz & 3), fx = (wx & 3) / 4, fz = (wz & 3) / 4;
+  const a = this.latticePoint(x0, z0), b = this.latticePoint(x0 + 4, z0), c = this.latticePoint(x0, z0 + 4), d = this.latticePoint(x0 + 4, z0 + 4);
+  for (let k = 0; k < NCLIM; k++) {
+    const top = a[k] + (b[k] - a[k]) * fx, bot = c[k] + (d[k] - c[k]) * fx;
+    _pvA[k] = top + (bot - top) * fz;
+  }
+  return this.columnFrom(_pvA, wx, wz);
+};
 Generator.prototype.columnFrom = function (p, wx, wz) {
   const c = p[0], e = p[1], ridge = p[2], hill = p[6];
   const t = p[3], hu = p[4];
@@ -734,6 +844,12 @@ Generator.prototype.columnFrom = function (p, wx, wz) {
   // swamps: flat, soggy lowlands
   const swampy = (t > 0.1 && hu > 0.42 && mtn < 0.15 && c > -0.05) ? smoothstep(0.42, 0.55, hu) * (1 - mtn / 0.15) : 0;
   if (swampy > 0) h = h + (SEA + this.nHill.n2(wx / 24, wz / 24) * 3 - h) * swampy;
+  // mushroom islands rise out of the deep ocean
+  let mush = 0;
+  if (c < -0.36) {
+    const m = this.nV.n2(wx / 170 + 91.3, wz / 170 - 47.1) * smoothstep(-0.36, -0.5, c);
+    if (m > 0.3) { mush = smoothstep(0.3, 0.4, m); h += (SEA + 3 + hill * 7 - h) * mush; }
+  }
   // rivers
   let river = false;
   if (c > -0.14) {
@@ -747,46 +863,88 @@ Generator.prototype.columnFrom = function (p, wx, wz) {
     }
   }
   h = Math.max(4, Math.min(240, Math.floor(h)));
-  // biome classification
+  // biome classification; v1/v2 pick the rarer variants inside a climate zone
+  const v1 = this.nV.n2(wx / 260, wz / 260), v2 = this.nV.n2(wz / 210 + 500, wx / 210 - 300);
   let b;
   const frozen = t < -0.48;
-  if (river && h < SEA) b = frozen ? BI.FROZEN_RIVER : BI.RIVER;
-  else if (h < SEA && (c < -0.1 || h < SEA - 7) && swampy < 0.5) b = frozen ? BI.FROZEN_OCEAN : (h < SEA - 20 ? BI.DEEP_OCEAN : BI.OCEAN);
-  else if (h <= SEA + 1 && c < -0.02 && c > -0.25 && mtn < 0.2) b = t < -0.4 ? BI.SNOWY_BEACH : (t > 0.35 && hu < 0 ? BI.DESERT : BI.BEACH);
-  else if (h > 152) b = (t < 0.25 || h > 178) ? BI.JAGGED_PEAKS : BI.STONY_PEAKS;
+  if (mush > 0.4 && h >= SEA) b = BI.MUSHROOM_FIELDS;
+  else if (river && h < SEA) b = frozen ? BI.FROZEN_RIVER : BI.RIVER;
+  else if (h < SEA && (c < -0.1 || h < SEA - 7) && swampy < 0.5) {
+    const deep = h < SEA - 20;
+    if (frozen) b = deep ? BI.DEEP_FROZEN_OCEAN : BI.FROZEN_OCEAN;
+    else if (t < -0.25) b = deep ? BI.DEEP_COLD_OCEAN : BI.COLD_OCEAN;
+    else if (t > 0.45) b = BI.WARM_OCEAN;
+    else if (t > 0.2) b = deep ? BI.DEEP_LUKEWARM_OCEAN : BI.LUKEWARM_OCEAN;
+    else b = deep ? BI.DEEP_OCEAN : BI.OCEAN;
+  } else if (h <= SEA + 1 && c < -0.02 && c > -0.25 && mtn < 0.2) b = e < -0.32 ? BI.STONY_SHORE : t < -0.4 ? BI.SNOWY_BEACH : (t > 0.35 && hu < 0 ? BI.DESERT : BI.BEACH);
+  else if (h > 152) b = t < -0.32 ? BI.FROZEN_PEAKS : (t < 0.25 || h > 178) ? BI.JAGGED_PEAKS : BI.STONY_PEAKS;
   else if (h > 112 && mtn > 0.25) {
     if (t < -0.15) b = BI.SNOWY_SLOPES;
     else if (hu > 0.2 && t > 0.0) b = BI.CHERRY_GROVE;
     else if (t < 0.12) b = BI.GROVE;
-    else if (hu < -0.2) b = BI.WINDSWEPT_HILLS;
+    else if (hu < -0.2) b = t > 0.33 ? BI.WINDSWEPT_SAVANNA : BI.WINDSWEPT_HILLS;
     else b = BI.MEADOW;
   } else if (h > 98 && mtn > 0.3 && hu > -0.1 && t > -0.2) b = hu > 0.25 ? BI.CHERRY_GROVE : BI.MEADOW;
-  else if (swampy > 0.5) b = BI.SWAMP;
+  else if (swampy > 0.5) b = t > 0.38 ? BI.MANGROVE_SWAMP : BI.SWAMP;
   else if (t > 0.33) {
-    if (hu < 0.05) b = (hu < -0.25 && t > 0.48) ? BI.BADLANDS : BI.DESERT;
-    else b = BI.SAVANNA;
+    if (hu < 0.05) {
+      if (hu < -0.25 && t > 0.48) b = v2 > 0.28 ? BI.WOODED_BADLANDS : v1 > 0.3 ? BI.ERODED_BADLANDS : BI.BADLANDS;
+      else b = BI.DESERT;
+    } else if (hu > 0.2) b = hu < 0.26 ? BI.SPARSE_JUNGLE : v2 > 0.3 ? BI.BAMBOO_JUNGLE : BI.JUNGLE;
+    else b = mtn > 0.3 ? BI.WINDSWEPT_SAVANNA : h > 90 ? BI.SAVANNA_PLATEAU : BI.SAVANNA;
   } else if (t > 0.05) {
-    if (hu > 0.1) b = this.nW.n2(wx / 300, wz / 300) > 0.18 ? BI.BIRCH_FOREST : BI.FOREST;
-    else if (hu > -0.1 && this.nW.n2(wx / 200, wz / 200) > 0.2) b = BI.FOREST;
-    else b = BI.PLAINS;
-  } else if (t > -0.42) b = hu > 0.05 ? BI.TAIGA : (mtn > 0.3 ? BI.WINDSWEPT_HILLS : (hu < -0.2 ? BI.PLAINS : BI.FOREST));
-  else b = hu > 0.05 ? BI.SNOWY_TAIGA : BI.SNOWY_PLAINS;
+    if (hu > 0.1) {
+      if (hu > 0.3 && t > 0.12) b = BI.DARK_FOREST;
+      else if (this.nW.n2(wx / 300, wz / 300) > 0.18) b = v2 > 0.32 ? BI.OLD_GROWTH_BIRCH_FOREST : BI.BIRCH_FOREST;
+      else b = v1 > 0.3 ? BI.FLOWER_FOREST : BI.FOREST;
+    } else if (hu > -0.1 && this.nW.n2(wx / 200, wz / 200) > 0.2) b = v1 > 0.3 ? BI.FLOWER_FOREST : BI.FOREST;
+    else b = v1 > 0.34 ? BI.SUNFLOWER_PLAINS : BI.PLAINS;
+  } else if (t > -0.42) {
+    if (hu > 0.05) b = hu > 0.38 ? (v2 > 0 ? BI.OLD_GROWTH_SPRUCE_TAIGA : BI.OLD_GROWTH_PINE_TAIGA) : BI.TAIGA;
+    else if (mtn > 0.3) b = hu > -0.06 ? BI.WINDSWEPT_FOREST : v1 > 0.25 ? BI.WINDSWEPT_GRAVELLY_HILLS : BI.WINDSWEPT_HILLS;
+    else b = hu < -0.2 ? BI.PLAINS : BI.FOREST;
+  } else b = hu > 0.05 ? BI.SNOWY_TAIGA : v1 > 0.3 ? BI.ICE_SPIKES : BI.SNOWY_PLAINS;
+  // eroded badlands: terracotta hoodoos
+  if (b === BI.ERODED_BADLANDS) {
+    const s = this.nV.n2(wx / 7, wz / 7) + this.nV.n2(wx / 3.1, wz / 3.1) * 0.15;
+    if (s > 0.28) h = Math.min(240, h + Math.floor((s - 0.28) * 70));
+  }
   return { h, b };
 };
 
+// underground biome regions of a column: 1 lush caves, 2 dripstone caves, 4 deep dark
+const DEEP_DARK_TOP = 30;
+Generator.prototype.caveFlags = function (wx, wz) {
+  let f = 0;
+  if (this.nCave.n2(wx / 150, wz / 150) > 0.34) f |= 1;
+  else if (this.nCave.n2(wx / 150 + 400, wz / 150 - 250) > 0.36) f |= 2;
+  if (fbm2(this.nDD, wx / 320, wz / 320, 2) > 0.3 || ancientCityNear(this, wx, wz)) f |= 4;
+  return f;
+};
+Generator.prototype.caveBiomeAt = function (wx, y, wz, surface) {
+  if (y > surface - 8) return -1;
+  const f = this.caveFlags(wx, wz);
+  if ((f & 4) && y <= DEEP_DARK_TOP) return BI.DEEP_DARK;
+  if (y > 60) return -1;
+  return (f & 1) ? BI.LUSH_CAVES : (f & 2) ? BI.DRIPSTONE_CAVES : -1;
+};
+
 const TREE_RULES = {};
-TREE_RULES[BI.PLAINS] = [0.003, 'oak'];
-TREE_RULES[BI.FOREST] = [0.055, 'forest'];
-TREE_RULES[BI.BIRCH_FOREST] = [0.055, 'birch'];
-TREE_RULES[BI.TAIGA] = [0.05, 'spruce'];
-TREE_RULES[BI.SNOWY_TAIGA] = [0.04, 'spruce'];
-TREE_RULES[BI.SNOWY_PLAINS] = [0.0025, 'spruce'];
-TREE_RULES[BI.GROVE] = [0.035, 'spruce'];
-TREE_RULES[BI.SAVANNA] = [0.006, 'flatoak'];
-TREE_RULES[BI.SWAMP] = [0.025, 'flatoak'];
-TREE_RULES[BI.MEADOW] = [0.0015, 'birch'];
-TREE_RULES[BI.CHERRY_GROVE] = [0.02, 'cherry'];
-TREE_RULES[BI.WINDSWEPT_HILLS] = [0.008, 'spruce'];
+((rule) => {
+  rule([BI.PLAINS], 0.003, 'oak'); rule([BI.SUNFLOWER_PLAINS], 0.002, 'oak'); rule([BI.WOODED_BADLANDS], 0.03, 'smalloak');
+  rule([BI.FOREST], 0.055, 'forest'); rule([BI.FLOWER_FOREST], 0.03, 'forest');
+  rule([BI.BIRCH_FOREST], 0.055, 'birch'); rule([BI.OLD_GROWTH_BIRCH_FOREST], 0.055, 'tallbirch'); rule([BI.DARK_FOREST], 0.1, 'darkforest');
+  rule([BI.TAIGA], 0.05, 'spruce'); rule([BI.SNOWY_TAIGA], 0.04, 'spruce'); rule([BI.SNOWY_PLAINS], 0.0025, 'spruce'); rule([BI.GROVE], 0.035, 'spruce');
+  rule([BI.OLD_GROWTH_PINE_TAIGA], 0.05, 'oldpine'); rule([BI.OLD_GROWTH_SPRUCE_TAIGA], 0.05, 'oldspruce');
+  rule([BI.SAVANNA, BI.SAVANNA_PLATEAU], 0.01, 'savanna'); rule([BI.WINDSWEPT_SAVANNA], 0.006, 'savanna');
+  rule([BI.SWAMP], 0.025, 'flatoak'); rule([BI.MANGROVE_SWAMP], 0.07, 'mangrove');
+  rule([BI.MEADOW], 0.0015, 'birch'); rule([BI.CHERRY_GROVE], 0.02, 'cherry');
+  rule([BI.WINDSWEPT_HILLS], 0.008, 'spruce'); rule([BI.WINDSWEPT_FOREST], 0.04, 'windforest'); rule([BI.WINDSWEPT_GRAVELLY_HILLS], 0.004, 'spruce');
+  rule([BI.JUNGLE], 0.11, 'junglemix'); rule([BI.SPARSE_JUNGLE], 0.03, 'sparsejungle'); rule([BI.BAMBOO_JUNGLE], 0.06, 'bamboojungle');
+  rule([BI.MUSHROOM_FIELDS], 0.008, 'mushroom'); rule([BI.ICE_SPIKES], 0.006, 'icespike');
+})((bs, d, t) => { for (const b of bs) TREE_RULES[b] = [d, t]; });
+const TWO_BY_TWO = new Set(['dark_oak', 'megajungle', 'megaspruce', 'megapine']);
+const BEE_BIOMES = new Set([BI.PLAINS, BI.SUNFLOWER_PLAINS, BI.MEADOW, BI.FLOWER_FOREST, BI.FOREST, BI.CHERRY_GROVE]);
 
 const BAND_COLORS = [B.TERRACOTTA, B.ORANGE_TERRACOTTA, B.TERRACOTTA, B.YELLOW_TERRACOTTA, B.WHITE_TERRACOTTA, B.TERRACOTTA, B.RED_TERRACOTTA,
   B.BROWN_TERRACOTTA, B.TERRACOTTA, B.ORANGE_TERRACOTTA, B.TERRACOTTA, B.TERRACOTTA, B.RED_TERRACOTTA, B.WHITE_TERRACOTTA, B.YELLOW_TERRACOTTA, B.TERRACOTTA];
@@ -799,12 +957,60 @@ const ORE_DEEP = {};
 ORE_DEEP[B.COAL_ORE] = B.DEEPSLATE_COAL_ORE; ORE_DEEP[B.IRON_ORE] = B.DEEPSLATE_IRON_ORE; ORE_DEEP[B.COPPER_ORE] = B.DEEPSLATE_COPPER_ORE;
 ORE_DEEP[B.GOLD_ORE] = B.DEEPSLATE_GOLD_ORE; ORE_DEEP[B.REDSTONE_ORE] = B.DEEPSLATE_REDSTONE_ORE; ORE_DEEP[B.LAPIS_ORE] = B.DEEPSLATE_LAPIS_ORE;
 ORE_DEEP[B.DIAMOND_ORE] = B.DEEPSLATE_DIAMOND_ORE; ORE_DEEP[B.EMERALD_ORE] = B.DEEPSLATE_EMERALD_ORE;
-const MOUNTAIN_BIOMES = new Set([BI.MEADOW, BI.CHERRY_GROVE, BI.GROVE, BI.SNOWY_SLOPES, BI.STONY_PEAKS, BI.JAGGED_PEAKS, BI.WINDSWEPT_HILLS]);
+const MOUNTAIN_BIOMES = new Set([BI.MEADOW, BI.CHERRY_GROVE, BI.GROVE, BI.SNOWY_SLOPES, BI.STONY_PEAKS, BI.JAGGED_PEAKS, BI.WINDSWEPT_HILLS,
+  BI.FROZEN_PEAKS, BI.WINDSWEPT_FOREST, BI.WINDSWEPT_GRAVELLY_HILLS, BI.WINDSWEPT_SAVANNA]);
+const LEAVES_GEN = new Uint8Array(MAXB);
+for (const n of BLOCK_NAMES) if (n.endsWith('_leaves')) LEAVES_GEN[B[n.toUpperCase()]] = 1;
+// plants and other things snow never settles on
+const NO_SNOW = new Uint8Array(MAXB);
+for (let i = B.BROWN_MUSHROOM; i <= B.KELP; i++) NO_SNOW[i] = 1;
+[B.WATER, B.ICE, B.LAVA, B.SNOW, B.PUMPKIN, B.MELON, B.BEE_NEST, B.COCOA, B.TORCH, B.LANTERN, B.BELL].forEach(i => NO_SNOW[i] = 1);
+const FF_FLOWERS = [B.DANDELION, B.POPPY, B.ALLIUM, B.AZURE_BLUET, B.RED_TULIP, B.ORANGE_TULIP, B.WHITE_TULIP, B.PINK_TULIP, B.OXEYE_DAISY, B.CORNFLOWER, B.LILY_OF_THE_VALLEY];
+const PLAINS_FLOWERS = [B.DANDELION, B.POPPY, B.AZURE_BLUET, B.OXEYE_DAISY, B.CORNFLOWER, B.RED_TULIP, B.ORANGE_TULIP, B.WHITE_TULIP, B.PINK_TULIP];
+const TALL_FLOWERS = [B.LILAC, B.ROSE_BUSH, B.PEONY];
+
+// surface layers of a column: [top, filler, filler depth, under, under depth]; -1 stands for the badlands band colour
+Generator.prototype.surface = function (b, h, steep, wx, wz, r) {
+  let top = B.GRASS_BLOCK, fill = B.DIRT, depth = 3 + (r * 2 | 0), under = B.STONE, underDepth = 0;
+  const mountain = MOUNTAIN_BIOMES.has(b);
+  switch (b) {
+    case BI.DESERT: top = B.SAND; fill = B.SAND; depth = 4; under = B.SANDSTONE; underDepth = 4; break;
+    case BI.BEACH: case BI.SNOWY_BEACH: top = B.SAND; fill = B.SAND; depth = 3; under = B.SANDSTONE; underDepth = 2; break;
+    case BI.STONY_SHORE: top = fill = this.nS.n2(wx / 10, wz / 10) > 0.3 ? B.GRAVEL : B.STONE; depth = 2; break;
+    case BI.BADLANDS: top = B.RED_SAND; fill = B.RED_SAND; depth = 1 + (r * 2 | 0); break;
+    case BI.ERODED_BADLANDS: if (steep >= 2) top = fill = -1; else { top = fill = B.RED_SAND; depth = 1 + (r * 2 | 0); } break;
+    case BI.WOODED_BADLANDS: top = r < 0.4 ? B.COARSE_DIRT : B.GRASS_BLOCK; fill = B.DIRT; depth = 1; break;
+    case BI.OCEAN: case BI.FROZEN_OCEAN: case BI.LUKEWARM_OCEAN: case BI.COLD_OCEAN: top = h > SEA - 12 ? B.SAND : B.GRAVEL; fill = top; depth = 3; if (r < 0.06 && h > SEA - 8) { top = B.CLAY; } break;
+    case BI.WARM_OCEAN: case BI.DEEP_LUKEWARM_OCEAN: top = fill = B.SAND; depth = 3; under = B.SANDSTONE; underDepth = 2; break;
+    case BI.DEEP_OCEAN: case BI.DEEP_COLD_OCEAN: case BI.DEEP_FROZEN_OCEAN: top = B.GRAVEL; fill = B.GRAVEL; depth = 3; break;
+    case BI.RIVER: case BI.FROZEN_RIVER: top = r < 0.15 ? B.CLAY : (r < 0.55 ? B.SAND : B.GRAVEL); fill = top === B.CLAY ? B.CLAY : B.SAND; depth = 2; break;
+    case BI.SNOWY_SLOPES: top = B.SNOW_BLOCK; fill = B.SNOW_BLOCK; depth = 2; break;
+    case BI.JAGGED_PEAKS: top = B.SNOW_BLOCK; fill = B.SNOW_BLOCK; depth = 1 + (r * 3 | 0); break;
+    case BI.FROZEN_PEAKS: top = fill = this.nS.n2(wx / 9, wz / 9) > 0.1 ? B.PACKED_ICE : B.SNOW_BLOCK; depth = 2; break;
+    case BI.STONY_PEAKS: top = B.STONE; fill = B.STONE; if (r < 0.2) top = B.CALCITE; break;
+    case BI.WINDSWEPT_HILLS: case BI.WINDSWEPT_FOREST: if (this.nS.n2(wx / 12, wz / 12) > 0.25) { top = B.GRAVEL; fill = B.GRAVEL; } break;
+    case BI.WINDSWEPT_GRAVELLY_HILLS: if (this.nS.n2(wx / 12, wz / 12) > -0.3) { top = B.GRAVEL; fill = B.GRAVEL; } break;
+    case BI.WINDSWEPT_SAVANNA: { const n = this.nS.n2(wx / 10, wz / 10); if (n > 0.3) top = fill = B.STONE; else if (n < -0.35) top = B.COARSE_DIRT; break; }
+    case BI.SWAMP: if (h < SEA) { top = r < 0.3 ? B.CLAY : B.DIRT; } break;
+    case BI.MANGROVE_SWAMP: top = fill = B.MUD; depth = 4; break;
+    case BI.MUSHROOM_FIELDS: top = B.MYCELIUM; break;
+    case BI.ICE_SPIKES: top = B.SNOW_BLOCK; break;
+    case BI.TAIGA: case BI.SNOWY_TAIGA: { const pz = this.nS.n2(wx / 18, wz / 18); if (pz > 0.3) top = B.PODZOL; else if (pz < -0.45) top = B.COARSE_DIRT; break; }
+    case BI.OLD_GROWTH_PINE_TAIGA: case BI.OLD_GROWTH_SPRUCE_TAIGA: { const pz = this.nS.n2(wx / 14, wz / 14); if (pz > -0.05) top = B.PODZOL; else if (pz < -0.4) top = B.COARSE_DIRT; break; }
+    case BI.BAMBOO_JUNGLE: if (this.nS.n2(wx / 10, wz / 10) > 0) top = B.PODZOL; break;
+  }
+  if (steep >= (mountain ? 3 : 5) && b !== BI.DESERT && !BADLANDS_BIOMES.has(b) && b !== BI.BEACH && b !== BI.MANGROVE_SWAMP && h > SEA) { top = B.STONE; fill = B.STONE; }
+  if (steep >= 4 && b === BI.DESERT) { top = B.SANDSTONE; fill = B.SANDSTONE; }
+  if (h < SEA && (top === B.GRASS_BLOCK || top === B.PODZOL || top === B.COARSE_DIRT || top === B.MYCELIUM)) { top = h >= SEA - 3 ? B.SAND : (r < 0.5 ? B.DIRT : B.GRAVEL); fill = top === B.SAND ? B.SAND : B.DIRT; }
+  const SF = this._sf;
+  SF[0] = top; SF[1] = fill; SF[2] = depth; SF[3] = under; SF[4] = underDepth;
+  return SF;
+};
 
 Generator.prototype.genChunk = function (cx, cz) {
   const seed = this.seed;
-  const M = 5, W = 16 + 2 * M;
-  const hs = new Int16Array(W * W), bs = new Uint8Array(W * W);
+  const M = 8, W = 16 + 2 * M;
+  const hs = new Int16Array(W * W), bs = new Uint8Array(W * W), tops = new Uint16Array(W * W), lushCol = new Uint8Array(W * W);
   // climate lattice every 4 blocks from (cx*16-8, cz*16-8), 9x9 points
   const LAT = new Float32Array(81 * NCLIM), pv = new Float32Array(NCLIM);
   for (let j = 0; j < 9; j++) for (let i = 0; i < 9; i++) this.climate(cx * 16 - 8 + i * 4, cz * 16 - 8 + j * 4, LAT, (j * 9 + i) * NCLIM);
@@ -816,12 +1022,29 @@ Generator.prototype.genChunk = function (cx, cz) {
       const top = LAT[a + k] + (LAT[b2 + k] - LAT[a + k]) * fx, bot = LAT[c2 + k] + (LAT[d + k] - LAT[c2 + k]) * fx;
       pv[k] = top + (bot - top) * fz;
     }
-    const col = this.columnFrom(pv, cx * 16 + x - M, cz * 16 + z - M);
+    const wx = cx * 16 + x - M, wz = cz * 16 + z - M;
+    const col = this.columnFrom(pv, wx, wz);
     hs[z * W + x] = col.h; bs[z * W + x] = col.b;
+    lushCol[z * W + x] = this.nCave.n2(wx / 150, wz / 150) > 0.34 ? 1 : 0;
   }
-  const blocks = new Uint16Array(65536);
-  const biomes = new Uint8Array(256);
+  const blocks = new Uint16Array(65536), meta = new Uint8Array(65536);
+  const biomes = new Uint8Array(256), cflag = new Uint8Array(256);
+  const be = [], mobs = [];
   const I = (x, y, z) => (y << 8) | (z << 4) | x;
+  const steepOf = pi => { const h = hs[pi]; return Math.max(Math.abs(hs[pi + 1] - h), Math.abs(hs[pi - 1] - h), Math.abs(hs[pi + W] - h), Math.abs(hs[pi - W] - h)); };
+  // the ground block of every column, the margin included (trees growing in from neighbours need it)
+  for (let z = 1; z < W - 1; z++) for (let x = 1; x < W - 1; x++) {
+    const pi = z * W + x, wx = cx * 16 + x - M, wz = cz * 16 + z - M;
+    const t = this.surface(bs[pi], hs[pi], steepOf(pi), wx, wz, hash2(wx, wz, seed))[0];
+    tops[pi] = t < 0 ? B.TERRACOTTA : t;
+  }
+  // structures reaching into this chunk; trees and plants keep away from them
+  const structs = this.structuresFor(cx, cz);
+  const keep = new Uint8Array(W * W);
+  for (const s of structs) for (const [x0, z0, x1, z1] of s.rects) {
+    for (let wz = Math.max(z0 - 2, cz * 16 - M); wz <= Math.min(z1 + 2, cz * 16 + 15 + M); wz++)
+      for (let wx = Math.max(x0 - 2, cx * 16 - M); wx <= Math.min(x1 + 2, cx * 16 + 15 + M); wx++) keep[(wz - cz * 16 + M) * W + (wx - cx * 16 + M)] = 1;
+  }
   let maxH = SEA;
   // ---- base terrain + surface ----
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
@@ -829,31 +1052,14 @@ Generator.prototype.genChunk = function (cx, cz) {
     const h = hs[pi], b = bs[pi];
     biomes[z * 16 + x] = b;
     if (h > maxH) maxH = h;
-    const steep = Math.max(Math.abs(hs[pi + 1] - h), Math.abs(hs[pi - 1] - h), Math.abs(hs[pi + W] - h), Math.abs(hs[pi - W] - h));
     const wx = cx * 16 + x, wz = cz * 16 + z;
+    cflag[z * 16 + x] = this.caveFlags(wx, wz);
     const r = hash2(wx, wz, seed);
-    let top = B.GRASS_BLOCK, fill = B.DIRT, depth = 3 + (r * 2 | 0), under = B.STONE, underDepth = 0;
-    const mountain = MOUNTAIN_BIOMES.has(b);
-    switch (b) {
-      case BI.DESERT: top = B.SAND; fill = B.SAND; depth = 4; under = B.SANDSTONE; underDepth = 4; break;
-      case BI.BEACH: case BI.SNOWY_BEACH: top = B.SAND; fill = B.SAND; depth = 3; under = B.SANDSTONE; underDepth = 2; break;
-      case BI.BADLANDS: top = B.RED_SAND; fill = B.RED_SAND; depth = 1 + (r * 2 | 0); break;
-      case BI.OCEAN: case BI.FROZEN_OCEAN: top = h > SEA - 12 ? B.SAND : B.GRAVEL; fill = top; depth = 3; if (r < 0.06 && h > SEA - 8) { top = B.CLAY; } break;
-      case BI.DEEP_OCEAN: top = B.GRAVEL; fill = B.GRAVEL; depth = 3; break;
-      case BI.RIVER: case BI.FROZEN_RIVER: top = r < 0.15 ? B.CLAY : (r < 0.55 ? B.SAND : B.GRAVEL); fill = top === B.CLAY ? B.CLAY : B.SAND; depth = 2; break;
-      case BI.SNOWY_SLOPES: top = B.SNOW_BLOCK; fill = B.SNOW_BLOCK; depth = 2; break;
-      case BI.JAGGED_PEAKS: top = B.SNOW_BLOCK; fill = B.SNOW_BLOCK; depth = 1 + (r * 3 | 0); break;
-      case BI.STONY_PEAKS: top = B.STONE; fill = B.STONE; if (r < 0.2) top = B.CALCITE; break;
-      case BI.WINDSWEPT_HILLS: if (this.nS.n2(wx / 12, wz / 12) > 0.25) { top = B.GRAVEL; fill = B.GRAVEL; } break;
-      case BI.SWAMP: if (h < SEA) { top = r < 0.3 ? B.CLAY : B.DIRT; } break;
-      case BI.TAIGA: case BI.SNOWY_TAIGA: { const pz = this.nS.n2(wx / 18, wz / 18); if (pz > 0.3) top = B.PODZOL; else if (pz < -0.45) top = B.COARSE_DIRT; break; }
-    }
-    if (steep >= (mountain ? 3 : 5) && b !== BI.DESERT && b !== BI.BADLANDS && b !== BI.BEACH && h > SEA) { top = B.STONE; fill = B.STONE; }
-    if (steep >= 4 && b === BI.DESERT) { top = B.SANDSTONE; fill = B.SANDSTONE; }
-    if (h < SEA && top === B.GRASS_BLOCK) { top = h >= SEA - 3 ? B.SAND : (r < 0.5 ? B.DIRT : B.GRAVEL); fill = top === B.SAND ? B.SAND : B.DIRT; }
+    const SF = this.surface(b, h, steepOf(pi), wx, wz, r);
+    const top = SF[0], fill = SF[1], depth = SF[2], under = SF[3], underDepth = SF[4];
     const deepY = 12 + (hash2(wx, wz, seed + 77) * 6 | 0);
-    const frozen = b === BI.FROZEN_OCEAN || b === BI.FROZEN_RIVER;
-    const bandOff = Math.floor(this.nBand.n2(wx / 60, wz / 60) * 4);
+    const frozen = b === BI.FROZEN_OCEAN || b === BI.FROZEN_RIVER || b === BI.DEEP_FROZEN_OCEAN || (h < SEA && SNOWY_BIOMES.has(b));
+    const bandOff = Math.floor(this.nBand.n2(wx / 60, wz / 60) * 4), bands = BADLANDS_BIOMES.has(b);
     const top2 = Math.max(h, SEA);
     for (let y = 0; y <= top2; y++) {
       let id;
@@ -863,8 +1069,9 @@ Generator.prototype.genChunk = function (cx, cz) {
         if (y === h) id = top;
         else if (y > h - depth) id = fill;
         else if (y > h - depth - underDepth) id = under;
-        else if (b === BI.BADLANDS && y > SEA - 10) id = BAND_COLORS[((y + bandOff) % 16 + 16) % 16];
+        else if (bands && y > SEA - 10) id = -1;
         else id = y < deepY ? B.DEEPSLATE : B.STONE;
+        if (id < 0) id = BAND_COLORS[((y + bandOff) % 16 + 16) % 16];
       } else id = (y === SEA && frozen) ? B.ICE : B.WATER;
       blocks[I(x, y, z)] = id;
     }
@@ -884,7 +1091,7 @@ Generator.prototype.genChunk = function (cx, cz) {
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const pi = (z + M) * W + (x + M);
     const h = hs[pi];
-    const steep = Math.max(Math.abs(hs[pi + 1] - h), Math.abs(hs[pi - 1] - h), Math.abs(hs[pi + W] - h), Math.abs(hs[pi - W] - h));
+    const steep = steepOf(pi);
     let ymax = h < SEA + 2 ? h - 7 : (steep < 3 ? h - 4 : h);
     ymax = Math.min(ymax, GY * 8 - 1);
     const gx = x >> 2, gz = z >> 2, fx = (x & 3) / 4, fz = (z & 3) / 4;
@@ -937,6 +1144,8 @@ Generator.prototype.genChunk = function (cx, cz) {
   vein(B.LAPIS_ORE, 2, 6, 1, 40, true);
   vein(B.DIAMOND_ORE, 3, 6, 1, 16, false);
   if (MOUNTAIN_BIOMES.has(biomes[136])) vein(B.EMERALD_ORE, 6, 1, 32, 200, false);
+  if (BADLANDS_BIOMES.has(biomes[136])) vein(B.GOLD_ORE, 8, 8, 32, 90, false);
+  if (cflag[136] & 2) vein(B.COPPER_ORE, 10, 14, 10, 60, false);
   // amethyst geode (kept inside the chunk)
   if (hash2(cx, cz, seed + 6001) < 0.035) {
     const gy = 14 + Math.floor(hash2(cx, cz, seed + 6002) * 40), R0 = 6.4;
@@ -955,73 +1164,264 @@ Generator.prototype.genChunk = function (cx, cz) {
     }
     for (const i of shell) { const above = i + 256; if (above < 65536 && blocks[above] === B.AIR && hash3(i, 1, 2, seed + 6005) < 0.35) blocks[above] = B.AMETHYST_CLUSTER; }
   }
-  // ---- trees ----
-  const setT = (x, y, z, id, isLog) => {
+  // ---- cave biomes: lush caves, dripstone caves, the deep dark; glow lichen everywhere else ----
+  const solid = id => OPAQUE_GEN[id] === 1;
+  const SIDES = [[0, 1, 0], [1, -1, 0], [4, 0, 1], [5, 0, -1]];
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const pi = (z + M) * W + (x + M), f = cflag[z * 16 + x], h = hs[pi], wx = cx * 16 + x, wz = cz * 16 + z;
+    const ytop = Math.min(h - 8, 60);
+    for (let y = 2; y <= ytop; y++) {
+      const i = I(x, y, z), id = blocks[i];
+      const dd = (f & 4) && y <= DEEP_DARK_TOP, lush = !dd && (f & 1), drip = !dd && !lush && (f & 2);
+      if (id === B.LAVA && lush) { blocks[i] = B.WATER; continue; }
+      if (id !== B.AIR) continue;
+      const below = blocks[i - 256], above = blocks[i + 256];
+      const r = hash3(wx, y, wz, seed + 7101), r2 = hash3(wx, y, wz, seed + 7102);
+      if (dd) {
+        const patch = this.nV.n3(wx / 8, y / 6, wz / 8);
+        if (solid(below) && patch > -0.3) {
+          blocks[i - 256] = r < 0.004 ? B.SCULK_CATALYST : B.SCULK;
+          if (r2 < 0.012) blocks[i] = B.SCULK_SENSOR;
+          else if (r2 < 0.019) { blocks[i] = B.SCULK_SHRIEKER; meta[i] = 1; }
+        } else if (solid(above) && patch > -0.15) blocks[i + 256] = B.SCULK;
+        else if (patch > -0.1) {
+          let m = solid(below) ? 8 : 0;
+          for (const [f6, dx, dz] of SIDES) { const nx = x + dx, nz = z + dz; if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && solid(blocks[I(nx, y, nz)]) && hash3(wx + dx, y, wz + dz, seed + 7106) < 0.6) m |= 1 << f6; }
+          if (m) { blocks[i] = B.SCULK_VEIN; meta[i] = m; }
+        }
+      } else if (lush) {
+        if (solid(below)) {
+          const clay = r < 0.08;
+          blocks[i - 256] = clay ? B.CLAY : B.MOSS_BLOCK;
+          if (r2 < (clay ? 0.3 : 0.02) && above === B.AIR) { blocks[i] = B.SMALL_DRIPLEAF; blocks[i + 256] = B.SMALL_DRIPLEAF; meta[i + 256] = 1; }
+          else if (r2 < (clay ? 0.55 : 0.035)) {
+            const n = Math.floor(hash3(wx, y, wz, seed + 7107) * 3);
+            let ok = true;
+            for (let k = 0; k <= n; k++) if (blocks[i + k * 256] !== B.AIR) ok = false;
+            if (ok) { for (let k = 0; k < n; k++) blocks[i + k * 256] = B.BIG_DRIPLEAF_STEM; blocks[i + n * 256] = B.BIG_DRIPLEAF; meta[i + n * 256] = Math.floor(r * 50) & 3; }
+          } else if (!clay) {
+            if (r2 < 0.24) blocks[i] = B.MOSS_CARPET;
+            else if (r2 < 0.33) blocks[i] = B.SHORT_GRASS;
+            else if (r2 < 0.355) blocks[i] = B.AZALEA;
+            else if (r2 < 0.365) blocks[i] = B.FLOWERING_AZALEA;
+          }
+        } else if (solid(above)) {
+          if (r < 0.75) blocks[i + 256] = B.MOSS_BLOCK;
+          if (r2 < 0.16) {
+            const n = 1 + Math.floor(hash3(wx, y, wz, seed + 7103) * 6);
+            for (let k = 0; k < n; k++) { const j = i - k * 256; if (blocks[j] !== B.AIR) break; blocks[j] = B.CAVE_VINES; meta[j] = hash3(wx, y - k, wz, seed + 7104) < 0.3 ? 1 : 0; }
+          } else if (r2 < 0.172) blocks[i] = B.SPORE_BLOSSOM;
+        }
+      } else if (drip) {
+        if (solid(below)) {
+          if (r < 0.7) blocks[i - 256] = B.DRIPSTONE_BLOCK;
+          if (r2 < 0.08) { const n = 1 + Math.floor(hash3(wx, y, wz, seed + 7105) * 3); for (let k = 0; k < n; k++) { const j = i + k * 256; if (blocks[j] !== B.AIR) break; blocks[j] = B.POINTED_DRIPSTONE; meta[j] = 1; } }
+        } else if (solid(above)) {
+          if (r < 0.7) blocks[i + 256] = B.DRIPSTONE_BLOCK;
+          if (r2 < 0.1) { const n = 1 + Math.floor(hash3(wx, y, wz, seed + 7108) * 4); for (let k = 0; k < n; k++) { const j = i - k * 256; if (blocks[j] !== B.AIR) break; blocks[j] = B.POINTED_DRIPSTONE; meta[j] = 0; } }
+        }
+      } else if (r < 0.012) {
+        let m = 0;
+        for (const [f6, dx, dz] of SIDES) { const nx = x + dx, nz = z + dz; if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && solid(blocks[I(nx, y, nz)])) { m = 1 << f6; break; } }
+        if (!m && solid(above)) m = 4;
+        if (m) { blocks[i] = B.GLOW_LICHEN; meta[i] = m; }
+      }
+    }
+  }
+  // ---- trees, huge mushrooms, ice spikes and boulders ----
+  let wet = false;
+  const setT = (x, y, z, id, isLog, m) => {
     if (x < 0 || x > 15 || z < 0 || z > 15 || y < 1 || y > 255) return;
     const i = I(x, y, z), cur = blocks[i];
-    if (cur === B.AIR || cur === B.SHORT_GRASS || cur === B.FERN || cur === B.SNOW || (isLog && (cur === B.OAK_LEAVES || cur === B.BIRCH_LEAVES || cur === B.SPRUCE_LEAVES || cur === B.CHERRY_LEAVES))) blocks[i] = id;
+    if (cur === B.AIR || cur === B.SHORT_GRASS || cur === B.FERN || cur === B.SNOW || (wet && (cur === B.WATER || cur === B.SEAGRASS)) || (isLog && LEAVES_GEN[cur])) { blocks[i] = id; meta[i] = m || 0; }
   };
-  for (let z = -M; z < 16 + M; z++) for (let x = -M; x < 16 + M; x++) {
+  const groundOk = (type, g) => type === 'mangrove' ? (g === B.MUD || g === B.GRASS_BLOCK || g === B.DIRT)
+    : (type === 'icespike' || type === 'bigicespike') ? g === B.SNOW_BLOCK
+      : type === 'boulder' ? (g === B.PODZOL || g === B.GRASS_BLOCK || g === B.COARSE_DIRT)
+        : (g === B.GRASS_BLOCK || g === B.DIRT || g === B.PODZOL || g === B.COARSE_DIRT || g === B.MYCELIUM);
+  for (let z = -M + 1; z < 15 + M; z++) for (let x = -M + 1; x < 15 + M; x++) {
     const pi = (z + M) * W + (x + M);
-    const h = hs[pi], b = bs[pi];
+    if (keep[pi]) continue;
+    const h = hs[pi], b = bs[pi], wx = cx * 16 + x, wz = cz * 16 + z;
     const rule = TREE_RULES[b];
-    if (!rule || h < SEA || h > 200) continue;
-    if (x <= -M || x >= 15 + M || z <= -M || z >= 15 + M) continue;
-    const steep = Math.max(Math.abs(hs[pi + 1] - h), Math.abs(hs[pi - 1] - h), Math.abs(hs[pi + W] - h), Math.abs(hs[pi - W] - h));
-    if (steep > 2) continue;
-    const wx = cx * 16 + x, wz = cz * 16 + z;
-    if (hash2(wx, wz, seed + 1234) >= rule[0]) continue;
-    if (x >= 0 && x < 16 && z >= 0 && z < 16) {
-      const g = blocks[I(x, h, z)];
-      if (g !== B.GRASS_BLOCK && g !== B.DIRT) continue;
-    }
+    // azaleas give away the lush caves below them; old growth taigas are strewn with mossy boulders
+    const azalea = lushCol[pi] && tops[pi] === B.GRASS_BLOCK && hash2(wx, wz, seed + 1240) < 0.004;
+    const boulder = (b === BI.OLD_GROWTH_PINE_TAIGA || b === BI.OLD_GROWTH_SPRUCE_TAIGA) && hash2(wx, wz, seed + 1241) < 0.003;
+    if (!azalea && !boulder && (!rule || hash2(wx, wz, seed + 1234) >= rule[0])) continue;
+    if (h > 200 || (b === BI.MANGROVE_SWAMP ? h < SEA - 5 : h < SEA)) continue;
+    if (steepOf(pi) > 2) continue;
     const tr = mulberry32((hash2(wx, wz, seed + 4321) * 4294967296) | 0);
-    let type = rule[1];
-    if (type === 'forest') type = tr() < 0.2 ? 'birch' : (tr() < 0.12 ? 'bigoak' : 'oak');
-    else if (type === 'oak' && tr() < 0.15) type = 'bigoak';
-    growTree(type, x, h + 1, z, tr, setT);
-    if (x >= 0 && x < 16 && z >= 0 && z < 16) blocks[I(x, h, z)] = B.DIRT;
+    let type = azalea ? 'azalea' : boulder ? 'boulder' : rule[1];
+    switch (type) {
+      case 'forest': type = tr() < 0.2 ? 'birch' : (tr() < 0.12 ? 'bigoak' : 'oak'); break;
+      case 'oak': if (tr() < 0.15) type = 'bigoak'; break;
+      case 'smalloak': type = 'oak'; break;
+      case 'darkforest': { const q = tr(); type = q < 0.72 ? 'dark_oak' : q < 0.8 ? (tr() < 0.5 ? 'red_mushroom' : 'brown_mushroom') : q < 0.92 ? 'oak' : 'birch'; break; }
+      case 'oldpine': type = tr() < 0.4 ? 'megapine' : 'spruce'; break;
+      case 'oldspruce': type = tr() < 0.4 ? 'megaspruce' : 'spruce'; break;
+      case 'savanna': type = tr() < 0.8 ? 'acacia' : 'flatoak'; break;
+      case 'windforest': type = tr() < 0.6 ? 'spruce' : 'oak'; break;
+      case 'junglemix': { const q = tr(); type = q < 0.1 ? 'megajungle' : q < 0.45 ? 'jungle' : 'bush'; break; }
+      case 'sparsejungle': type = tr() < 0.5 ? 'jungle' : 'bush'; break;
+      case 'bamboojungle': type = tr() < 0.3 ? 'jungle' : 'bush'; break;
+      case 'mushroom': type = tr() < 0.5 ? 'red_mushroom' : 'brown_mushroom'; break;
+      case 'icespike': type = tr() < 0.08 ? 'bigicespike' : 'icespike'; break;
+    }
+    if (!groundOk(type, tops[pi])) continue;
+    wet = type === 'mangrove';
+    const inside = x >= 0 && x < 16 && z >= 0 && z < 16;
+    const hgt = growTree(type, x, h + 1, z, tr, setT);
+    wet = false;
+    if (type === 'boulder' || type === 'icespike' || type === 'bigicespike') continue;
+    if (inside) { const g = blocks[I(x, h, z)]; if (g === B.GRASS_BLOCK || g === B.MYCELIUM || g === B.PODZOL) blocks[I(x, h, z)] = B.DIRT; }
+    if (type === 'azalea' && inside) for (let k = 0; k < 4; k++) { const i = I(x, h - k, z); if (blocks[i] === B.DIRT || blocks[i] === B.STONE || blocks[i] === B.GRASS_BLOCK) blocks[i] = B.ROOTED_DIRT; }
+    // 2x2 trunks reach down to the ground on uneven terrain
+    if (TWO_BY_TWO.has(type)) {
+      const log = type === 'dark_oak' ? B.DARK_OAK_LOG : type === 'megajungle' ? B.JUNGLE_LOG : B.SPRUCE_LOG;
+      for (const [ox, oz] of TRUNK_2X2) {
+        const tx = x + ox, tz = z + oz;
+        if (tx < 0 || tx > 15 || tz < 0 || tz > 15) continue;
+        for (let y = h; y > h - 4; y--) { const i = I(tx, y, tz), cur = blocks[i]; if (cur !== B.AIR && cur !== B.SHORT_GRASS && cur !== B.FERN && cur !== B.WATER) break; blocks[i] = log; }
+      }
+    }
+    // bee nests hang under the crowns of oaks and birches in flowery places
+    if (hgt && BEE_BIOMES.has(b) && hash2(wx, wz, seed + 1250) < (b === BI.MEADOW ? 1 : b === BI.FOREST ? 0.002 : b === BI.FLOWER_FOREST ? 0.02 : 0.05)) {
+      const d = Math.floor(tr() * 4), dx = [0, 1, 0, -1][d], dz = [-1, 0, 1, 0][d], ny = h + 1 + Math.max(1, hgt - 4);
+      setT(x + dx, ny, z + dz, B.BEE_NEST, false, (d + 2) & 3);
+      const nx = x + dx, nz = z + dz;
+      if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && blocks[I(nx, ny, nz)] === B.BEE_NEST) {
+        const n = 2 + Math.floor(tr() * 2);
+        for (let k = 0; k < n; k++) mobs.push(['bee', cx * 16 + nx + dx + 0.5, ny, cz * 16 + nz + dz + 0.5, { hive: [cx * 16 + nx, ny, cz * 16 + nz] }]);
+      }
+    }
+  }
+  // ---- vines hanging from jungle, swamp and mangrove leaves ----
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const b = biomes[z * 16 + x];
+    if (!JUNGLE_BIOMES.has(b) && b !== BI.SWAMP && b !== BI.MANGROVE_SWAMP) continue;
+    const pi = (z + M) * W + (x + M), h = Math.max(hs[pi], SEA), wx = cx * 16 + x, wz = cz * 16 + z;
+    for (let y = h + 3; y < Math.min(250, h + 34); y++) {
+      const i = I(x, y, z);
+      if (blocks[i] !== B.AIR) continue;
+      let m = 0;
+      for (const [f6, dx, dz] of SIDES) {
+        const nx = x + dx, nz = z + dz;
+        if (nx < 0 || nx > 15 || nz < 0 || nz > 15) continue;
+        const n = blocks[I(nx, y, nz)];
+        if (n === B.JUNGLE_LEAVES || n === B.OAK_LEAVES || n === B.MANGROVE_LEAVES) m |= 1 << f6;
+      }
+      if (!m || hash3(wx, y, wz, seed + 71) > 0.22) continue;
+      const len = 1 + Math.floor(hash3(wx, y, wz, seed + 72) * 6);
+      for (let k = 0; k < len && y - k > h; k++) { const j = i - k * 256; if (blocks[j] !== B.AIR) break; blocks[j] = B.VINE; meta[j] = m; }
+    }
   }
   // ---- small plants ----
+  const tall = (x, y, z, id) => { if (y < 254 && blocks[I(x, y, z)] === B.AIR && blocks[I(x, y + 1, z)] === B.AIR) { blocks[I(x, y, z)] = id; blocks[I(x, y + 1, z)] = id; meta[I(x, y + 1, z)] = 1; } };
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const pi = (z + M) * W + (x + M);
     const h = hs[pi], b = bs[pi];
-    if (h < SEA || h > 250) continue;
+    if (h < SEA || h > 250 || keep[pi]) continue;
     const wx = cx * 16 + x, wz = cz * 16 + z;
     const topB = blocks[I(x, h, z)];
     if (blocks[I(x, h + 1, z)] !== B.AIR) continue;
-    const r = hash2(wx, wz, seed + 55), r2 = hash2(wx, wz, seed + 56);
-    if (topB === B.GRASS_BLOCK) {
-      const fl = this.nW.n2(wx / 25, wz / 25);
+    const r = hash2(wx, wz, seed + 55), r2 = hash2(wx, wz, seed + 56), y = h + 1, at = I(x, y, z);
+    if (topB === B.GRASS_BLOCK || (topB === B.PODZOL && JUNGLE_BIOMES.has(b))) {
+      const fl = this.nW.n2(wx / 25, wz / 25), fi = Math.max(0, Math.floor((fl + 1) * 7.3));
       let plant = 0;
       switch (b) {
-        case BI.PLAINS: if (r < 0.22) plant = B.SHORT_GRASS; else if (r < 0.245) plant = fl > 0.1 ? B.DANDELION : (fl < -0.15 ? B.AZURE_BLUET : (fl < 0 ? B.OXEYE_DAISY : B.POPPY)); break;
-        case BI.MEADOW: if (r < 0.3) plant = B.SHORT_GRASS; else if (r < 0.42) plant = [B.ALLIUM, B.CORNFLOWER, B.OXEYE_DAISY, B.DANDELION, B.POPPY, B.AZURE_BLUET][Math.abs(Math.floor((fl + 0.6) * 5)) % 6]; break;
-        case BI.FOREST: case BI.BIRCH_FOREST: if (r < 0.1) plant = B.SHORT_GRASS; else if (r < 0.115) plant = fl > 0 ? B.POPPY : B.DANDELION; break;
-        case BI.TAIGA: case BI.WINDSWEPT_HILLS: if (r < 0.08) plant = B.FERN; else if (r < 0.14) plant = B.SHORT_GRASS; break;
-        case BI.SWAMP: if (r < 0.15) plant = B.SHORT_GRASS; break;
-        case BI.SAVANNA: if (r < 0.35) plant = B.SHORT_GRASS; break;
-        case BI.CHERRY_GROVE: if (r < 0.14) plant = B.SHORT_GRASS; else if (r < 0.17) plant = B.ALLIUM; break;
+        case BI.SUNFLOWER_PLAINS: if (r > 0.7 && r < 0.78) { tall(x, y, z, B.SUNFLOWER); break; }
+        // falls through
+        case BI.PLAINS:
+          if (r < 0.2) plant = B.SHORT_GRASS; else if (r < 0.225) tall(x, y, z, B.TALL_GRASS);
+          else if (r < 0.25) plant = PLAINS_FLOWERS[fi % PLAINS_FLOWERS.length];
+          break;
+        case BI.MEADOW: if (r < 0.3) plant = B.SHORT_GRASS; else if (r < 0.36) tall(x, y, z, B.TALL_GRASS); else if (r < 0.48) plant = [B.ALLIUM, B.CORNFLOWER, B.OXEYE_DAISY, B.DANDELION, B.POPPY, B.AZURE_BLUET][Math.abs(Math.floor((fl + 0.6) * 5)) % 6]; break;
+        case BI.FOREST: case BI.BIRCH_FOREST: case BI.OLD_GROWTH_BIRCH_FOREST:
+          if (r < 0.1) plant = B.SHORT_GRASS; else if (r < 0.115) plant = fl > 0.3 ? B.LILY_OF_THE_VALLEY : fl > 0 ? B.POPPY : B.DANDELION;
+          else if (r < 0.122) tall(x, y, z, TALL_FLOWERS[Math.floor(r2 * 3)]);
+          break;
+        case BI.FLOWER_FOREST: if (r < 0.06) plant = B.SHORT_GRASS; else if (r < 0.38) plant = FF_FLOWERS[fi % FF_FLOWERS.length]; else if (r < 0.41) tall(x, y, z, TALL_FLOWERS[Math.floor(r2 * 3)]); break;
+        case BI.DARK_FOREST: if (r < 0.06) plant = B.SHORT_GRASS; else if (r < 0.07) tall(x, y, z, TALL_FLOWERS[Math.floor(r2 * 3)]); break;
+        case BI.TAIGA: case BI.WINDSWEPT_HILLS: case BI.WINDSWEPT_FOREST: case BI.WINDSWEPT_GRAVELLY_HILLS:
+          if (r < 0.08) plant = B.FERN; else if (r < 0.14) plant = B.SHORT_GRASS; else if (r < 0.15) tall(x, y, z, B.LARGE_FERN);
+          if (b === BI.TAIGA && r2 > 0.996) { blocks[at] = B.SWEET_BERRY_BUSH; meta[at] = 3; plant = 0; }
+          break;
+        case BI.OLD_GROWTH_PINE_TAIGA: case BI.OLD_GROWTH_SPRUCE_TAIGA:
+          if (r < 0.14) plant = B.FERN; else if (r < 0.2) tall(x, y, z, B.LARGE_FERN); else if (r < 0.26) plant = B.SHORT_GRASS;
+          if (r2 > 0.993) { blocks[at] = B.SWEET_BERRY_BUSH; meta[at] = 3; plant = 0; }
+          break;
+        case BI.SNOWY_TAIGA: if (r < 0.05) plant = B.FERN; if (r2 > 0.997) { blocks[at] = B.SWEET_BERRY_BUSH; meta[at] = 3; plant = 0; } break;
+        case BI.SWAMP: if (r < 0.15) plant = B.SHORT_GRASS; else if (r < 0.17) plant = B.BLUE_ORCHID; break;
+        case BI.SAVANNA: case BI.SAVANNA_PLATEAU: case BI.WINDSWEPT_SAVANNA: if (r < 0.35) plant = B.SHORT_GRASS; else if (r < 0.42) tall(x, y, z, B.TALL_GRASS); break;
+        case BI.CHERRY_GROVE: if (r < 0.12) plant = B.SHORT_GRASS; else if (r < 0.32) { blocks[at] = B.PINK_PETALS; meta[at] = (Math.floor(r2 * 4) & 3) | (Math.floor(hash2(wx, wz, seed + 57) * 4) << 2); } break;
+        case BI.JUNGLE: case BI.SPARSE_JUNGLE: case BI.BAMBOO_JUNGLE: {
+          const bamboo = b === BI.BAMBOO_JUNGLE ? r2 < 0.2 : r2 < 0.006;
+          if (bamboo) {
+            const n = 5 + Math.floor(hash2(wx, wz, seed + 58) * 8);
+            for (let k = 0; k < n && blocks[at + k * 256] === B.AIR; k++) { blocks[at + k * 256] = B.BAMBOO; meta[at + k * 256] = k >= n - 3 ? 1 : 0; }
+          } else if (r < 0.25) plant = B.SHORT_GRASS; else if (r < 0.33) plant = B.FERN; else if (r < 0.36) tall(x, y, z, B.LARGE_FERN);
+          else if (r2 > 0.99 && b !== BI.BAMBOO_JUNGLE) plant = B.MELON;
+          break;
+        }
+        case BI.WOODED_BADLANDS: if (r < 0.1) plant = B.SHORT_GRASS; break;
       }
-      if (r2 > 0.9993 && (b === BI.PLAINS || b === BI.FOREST || b === BI.MEADOW)) plant = B.PUMPKIN;
+      if (r2 > 0.9993 && (b === BI.PLAINS || b === BI.SUNFLOWER_PLAINS || b === BI.FOREST || b === BI.MEADOW || b === BI.TAIGA)) plant = B.PUMPKIN;
       if (r2 > 0.9996 && (b === BI.SWAMP || b === BI.BIRCH_FOREST)) plant = B.MELON;
-      if (r2 < 0.006 && (b === BI.TAIGA || b === BI.SWAMP || b === BI.SNOWY_TAIGA || b === BI.FOREST)) plant = r2 < 0.003 ? B.BROWN_MUSHROOM : B.RED_MUSHROOM;
-      if (plant) blocks[I(x, h + 1, z)] = plant;
-    } else if ((topB === B.PODZOL || topB === B.COARSE_DIRT) && r < 0.12) {
-      blocks[I(x, h + 1, z)] = r < 0.08 ? B.FERN : B.BROWN_MUSHROOM;
-    } else if ((topB === B.SAND || topB === B.RED_SAND) && (b === BI.DESERT || b === BI.BADLANDS)) {
-      if (r < 0.01) blocks[I(x, h + 1, z)] = B.DEAD_BUSH;
-      else if (r < 0.016 && b === BI.DESERT && x > 0 && x < 15 && z > 0 && z < 15) {
+      if (r2 < 0.006 && (b === BI.TAIGA || b === BI.SWAMP || b === BI.SNOWY_TAIGA || b === BI.FOREST || b === BI.DARK_FOREST || b === BI.OLD_GROWTH_PINE_TAIGA || b === BI.OLD_GROWTH_SPRUCE_TAIGA)) plant = r2 < 0.003 ? B.BROWN_MUSHROOM : B.RED_MUSHROOM;
+      if (plant && blocks[at] === B.AIR) blocks[at] = plant;
+    } else if (topB === B.PODZOL || topB === B.COARSE_DIRT) {
+      if (r < 0.12) blocks[at] = r < 0.08 ? B.FERN : B.BROWN_MUSHROOM;
+      else if (r < 0.16 && (b === BI.OLD_GROWTH_PINE_TAIGA || b === BI.OLD_GROWTH_SPRUCE_TAIGA)) tall(x, y, z, B.LARGE_FERN);
+    } else if (topB === B.MYCELIUM) {
+      if (r < 0.035) blocks[at] = r2 < 0.5 ? B.RED_MUSHROOM : B.BROWN_MUSHROOM;
+    } else if ((topB === B.SAND || topB === B.RED_SAND) && (b === BI.DESERT || BADLANDS_BIOMES.has(b))) {
+      if (r < 0.01) blocks[at] = B.DEAD_BUSH;
+      else if (r < (b === BI.DESERT ? 0.016 : 0.012) && x > 0 && x < 15 && z > 0 && z < 15) {
         const n = 1 + Math.floor(r2 * 3);
         for (let k = 1; k <= n; k++) blocks[I(x, h + k, z)] = B.CACTUS;
       }
-    }
-    if (h === SEA && (topB === B.GRASS_BLOCK || topB === B.SAND) && r2 < 0.12 && blocks[I(x, h + 1, z)] === B.AIR) {
+    } else if (topB === B.COARSE_DIRT && b === BI.WOODED_BADLANDS && r < 0.02) blocks[at] = B.DEAD_BUSH;
+    if (h === SEA && (topB === B.GRASS_BLOCK || topB === B.SAND || topB === B.PODZOL) && r2 < (JUNGLE_BIOMES.has(b) || b === BI.SWAMP ? 0.2 : 0.12) && blocks[at] === B.AIR) {
       if (hs[pi + 1] < SEA || hs[pi - 1] < SEA || hs[pi + W] < SEA || hs[pi - W] < SEA) {
         const n = 1 + Math.floor(hash2(wx, wz, seed + 57) * 3);
         for (let k = 1; k <= n; k++) blocks[I(x, h + k, z)] = B.SUGAR_CANE;
       }
     }
+  }
+  // ---- under water: seagrass, kelp forests, coral reefs, sea pickles; lily pads on swamps ----
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const pi = (z + M) * W + (x + M), h = hs[pi], b = bs[pi];
+    if (h >= SEA - 1 || keep[pi]) continue;
+    const wx = cx * 16 + x, wz = cz * 16 + z, at = I(x, h + 1, z), depth = SEA - h;
+    const r = hash2(wx, wz, seed + 61), r2 = hash2(wx, wz, seed + 62);
+    if (b === BI.SWAMP && r2 > 0.95 && blocks[I(x, SEA, z)] === B.WATER && blocks[I(x, SEA + 1, z)] === B.AIR) blocks[I(x, SEA + 1, z)] = B.LILY_PAD;
+    if (blocks[at] !== B.WATER) continue;
+    const below = blocks[at - 256];
+    if (below !== B.SAND && below !== B.GRAVEL && below !== B.CLAY && below !== B.DIRT && below !== B.MUD) continue;
+    if (b === BI.FROZEN_OCEAN || b === BI.DEEP_FROZEN_OCEAN || b === BI.FROZEN_RIVER) continue;
+    if (b === BI.WARM_OCEAN) {
+      if (depth >= 4 && this.nS.n2(wx / 20, wz / 20) > 0.05) {
+        const kind = CORALS[Math.floor(hash2(wx >> 3, wz >> 3, seed + 65) * 5)];
+        const cblock = B[(kind + '_coral_block').toUpperCase()], cplant = B[(kind + '_coral').toUpperCase()], cfan = B[(kind + '_coral_fan').toUpperCase()];
+        let top = at;
+        if (r < 0.35) { const n = 1 + Math.floor(r2 * Math.min(3, depth - 3)); for (let k = 0; k < n; k++) blocks[at + k * 256] = cblock; top = at + n * 256; }
+        if (blocks[top] === B.WATER && r < 0.65) {
+          const q = hash2(wx, wz, seed + 66);
+          if (q < 0.45) blocks[top] = cplant; else if (q < 0.85) { blocks[top] = cfan; meta[top] = 3; } else { blocks[top] = B.SEA_PICKLE; meta[top] = Math.floor(r2 * 4); }
+        }
+      } else if (r < 0.1) blocks[at] = B.SEAGRASS;
+      continue;
+    }
+    const kelpy = b === BI.OCEAN || b === BI.DEEP_OCEAN || b === BI.LUKEWARM_OCEAN || b === BI.DEEP_LUKEWARM_OCEAN || b === BI.COLD_OCEAN || b === BI.DEEP_COLD_OCEAN;
+    if (kelpy && depth > 4 && this.nS.n2(wx / 28, wz / 28) > 0.1 && r2 < 0.35) {
+      const n = Math.max(1, Math.min(depth - 2, 2 + Math.floor(hash2(wx, wz, seed + 63) * (depth - 2))));
+      for (let k = 0; k < n; k++) blocks[at + k * 256] = B.KELP;
+      continue;
+    }
+    if (r < (b === BI.RIVER || b === BI.SWAMP || b === BI.MANGROVE_SWAMP ? 0.3 : 0.22)) {
+      if (r < 0.05 && depth >= 3) { blocks[at] = B.TALL_SEAGRASS; blocks[at + 256] = B.TALL_SEAGRASS; meta[at + 256] = 1; }
+      else blocks[at] = B.SEAGRASS;
+    } else if (r2 > 0.996 && b !== BI.RIVER) { blocks[at] = B.SEA_PICKLE; meta[at] = Math.floor(hash2(wx, wz, seed + 64) * 4); }
   }
   // ---- cave cobwebs ----
   for (let k = 0; k < 6; k++) {
@@ -1029,27 +1429,33 @@ Generator.prototype.genChunk = function (cx, cz) {
     const x = Math.floor(hash2(cx, cz * 5 + k, seed + 6102) * 16), z = Math.floor(hash2(cx * 3 + k, cz, seed + 6103) * 16), y0 = 8 + Math.floor(hash2(cx, cz + k, seed + 6104) * 40);
     for (let y = y0; y < y0 + 20; y++) if (blocks[I(x, y, z)] === B.AIR && OPAQUE_GEN[blocks[I(x, y + 1, z)]]) { blocks[I(x, y, z)] = B.COBWEB; break; }
   }
+  buildPortalRoom(blocks, cx, cz, seed);
+  // ---- structures ----
+  if (structs.length) {
+    const ctx = { gen: this, cx, cz, blocks, meta, be, mobs, hs, bs, M, W, I };
+    for (const s of structs) s.build(ctx);
+  }
   // ---- snow cover ----
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const b = biomes[z * 16 + x];
     const pi = (z + M) * W + (x + M);
     if (!SNOWY_BIOMES.has(b) && hs[pi] < 168) continue;
-    for (let y = Math.min(254, hs[pi] + 24); y > 0; y--) {
+    for (let y = Math.min(254, Math.max(hs[pi], SEA) + 40); y > 0; y--) {
       const id = blocks[I(x, y, z)];
       if (id === B.AIR) continue;
       if (id === B.SHORT_GRASS || id === B.FERN) { blocks[I(x, y, z)] = B.SNOW; break; }
-      if (id === B.WATER || id === B.ICE || id === B.LAVA || id === B.SNOW || id === B.CACTUS || id === B.SUGAR_CANE ||
-        (id >= B.SHORT_GRASS && id <= B.SUGAR_CANE) || id === B.PUMPKIN) break;
+      if (NO_SNOW[id]) break;
       blocks[I(x, y + 1, z)] = B.SNOW;
       break;
     }
   }
-  buildPortalRoom(blocks, cx, cz, seed);
-  return { blocks, biomes };
+  return { blocks, biomes, meta, be, mobs };
 };
 // opaque lookup usable inside workers (no block registry there)
 const OPAQUE_GEN = new Uint8Array(MAXB);
-[B.STONE, B.DEEPSLATE, B.DIRT, B.GRANITE, B.DIORITE, B.ANDESITE, B.TUFF, B.GRAVEL, B.COAL_ORE, B.IRON_ORE, B.COPPER_ORE, B.CALCITE].forEach(i => OPAQUE_GEN[i] = 1);
+[B.STONE, B.DEEPSLATE, B.DIRT, B.GRANITE, B.DIORITE, B.ANDESITE, B.TUFF, B.GRAVEL, B.COAL_ORE, B.IRON_ORE, B.COPPER_ORE, B.CALCITE,
+  B.GOLD_ORE, B.REDSTONE_ORE, B.LAPIS_ORE, B.DIAMOND_ORE, B.EMERALD_ORE, B.DEEPSLATE_COAL_ORE, B.DEEPSLATE_IRON_ORE, B.DEEPSLATE_COPPER_ORE,
+  B.DEEPSLATE_GOLD_ORE, B.DEEPSLATE_REDSTONE_ORE, B.DEEPSLATE_LAPIS_ORE, B.DEEPSLATE_DIAMOND_ORE, B.DEEPSLATE_EMERALD_ORE, B.SMOOTH_BASALT].forEach(i => OPAQUE_GEN[i] = 1);
 
 /* @file 12_dims.js */
 /* ===================================================================
@@ -1407,6 +1813,545 @@ function makeGenerator(seed, dim) {
   if (dim === 'end') return new EndGenerator(seed);
   return new Generator(seed);
 }
+
+/* @file 13_structures.js */
+/* ===================================================================
+   OVERWORLD STRUCTURES (shared with the workers) — villages, ancient
+   cities and the smaller features. A structure is planned from the
+   seed alone, so every chunk it reaches rebuilds its own slice of it
+   and neighbouring chunks always agree.
+   =================================================================== */
+const DIR4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];      // 0 north (-Z), 1 east (+X), 2 south (+Z), 3 west (-X)
+// block states by world direction
+const M_STAIRS = (d, top) => d | (top ? 4 : 0);      // the tall side of the step toward d
+const M_FACING = d => (d + 2) & 3;                    // furnaces, chests, lecterns: front toward d
+const M_DOOR = d => (d + 2) & 3;                      // a door in a wall whose outside lies toward d
+const M_BED = d => (d + 2) & 3;                       // foot half of a bed whose head points toward d
+const M_TORCH = d => [3, 2, 4, 1][d];                 // wall torch hanging on the block toward d
+// cells a foundation may fill and plants a road clears
+const FILLABLE = new Uint8Array(MAXB);
+for (let i = B.BROWN_MUSHROOM; i <= B.KELP; i++) FILLABLE[i] = 1;
+[B.AIR, B.WATER, B.SNOW, B.LAVA].forEach(i => FILLABLE[i] = 1);
+for (const n of BLOCK_NAMES) if (n.endsWith('_leaves')) FILLABLE[B[n.toUpperCase()]] = 1;
+const PATHABLE = new Uint8Array(MAXB);
+[B.GRASS_BLOCK, B.DIRT, B.COARSE_DIRT, B.PODZOL, B.SAND, B.RED_SAND, B.SNOW_BLOCK, B.MYCELIUM, B.GRAVEL, B.ROOTED_DIRT, B.MUD, B.CLAY].forEach(i => PATHABLE[i] = 1);
+NO_SNOW[B.DIRT_PATH] = 1; NO_SNOW[B.FARMLAND] = 1;
+
+/* ---------------- registry ---------------- */
+function structurePlan(gen, S, rx, rz) {
+  const k = S.name + ':' + rx + ',' + rz;
+  let p = gen.plans.get(k);
+  if (p === undefined) {
+    if (gen.plans.size > 4000) gen.plans.clear();
+    p = S.plan(gen, rx, rz) || null;
+    if (p) { p.kind = S.name; p.build = ctx => S.build(p, ctx); if (!p.rects) p.rects = []; }
+    gen.plans.set(k, p);
+  }
+  return p;
+}
+const STRUCTURES = [];
+// every planned structure whose bounds reach into chunk (cx, cz) or its 8-block margin
+Generator.prototype.structuresFor = function (cx, cz) {
+  const out = [], x0 = cx * 16 - 8, z0 = cz * 16 - 8, x1 = cx * 16 + 23, z1 = cz * 16 + 23;
+  for (const S of STRUCTURES) {
+    const rx0 = Math.floor((x0 - S.reach) / S.region), rx1 = Math.floor((x1 + S.reach) / S.region);
+    const rz0 = Math.floor((z0 - S.reach) / S.region), rz1 = Math.floor((z1 + S.reach) / S.region);
+    for (let rz = rz0; rz <= rz1; rz++) for (let rx = rx0; rx <= rx1; rx++) {
+      const p = structurePlan(this, S, rx, rz);
+      if (p && p.bbox[0] <= x1 && p.bbox[2] >= x0 && p.bbox[1] <= z1 && p.bbox[3] >= z0) out.push(p);
+    }
+  }
+  return out;
+};
+// the structure of a kind nearest to (wx, wz), searching rings of regions outward
+function nearestStructure(gen, name, wx, wz, maxRegions) {
+  const S = STRUCTURES.find(s => s.name === name);
+  if (!S) return null;
+  const rx0 = Math.floor(wx / S.region), rz0 = Math.floor(wz / S.region);
+  let best = null, bd = Infinity;
+  for (let r = 0; r <= (maxRegions || 8); r++) {
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const p = structurePlan(gen, S, rx0 + dx, rz0 + dz);
+      if (!p) continue;
+      const d = (p.X - wx) ** 2 + (p.Z - wz) ** 2;
+      if (d < bd) { bd = d; best = p; }
+    }
+    // a region further out can't hold anything closer than what we found
+    if (best && Math.sqrt(bd) < (r - 1) * S.region) break;
+  }
+  return best;
+}
+
+/* ---------------- writing pieces ---------------- */
+// A piece lives in its own frame: lx runs along the front, ly up from the floor, lz from the front wall to the back.
+// p.rect is the world footprint, p.f the world direction the front faces, p.y the floor level.
+function pieceWriter(ctx, p) {
+  const bx = ctx.cx * 16, bz = ctx.cz * 16, blocks = ctx.blocks, meta = ctx.meta, I = ctx.I, f = p.f;
+  const [x0, z0, x1, z1] = p.rect;
+  const WX = f === 0 ? (lx, lz) => x0 + lx : f === 2 ? (lx, lz) => x1 - lx : f === 1 ? (lx, lz) => x1 - lz : (lx, lz) => x0 + lz;
+  const WZ = f === 0 ? (lx, lz) => z0 + lz : f === 2 ? (lx, lz) => z1 - lz : f === 1 ? (lx, lz) => z0 + lx : (lx, lz) => z1 - lx;
+  const W = {
+    p, ctx,
+    d: ld => (ld + f) & 3,
+    axisX: (f & 1) ? 2 : 1, axisZ: (f & 1) ? 1 : 2,
+    wx: WX, wz: WZ,
+    idx(lx, ly, lz) {
+      const x = WX(lx, lz) - bx, z = WZ(lx, lz) - bz, y = p.y + ly;
+      return (x < 0 || x > 15 || z < 0 || z > 15 || y < 1 || y > 255) ? -1 : I(x, y, z);
+    },
+    set(lx, ly, lz, id, m) { const i = W.idx(lx, ly, lz); if (i >= 0) { blocks[i] = id; meta[i] = m || 0; } return i; },
+    get(lx, ly, lz) { const i = W.idx(lx, ly, lz); return i < 0 ? -1 : blocks[i]; },
+    fill(lx0, ly0, lz0, lx1, ly1, lz1, id, m) { for (let ly = ly0; ly <= ly1; ly++) for (let lz = lz0; lz <= lz1; lz++) for (let lx = lx0; lx <= lx1; lx++) W.set(lx, ly, lz, id, m); },
+    // solid ground under the piece: fill air, water and plants downward
+    foundation(lx0, lz0, lx1, lz1, id) {
+      for (let lz = lz0; lz <= lz1; lz++) for (let lx = lx0; lx <= lx1; lx++) for (let ly = -1; ly >= -12; ly--) {
+        const i = W.idx(lx, ly, lz);
+        if (i < 0 || !FILLABLE[blocks[i]]) break;
+        blocks[i] = id; meta[i] = 0;
+      }
+    },
+    // the tall half of two block plants and doors
+    door(lx, lz, id, ld) { const m = M_DOOR(W.d(ld)); W.set(lx, 1, lz, id, m); W.set(lx, 2, lz, id, m | 8); },
+    bed(lx, ly, lz, id, ld) { const [dx, dz] = DIR4[ld]; const m = M_BED(W.d(ld)); W.set(lx, ly, lz, id, m); W.set(lx + dx, ly, lz + dz, id, m | 4); },
+    chest(lx, ly, lz, ld, loot, id) { const i = W.set(lx, ly, lz, id || B.CHEST, (id === B.BARREL) ? 2 : M_FACING(W.d(ld))); if (i >= 0 && loot) ctx.be.push([i, { type: id === B.BARREL ? 'barrel' : 'chest', kind: id === B.BARREL ? 'barrel' : 'chest', loot }]); return i; },
+    spawn(type, lx, ly, lz, opts) {
+      const x = WX(lx, lz), z = WZ(lx, lz);
+      if (x >> 4 === ctx.cx && z >> 4 === ctx.cz) ctx.mobs.push([type, x + 0.5, p.y + ly, z + 0.5, opts || {}]);
+    },
+  };
+  // local x: +1 is world direction d(1)
+  W.dirX = [W.d(3), W.d(1)];
+  return W;
+}
+// clipped writes in world coordinates
+function worldWriter(ctx) {
+  const bx = ctx.cx * 16, bz = ctx.cz * 16, blocks = ctx.blocks, meta = ctx.meta, I = ctx.I;
+  return {
+    idx: (x, y, z) => { x -= bx; z -= bz; return (x < 0 || x > 15 || z < 0 || z > 15 || y < 1 || y > 255) ? -1 : I(x, y, z); },
+    set(x, y, z, id, m) { x -= bx; z -= bz; if (x < 0 || x > 15 || z < 0 || z > 15 || y < 1 || y > 255) return -1; const i = I(x, y, z); blocks[i] = id; meta[i] = m || 0; return i; },
+    get(x, y, z) { x -= bx; z -= bz; if (x < 0 || x > 15 || z < 0 || z > 15 || y < 0 || y > 255) return -1; return blocks[I(x, y, z)]; },
+    inside: (x, z) => x >= bx && x < bx + 16 && z >= bz && z < bz + 16,
+  };
+}
+
+/* ---------------- villages ---------------- */
+const VILLAGE_REGION = 512;
+const BED_COLORS = [B.WHITE_BED, B.RED_BED, B.YELLOW_BED, B.LIGHT_BLUE_BED, B.LIME_BED, B.ORANGE_BED, B.PURPLE_BED, B.CYAN_BED];
+const VSTYLE = {
+  plains: { log: B.OAK_LOG, wall: B.OAK_PLANKS, low: B.COBBLESTONE, floor: B.OAK_PLANKS, base: B.COBBLESTONE, stairs: B.OAK_STAIRS, slab: B.OAK_SLAB, roofTop: B.OAK_PLANKS,
+    fence: B.OAK_FENCE, post: B.OAK_FENCE, gate: B.OAK_FENCE_GATE, door: B.OAK_DOOR, glass: B.GLASS_PANE, light: B.TORCH, path: B.DIRT_PATH, bridge: B.OAK_PLANKS,
+    roof: 'gable', vtype: 'plains', loot: 'village_plains_house', animals: ['cow', 'sheep', 'pig'], well: B.COBBLESTONE, wellRoof: B.COBBLESTONE_SLAB },
+  desert: { log: B.CUT_SANDSTONE, wall: B.SANDSTONE, low: B.SANDSTONE, floor: B.SMOOTH_SANDSTONE, base: B.SANDSTONE, stairs: B.SANDSTONE_STAIRS, slab: B.SMOOTH_SANDSTONE_SLAB, roofTop: B.SMOOTH_SANDSTONE,
+    fence: B.JUNGLE_FENCE, post: B.SANDSTONE_WALL, gate: B.JUNGLE_FENCE_GATE, door: B.JUNGLE_DOOR, glass: B.GLASS_PANE, light: B.TORCH, path: B.SMOOTH_SANDSTONE, bridge: B.SMOOTH_SANDSTONE,
+    roof: 'flat', accent: B.YELLOW_TERRACOTTA, vtype: 'desert', loot: 'village_desert_house', animals: ['camel', 'sheep', 'rabbit'], well: B.CUT_SANDSTONE, wellRoof: B.SMOOTH_SANDSTONE_SLAB },
+  savanna: { log: B.ACACIA_LOG, wall: B.ACACIA_PLANKS, low: B.ORANGE_TERRACOTTA, floor: B.ACACIA_PLANKS, base: B.COBBLESTONE, stairs: B.ACACIA_STAIRS, slab: B.ACACIA_SLAB, roofTop: B.ACACIA_PLANKS,
+    fence: B.ACACIA_FENCE, post: B.ACACIA_FENCE, gate: B.ACACIA_FENCE_GATE, door: B.ACACIA_DOOR, glass: B.GLASS_PANE, light: B.TORCH, path: B.DIRT_PATH, bridge: B.ACACIA_PLANKS,
+    roof: 'gable', vtype: 'savanna', loot: 'village_savanna_house', animals: ['cow', 'sheep', 'horse'], well: B.ACACIA_PLANKS, wellRoof: B.ACACIA_SLAB },
+  taiga: { log: B.SPRUCE_LOG, wall: B.SPRUCE_PLANKS, low: B.COBBLESTONE, floor: B.SPRUCE_PLANKS, base: B.MOSSY_COBBLESTONE, stairs: B.SPRUCE_STAIRS, slab: B.SPRUCE_SLAB, roofTop: B.SPRUCE_PLANKS,
+    fence: B.SPRUCE_FENCE, post: B.SPRUCE_FENCE, gate: B.SPRUCE_FENCE_GATE, door: B.SPRUCE_DOOR, glass: B.GLASS_PANE, light: B.LANTERN, path: B.DIRT_PATH, bridge: B.SPRUCE_PLANKS,
+    roof: 'gable', vtype: 'taiga', loot: 'village_taiga_house', animals: ['sheep', 'pig', 'cow'], well: B.COBBLESTONE, wellRoof: B.SPRUCE_SLAB },
+  snowy: { log: B.STRIPPED_SPRUCE_LOG, wall: B.SNOW_BLOCK, low: B.SPRUCE_PLANKS, floor: B.SPRUCE_PLANKS, base: B.STONE_BRICKS, stairs: B.SPRUCE_STAIRS, slab: B.SPRUCE_SLAB, roofTop: B.SPRUCE_PLANKS,
+    fence: B.SPRUCE_FENCE, post: B.SPRUCE_FENCE, gate: B.SPRUCE_FENCE_GATE, door: B.SPRUCE_DOOR, glass: B.GLASS_PANE, light: B.LANTERN, path: B.DIRT_PATH, bridge: B.SPRUCE_PLANKS,
+    roof: 'gable', vtype: 'snow', loot: 'village_snowy_house', animals: ['sheep', 'rabbit', 'pig'], well: B.PACKED_ICE, wellRoof: B.SPRUCE_SLAB },
+};
+const JOB_SITE_BLOCKS = [B.SMOKER, B.CARTOGRAPHY_TABLE, B.BARREL, B.FLETCHING_TABLE, B.CAULDRON, B.STONECUTTER, B.LOOM, B.SMITHING_TABLE, B.GRINDSTONE,
+  B.BLAST_FURNACE, B.LECTERN, B.BREWING_STAND];
+const CROPS = [[B.WHEAT, 7], [B.CARROTS, 7], [B.POTATOES, 7], [B.BEETROOTS, 3]];
+function villageStyle(b) {
+  if (b === BI.PLAINS || b === BI.SUNFLOWER_PLAINS || b === BI.MEADOW) return 'plains';
+  if (b === BI.DESERT) return 'desert';
+  if (b === BI.SAVANNA || b === BI.SAVANNA_PLATEAU) return 'savanna';
+  if (b === BI.TAIGA) return 'taiga';
+  if (b === BI.SNOWY_PLAINS) return 'snowy';
+  return null;
+}
+function villagePlan(gen, rx, rz) {
+  const seed = gen.seed;
+  for (let k = 0; k < 4; k++) {
+    if (hash2(rx * 4 + k, rz, seed + 9100) > 0.85) continue;
+    const X = rx * VILLAGE_REGION + 64 + Math.floor(hash2(rx * 4 + k, rz, seed + 9101) * 384);
+    const Z = rz * VILLAGE_REGION + 64 + Math.floor(hash2(rx * 4 + k, rz, seed + 9102) * 384);
+    const col = gen.columnAt(X, Z), style = villageStyle(col.b);
+    if (!style || col.h < SEA + 1) continue;
+    let lo = col.h, hi = col.h;
+    for (const [dx, dz] of [[-16, 0], [16, 0], [0, -16], [0, 16], [-12, -12], [12, 12], [12, -12], [-12, 12]]) { const h = gen.columnAt(X + dx, Z + dz).h; lo = Math.min(lo, h); hi = Math.max(hi, h); }
+    if (hi - lo > 12 || lo < SEA - 1) continue;
+    return planVillageLayout(gen, X, Z, style);
+  }
+  return null;
+}
+// building sizes: [width along the street, depth away from it]
+const VBUILD = {
+  house_s: [5, 5], house_m: [7, 6], house_l: [9, 7], smith: [8, 7], farm: [9, 7], farm_l: [13, 9], pen: [7, 7], lamp: [1, 1],
+};
+function planVillageLayout(gen, X, Z, style) {
+  const R = mulberry32((hash2(X, Z, gen.seed + 9103) * 4294967296) | 0);
+  const ground = (x, z) => gen.columnAt(x, z).h;
+  const pieces = [], roads = [], built = [];
+  const overlaps = (r, list, m) => list.some(o => r[0] - m <= o[2] && r[2] + m >= o[0] && r[1] - m <= o[3] && r[3] + m >= o[1]);
+  const cy = ground(X, Z);
+  const plaza = { type: 'center', rect: [X - 4, Z - 4, X + 4, Z + 4], f: 0, y: cy };
+  pieces.push(plaza); built.push(plaza.rect);
+  // streets: four main roads out of the plaza, some with side streets
+  const streets = [];
+  const addStreet = (sx, sz, d, len, depth) => {
+    const [dx, dz] = DIR4[d];
+    // the road ends where the land drops into water or a cliff
+    let n = 0, last = ground(sx, sz);
+    for (; n < len; n++) {
+      const h = ground(sx + dx * n, sz + dz * n);
+      if (h < SEA - 1 && n > 6) break;
+      if (Math.abs(h - last) > 3) break;
+      last = h;
+    }
+    if (n < 6) return;
+    const ex = sx + dx * (n - 1), ez = sz + dz * (n - 1);
+    const rect = dx ? [Math.min(sx, ex), sz - 1, Math.max(sx, ex), sz + 1] : [sx - 1, Math.min(sz, ez), sx + 1, Math.max(sz, ez)];
+    if (depth > 0 && overlaps(rect, built, 1)) return;
+    roads.push(rect);
+    streets.push({ sx, sz, d, len: n, depth });
+    if (depth === 0 && n > 16) {
+      const nb = R() < 0.7 ? 1 + (R() < 0.4 ? 1 : 0) : 0;
+      for (let b = 0; b < nb; b++) {
+        const t = 8 + Math.floor(R() * (n - 14)), side = R() < 0.5 ? 1 : 3, sd = (d + side) & 3, [ox, oz] = DIR4[sd];
+        addStreet(sx + dx * t + ox * 2, sz + dz * t + oz * 2, sd, 12 + Math.floor(R() * 14), depth + 1);
+      }
+    }
+  };
+  for (let d = 0; d < 4; d++) {
+    if (d >= 2 && R() < 0.12) continue;
+    const [dx, dz] = DIR4[d];
+    addStreet(X + dx * 5, Z + dz * 5, d, 20 + Math.floor(R() * 24), 0);
+  }
+  // buildings along both sides of every street
+  const weights = style === 'desert' ? [['house_s', 30], ['house_m', 24], ['house_l', 8], ['smith', 6], ['farm', 18], ['pen', 6]]
+    : [['house_s', 26], ['house_m', 22], ['house_l', 9], ['smith', 6], ['farm', 14], ['farm_l', 6], ['pen', 7]];
+  const pick = () => { let tot = 0; for (const w of weights) tot += w[1]; let r = R() * tot; for (const w of weights) { r -= w[1]; if (r < 0) return w[0]; } return 'house_s'; };
+  const place = (st, t, side, type) => {
+    const [w, dep] = VBUILD[type], [dx, dz] = DIR4[st.d], s = (st.d + side) & 3, [ox, oz] = DIR4[s];
+    const off = type === 'lamp' ? 2 : 2;
+    const ax = st.sx + dx * t + ox * off, az = st.sz + dz * t + oz * off;
+    const bx2 = ax + dx * (w - 1) + ox * (dep - 1), bz2 = az + dz * (w - 1) + oz * (dep - 1);
+    const rect = [Math.min(ax, bx2), Math.min(az, bz2), Math.max(ax, bx2), Math.max(az, bz2)];
+    if (overlaps(rect, built, 1) || overlaps(rect, roads, 0)) return false;
+    const f = (s + 2) & 3;
+    // floor level: the street in front of the door
+    const mid = Math.floor((w - 1) / 2), fx = st.sx + dx * (t + mid) + ox, fz = st.sz + dz * (t + mid) + oz;
+    const y = ground(fx, fz);
+    if (y < SEA) return false;
+    for (const [cx2, cz2] of [[rect[0], rect[1]], [rect[2], rect[1]], [rect[0], rect[3]], [rect[2], rect[3]]]) { const h = ground(cx2, cz2); if (h < SEA - 1 || h - y > 5 || y - h > 4) return false; }
+    const pc = { type, rect, f, y };
+    if (type.startsWith('house') || type === 'smith') pc.job = type === 'smith' ? [B.SMITHING_TABLE, B.GRINDSTONE, B.BLAST_FURNACE][Math.floor(R() * 3)] : (R() < 0.75 ? JOB_SITE_BLOCKS[Math.floor(R() * JOB_SITE_BLOCKS.length)] : 0);
+    pieces.push(pc); built.push(rect);
+    return true;
+  };
+  for (const st of streets) {
+    for (const side of [1, 3]) {
+      let t = 1 + Math.floor(R() * 3);
+      while (t < st.len - 2) {
+        const type = pick(), w = VBUILD[type][0];
+        if (t + w > st.len) { t++; continue; }
+        if (place(st, t, side, type)) t += w + 1 + Math.floor(R() * 3); else t += 2;
+      }
+      // a lamp post at the far end of the street
+      if (R() < 0.8) place(st, st.len - 1, side, 'lamp');
+    }
+  }
+  // a couple of lamps beside the plaza
+  let bb = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const r of [...built, ...roads]) bb = [Math.min(bb[0], r[0]), Math.min(bb[1], r[1]), Math.max(bb[2], r[2]), Math.max(bb[3], r[3])];
+  const rects = [...built, ...roads];
+  return { X, Y: cy, Z, style, pieces, roads, rects, bbox: [bb[0] - 2, bb[1] - 2, bb[2] + 2, bb[3] + 2] };
+}
+function buildVillage(p, ctx) {
+  const S = VSTYLE[p.style], bx = ctx.cx * 16, bz = ctx.cz * 16, { blocks, meta, I, hs, M, W: PW } = ctx;
+  // roads follow the ground; planks bridge the water
+  for (const r of p.roads) {
+    if (r[0] > bx + 15 || r[2] < bx || r[1] > bz + 15 || r[3] < bz) continue;
+    for (let z = Math.max(r[1], bz); z <= Math.min(r[3], bz + 15); z++) for (let x = Math.max(r[0], bx); x <= Math.min(r[2], bx + 15); x++) {
+      const lx = x - bx, lz = z - bz, h = hs[(lz + M) * PW + (lx + M)];
+      if (h < SEA) { const i = I(lx, SEA, lz); if (blocks[i] === B.WATER || blocks[i] === B.ICE) { blocks[i] = S.bridge; meta[i] = 0; } for (let k = 1; k <= 2; k++) { const j = I(lx, SEA + k, lz); if (FILLABLE[blocks[j]] && blocks[j] !== B.WATER) blocks[j] = 0; } continue; }
+      const i = I(lx, h, lz);
+      if (PATHABLE[blocks[i]]) { blocks[i] = S.path; meta[i] = 0; }
+      for (let k = 1; k <= 3; k++) { const j = I(lx, h + k, lz); if (FILLABLE[blocks[j]] && blocks[j] !== B.WATER) { blocks[j] = 0; meta[j] = 0; } }
+    }
+  }
+  for (const pc of p.pieces) {
+    const [x0, z0, x1, z1] = pc.rect;
+    if (x0 - 1 > bx + 15 || x1 + 1 < bx || z0 - 1 > bz + 15 || z1 + 1 < bz) continue;
+    const W = pieceWriter(ctx, pc), R = mulberry32((hash2(x0 * 3 + pc.f, z0, ctx.gen.seed + 9200) * 4294967296) | 0);
+    VPIECES[pc.type](W, S, R, pc, p);
+  }
+}
+// a house: walls with log corners, windows, a door to the street, beds at the back, a job site
+function vHouse(W, S, R, pc, w, d, h, beds) {
+  const door = (w - 1) >> 1, top = S.roof === 'flat' ? h + 2 : h + Math.ceil(d / 2) + 2;
+  W.foundation(0, 0, w - 1, d - 1, S.base);
+  W.fill(0, 1, 0, w - 1, top, d - 1, B.AIR);
+  W.fill(0, 0, 0, w - 1, 0, d - 1, S.base);
+  W.fill(1, 0, 1, w - 2, 0, d - 2, S.floor);
+  for (let ly = 1; ly <= h; ly++) for (let lz = 0; lz < d; lz++) for (let lx = 0; lx < w; lx++) {
+    const ex = lx === 0 || lx === w - 1, ez = lz === 0 || lz === d - 1;
+    if (!ex && !ez) continue;
+    W.set(lx, ly, lz, ex && ez ? S.log : (ly === 1 ? S.low : S.wall), 0);
+  }
+  if (S.accent) for (let lx = 1; lx < w - 1; lx++) W.set(lx, h, 0, S.accent);
+  // windows
+  for (let lz = 2; lz < d - 1; lz += 2) { W.set(0, 2, lz, S.glass); W.set(w - 1, 2, lz, S.glass); }
+  for (let lx = 1; lx < w - 1; lx += 2) if (Math.abs(lx - door) > 1) { W.set(lx, 2, 0, S.glass); }
+  for (let lx = 2; lx < w - 2; lx += 2) W.set(lx, 2, d - 1, S.glass);
+  W.door(door, 0, S.door, 0);
+  // the step in front of the door
+  if (W.get(door, 0, -1) !== -1 && FILLABLE[W.get(door, 0, -1)]) W.set(door, 0, -1, S.base);
+  // roof
+  if (S.roof === 'flat') {
+    W.fill(0, h + 1, 0, w - 1, h + 1, d - 1, S.roofTop);
+    for (let lx = 0; lx < w; lx++) { W.set(lx, h + 2, 0, S.slab); W.set(lx, h + 2, d - 1, S.slab); }
+    for (let lz = 1; lz < d - 1; lz++) { W.set(0, h + 2, lz, S.slab); W.set(w - 1, h + 2, lz, S.slab); }
+  } else {
+    for (let k = 0; ; k++) {
+      const a = k, b = d - 1 - k, ly = h + 1 + k;
+      if (a > b) break;
+      for (let lx = 0; lx < w; lx++) {
+        if (a === b) W.set(lx, ly, a, S.slab);
+        else { W.set(lx, ly, a, S.stairs, M_STAIRS(W.d(2))); W.set(lx, ly, b, S.stairs, M_STAIRS(W.d(0))); }
+      }
+      // gable ends
+      for (let lz = a + 1; lz < b; lz++) { W.set(0, ly, lz, S.wall); W.set(w - 1, ly, lz, S.wall); }
+    }
+  }
+  // inside: beds along the back wall, the job site and a table or chest at the front corners, lights
+  const used = new Set([door]);
+  const bedXs = beds === 1 ? [1] : beds === 2 ? [1, w - 2] : [1, door + (door + 1 < w - 2 ? 1 : -1), w - 2];
+  const color = BED_COLORS[Math.floor(R() * BED_COLORS.length)];
+  for (const bx of bedXs) W.bed(bx, 1, d - 3, color, 2);
+  if (pc.job) W.set(1, 1, 1, pc.job, pc.job === B.BARREL ? 2 : M_FACING(W.d(2)));
+  const r = R();
+  if (r < 0.45) W.chest(w - 2, 1, 1, 2, S.loot);
+  else if (r < 0.75) W.set(w - 2, 1, 1, B.CRAFTING_TABLE);
+  else { W.set(w - 2, 1, 1, S.fence); W.set(w - 2, 2, 1, B.OAK_PRESSURE_PLATE); }
+  W.set(1, 2, 1, B.TORCH, M_TORCH(W.d(3))); W.set(w - 2, 2, 1, B.TORCH, M_TORCH(W.d(1)));
+  W.set(door, 3, -1, B.TORCH, M_TORCH(W.d(2)));
+  // a villager or two per house; the spare beds let them grow the village
+  const n = beds >= 3 && R() < 0.5 ? 2 : 1;
+  for (let k = 0; k < n; k++) W.spawn('villager', door, 1, 1 + k, { vtype: S.vtype, baby: R() < 0.15 });
+}
+const VPIECES = {
+  center(W, S, R, pc) {
+    // the plaza: a well under a little roof, the bell, an iron golem and the village cats
+    W.foundation(0, 0, 8, 8, S.base);
+    W.fill(0, 1, 0, 8, 6, 8, B.AIR);
+    W.fill(0, 0, 0, 8, 0, 8, S.path);
+    W.fill(2, -3, 2, 6, 0, 6, S.well);
+    W.fill(3, -2, 3, 5, 0, 5, B.WATER);
+    for (let lx = 2; lx <= 6; lx++) for (let lz = 2; lz <= 6; lz++) if (lx === 2 || lx === 6 || lz === 2 || lz === 6) W.set(lx, 1, lz, S.well);
+    for (const [lx, lz] of [[2, 2], [6, 2], [2, 6], [6, 6]]) { W.set(lx, 2, lz, S.post); W.set(lx, 3, lz, S.post); }
+    W.fill(2, 4, 2, 6, 4, 6, S.wellRoof);
+    W.set(1, 1, 1, B.BELL, W.d(1) & 1);
+    W.set(0, 1, 0, S.post); W.set(0, 2, 0, S.post); W.set(0, 3, 0, S.light, 0);
+    W.set(8, 1, 8, S.post); W.set(8, 2, 8, S.post); W.set(8, 3, 8, S.light, 0);
+    W.spawn('iron_golem', 7, 1, 1, {});
+    const cats = 1 + Math.floor(R() * 2);
+    for (let k = 0; k < cats; k++) W.spawn('cat', 1 + k, 1, 7, {});
+  },
+  house_s(W, S, R, pc) { vHouse(W, S, R, pc, 5, 5, 3, 1); },
+  house_m(W, S, R, pc) { vHouse(W, S, R, pc, 7, 6, 3, 2); },
+  house_l(W, S, R, pc) { vHouse(W, S, R, pc, 9, 7, 4, 3); },
+  smith(W, S, R, pc) {
+    // an open-fronted workshop: furnaces against the back, the job site, a chest of loot
+    const w = 8, d = 7, h = 4;
+    W.foundation(0, 0, w - 1, d - 1, S.base);
+    W.fill(0, 1, 0, w - 1, h + 2, d - 1, B.AIR);
+    W.fill(0, 0, 0, w - 1, 0, d - 1, B.COBBLESTONE);
+    for (let ly = 1; ly <= h; ly++) {
+      for (let lx = 0; lx < w; lx++) W.set(lx, ly, d - 1, lx === 0 || lx === w - 1 ? S.log : B.COBBLESTONE);
+      for (let lz = 2; lz < d - 1; lz++) { W.set(0, ly, lz, B.COBBLESTONE); W.set(w - 1, ly, lz, B.COBBLESTONE); }
+      W.set(0, ly, 0, S.log); W.set(w - 1, ly, 0, S.log);
+    }
+    W.fill(0, h + 1, 0, w - 1, h + 1, d - 1, S.slab);
+    W.set(2, 1, d - 2, B.FURNACE, M_FACING(W.d(0))); W.set(3, 1, d - 2, B.FURNACE, M_FACING(W.d(0)));
+    W.set(4, 0, d - 2, B.LAVA); W.set(5, 0, d - 2, B.LAVA); W.set(4, 1, d - 2, B.IRON_BARS); W.set(5, 1, d - 2, B.IRON_BARS);
+    W.set(1, 1, 2, pc.job || B.SMITHING_TABLE, M_FACING(W.d(1)));
+    W.chest(w - 2, 1, 2, 3, 'village_weaponsmith');
+    W.set(w - 2, 1, 3, B.ANVIL, W.d(0) & 3);
+    W.set(1, h, 1, B.TORCH, M_TORCH(W.d(3)));
+    W.spawn('villager', 3, 1, 2, { vtype: S.vtype });
+  },
+  farm(W, S, R, pc) { vFarm(W, S, R, 9, 7, [3]); },
+  farm_l(W, S, R, pc) { vFarm(W, S, R, 13, 9, [3, 5]); },
+  pen(W, S, R, pc) {
+    const w = 7, d = 7;
+    W.foundation(0, 0, w - 1, d - 1, B.DIRT);
+    W.fill(0, 1, 0, w - 1, 3, d - 1, B.AIR);
+    for (let lz = 0; lz < d; lz++) for (let lx = 0; lx < w; lx++) {
+      const i = W.idx(lx, 0, lz);
+      if (i >= 0 && W.get(lx, 0, lz) !== B.WATER) W.set(lx, 0, lz, S === VSTYLE.desert ? B.SAND : B.GRASS_BLOCK);
+      if (lx === 0 || lx === w - 1 || lz === 0 || lz === d - 1) W.set(lx, 1, lz, S.fence);
+    }
+    W.set(3, 1, 0, S.gate, W.d(0) & 1);
+    W.set(1, 1, d - 2, B.HAY_BLOCK); W.set(2, 1, d - 2, B.HAY_BLOCK); W.set(1, 2, d - 2, B.HAY_BLOCK);
+    const type = S.animals[Math.floor(R() * S.animals.length)], n = 2 + Math.floor(R() * 3);
+    for (let k = 0; k < n; k++) W.spawn(type, 2 + (k % 3), 1, 2 + (k >> 1), {});
+  },
+  lamp(W, S, R, pc) {
+    W.foundation(0, 0, 0, 0, S.base);
+    W.set(0, 0, 0, S.base);
+    W.fill(0, 1, 0, 0, 4, 0, B.AIR);
+    W.set(0, 1, 0, S.post); W.set(0, 2, 0, S.post);
+    if (S.light === B.LANTERN) W.set(0, 3, 0, B.LANTERN, 0);
+    else { W.set(0, 3, 0, S === VSTYLE.desert ? B.CUT_SANDSTONE : B.BLACK_WOOL); for (const d of [0, 1, 2, 3]) { const [dx, dz] = DIR4[d]; W.set(dx, 3, dz, B.TORCH, M_TORCH(W.d((d + 2) & 3))); } }
+  },
+};
+// fields of crops with a water channel, bordered by logs; the composter is the farmer's job site
+function vFarm(W, S, R, w, d, water) {
+  W.foundation(0, 0, w - 1, d - 1, B.DIRT);
+  W.fill(0, 1, 0, w - 1, 2, d - 1, B.AIR);
+  const [crop, ripe] = CROPS[Math.floor(R() * CROPS.length)];
+  for (let lz = 0; lz < d; lz++) for (let lx = 0; lx < w; lx++) {
+    if (lx === 0 || lx === w - 1 || lz === 0 || lz === d - 1) { W.set(lx, 0, lz, S.log, lx === 0 || lx === w - 1 ? W.axisZ : W.axisX); continue; }
+    if (water.includes(lz)) { W.set(lx, 0, lz, B.WATER); continue; }
+    W.set(lx, 0, lz, B.FARMLAND, 7);
+    const age = R() < 0.6 ? Math.floor(R() * (ripe + 1)) : ripe;
+    W.set(lx, 1, lz, crop, age);
+  }
+  W.set(0, 1, 0, B.COMPOSTER);
+}
+
+/* ---------------- ancient cities ---------------- */
+const CITY_REGION = 640, CITY_Y = 14;
+function ancientCityPlan(gen, rx, rz) {
+  const seed = gen.seed;
+  if (hash2(rx, rz, seed + 9500) > 0.8) return null;
+  const X = rx * CITY_REGION + 140 + Math.floor(hash2(rx, rz, seed + 9501) * 360);
+  const Z = rz * CITY_REGION + 140 + Math.floor(hash2(rx, rz, seed + 9502) * 360);
+  for (const [dx, dz] of [[0, 0], [-48, 0], [48, 0], [0, -36], [0, 36]]) if (gen.columnAt(X + dx, Z + dz).h < SEA + 3) return null;
+  const R = mulberry32((hash2(X, Z, seed + 9503) * 4294967296) | 0);
+  const pieces = [];
+  const spots = [[-40, -25], [-21, -29], [21, -29], [40, -25], [-48, 0], [48, 0], [-40, 25], [-21, 29], [21, 29], [40, 25]];
+  for (const [dx, dz] of spots) {
+    if (R() < 0.1) continue;
+    const q = R(), type = q < 0.35 ? 'tower' : q < 0.55 ? 'icebox' : q < 0.85 ? 'hall' : 'ruin';
+    pieces.push({ type, x: X + dx + Math.floor(R() * 5) - 2, z: Z + dz + Math.floor(R() * 3) - 1, h: 9 + Math.floor(R() * 6), seed: Math.floor(R() * 2147483647) });
+  }
+  return { X, Y: CITY_Y, Z, pieces, bbox: [X - 64, Z - 50, X + 64, Z + 50], rects: [] };
+}
+const CITY_RX = 62, CITY_RZ = 48;
+function ancientCityNear(gen, wx, wz) {
+  // cities sit well inside their region, so only the region of the point itself matters
+  const p = structurePlan(gen, CITY_STRUCT, Math.floor(wx / CITY_REGION), Math.floor(wz / CITY_REGION));
+  return !!p && Math.abs(wx - p.X) < 92 && Math.abs(wz - p.Z) < 76;
+}
+function buildAncientCity(p, ctx) {
+  const { blocks, meta, I, cx, cz, gen } = ctx, seed = gen.seed, bx = cx * 16, bz = cz * 16, { X, Y, Z } = p;
+  const Wr = worldWriter(ctx);
+  const lane = (wx, wz) => {
+    const u = wx - X, v = wz - Z;
+    if (Math.abs(u) <= 20 && Math.abs(v) <= 9) return 2;          // plaza
+    if (Math.abs(v) <= 2) return 1;                                // avenue
+    for (const b of p.pieces) if (Math.abs(wx - b.x) <= 1 && (b.z < Z ? wz <= Z - 2 && wz >= b.z : wz >= Z + 2 && wz <= b.z)) return 1;
+    return 0;
+  };
+  // the cavern: a wide dome over a flat floor of deepslate
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const wx = bx + x, wz = bz + z, ex = (wx - X) / CITY_RX, ez = (wz - Z) / CITY_RZ, e2 = ex * ex + ez * ez;
+    if (e2 >= 1) continue;
+    const top = Math.floor(Y + 3 + 26 * Math.sqrt(1 - e2) + gen.nV.n2(wx / 11, wz / 11) * 4);
+    for (let y = Y - 3; y < Y - 1; y++) { const i = I(x, y, z); if (!OPAQUE_GEN[blocks[i]]) { blocks[i] = B.DEEPSLATE; meta[i] = 0; } }
+    for (let y = Y; y <= top; y++) { const i = I(x, y, z); blocks[i] = 0; meta[i] = 0; }
+    const ln = lane(wx, wz), h = hash2(wx, wz, seed + 9510), fi = I(x, Y - 1, z);
+    if (ln === 2) blocks[fi] = (Math.abs(wx - X) + Math.abs(wz - Z)) % 4 === 0 ? B.POLISHED_DEEPSLATE : B.DEEPSLATE_TILES;
+    else if (ln === 1) blocks[fi] = Math.abs(wz - Z) === 0 && Math.abs(wx - X) > 20 ? B.GRAY_WOOL : (h < 0.15 ? B.CRACKED_DEEPSLATE_TILES : B.DEEPSLATE_TILES);
+    else {
+      const patch = gen.nV.n2(wx / 9, wz / 9);
+      blocks[fi] = patch > -0.1 ? B.SCULK : h < 0.4 ? B.COBBLED_DEEPSLATE : B.DEEPSLATE;
+      if (patch > -0.1) {
+        const i = I(x, Y, z), r = hash2(wx, wz, seed + 9511);
+        if (r < 0.008) blocks[i] = B.SCULK_SENSOR;
+        else if (r < 0.013) { blocks[i] = B.SCULK_SHRIEKER; meta[i] = 1; }
+        else if (r < 0.014) blocks[fi] = B.SCULK_CATALYST;
+        else if (r < 0.05 && patch > 0.2) { blocks[i] = B.SCULK_VEIN; meta[i] = 8; }
+      }
+    }
+    // sculk creeping over the dome
+    const ti = I(x, Math.min(255, top + 1), z);
+    if (gen.nV.n2(wx / 7 + 50, wz / 7) > 0.15 && OPAQUE_GEN[blocks[ti]]) blocks[ti] = B.SCULK;
+    // lamp posts along the avenue
+    const u = wx - X, v = wz - Z;
+    if (Math.abs(v) === 3 && Math.abs(u) > 21 && Math.abs(u) % 8 === 0) {
+      blocks[I(x, Y, z)] = B.DEEPSLATE_BRICK_WALL; blocks[I(x, Y + 1, z)] = B.DEEPSLATE_BRICK_WALL; blocks[I(x, Y + 2, z)] = B.SOUL_LANTERN; meta[I(x, Y + 2, z)] = 0;
+    }
+  }
+  // the great frame at the heart of the city
+  for (let v = -5; v <= 5; v++) for (let u = -15; u <= 15; u++) {
+    const wx = X + u, wz = Z + v;
+    if (!Wr.inside(wx, wz)) continue;
+    const au = Math.abs(u), av = Math.abs(v);
+    for (let hh = 0; hh <= 27; hh++) {
+      const y = Y + hh;
+      let id = -1, m = 0;
+      if (hh <= 2) { if (au <= 15 - hh && av <= 5 - hh) id = hh === 2 ? B.DEEPSLATE_TILES : B.DEEPSLATE_BRICKS; else if (au <= 16 - hh && av <= 6 - hh && hh > 0) { id = B.DEEPSLATE_BRICK_SLAB; } }
+      else if (av <= 2) {
+        const pillar = au >= 9 && au <= 13 && hh <= 19, beam = au <= 13 && hh >= 14 && hh <= 19;
+        if (pillar || beam) id = (au === 13 || hh === 19) ? B.POLISHED_DEEPSLATE : (hash3(wx, y, wz, seed + 9512) < 0.15 ? B.CRACKED_DEEPSLATE_BRICKS : B.DEEPSLATE_BRICKS);
+        if (v === 0 && ((au === 8 && hh <= 14) || (hh === 14 && au <= 8))) id = B.REINFORCED_DEEPSLATE;
+        if (!pillar && !beam && au <= 8 && hh <= 13 && v !== 0) id = 0;
+        // the horns
+        if (hh >= 20 && av <= 1) { const k = hh - 20, o = 11 + (k >> 1); if (au >= o && au <= o + 1 && k <= 6) id = B.DEEPSLATE_BRICKS; }
+        if (hh === 13 && au === 4 && av === 2) { id = B.SOUL_LANTERN; m = 1; }
+      }
+      if (id >= 0) Wr.set(wx, y, wz, id, m);
+    }
+  }
+  // buildings around the plaza
+  for (const b of p.pieces) {
+    const R = mulberry32(b.seed), s = b.type === 'hall' ? [5, 3] : b.type === 'icebox' ? [3, 3] : [3, 3];
+    const [hx, hz] = s, front = b.z < Z ? 1 : -1;
+    if (b.x + hx + 1 < bx || b.x - hx - 1 > bx + 15 || b.z + hz + 1 < bz || b.z - hz - 1 > bz + 15) { R(); continue; }
+    const H = b.type === 'tower' ? b.h : b.type === 'hall' ? 6 : b.type === 'icebox' ? 5 : 7;
+    for (let dz = -hz; dz <= hz; dz++) for (let dx = -hx; dx <= hx; dx++) {
+      const wx = b.x + dx, wz = b.z + dz, edge = Math.abs(dx) === hx || Math.abs(dz) === hz, corner = Math.abs(dx) === hx && Math.abs(dz) === hz;
+      Wr.set(wx, Y - 1, wz, B.DEEPSLATE_TILES);
+      for (let hh = 0; hh <= H; hh++) {
+        const y = Y + hh, r = hash3(wx, y, wz, b.seed);
+        let id = 0;
+        if (hh === H) id = b.type === 'ruin' ? (r < 0.5 ? B.DEEPSLATE_TILE_SLAB : 0) : B.DEEPSLATE_TILES;
+        else if (edge) {
+          id = corner ? B.POLISHED_DEEPSLATE : (b.type === 'icebox' ? B.DEEPSLATE_TILES : (r < 0.12 ? B.CRACKED_DEEPSLATE_BRICKS : B.DEEPSLATE_BRICKS));
+          // the doorway faces the avenue, windows high up
+          if (dz === hz * front && Math.abs(dx) <= 1 && hh <= 3) id = 0;
+          if (b.type === 'tower' && !corner && hh === H - 3 && (dx === 0 || dz === 0)) id = 0;
+          if (b.type === 'ruin' && r < 0.3 + hh * 0.08) id = 0;
+        } else if (b.type === 'icebox' && hh <= H - 1 && (Math.abs(dx) === hx - 1 || Math.abs(dz) === hz - 1)) id = hh === 0 ? B.SNOW_BLOCK : (r < 0.4 ? B.BLUE_ICE : B.PACKED_ICE);
+        Wr.set(wx, y, wz, id, 0);
+      }
+    }
+    // furnishing
+    const back = b.z - hz * front + front;
+    if (b.type === 'hall') {
+      for (let dx = -hx + 1; dx <= hx - 1; dx++) Wr.set(b.x + dx, Y, b.z, B.GRAY_CARPET);
+      const i = Wr.set(b.x - 3, Y, back, B.CHEST, M_FACING(front > 0 ? 2 : 0)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot: 'ancient_city' }]);
+      Wr.set(b.x + 3, Y, back, B.SOUL_CAMPFIRE, 0);
+      Wr.set(b.x, Y, back, B.SCULK_SHRIEKER, 1);
+      Wr.set(b.x - 2, Y, back, B.CANDLE, (R() * 4) | 0);
+    } else if (b.type === 'icebox') {
+      const i = Wr.set(b.x, Y, back, B.CHEST, M_FACING(front > 0 ? 2 : 0)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot: 'ancient_city_ice_box' }]);
+      Wr.set(b.x - 1, Y, b.z, B.SNOW, 1); Wr.set(b.x + 1, Y, b.z, B.SNOW, 2);
+    } else {
+      const i = Wr.set(b.x, Y, back, B.CHEST, M_FACING(front > 0 ? 2 : 0)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot: 'ancient_city' }]);
+      Wr.set(b.x + 1, Y, back, B.DEEPSLATE_BRICK_SLAB); Wr.set(b.x + 1, Y + 1, back, B.CANDLE, 1 + ((R() * 3) | 0));
+      Wr.set(b.x - 1, Y, back, B.SOUL_LANTERN, 0);
+      if (b.type === 'tower') Wr.set(b.x, Y + b.h + 1, b.z, B.SOUL_LANTERN, 0);
+      if (R() < 0.5) Wr.set(b.x - 1, Y, b.z, B.SKELETON_SKULL, (R() * 16) | 0);
+    }
+    // sculk climbing the walls of the older buildings
+    if (b.type === 'ruin' || b.type === 'tower') for (let k = 0; k < 6; k++) { const dx = Math.floor(R() * (hx * 2 + 1)) - hx, dz = Math.floor(R() * (hz * 2 + 1)) - hz; Wr.set(b.x + dx, Y - 1, b.z + dz, B.SCULK); }
+  }
+}
+
+STRUCTURES.push({ name: 'village', region: VILLAGE_REGION, reach: 100, plan: villagePlan, build: buildVillage });
+const CITY_STRUCT = { name: 'ancient_city', region: CITY_REGION, reach: 70, plan: ancientCityPlan, build: buildAncientCity };
+STRUCTURES.push(CITY_STRUCT);
 
 </script>
 <script>
@@ -4161,6 +5106,25 @@ const BIOME_COL = (() => {
   def([BI.CHERRY_GROVE], [182, 219, 97], [182, 219, 97], [93, 183, 239]);
   def([BI.STONY_PEAKS, BI.WINDSWEPT_HILLS], [138, 182, 137], [109, 163, 107]);
   def([BI.SWAMP], [106, 112, 57], [106, 112, 57], [97, 123, 100]);
+  def([BI.JUNGLE, BI.BAMBOO_JUNGLE], [89, 201, 60], [48, 187, 11]);
+  def([BI.SPARSE_JUNGLE], [100, 199, 63], [62, 184, 15]);
+  def([BI.DARK_FOREST], [80, 122, 50], [89, 174, 48]);
+  def([BI.MUSHROOM_FIELDS], [85, 201, 63], [43, 187, 15]);
+  def([BI.FLOWER_FOREST], [121, 192, 90], [89, 174, 48]);
+  def([BI.SUNFLOWER_PLAINS], [145, 189, 89], [119, 171, 47]);
+  def([BI.OLD_GROWTH_PINE_TAIGA], [134, 184, 127], [104, 165, 95]);
+  def([BI.OLD_GROWTH_SPRUCE_TAIGA], [134, 183, 131], [104, 164, 100]);
+  def([BI.OLD_GROWTH_BIRCH_FOREST], [136, 187, 103], [107, 169, 65]);
+  def([BI.ICE_SPIKES, BI.FROZEN_PEAKS], [128, 180, 151], [96, 161, 123], [61, 87, 214]);
+  def([BI.DEEP_FROZEN_OCEAN], [128, 180, 151], [96, 161, 123], [57, 56, 201]);
+  def([BI.WARM_OCEAN], [142, 185, 113], [113, 167, 77], [67, 213, 238]);
+  def([BI.LUKEWARM_OCEAN, BI.DEEP_LUKEWARM_OCEAN], [142, 185, 113], [113, 167, 77], [69, 173, 242]);
+  def([BI.COLD_OCEAN, BI.DEEP_COLD_OCEAN], [142, 185, 113], [113, 167, 77], [61, 87, 214]);
+  def([BI.MANGROVE_SWAMP], [106, 112, 57], [141, 177, 39], [58, 122, 106]);
+  def([BI.STONY_SHORE, BI.WINDSWEPT_FOREST, BI.WINDSWEPT_GRAVELLY_HILLS], [138, 182, 137], [109, 163, 107]);
+  def([BI.ERODED_BADLANDS, BI.WOODED_BADLANDS], [144, 129, 77], [158, 129, 77], [50, 165, 200]);
+  def([BI.WINDSWEPT_SAVANNA, BI.SAVANNA_PLATEAU], [191, 183, 85], [174, 164, 42], [50, 165, 200]);
+  def([BI.LUSH_CAVES, BI.DRIPSTONE_CAVES, BI.DEEP_DARK], [145, 189, 89], [119, 171, 47]);
   return t;
 })();
 
@@ -9838,7 +10802,7 @@ Object.assign(MOB_INIT, {
   fox(m, o) { if (!o.loading) m.data.variant = SNOWY_BIOMES.has(biomeAt(m.game, m.x, m.z)) ? 'snow' : 'red'; },
   parrot(m, o) { if (!o.loading) m.data.variant = pick(Math.random, ['red_blue', 'blue', 'green', 'yellow_blue', 'grey']); },
   axolotl(m, o) { if (!o.loading) m.data.variant = Math.random() < 1 / 1200 ? 'blue' : pick(Math.random, ['lucy', 'wild', 'gold', 'cyan']); },
-  frog(m, o) { if (o.loading) return; const bi = biomeAt(m.game, m.x, m.z); m.data.variant = SNOWY_BIOMES.has(bi) ? 'cold' : [BI.DESERT, BI.BADLANDS, BI.SAVANNA].includes(bi) || bi === BI.NETHER_WASTES ? 'warm' : 'temperate'; },
+  frog(m, o) { if (o.loading) return; const bi = biomeAt(m.game, m.x, m.z); m.data.variant = SNOWY_BIOMES.has(bi) ? 'cold' : DRY_BIOMES.has(bi) || JUNGLE_BIOMES.has(bi) || bi === BI.MANGROVE_SWAMP || bi === BI.NETHER_WASTES ? 'warm' : 'temperate'; },
   panda(m, o) { if (!o.loading) m.data.variant = Math.random() < 0.05 ? 'brown' : pick(Math.random, ['normal', 'normal', 'normal', 'lazy', 'worried', 'playful', 'weak', 'aggressive']); },
   llama(m, o) { if (!o.loading) { m.data.variant = pick(Math.random, ['creamy', 'white', 'brown', 'gray']); m.data.strength = 1 + Math.floor(Math.random() * 5); m.maxHealth = m.health = 15 + Math.floor(Math.random() * 16); } },
   trader_llama(m, o) { if (!o.loading) m.data.variant = pick(Math.random, ['creamy', 'white', 'brown', 'gray']); },
@@ -13425,14 +14389,14 @@ class Game {
   }
   // ---------------- workers ----------------
   setupWorkers() {
-    const src = $('shared-src').textContent + '\nconst G={};onmessage=function(e){const d=e.data,k=d.dim+":"+(d.seed|0);if(!G[k])G[k]=makeGenerator(d.seed,d.dim);const r=G[k].genChunk(d.cx,d.cz);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,dim:d.dim,blocks:r.blocks,biomes:r.biomes},[r.blocks.buffer,r.biomes.buffer]);};';
+    const src = $('shared-src').textContent + '\nconst G={};onmessage=function(e){const d=e.data,k=d.dim+":"+(d.seed|0);if(!G[k])G[k]=makeGenerator(d.seed,d.dim);const r=G[k].genChunk(d.cx,d.cz);const t=[r.blocks.buffer,r.biomes.buffer];if(r.meta)t.push(r.meta.buffer);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,dim:d.dim,blocks:r.blocks,biomes:r.biomes,meta:r.meta||null,be:r.be||null,mobs:r.mobs||null},t);};';
     this.workers = [];
     try {
       const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
       const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
       for (let i = 0; i < n; i++) {
         const w = new Worker(url);
-        w.onmessage = e => { if (e.data.tok !== this.tok) return; this.inflight--; this.onChunkData(e.data.cx, e.data.cz, e.data.seed, e.data.blocks, e.data.biomes, null, null, e.data.dim); };
+        w.onmessage = e => { const d = e.data; if (d.tok !== this.tok) return; this.inflight--; this.onChunkData(d.cx, d.cz, d.seed, d.blocks, d.biomes, null, null, d.dim, null, d); };
         w.onerror = () => { this.workers = []; };
         this.workers.push(w);
       }
@@ -13462,12 +14426,14 @@ class Game {
     if (this.workers.length) { this.workers[this.wrr++ % this.workers.length].postMessage({ cx: c.cx, cz: c.cz, seed: this.world.seed, tok: this.tok, dim: this.world.dim }); }
     else { this.localQueue = this.localQueue || []; this.localQueue.push(c); }
   }
-  onChunkData(cx, cz, seed, blocks, biomes, meta, be, dim, ents) {
+  // meta/be/ents come from a save; gen holds what the generator made for a fresh chunk (block states, loot chests, mobs)
+  onChunkData(cx, cz, seed, blocks, biomes, meta, be, dim, ents, gen) {
     const w = this.world;
     if (!w || (seed | 0) !== (w.seed | 0) || (dim && dim !== w.dim)) return;
     const c = w.chunks.get(w.key(cx, cz));
     if (!c || c.state !== 0) return;
-    c.blocks = blocks; c.biomes = biomes; c.meta = meta || new Uint8Array(65536); c.light = new Uint8Array(65536);
+    c.blocks = blocks; c.biomes = biomes; c.meta = meta || (gen && gen.meta) || new Uint8Array(65536); c.light = new Uint8Array(65536);
+    if (!meta && gen) { if (gen.be && gen.be.length) be = gen.be; if (gen.mobs && gen.mobs.length) c.genMobs = gen.mobs; }
     if (!meta && w.dim === 'overworld') this.initStructureMeta(c);
     if (be) for (const [i, v] of be) {
       v.x = cx * 16 + (i & 15); v.y = i >> 8; v.z = cz * 16 + ((i >> 4) & 15);
@@ -13534,7 +14500,7 @@ class Game {
       while (this.localQueue.length && performance.now() - t0 < budget * 0.5) {
         const c = this.localQueue.shift(); this.inflight--;
         const r = this.localGen.genChunk(c.cx, c.cz);
-        this.onChunkData(c.cx, c.cz, w.seed, r.blocks, r.biomes, null, null, w.dim);
+        this.onChunkData(c.cx, c.cz, w.seed, r.blocks, r.biomes, null, null, w.dim, null, r);
       }
     }
     // lighting
@@ -14625,9 +15591,28 @@ class Game {
             return say('The nearest portal room is at ' + pr.x + ', ' + pr.y + ', ' + pr.z + ' (' + dist(pr.x, pr.z) + ' blocks away)', '#8f8');
           }
           const name = what.replace(/_/g, ' ');
+          const st = STRUCTURES.find(s => s.name === what.replace(/ /g, '_'));
+          if (st) {
+            if (w.dim !== 'overworld') return say('That structure is found in the Overworld', '#f66');
+            const f = nearestStructure(this.genInfo(), st.name, p.x, p.z, 12);
+            if (!f) return say('Could not find a ' + name + ' nearby', '#f66');
+            return say('The nearest ' + name + ' is at ' + f.X + ', ' + (f.Y === undefined ? '~' : f.Y) + ', ' + f.Z + ' (' + dist(f.X, f.Z) + ' blocks away)', '#8f8');
+          }
           const bi = BIOME_NAMES.findIndex(n => n.toLowerCase() === name);
-          if (bi < 0) return say('Unknown biome or structure. Try fortress, portal_room or a biome: ' + BIOME_NAMES.join(', '), '#f66');
-          const g = makeGenerator(w.seed, w.dim);
+          if (bi < 0) return say('Unknown biome or structure. Try fortress, portal_room, ' + STRUCTURES.map(s => s.name).join(', ') + ' or a biome: ' + BIOME_NAMES.join(', '), '#f66');
+          const g = w.dim === 'overworld' ? this.genInfo() : makeGenerator(w.seed, w.dim);
+          const caveBit = bi === BI.LUSH_CAVES ? 1 : bi === BI.DRIPSTONE_CAVES ? 2 : bi === BI.DEEP_DARK ? 4 : 0;
+          if (caveBit) {
+            if (w.dim !== 'overworld') return say('Cave biomes are found in the Overworld', '#f66');
+            for (let r = 0; r < 4000; r += 24) {
+              const n = Math.max(1, Math.floor(r / 12));
+              for (let k = 0; k < n; k++) {
+                const an = k / n * Math.PI * 2, x = Math.round(p.x + Math.cos(an) * r), z = Math.round(p.z + Math.sin(an) * r);
+                if (g.caveFlags(x, z) & caveBit) return say('The nearest ' + BIOME_NAMES[bi] + ' is at ' + x + ', ' + (caveBit === 4 ? 20 : 40) + ', ' + z + ' (' + r + ' blocks away)', '#8f8');
+              }
+            }
+            return say('Could not find that biome nearby', '#f66');
+          }
           for (let r = 0; r < 4000; r += 32) {
             const n = Math.max(1, Math.floor(r / 16));
             for (let k = 0; k < n; k++) {
@@ -14854,7 +15839,7 @@ class Game {
       if (y1 <= y0) continue;
       const bi = c.biomes[((z & 15) << 4) | (x & 15)];
       const snow = SNOWY_BIOMES.has(bi) || top > 150;
-      if ((bi === BI.DESERT || bi === BI.BADLANDS || bi === BI.SAVANNA)) continue;
+      if (DRY_BIOMES.has(bi)) continue;
       const mx = x + 0.5, mz = z + 0.5;
       let px = -(mz - eye[2]), pz = mx - eye[0];
       const l = Math.hypot(px, pz) || 1; px = px / l * 0.5; pz = pz / l * 0.5;
@@ -15057,7 +16042,8 @@ class Game {
     const w = this.world, x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z);
     const c = w.getChunk(x >> 4, z >> 4);
     const l = w.getLightRaw(x, y, z);
-    const biome = c && c.biomes ? BIOME_NAMES[c.biomes[((z & 15) << 4) | (x & 15)]] : '?';
+    const cave = this.caveBiomeAt ? this.caveBiomeAt(x, y, z) : -1;
+    const biome = cave >= 0 ? BIOME_NAMES[cave] : c && c.biomes ? BIOME_NAMES[c.biomes[((z & 15) << 4) | (x & 15)]] : '?';
     const deg = ((-p.yaw * 180 / Math.PI) % 360 + 360) % 360;
     const facing = deg < 45 || deg >= 315 ? 'north (Towards negative Z)' : deg < 135 ? 'east (Towards positive X)' : deg < 225 ? 'south (Towards positive Z)' : 'west (Towards negative X)';
     const t = this.target;
@@ -16983,7 +17969,7 @@ function makeOffer(tp, R) {
   if (tp.kind === 'buy') return { buy: [id, tp.count], sell: { id: I.EMERALD, count: tp.price }, uses: 0, max: tp.uses, xp: tp.xp };
   const out = { id, count: tp.count };
   if (tp.kind === 'ench') {
-    const lvl = 5 + Math.floor(R() * 15), opts = typeof enchantOptions === 'function' ? rollEnchants(id, {}, lvl, R) : null;
+    const lvl = 5 + Math.floor(R() * 15), opts = rollEnchants(id, (ITEMS[id] && ITEMS[id].ench) || 1, lvl, R);
     if (opts && opts.length) { out.tag = { ench: {} }; for (const [k, l] of opts) out.tag.ench[k] = l; }
     return { buy: [I.EMERALD, Math.min(64, tp.price + lvl)], sell: out, uses: 0, max: tp.uses, xp: tp.xp };
   }
@@ -16998,9 +17984,19 @@ function addTrades(m, level) {
   const R = Math.random, list = pool.slice();
   for (let k = 0; k < 2 && list.length; k++) { const tp = list.splice(Math.floor(R() * list.length), 1)[0], o = makeOffer(tp, R); if (o) m.data.trades.push(o); }
 }
+// villager clothes by biome
+function villagerTypeFor(bi) {
+  if (bi === BI.DESERT || BADLANDS_BIOMES.has(bi)) return 'desert';
+  if (bi === BI.SAVANNA || bi === BI.SAVANNA_PLATEAU || bi === BI.WINDSWEPT_SAVANNA) return 'savanna';
+  if (SNOWY_BIOMES.has(bi)) return 'snow';
+  if (bi === BI.SWAMP || bi === BI.MANGROVE_SWAMP) return 'swamp';
+  if (bi === BI.TAIGA || bi === BI.SNOWY_TAIGA || bi === BI.GROVE || bi === BI.OLD_GROWTH_PINE_TAIGA || bi === BI.OLD_GROWTH_SPRUCE_TAIGA) return 'taiga';
+  if (JUNGLE_BIOMES.has(bi)) return 'jungle';
+  return 'plains';
+}
 function initVillager(m, o) {
   const bi = biomeAt(m.game, m.x, m.z);
-  m.data.vtype = o.vtype || (bi === BI.DESERT || bi === BI.BADLANDS ? 'desert' : bi === BI.SAVANNA ? 'savanna' : SNOWY_BIOMES.has(bi) ? 'snow' : bi === BI.SWAMP ? 'swamp' : (bi === BI.TAIGA || bi === BI.SNOWY_TAIGA || bi === BI.GROVE) ? 'taiga' : bi === BI.JUNGLE ? 'jungle' : 'plains');
+  m.data.vtype = o.vtype || villagerTypeFor(bi);
   m.data.prof = o.prof || 'none'; m.data.level = 1; m.data.xp = 0; m.data.trades = [];
   if (Math.random() < 0.03 && !o.prof) m.data.prof = 'nitwit';
   if (m.data.prof !== 'none' && m.data.prof !== 'nitwit') addTrades(m, 1);
@@ -17747,6 +18743,170 @@ function checkWither(g, x, y, z) {
   }
   return false;
 }
+
+/* @file 98_world_gen.js */
+/* ===================================================================
+   THE GENERATED WORLD IN PLAY — loot tables of structure chests (rolled
+   the first time a chest is opened or broken), mobs placed by structures,
+   cave biomes for F3 and spawning, spawn tables of the newer biomes
+   =================================================================== */
+// a pool: [[min rolls, max rolls], [[item, weight, min, max, extra], ...]]; extra: { ench: level }, { book: key or true }, { potion }
+const LOOT = {
+  village_plains_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['dandelion', 2], ['poppy', 1], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['apple', 10, 1, 5], ['book', 1], ['feather', 1], ['emerald', 2, 1, 4], ['oak_sapling', 5, 1, 2]]]],
+  village_desert_house: [[[3, 8], [['clay_ball', 1], ['green_dye', 1], ['cactus', 10, 1, 4], ['wheat', 10, 1, 7], ['bread', 10, 1, 4], ['book', 1], ['dead_bush', 2, 1, 3], ['emerald', 1, 1, 3]]]],
+  village_savanna_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['short_grass', 5], ['tall_grass', 5], ['bread', 10, 1, 4], ['wheat_seeds', 10, 1, 5], ['emerald', 2, 1, 4], ['acacia_sapling', 10, 1, 2], ['saddle', 1], ['torch', 1, 1, 2], ['bucket', 1]]]],
+  village_taiga_house: [[[3, 8], [['iron_nugget', 1, 1, 5], ['fern', 2], ['large_fern', 2], ['potato', 10, 1, 7], ['sweet_berries', 5, 1, 7], ['bread', 10, 1, 4], ['pumpkin_seeds', 5, 1, 5], ['pumpkin_pie', 1], ['emerald', 2, 1, 4], ['spruce_sapling', 5, 1, 5], ['spruce_sign', 1], ['spruce_log', 10, 1, 5]]]],
+  village_snowy_house: [[[3, 8], [['blue_ice', 1], ['snow_block', 4], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['beetroot_seeds', 10, 1, 5], ['beetroot_soup', 1], ['furnace', 1], ['emerald', 1, 1, 4], ['snowball', 10, 1, 7], ['coal', 5, 1, 4]]]],
+  village_weaponsmith: [[[3, 8], [['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['bread', 15, 1, 3], ['apple', 15, 1, 3], ['iron_pickaxe', 5], ['iron_sword', 5], ['iron_chestplate', 5], ['iron_helmet', 5],
+    ['iron_leggings', 5], ['iron_boots', 5], ['obsidian', 5, 3, 7], ['oak_sapling', 5, 3, 7], ['saddle', 3], ['iron_horse_armor', 1], ['golden_horse_armor', 1], ['diamond_horse_armor', 1]]]],
+  ancient_city: [[[5, 10], [['enchanted_golden_apple', 1, 1, 2], ['music_disc_otherside', 1], ['compass', 2], ['sculk_catalyst', 2, 1, 2], ['name_tag', 2], ['diamond_hoe', 2, 1, 1, { ench: 40 }], ['lead', 2],
+    ['diamond_horse_armor', 2], ['saddle', 2], ['music_disc_13', 2], ['music_disc_cat', 2], ['diamond_leggings', 2, 1, 1, { ench: 40 }], ['enchanted_book', 3, 1, 1, { book: 'swift_sneak' }], ['sculk', 3, 4, 10],
+    ['sculk_sensor', 3, 1, 3], ['candle', 3, 1, 4], ['amethyst_shard', 3, 1, 15], ['experience_bottle', 3, 1, 3], ['glow_berries', 3, 1, 15], ['iron_leggings', 3, 1, 1, { ench: 30 }], ['echo_shard', 4, 1, 4],
+    ['disc_fragment_5', 4, 1, 3], ['potion', 5, 1, 3, { potion: 'regeneration' }], ['enchanted_book', 5, 1, 1, { book: true }], ['bone', 5, 1, 15], ['soul_torch', 5, 1, 15], ['coal', 7, 6, 15]]],
+    [[1, 1], [[null, 64], ['ward_armor_trim_smithing_template', 4], ['silence_armor_trim_smithing_template', 1]]]],
+  ancient_city_ice_box: [[[4, 10], [['suspicious_stew', 1, 1, 6], ['golden_carrot', 1, 1, 10], ['baked_potato', 1, 1, 10], ['packed_ice', 2, 2, 6], ['snowball', 4, 2, 6]]]],
+  desert_pyramid: [[[2, 4], [['diamond', 5, 1, 3], ['iron_ingot', 15, 1, 5], ['gold_ingot', 15, 2, 7], ['emerald', 15, 1, 3], ['bone', 25, 4, 6], ['spider_eye', 25, 1, 3], ['rotten_flesh', 25, 3, 7], ['saddle', 20],
+    ['iron_horse_armor', 15], ['golden_horse_armor', 10], ['diamond_horse_armor', 5], ['enchanted_book', 20, 1, 1, { book: true }], ['golden_apple', 20], ['enchanted_golden_apple', 2], [null, 15]]],
+    [[4, 4], [['bone', 10, 1, 8], ['gunpowder', 10, 1, 8], ['rotten_flesh', 10, 1, 8], ['string', 10, 1, 8], ['sand', 10, 1, 8]]],
+    [[1, 1], [[null, 6], ['dune_armor_trim_smithing_template', 1]]]],
+  jungle_temple: [[[2, 6], [['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 15, 2, 7], ['emerald', 2, 1, 3], ['bone', 20, 4, 6], ['rotten_flesh', 16, 3, 7], ['saddle', 3], ['iron_horse_armor', 1],
+    ['golden_horse_armor', 1], ['diamond_horse_armor', 1], ['enchanted_book', 1, 1, 1, { book: true }], ['bamboo', 15, 1, 3]]], [[1, 1], [[null, 2], ['wild_armor_trim_smithing_template', 1]]]],
+  simple_dungeon: [[[1, 3], [['saddle', 20], ['golden_apple', 15], ['enchanted_golden_apple', 2], ['music_disc_otherside', 2], ['music_disc_13', 15], ['music_disc_cat', 15], ['name_tag', 20],
+    ['golden_horse_armor', 10], ['iron_horse_armor', 15], ['diamond_horse_armor', 5], ['enchanted_book', 10, 1, 1, { book: true }]]],
+    [[1, 4], [['iron_ingot', 10, 1, 4], ['gold_ingot', 5, 1, 4], ['bread', 20], ['wheat', 20, 1, 4], ['bucket', 10], ['redstone', 15, 1, 4], ['coal', 15, 1, 4], ['melon_seeds', 10, 2, 4], ['pumpkin_seeds', 10, 2, 4], ['beetroot_seeds', 10, 2, 4]]],
+    [[3, 3], [['bone', 10, 1, 8], ['gunpowder', 10, 1, 8], ['rotten_flesh', 10, 1, 8], ['string', 10, 1, 8]]]],
+  igloo_chest: [[[2, 8], [['apple', 15, 1, 3], ['coal', 15, 1, 4], ['gold_nugget', 10, 1, 3], ['stone_axe', 2], ['rotten_flesh', 10], ['emerald', 1], ['wheat', 10, 2, 3]]], [[1, 1], [['golden_apple', 1]]]],
+  pillager_outpost: [[[0, 1], [['crossbow', 1]]], [[2, 3], [['wheat', 7, 3, 5], ['potato', 5, 2, 5], ['carrot', 5, 3, 5]]], [[1, 3], [['dark_oak_log', 1, 2, 3]]],
+    [[2, 3], [['experience_bottle', 7], ['string', 4, 1, 6], ['arrow', 4, 2, 7], ['tripwire_hook', 3, 1, 3], ['iron_ingot', 3, 1, 3], ['enchanted_book', 1, 1, 1, { book: true }]]],
+    [[1, 1], [[null, 3], ['sentry_armor_trim_smithing_template', 1]]], [[1, 1], [[null, 9], ['goat_horn', 1]]]],
+  shipwreck_supply: [[[3, 10], [['paper', 8, 1, 12], ['potato', 7, 2, 6], ['moss_block', 7, 1, 4], ['poisonous_potato', 7, 2, 6], ['carrot', 7, 4, 8], ['wheat', 7, 8, 21], ['suspicious_stew', 10], ['coal', 6, 2, 8],
+    ['rotten_flesh', 5, 5, 24], ['pumpkin', 2, 1, 3], ['bamboo', 2, 1, 3], ['gunpowder', 3, 1, 5], ['tnt', 1, 1, 2], ['leather_helmet', 3, 1, 1, { ench: 15 }], ['leather_chestplate', 3, 1, 1, { ench: 15 }], ['leather_boots', 3, 1, 1, { ench: 15 }]]],
+    [[1, 1], [[null, 5], ['coast_armor_trim_smithing_template', 1]]]],
+  shipwreck_treasure: [[[3, 6], [['iron_ingot', 90, 1, 5], ['gold_ingot', 10, 1, 5], ['emerald', 40, 1, 5], ['diamond', 5], ['experience_bottle', 5]]], [[2, 5], [['iron_nugget', 50, 1, 10], ['gold_nugget', 10, 1, 10], ['lapis_lazuli', 20, 1, 10]]]],
+  shipwreck_map: [[[1, 1], [['map', 1]]], [[3, 3], [['compass', 1], ['map', 1], ['clock', 1], ['paper', 20, 1, 10], ['feather', 10, 1, 5], ['book', 5, 1, 5]]], [[1, 1], [[null, 5], ['coast_armor_trim_smithing_template', 1]]]],
+  buried_treasure: [[[1, 1], [['heart_of_the_sea', 1]]], [[5, 8], [['iron_ingot', 20, 1, 4], ['gold_ingot', 10, 1, 4], ['tnt', 5, 1, 2]]], [[1, 3], [['emerald', 5, 4, 8], ['diamond', 5, 1, 2], ['prismarine_crystals', 5, 1, 5]]],
+    [[0, 1], [['leather_chestplate', 1], ['iron_sword', 1]]], [[2, 2], [['cooked_cod', 1, 2, 4], ['cooked_salmon', 1, 2, 4]]], [[0, 2], [['potion', 1, 1, 1, { potion: 'water_breathing' }]]]],
+  ruined_portal: [[[4, 8], [['obsidian', 40, 1, 2], ['flint', 40, 1, 4], ['iron_nugget', 40, 9, 18], ['flint_and_steel', 40], ['fire_charge', 40], ['golden_apple', 15], ['gold_nugget', 15, 4, 24], ['golden_sword', 15, 1, 1, { ench: 15 }],
+    ['golden_axe', 15, 1, 1, { ench: 15 }], ['golden_hoe', 15, 1, 1, { ench: 15 }], ['golden_shovel', 15, 1, 1, { ench: 15 }], ['golden_pickaxe', 15, 1, 1, { ench: 15 }], ['golden_boots', 15, 1, 1, { ench: 15 }],
+    ['golden_chestplate', 15, 1, 1, { ench: 15 }], ['golden_helmet', 15, 1, 1, { ench: 15 }], ['golden_leggings', 15, 1, 1, { ench: 15 }], ['glistering_melon_slice', 5, 4, 12], ['golden_horse_armor', 5], ['light_weighted_pressure_plate', 5],
+    ['golden_carrot', 5, 4, 12], ['clock', 5], ['gold_ingot', 5, 2, 8], ['bell', 1], ['enchanted_golden_apple', 1], ['gold_block', 1, 1, 2]]]],
+  abandoned_mineshaft: [[[1, 1], [['golden_apple', 20], ['enchanted_golden_apple', 1], ['name_tag', 30], ['enchanted_book', 10, 1, 1, { book: true }], ['iron_pickaxe', 5], [null, 5]]],
+    [[2, 4], [['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['redstone', 5, 4, 9], ['lapis_lazuli', 5, 4, 9], ['diamond', 3, 1, 2], ['coal', 10, 3, 8], ['bread', 15, 1, 3], ['glow_berries', 15, 3, 6], ['melon_seeds', 10, 2, 4],
+      ['pumpkin_seeds', 10, 2, 4], ['beetroot_seeds', 10, 2, 4]]], [[3, 3], [['rail', 20, 4, 8], ['powered_rail', 5, 1, 4], ['detector_rail', 5, 1, 4], ['activator_rail', 5, 1, 4], ['torch', 15, 1, 16]]]],
+  trial_chambers_corridor: [[[1, 3], [['iron_axe', 1, 1, 1, { ench: 10 }], ['honeycomb', 1, 1, 8], ['stone_axe', 2], ['stone_pickaxe', 2], ['ender_pearl', 2, 1, 2], ['bamboo_hanging_sign', 2, 1, 4], ['bamboo_planks', 2, 1, 6],
+    ['scaffolding', 2, 2, 10], ['torch', 2, 3, 6], ['tuff', 3, 8, 20]]]],
+  trial_chambers_supply: [[[3, 5], [['arrow', 2, 4, 14], ['baked_potato', 2, 2, 4], ['glow_berries', 2, 2, 10], ['acacia_planks', 1, 3, 6], ['moss_block', 1, 2, 5], ['bone_meal', 1, 2, 5], ['tuff', 1, 5, 10], ['torch', 1, 3, 6],
+    ['potion', 1, 2, 5, { potion: 'regeneration' }], ['potion', 1, 2, 5, { potion: 'strength' }], ['stone_pickaxe', 2], ['milk_bucket', 1]]]],
+  trial_spawner: [[[1, 1], [['emerald', 4, 2, 4], ['arrow', 4, 4, 8], ['iron_ingot', 3, 1, 2], ['honey_bottle', 3], ['bread', 3, 1, 3], ['cooked_chicken', 3, 1, 3], ['golden_carrot', 2, 1, 2], ['diamond', 1], ['wind_charge', 3, 4, 12],
+    ['ominous_bottle', 1]]], [[1, 1], [['trial_key', 1]]]],
+  trial_vault: [[[1, 1], [['emerald', 5, 4, 10], ['wind_charge', 4, 4, 12], ['arrow', 3, 2, 8], ['shield', 3], ['bow', 2, 1, 1, { ench: 15 }], ['crossbow', 2, 1, 1, { ench: 15 }], ['iron_axe', 2, 1, 1, { ench: 15 }],
+    ['iron_chestplate', 2, 1, 1, { ench: 15 }], ['golden_carrot', 2, 1, 2], ['enchanted_book', 2, 1, 1, { book: true }], ['diamond_axe', 1, 1, 1, { ench: 20 }], ['diamond_chestplate', 1, 1, 1, { ench: 20 }], ['golden_apple', 2],
+    ['music_disc_precipice', 1], ['flow_banner_pattern', 1], ['guster_banner_pattern', 1], ['bolt_armor_trim_smithing_template', 1], ['flow_armor_trim_smithing_template', 1], ['heavy_core', 1], ['diamond', 2, 1, 2]]]],
+  end_city_treasure: [[[2, 6], [['diamond', 5, 2, 7], ['iron_ingot', 10, 4, 8], ['gold_ingot', 15, 2, 7], ['emerald', 2, 2, 6], ['beetroot_seeds', 5, 1, 10], ['saddle', 3], ['iron_horse_armor', 1], ['golden_horse_armor', 1],
+    ['diamond_horse_armor', 1], ['diamond_sword', 3, 1, 1, { ench: 25 }], ['diamond_boots', 3, 1, 1, { ench: 25 }], ['diamond_chestplate', 3, 1, 1, { ench: 25 }], ['diamond_leggings', 3, 1, 1, { ench: 25 }],
+    ['diamond_helmet', 3, 1, 1, { ench: 25 }], ['diamond_pickaxe', 3, 1, 1, { ench: 25 }], ['diamond_shovel', 3, 1, 1, { ench: 25 }], ['iron_sword', 3, 1, 1, { ench: 25 }], ['iron_pickaxe', 3, 1, 1, { ench: 25 }]]],
+    [[1, 1], [[null, 14], ['spire_armor_trim_smithing_template', 1]]]],
+  swamp_hut: [[[2, 4], [['glass_bottle', 3, 1, 3], ['redstone', 2, 1, 4], ['glowstone_dust', 2, 1, 4], ['sugar', 2, 1, 4], ['spider_eye', 2, 1, 2], ['gunpowder', 2, 1, 2], ['stick', 2, 1, 3]]]],
+};
+function enchantTag(id, level, R) {
+  const list = rollEnchants(id, (ITEMS[id] && ITEMS[id].ench) || 1, level, R);
+  if (!list.length) return null;
+  const ench = {};
+  for (const [k, l] of list) ench[k] = l;
+  return { ench };
+}
+function lootStack(e, R) {
+  const [name, , mn = 1, mx = mn, x] = e;
+  const it = ITEM_BY_NAME[name];
+  if (!it) return null;
+  const st = { id: it.id, count: Math.min(it.stack || 64, mn + Math.floor(R() * (mx - mn + 1))) };
+  if (x && x.ench) { const t = enchantTag(it.id, x.ench, R); if (t) st.tag = t; }
+  if (x && x.book) {
+    let key = x.book, lvl = 1;
+    if (key === true) {
+      const list = ENCHANTS.filter(en => !en.curse || R() < 0.3);
+      const en = list[Math.floor(R() * list.length)];
+      key = en.key; lvl = 1 + Math.floor(R() * en.max);
+    } else { const en = ENCHANTS.find(q => q.key === key); lvl = en ? 1 + Math.floor(R() * en.max) : 1; }
+    st.tag = { stored: { [key]: lvl } };
+  }
+  if (x && x.potion) st.tag = { potion: x.potion };
+  return st;
+}
+function rollLoot(table, R) {
+  const t = LOOT[table], out = [];
+  if (!t) return out;
+  for (const [[a, b], entries] of t) {
+    const n = a + Math.floor(R() * (b - a + 1));
+    for (let k = 0; k < n; k++) {
+      const e = pickWeighted(entries, R);
+      if (!e[0]) continue;
+      const st = lootStack(e, R);
+      if (st) out.push(st);
+    }
+  }
+  return out;
+}
+// containers scatter their loot over random slots, the way vanilla chests look
+function fillLoot(be) {
+  const R = Math.random, n = be.kind === 'dispenser' ? 9 : 27, items = new Array(n).fill(null);
+  for (const st of rollLoot(be.loot, R)) {
+    let slot = Math.floor(R() * n);
+    for (let k = 0; k < n && items[slot]; k++) slot = (slot + 1) % n;
+    if (!items[slot]) items[slot] = st;
+  }
+  be.items = items;
+  delete be.loot;
+}
+// loot is rolled the moment something first looks into the container
+const _getBEgen = World.prototype.getBE;
+World.prototype.getBE = function (x, y, z) {
+  const be = _getBEgen.call(this, x, y, z);
+  if (be && be.loot) { fillLoot(be); this.setBE(x, y, z, be); }
+  return be;
+};
+
+/* ---------------- mobs placed by structures ---------------- */
+const _initialSpawnGen = Game.prototype.initialSpawn;
+Game.prototype.initialSpawn = function (c) {
+  const before = this.entities.length;
+  if (c.genMobs) {
+    for (const [type, x, y, z, opts] of c.genMobs) {
+      const m = createMob(this, type, x, y, z, opts || {});
+      if (!m) continue;
+      if (type !== 'bee') m.persistent = true;
+      if (opts && opts.hive) m.home = opts.hive;
+      this.entities.push(m);
+    }
+    c.genMobs = null;
+  }
+  _initialSpawnGen.call(this, c);
+  // the chunk is saved from now on, so what lives there is never spawned twice
+  if (this.entities.length > before) c.entsLoaded = true;
+};
+
+/* ---------------- cave biomes ---------------- */
+// an overworld generator kept around for questions about the terrain (no blocks are generated with it)
+Game.prototype.genInfo = function () {
+  const s = this.world.seed | 0;
+  if (!this._genInfo || this._genInfo.seed !== s) this._genInfo = new Generator(s);
+  return this._genInfo;
+};
+Game.prototype.caveBiomeAt = function (x, y, z) {
+  if (this.world.dim !== 'overworld') return -1;
+  const g = this.genInfo();
+  return g.caveBiomeAt(Math.floor(x), Math.floor(y), Math.floor(z), g.columnAt(x, z).h);
+};
+Game.prototype.deepDarkAt = function (x, y, z) { return this.caveBiomeAt(x, y, z) === BI.DEEP_DARK; };
+
+/* ---------------- spawn tables of the newer biomes ---------------- */
+Object.assign(SPAWN_ANIMALS, {
+  sparse_jungle: SPAWN_ANIMALS.jungle, old_growth_pine_taiga: SPAWN_ANIMALS.old_growth_taiga, old_growth_spruce_taiga: SPAWN_ANIMALS.old_growth_taiga,
+  old_growth_birch_forest: SPAWN_ANIMALS.birch_forest, sunflower_plains: SPAWN_ANIMALS.plains, ice_spikes: SPAWN_ANIMALS.snowy_plains,
+  savanna_plateau: SPAWN_ANIMALS.savanna, windswept_savanna: SPAWN_ANIMALS.savanna, eroded_badlands: SPAWN_ANIMALS.badlands, wooded_badlands: SPAWN_ANIMALS.badlands,
+  frozen_peaks: SPAWN_ANIMALS.jagged_peaks, windswept_forest: SPAWN_ANIMALS.windswept_hills, windswept_gravelly_hills: SPAWN_ANIMALS.windswept_hills,
+});
+Object.assign(SPAWN_WATER, { deep_lukewarm_ocean: SPAWN_WATER.lukewarm_ocean, deep_cold_ocean: SPAWN_WATER.cold_ocean, deep_frozen_ocean: SPAWN_WATER.frozen_ocean, swamp: [['salmon', 1, 1, 2]], mangrove_swamp: [['tropical_fish', 25, 4, 8]] });
 
 </script>
 </body>
