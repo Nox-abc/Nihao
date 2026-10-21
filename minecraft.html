@@ -31501,11 +31501,27 @@ function rbCounts(p, extra) {
 }
 // an id for each ingredient cell when n sets are made, or null
 function rbAssign(e, counts, n) {
-  const cells = e.cells.map((a, i) => [a, i]).filter(x => x[0]), left = new Map(counts), pick = new Array(e.cells.length).fill(0);
+  const left = new Map(counts), pick = new Array(e.cells.length).fill(0);
+  // cells that take the same ingredient share its list; with no item in two lists, the most plentiful
+  // choice for each cell is always right (every choice uses up exactly one set's worth)
+  const groups = new Map();
+  e.cells.forEach((a, i) => { if (!a) return; const k = a.join(','); let g = groups.get(k); if (!g) groups.set(k, g = [a, []]); g[1].push(i); });
+  const seen = new Set();
+  let overlap = false;
+  for (const [a] of groups.values()) { for (const id of a) if (seen.has(id)) overlap = true; for (const id of a) seen.add(id); }
+  if (!overlap) {
+    for (const [a, cells] of groups.values()) for (const i of cells) {
+      let best = -1, bc = -1;
+      for (const id of a) { const c = left.get(id) || 0; if (c >= n && c > bc) { bc = c; best = id; } }
+      if (best < 0) return null;
+      left.set(best, bc - n); pick[i] = best;
+    }
+    return pick;
+  }
+  const cells = e.cells.map((a, i) => [a, i]).filter(x => x[0]);
   const go = k => {
     if (k === cells.length) return true;
     const [alts, i] = cells[k];
-    // the most plentiful choice first, so the same item tends to fill every cell
     const order = alts.filter(id => (left.get(id) || 0) >= n).sort((a, b) => (left.get(b) || 0) - (left.get(a) || 0));
     for (const id of order) { left.set(id, left.get(id) - n); pick[i] = id; if (go(k + 1)) return true; left.set(id, left.get(id) + n); }
     return false;
@@ -31955,6 +31971,1146 @@ Game.prototype.startWorld = function (meta, saved) {
   }
   return r;
 };
+
+/* @file 126_advancements.js */
+/* ===================================================================
+   ADVANCEMENTS — Java Edition 1.21's five trees (the story, the
+   Nether, the End, adventure, husbandry) with their goals, parents,
+   frames (task, goal, challenge), experience rewards and triggers,
+   told in our own words; toasts, chat announcements
+   (announceAdvancements), the advancements screen (L), /advancement
+   =================================================================== */
+// [id, parent, icon, frame, title, description, criteria, extra]
+// criteria: { name: [trigger, ...params] } — all needed unless extra.any; extra.xp, extra.hidden
+const OVERWORLD_BIOMES = ['Ocean', 'Deep Ocean', 'Frozen Ocean', 'Deep Frozen Ocean', 'Cold Ocean', 'Deep Cold Ocean', 'Lukewarm Ocean', 'Deep Lukewarm Ocean', 'Warm Ocean', 'River', 'Frozen River',
+  'Beach', 'Snowy Beach', 'Stony Shore', 'Plains', 'Sunflower Plains', 'Snowy Plains', 'Ice Spikes', 'Desert', 'Forest', 'Flower Forest', 'Birch Forest', 'Old Growth Birch Forest', 'Dark Forest',
+  'Taiga', 'Old Growth Pine Taiga', 'Old Growth Spruce Taiga', 'Snowy Taiga', 'Swamp', 'Mangrove Swamp', 'Jungle', 'Sparse Jungle', 'Bamboo Jungle', 'Savanna', 'Savanna Plateau',
+  'Windswept Savanna', 'Badlands', 'Eroded Badlands', 'Wooded Badlands', 'Windswept Hills', 'Windswept Forest', 'Windswept Gravelly Hills', 'Meadow', 'Grove', 'Snowy Slopes',
+  'Frozen Peaks', 'Jagged Peaks', 'Stony Peaks', 'Cherry Grove', 'Mushroom Fields', 'Lush Caves', 'Dripstone Caves', 'Deep Dark'];
+const NETHER_BIOMES = ['Nether Wastes', 'Crimson Forest', 'Warped Forest', 'Soul Sand Valley', 'Basalt Deltas'];
+const ALL_HOSTILES = ['blaze', 'bogged', 'breeze', 'cave_spider', 'creeper', 'drowned', 'elder_guardian', 'ender_dragon', 'enderman', 'endermite', 'evoker', 'ghast', 'guardian', 'hoglin', 'husk',
+  'magma_cube', 'phantom', 'piglin', 'piglin_brute', 'pillager', 'ravager', 'shulker', 'silverfish', 'skeleton', 'slime', 'spider', 'stray', 'vex', 'vindicator', 'witch', 'wither',
+  'wither_skeleton', 'zoglin', 'zombie', 'zombie_villager', 'zombified_piglin'];
+const BREEDABLE = ['horse', 'donkey', 'mule', 'sheep', 'cow', 'mooshroom', 'pig', 'chicken', 'wolf', 'cat', 'ocelot', 'rabbit', 'llama', 'turtle', 'panda', 'fox', 'bee', 'hoglin', 'strider',
+  'goat', 'axolotl', 'camel', 'sniffer', 'armadillo', 'frog'];
+const ALL_FOODS = ['apple', 'mushroom_stew', 'bread', 'porkchop', 'cooked_porkchop', 'golden_apple', 'enchanted_golden_apple', 'cod', 'salmon', 'tropical_fish', 'pufferfish', 'cooked_cod',
+  'cooked_salmon', 'cookie', 'melon_slice', 'beef', 'cooked_beef', 'chicken', 'cooked_chicken', 'rotten_flesh', 'spider_eye', 'carrot', 'potato', 'baked_potato', 'poisonous_potato',
+  'golden_carrot', 'pumpkin_pie', 'rabbit', 'cooked_rabbit', 'rabbit_stew', 'mutton', 'cooked_mutton', 'chorus_fruit', 'beetroot', 'beetroot_soup', 'dried_kelp', 'suspicious_stew',
+  'sweet_berries', 'honey_bottle', 'glow_berries'];
+const ALL_EFFECTS_ADV = ['speed', 'slowness', 'haste', 'mining_fatigue', 'strength', 'jump_boost', 'nausea', 'regeneration', 'resistance', 'fire_resistance', 'water_breathing',
+  'invisibility', 'blindness', 'night_vision', 'hunger', 'weakness', 'poison', 'wither', 'health_boost', 'absorption', 'glowing', 'levitation', 'luck', 'unluck', 'slow_falling',
+  'conduit_power', 'dolphins_grace', 'bad_omen', 'hero_of_the_village', 'darkness', 'trial_omen', 'raid_omen', 'wind_charged', 'weaving', 'oozing', 'infested'];
+const POTION_EFFECTS_ADV = ['speed', 'slowness', 'strength', 'jump_boost', 'regeneration', 'fire_resistance', 'water_breathing', 'invisibility', 'night_vision', 'weakness', 'poison',
+  'slow_falling', 'resistance', 'wind_charged', 'weaving', 'oozing', 'infested'];
+const each = (list, f) => Object.fromEntries(list.map(k => [k, f(k)]));
+const ADVANCEMENTS = [
+  // ---------------- the story ----------------
+  ['story/root', null, 'grass_block', 'task', 'Blockcraft', 'Where every adventure begins', { crafting_table: ['inv', 'crafting_table'] }],
+  ['story/mine_stone', 'story/root', 'wooden_pickaxe', 'task', 'Rock Bottom', 'Dig up some stone with a pickaxe', { get_stone: ['inv', 'cobblestone', 'cobbled_deepslate', 'blackstone'] }],
+  ['story/upgrade_tools', 'story/mine_stone', 'stone_pickaxe', 'task', 'Sharper Edges', 'Make a stone pickaxe', { stone_pickaxe: ['inv', 'stone_pickaxe'] }],
+  ['story/smelt_iron', 'story/upgrade_tools', 'iron_ingot', 'task', 'Heavy Metal', 'Smelt an iron ingot', { iron: ['inv', 'iron_ingot'] }],
+  ['story/obtain_armor', 'story/smelt_iron', 'iron_chestplate', 'task', 'Ironclad', 'Put on a piece of iron armor', { armor: ['inv', 'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots'] }],
+  ['story/lava_bucket', 'story/smelt_iron', 'lava_bucket', 'task', 'Handle with Care', 'Scoop up lava in a bucket', { lava: ['inv', 'lava_bucket'] }],
+  ['story/iron_tools', 'story/smelt_iron', 'iron_pickaxe', 'task', 'Iron Grip', 'Make an iron pickaxe', { iron_pickaxe: ['inv', 'iron_pickaxe'] }],
+  ['story/deflect_arrow', 'story/obtain_armor', 'shield', 'task', 'Not This Time', 'Stop a projectile with a shield', { blocked: ['ev', 'deflect'] }],
+  ['story/form_obsidian', 'story/lava_bucket', 'obsidian', 'task', 'Cooled Off', 'Get a block of obsidian', { obsidian: ['inv', 'obsidian'] }],
+  ['story/mine_diamond', 'story/iron_tools', 'diamond', 'task', 'Shiny!', 'Find a diamond', { diamond: ['inv', 'diamond'] }],
+  ['story/enter_the_nether', 'story/form_obsidian', 'flint_and_steel', 'goal', 'Through the Gate', 'Build, light and step into a Nether portal', { nether: ['dim', 'nether'] }],
+  ['story/shiny_gear', 'story/mine_diamond', 'diamond_chestplate', 'task', 'Sparkling Suit', 'Wear a piece of diamond armor', { armor: ['inv', 'diamond_helmet', 'diamond_chestplate', 'diamond_leggings', 'diamond_boots'] }],
+  ['story/enchant_item', 'story/mine_diamond', 'enchanted_book', 'task', 'Magic Touch', 'Enchant something at an enchanting table', { enchanted: ['ev', 'enchant'] }],
+  ['story/cure_zombie_villager', 'story/enter_the_nether', 'golden_apple', 'goal', 'House Call', 'Weaken a zombie villager, then cure it', { cured: ['ev', 'cure'] }],
+  ['story/follow_ender_eye', 'story/enter_the_nether', 'ender_eye', 'task', 'Follow the Eye', 'Find a stronghold by following an eye of ender', { stronghold: ['struct', 'stronghold'] }],
+  ['story/enter_the_end', 'story/follow_ender_eye', 'end_stone', 'task', 'Edge of the World', 'Step through an end portal', { end: ['dim', 'end'] }],
+  // ---------------- the Nether ----------------
+  ['nether/root', null, 'red_nether_bricks', 'task', 'Nether', 'Pack something fireproof', { nether: ['dim', 'nether'] }],
+  ['nether/return_to_sender', 'nether/root', 'fire_charge', 'challenge', 'Hot Potato', 'Kill a ghast with its own fireball', { killed: ['kill', 'ghast', 'fireball'] }, { xp: 50 }],
+  ['nether/find_bastion', 'nether/root', 'polished_blackstone_bricks', 'task', 'Old Ruins', 'Step into a bastion remnant', { bastion: ['struct', 'bastion_remnant'] }],
+  ['nether/obtain_ancient_debris', 'nether/root', 'ancient_debris', 'task', 'Deep Treasure', 'Get ancient debris', { debris: ['inv', 'ancient_debris'] }],
+  ['nether/fast_travel', 'nether/root', 'map', 'challenge', 'Shortcut', 'Travel 7 km in the Overworld by way of the Nether', { travelled: ['ev', 'fast_travel'] }, { xp: 100 }],
+  ['nether/find_fortress', 'nether/root', 'nether_bricks', 'task', 'Brick by Brick', 'Step into a nether fortress', { fortress: ['struct', 'fortress'] }],
+  ['nether/obtain_crying_obsidian', 'nether/obtain_ancient_debris', 'crying_obsidian', 'task', 'Tears of Stone', 'Get crying obsidian', { crying: ['inv', 'crying_obsidian'] }],
+  ['nether/distract_piglin', 'nether/find_bastion', 'gold_ingot', 'task', 'Gold Rush', 'Distract a piglin with gold', { distracted: ['ev', 'piglin_gold'] }],
+  ['nether/ride_strider', 'nether/find_fortress', 'warped_fungus_on_a_stick', 'task', 'Lava Walker', 'Ride a strider with a warped fungus on a stick', { ride: ['ev', 'ride_strider'] }],
+  ['nether/uneasy_alliance', 'nether/return_to_sender', 'ghast_tear', 'challenge', 'Long Way Home', 'Bring a ghast to the Overworld and kill it there', { killed: ['kill', 'ghast', null, 'overworld'] }, { xp: 100 }],
+  ['nether/loot_bastion', 'nether/find_bastion', 'chest', 'task', 'Pig Pillage', 'Open a chest in a bastion remnant', { loot: ['ev', 'loot_bastion'] }],
+  ['nether/use_lodestone', 'nether/obtain_ancient_debris', 'lodestone', 'task', 'True North', 'Point a compass at a lodestone', { lodestone: ['ev', 'lodestone'] }],
+  ['nether/obtain_blaze_rod', 'nether/find_fortress', 'blaze_rod', 'task', 'Firebrand', 'Get a blaze rod', { rod: ['inv', 'blaze_rod'] }],
+  ['nether/get_wither_skull', 'nether/find_fortress', 'wither_skeleton_skull', 'task', 'Dark Trophy', 'Get a wither skeleton skull', { skull: ['inv', 'wither_skeleton_skull'] }],
+  ['nether/charge_respawn_anchor', 'nether/obtain_crying_obsidian', 'respawn_anchor', 'task', 'Fully Charged', 'Fill a respawn anchor with glowstone', { charged: ['ev', 'anchor_full'] }],
+  ['nether/ride_strider_in_overworld_lava', 'nether/ride_strider', 'warped_fungus_on_a_stick', 'task', 'Lava Cruise', 'Ride a strider 50 blocks across lava in the Overworld', { cruise: ['ev', 'strider_cruise'] }],
+  ['nether/explore_nether', 'nether/ride_strider_in_overworld_lava', 'netherite_boots', 'challenge', 'Nether Tour', 'Visit all five Nether biomes', each(NETHER_BIOMES, b => ['biome', b]), { xp: 500 }],
+  ['nether/summon_wither', 'nether/get_wither_skull', 'nether_star', 'goal', 'Bad Idea', 'Summon the Wither', { summoned: ['ev', 'summon_wither'] }],
+  ['nether/brew_potion', 'nether/obtain_blaze_rod', 'potion', 'task', 'Home Brew', 'Brew a potion', { brewed: ['ev', 'brew'] }],
+  ['nether/create_beacon', 'nether/summon_wither', 'beacon', 'task', 'Light Tower', 'Build a working beacon', { beacon: ['ev', 'beacon', 1] }],
+  ['nether/all_potions', 'nether/brew_potion', 'milk_bucket', 'challenge', 'Cocktail Hour', 'Have every potion effect at the same time', { all: ['effects', POTION_EFFECTS_ADV] }, { xp: 100 }],
+  ['nether/create_full_beacon', 'nether/create_beacon', 'beacon', 'goal', 'Full Power', 'Build a beacon on a complete four-level pyramid', { beacon: ['ev', 'beacon', 4] }],
+  ['nether/all_effects', 'nether/all_potions', 'bucket', 'challenge', 'Everything at Once', 'Have every status effect at the same time', { all: ['effects', ALL_EFFECTS_ADV] }, { xp: 1000, hidden: true }],
+  ['nether/netherite_armor', 'nether/obtain_ancient_debris', 'netherite_chestplate', 'challenge', 'Fireproof Fashion', 'Wear a full set of netherite armor', { suit: ['suit', 'netherite'] }, { xp: 100 }],
+  // ---------------- the End ----------------
+  ['end/root', null, 'end_stone', 'task', 'The End', 'Arrive in the End', { end: ['dim', 'end'] }],
+  ['end/kill_dragon', 'end/root', 'dragon_head', 'task', 'Dragon Slayer', 'Defeat the Ender Dragon', { dragon: ['kill', 'ender_dragon'] }],
+  ['end/dragon_egg', 'end/kill_dragon', 'dragon_egg', 'goal', 'Egg Hunt', 'Hold the dragon egg', { egg: ['inv', 'dragon_egg'] }],
+  ['end/enter_end_gateway', 'end/kill_dragon', 'ender_pearl', 'task', 'Off the Island', 'Go through an end gateway', { gateway: ['ev', 'gateway'] }],
+  ['end/respawn_dragon', 'end/kill_dragon', 'end_crystal', 'goal', 'Encore', 'Bring the Ender Dragon back', { respawn: ['ev', 'respawn_dragon'] }],
+  ['end/dragon_breath', 'end/kill_dragon', 'dragon_breath', 'goal', 'Bottled Breath', 'Catch dragon\'s breath in a glass bottle', { breath: ['inv', 'dragon_breath'] }],
+  ['end/find_end_city', 'end/enter_end_gateway', 'purpur_block', 'task', 'Purpur Towers', 'Step into an end city', { city: ['struct', 'end_city'] }],
+  ['end/elytra', 'end/find_end_city', 'elytra', 'goal', 'Wings', 'Find an elytra', { elytra: ['inv', 'elytra'] }],
+  ['end/levitate', 'end/find_end_city', 'shulker_shell', 'challenge', 'Floating Away', 'Rise 50 blocks under a shulker\'s levitation', { up: ['ev', 'levitate50'] }, { xp: 50 }],
+  // ---------------- adventure ----------------
+  ['adventure/root', null, 'map', 'task', 'Adventure', 'Explore, fight and survive', { killed: ['kill', null], killed_by: ['ev', 'killed_by'] }, { any: true }],
+  ['adventure/voluntary_exile', 'adventure/root', 'white_banner', 'task', 'Exile', 'Defeat the captain of a raid or patrol', { captain: ['ev', 'kill_captain'] }, { hidden: true }],
+  ['adventure/spyglass_at_parrot', 'adventure/root', 'spyglass', 'task', 'Bird Watching', 'Look at a parrot through a spyglass', { look: ['ev', 'spyglass', 'parrot'] }],
+  ['adventure/kill_a_mob', 'adventure/root', 'iron_sword', 'task', 'First Victory', 'Defeat a hostile mob', each(ALL_HOSTILES, m => ['kill', m]), { any: true }],
+  ['adventure/read_power_of_chiseled_bookshelf', 'adventure/root', 'chiseled_bookshelf', 'task', 'Bookworm', 'Read a chiseled bookshelf with a comparator', { read: ['ev', 'bookshelf_comparator'] }],
+  ['adventure/trade', 'adventure/root', 'emerald', 'task', 'Bargain', 'Trade with a villager', { traded: ['ev', 'trade'] }],
+  ['adventure/trim_with_any_armor_pattern', 'adventure/trade', 'dune_armor_trim_smithing_template', 'task', 'New Look', 'Put a trim on a piece of armor', { trim: ['ev', 'trim'] }],
+  ['adventure/honey_block_slide', 'adventure/root', 'honey_block', 'task', 'Sweet Landing', 'Slide down the side of a honey block', { slide: ['ev', 'honey_slide'] }],
+  ['adventure/ol_betsy', 'adventure/root', 'crossbow', 'task', 'Bolt Action', 'Shoot a crossbow', { shot: ['ev', 'crossbow'] }],
+  ['adventure/lightning_rod_with_villager_no_fire', 'adventure/root', 'lightning_rod', 'task', 'Grounded', 'Keep a villager safe from lightning with a lightning rod', { rod: ['ev', 'rod_saves_villager'] }],
+  ['adventure/fall_from_world_height', 'adventure/root', 'water_bucket', 'task', 'Long Drop', 'Fall from the top of the world to the bottom and live', { fell: ['ev', 'world_fall'] }],
+  ['adventure/salvage_sherd', 'adventure/root', 'brush', 'task', 'Digging History', 'Brush a pottery sherd out of suspicious sand or gravel', { sherd: ['ev', 'sherd'] }],
+  ['adventure/craft_decorated_pot_using_only_sherds', 'adventure/salvage_sherd', 'decorated_pot', 'task', 'Patchwork Pot', 'Make a decorated pot from four pottery sherds', { pot: ['ev', 'sherd_pot'] }],
+  ['adventure/avoid_vibration', 'adventure/root', 'sculk_sensor', 'task', 'Quiet Steps', 'Sneak past a sculk sensor or a warden without a sound', { sneak: ['ev', 'avoid_vibration'] }],
+  ['adventure/minecraft_trials_edition', 'adventure/root', 'chiseled_tuff', 'task', 'Trial Run', 'Step into a trial chamber', { chamber: ['struct', 'trial_chambers'] }],
+  ['adventure/sleep_in_bed', 'adventure/root', 'red_bed', 'task', 'Good Night', 'Sleep in a bed', { slept: ['ev', 'sleep'] }],
+  ['adventure/hero_of_the_village', 'adventure/voluntary_exile', 'white_banner', 'challenge', 'Village Defender', 'Win a raid', { won: ['ev', 'raid_win'] }, { xp: 100 }],
+  ['adventure/spyglass_at_ghast', 'adventure/spyglass_at_parrot', 'spyglass', 'task', 'Balloon Watching', 'Look at a ghast through a spyglass', { look: ['ev', 'spyglass', 'ghast'] }],
+  ['adventure/throw_trident', 'adventure/kill_a_mob', 'trident', 'task', 'Fling', 'Hit something with a thrown trident', { hit: ['ev', 'trident_hit'] }],
+  ['adventure/kill_mob_near_sculk_catalyst', 'adventure/kill_a_mob', 'sculk_catalyst', 'task', 'Spreading', 'Defeat a mob near a sculk catalyst', { kill: ['ev', 'kill_near_catalyst'] }],
+  ['adventure/shoot_arrow', 'adventure/kill_a_mob', 'bow', 'task', 'Bullseye Practice', 'Hit something with an arrow', { hit: ['ev', 'arrow_hit'] }],
+  ['adventure/kill_all_mobs', 'adventure/kill_a_mob', 'diamond_sword', 'challenge', 'Bestiary', 'Defeat one of every hostile mob', each(ALL_HOSTILES, m => ['kill', m]), { xp: 100 }],
+  ['adventure/totem_of_undying', 'adventure/kill_a_mob', 'totem_of_undying', 'goal', 'Second Chance', 'Cheat death with a totem of undying', { totem: ['ev', 'totem'] }],
+  ['adventure/summon_iron_golem', 'adventure/trade', 'carved_pumpkin', 'goal', 'Bodyguard', 'Build an iron golem', { golem: ['ev', 'summon_golem'] }],
+  ['adventure/trade_at_world_height', 'adventure/trade', 'emerald', 'task', 'Sky Market', 'Trade with a villager at the top of the world', { traded: ['ev', 'trade_high'] }],
+  ['adventure/trim_with_all_exclusive_armor_patterns', 'adventure/trim_with_any_armor_pattern', 'silence_armor_trim_smithing_template', 'challenge', 'Rare Style', 'Use each of the eight rare armor trims',
+    each(['spire', 'snout', 'rib', 'ward', 'silence', 'vex', 'tide', 'wayfinder'], t => ['ev', 'trim', t]), { xp: 150 }],
+  ['adventure/two_birds_one_arrow', 'adventure/ol_betsy', 'crossbow', 'challenge', 'Double Hit', 'Kill two phantoms with one piercing arrow', { two: ['ev', 'two_phantoms'] }, { xp: 65 }],
+  ['adventure/whos_the_pillager_now', 'adventure/ol_betsy', 'crossbow', 'task', 'Turnabout', 'Defeat a pillager with a crossbow', { killed: ['kill', 'pillager', 'crossbow'] }],
+  ['adventure/arbalistic', 'adventure/ol_betsy', 'crossbow', 'challenge', 'Five in One', 'Kill five different mobs with one crossbow shot', { five: ['ev', 'arbalistic'] }, { xp: 85, hidden: true }],
+  ['adventure/adventuring_time', 'adventure/sleep_in_bed', 'diamond_boots', 'challenge', 'Globetrotter', 'Visit every Overworld biome', each(OVERWORLD_BIOMES, b => ['biome', b]), { xp: 500 }],
+  ['adventure/play_jukebox_in_meadows', 'adventure/sleep_in_bed', 'jukebox', 'task', 'Meadow Music', 'Play a disc in a jukebox in a meadow', { music: ['ev', 'jukebox_meadow'] }],
+  ['adventure/walk_on_powder_snow_with_leather_boots', 'adventure/sleep_in_bed', 'leather_boots', 'task', 'Snowshoes', 'Walk across powder snow in leather boots', { walk: ['ev', 'powder_walk'] }],
+  ['adventure/spyglass_at_dragon', 'adventure/spyglass_at_ghast', 'spyglass', 'task', 'Dragon Watching', 'Look at the Ender Dragon through a spyglass', { look: ['ev', 'spyglass', 'ender_dragon'] }],
+  ['adventure/very_very_frightening', 'adventure/throw_trident', 'trident', 'task', 'Shock Therapy', 'Strike a villager with lightning', { struck: ['ev', 'villager_struck'] }],
+  ['adventure/sniper_duel', 'adventure/shoot_arrow', 'arrow', 'challenge', 'Long Shot', 'Defeat a skeleton from 50 blocks away', { killed: ['ev', 'sniper'] }, { xp: 50 }],
+  ['adventure/bullseye', 'adventure/shoot_arrow', 'target', 'challenge', 'Dead Center', 'Hit the center of a target block from 30 blocks away', { hit: ['ev', 'bullseye'] }, { xp: 50 }],
+  ['adventure/under_lock_and_key', 'adventure/minecraft_trials_edition', 'trial_key', 'task', 'Key Holder', 'Open a vault with a trial key', { vault: ['ev', 'vault'] }],
+  ['adventure/revaulting', 'adventure/under_lock_and_key', 'ominous_trial_key', 'goal', 'Ominous Loot', 'Open an ominous vault with an ominous trial key', { vault: ['ev', 'ominous_vault'] }],
+  ['adventure/blowback', 'adventure/minecraft_trials_edition', 'wind_charge', 'challenge', 'Return Gust', 'Defeat a breeze with its own wind charge', { killed: ['kill', 'breeze', 'wind'] }, { xp: 40 }],
+  ['adventure/who_needs_rockets', 'adventure/minecraft_trials_edition', 'wind_charge', 'task', 'Updraft', 'Launch yourself 8 blocks up with a wind charge', { up: ['ev', 'wind_launch'] }],
+  ['adventure/crafters_crafting_crafters', 'adventure/minecraft_trials_edition', 'crafter', 'task', 'Self-Replicating', 'Be near a crafter as it crafts a crafter', { crafted: ['ev', 'crafter_crafter'] }],
+  ['adventure/lighten_up', 'adventure/minecraft_trials_edition', 'copper_bulb', 'task', 'Brighter Idea', 'Scrape a copper bulb with an axe to make it brighter', { scraped: ['ev', 'scrape_bulb'] }],
+  ['adventure/overoverkill', 'adventure/blowback', 'mace', 'challenge', 'Heavy Blow', 'Deal 50 hearts of damage in one hit with a mace', { hit: ['ev', 'mace100'] }, { xp: 50 }],
+  // ---------------- husbandry ----------------
+  ['husbandry/root', null, 'hay_block', 'task', 'Husbandry', 'Eat something', { ate: ['eat', null] }],
+  ['husbandry/safely_harvest_honey', 'husbandry/root', 'honey_bottle', 'task', 'Smoky Honey', 'Bottle honey from a hive over a campfire', { honey: ['ev', 'safe_honey'] }],
+  ['husbandry/breed_an_animal', 'husbandry/root', 'wheat', 'task', 'New Arrival', 'Breed two animals', { bred: ['breed', null] }],
+  ['husbandry/allay_deliver_item_to_player', 'husbandry/root', 'cookie', 'task', 'Helpful Spirit', 'Have an allay bring you an item', { delivered: ['ev', 'allay_deliver'] }],
+  ['husbandry/allay_deliver_cake_to_note_block', 'husbandry/allay_deliver_item_to_player', 'note_block', 'task', 'Party Delivery', 'Have an allay drop a cake at a note block', { cake: ['ev', 'allay_cake'] }],
+  ['husbandry/ride_a_boat_with_a_goat', 'husbandry/root', 'oak_boat', 'task', 'Goat Boat', 'Ride a boat with a goat', { goat: ['ev', 'goat_boat'] }],
+  ['husbandry/tame_an_animal', 'husbandry/root', 'lead', 'task', 'Loyal Companion', 'Tame an animal', { tamed: ['tame', null] }],
+  ['husbandry/make_a_sign_glow', 'husbandry/root', 'glow_ink_sac', 'task', 'Bright Words', 'Make the text of a sign glow', { glow: ['ev', 'glow_sign'] }],
+  ['husbandry/fishy_business', 'husbandry/root', 'fishing_rod', 'task', 'Gone Fishing', 'Catch a fish', { fish: ['ev', 'fish'] }],
+  ['husbandry/silk_touch_nest', 'husbandry/root', 'bee_nest', 'task', 'Moving Day', 'Move a bee nest with three bees in it using Silk Touch', { nest: ['ev', 'silk_nest'] }],
+  ['husbandry/tactical_fishing', 'husbandry/fishy_business', 'pufferfish_bucket', 'task', 'Bucket Catch', 'Catch a fish without a fishing rod', { bucket: ['ev', 'bucket_fish'] }],
+  ['husbandry/wax_on', 'husbandry/safely_harvest_honey', 'honeycomb', 'task', 'Polish', 'Wax a copper block with honeycomb', { wax: ['ev', 'wax_on'] }],
+  ['husbandry/wax_off', 'husbandry/wax_on', 'stone_axe', 'task', 'Scrub', 'Scrape the wax off a copper block', { wax: ['ev', 'wax_off'] }],
+  ['husbandry/axolotl_in_a_bucket', 'husbandry/tactical_fishing', 'axolotl_bucket', 'task', 'Pink Friend', 'Catch an axolotl in a bucket', { bucket: ['ev', 'bucket_axolotl'] }],
+  ['husbandry/kill_axolotl_target', 'husbandry/axolotl_in_a_bucket', 'tropical_fish_bucket', 'task', 'Team Effort', 'Win a fight alongside an axolotl', { fight: ['ev', 'axolotl_team'] }],
+  ['husbandry/tadpole_in_a_bucket', 'husbandry/root', 'tadpole_bucket', 'task', 'Tiny Swimmer', 'Catch a tadpole in a bucket', { bucket: ['ev', 'bucket_tadpole'] }],
+  ['husbandry/leash_all_frog_variants', 'husbandry/tadpole_in_a_bucket', 'lead', 'task', 'Frog Squad', 'Have all three kinds of frog on leads at once', { frogs: ['ev', 'frog_squad'] }],
+  ['husbandry/froglights', 'husbandry/leash_all_frog_variants', 'verdant_froglight', 'challenge', 'Light Show', 'Have all three froglights', { lights: ['invAll', 'ochre_froglight', 'verdant_froglight', 'pearlescent_froglight'] }, { xp: 100 }],
+  ['husbandry/plant_seed', 'husbandry/root', 'wheat_seeds', 'task', 'Green Thumb', 'Plant a seed', { planted: ['ev', 'plant_seed'] }],
+  ['husbandry/obtain_sniffer_egg', 'husbandry/plant_seed', 'sniffer_egg', 'task', 'Ancient Egg', 'Get a sniffer egg', { egg: ['inv', 'sniffer_egg'] }],
+  ['husbandry/feed_snifflet', 'husbandry/obtain_sniffer_egg', 'torchflower_seeds', 'task', 'Snack Time', 'Feed a baby sniffer', { fed: ['ev', 'feed_snifflet'] }],
+  ['husbandry/plant_any_sniffer_seed', 'husbandry/feed_snifflet', 'pitcher_pod', 'task', 'Old Seeds', 'Plant a seed a sniffer found', { planted: ['ev', 'plant_sniffer_seed'] }],
+  ['husbandry/bred_all_animals', 'husbandry/breed_an_animal', 'golden_carrot', 'challenge', 'Full Ark', 'Breed every kind of animal', each(BREEDABLE, m => ['breed', m]), { xp: 100 }],
+  ['husbandry/complete_catalogue', 'husbandry/tame_an_animal', 'cod', 'challenge', 'Cat Collector', 'Tame every kind of cat', each(['tabby', 'black', 'red', 'siamese', 'british_shorthair', 'calico', 'persian', 'ragdoll', 'white', 'jellie', 'all_black'], v => ['tame', 'cat', v]), { xp: 50 }],
+  ['husbandry/whole_pack', 'husbandry/tame_an_animal', 'bone', 'challenge', 'Pack Leader', 'Tame every kind of wolf', each(['pale', 'ashen', 'black', 'chestnut', 'rusty', 'snowy', 'spotted', 'striped', 'woods'], v => ['tame', 'wolf', v]), { xp: 50 }],
+  ['husbandry/remove_wolf_armor', 'husbandry/tame_an_animal', 'shears', 'task', 'Trim the Coat', 'Take wolf armor off a wolf with shears', { removed: ['ev', 'wolf_armor_off'] }],
+  ['husbandry/repair_wolf_armor', 'husbandry/remove_wolf_armor', 'wolf_armor', 'task', 'Patched Up', 'Mend damaged wolf armor with armadillo scutes', { repaired: ['ev', 'wolf_armor_fix'] }],
+  ['husbandry/balanced_diet', 'husbandry/plant_seed', 'apple', 'challenge', 'Tasting Menu', 'Eat every kind of food', each(ALL_FOODS, f => ['eat', f]), { xp: 100 }],
+  ['husbandry/obtain_netherite_hoe', 'husbandry/plant_seed', 'netherite_hoe', 'challenge', 'Farmer Supreme', 'Upgrade a hoe to netherite', { hoe: ['inv', 'netherite_hoe'] }, { xp: 100 }],
+];
+const ADV_BY_ID = new Map();
+const ADV_TABS = [['story', 'Blockcraft'], ['nether', 'Nether'], ['end', 'The End'], ['adventure', 'Adventure'], ['husbandry', 'Husbandry']];
+for (const [id, parent, icon, frame, title, desc, crit, extra] of ADVANCEMENTS) {
+  const x = extra || {};
+  ADV_BY_ID.set(id, { id, parent, icon, frame, title, desc, crit, any: !!x.any, xp: x.xp || 0, hidden: !!x.hidden, tab: id.split('/')[0], children: [] });
+}
+for (const a of ADV_BY_ID.values()) if (a.parent) ADV_BY_ID.get(a.parent).children.push(a);
+// the criteria waiting on each kind of trigger
+const ADV_BY_TRIGGER = new Map();
+for (const a of ADV_BY_ID.values()) for (const [name, c] of Object.entries(a.crit)) { if (!ADV_BY_TRIGGER.has(c[0])) ADV_BY_TRIGGER.set(c[0], []); ADV_BY_TRIGGER.get(c[0]).push([a, name, c]); }
+const advItem = n => { const it = ITEM_BY_NAME[n]; return it ? it.id : -1; };
+const ADV_MATCH = {
+  inv: (c, ids) => c.slice(1).some(n => ids.has(advItem(n))),
+  invAll: (c, ids) => c.slice(1).every(n => ids.has(advItem(n))),
+  suit: (c, mat) => c[1] === mat,
+  dim: (c, dim) => c[1] === dim,
+  kill: (c, type, how, dim) => (c[1] === null || c[1] === type) && (!c[2] || c[2] === how) && (!c[3] || c[3] === dim),
+  eat: (c, id) => c[1] === null || advItem(c[1]) === id,
+  breed: (c, type) => c[1] === null || c[1] === type,
+  tame: (c, type, variant) => c[1] === null || (c[1] === type && (!c[2] || c[2] === variant)),
+  ev: (c, name, arg) => c[1] === name && (c[2] === undefined || c[2] === arg),
+  biome: (c, b) => c[1] === b,
+  struct: (c, s) => c[1] === s,
+  effects: (c, set) => c[1].every(e => set.has(e)),
+};
+const ADV_FRAME = {
+  task: { toast: 'Advancement Made!', chat: 'has made the advancement', color: '#ffff55', link: '#55ff55' },
+  goal: { toast: 'Goal Reached!', chat: 'has reached the goal', color: '#ffff55', link: '#55ff55' },
+  challenge: { toast: 'Challenge Complete!', chat: 'has completed the challenge', color: '#ff55ff', link: '#aa00aa' },
+};
+Player.prototype.advState = function (id) { if (!this.adv) this.adv = {}; return this.adv[id] || (this.adv[id] = { c: {} }); };
+Player.prototype.advDone = function (id) { return !!(this.adv && this.adv[id] && this.adv[id].done); };
+// PlayerAdvancements.award: a criterion is met; the advancement is made once its requirements are
+Game.prototype.advGrant = function (a, name, quiet) {
+  const p = this.player, st = p.advState(a.id);
+  if (st.done || st.c[name]) return false;
+  st.c[name] = 1;
+  if (a.any || Object.keys(a.crit).every(n => st.c[n])) {
+    st.done = Date.now();
+    if (!quiet) this.advAnnounce(a);
+    return true;
+  }
+  return false;
+};
+Game.prototype.advAnnounce = function (a) {
+  const p = this.player, F = ADV_FRAME[a.frame];
+  this.ui.toast({ kind: 'adv', icons: [advItem(a.icon)], title: F.toast, color: F.color, text: a.title });
+  if (a.frame === 'challenge') this.sound('levelup', p.x, p.y, p.z);
+  if (this.rule('announceAdvancements')) this.ui.chat('Player ' + F.chat + ' [' + a.title + ']', '#fff');
+  if (a.xp) p.addXP(a.xp);
+  if (this.ui.advOpen) this.ui.advRefresh();
+};
+// a trigger fired: every criterion still open on it is tested
+Game.prototype.adv = function (type, ...args) {
+  const p = this.player, list = ADV_BY_TRIGGER.get(type);
+  if (!p || !list || p.dead) return;
+  for (const [a, name, c] of list) {
+    const st = p.adv && p.adv[a.id];
+    if (st && (st.done || st.c[name])) continue;
+    if (ADV_MATCH[type](c, ...args)) this.advGrant(a, name);
+  }
+};
+
+/* ---------------- what is checked as you go ---------------- */
+// blocks that only structures are built of: standing among them means you are inside one
+const ADV_STRUCT_BLOCKS = [
+  ['fortress', 'nether', ['nether_bricks', 'nether_brick_fence', 'nether_brick_stairs', 'nether_brick_slab']],
+  ['bastion_remnant', 'nether', ['polished_blackstone_bricks', 'cracked_polished_blackstone_bricks', 'gilded_blackstone', 'polished_blackstone_brick_stairs', 'polished_blackstone_brick_slab']],
+  ['end_city', 'end', ['purpur_block', 'purpur_pillar', 'purpur_stairs', 'purpur_slab', 'end_stone_bricks', 'end_rod']],
+  ['trial_chambers', 'overworld', ['tuff_bricks', 'chiseled_tuff', 'chiseled_tuff_bricks', 'polished_tuff', 'tuff_brick_stairs', 'tuff_brick_slab', 'polished_tuff_slab', 'waxed_copper_block', 'waxed_oxidized_cut_copper', 'waxed_cut_copper', 'trial_spawner', 'vault']],
+  ['stronghold', 'overworld', ['stone_bricks', 'mossy_stone_bricks', 'cracked_stone_bricks', 'end_portal_frame', 'iron_bars']],
+].map(([s, dim, names]) => [s, dim, new Set(names.map(n => ITEM_BY_NAME[n] && ITEM_BY_NAME[n].block !== undefined ? ITEM_BY_NAME[n].block : B[n.toUpperCase()]).filter(v => v !== undefined))]);
+Game.prototype.advStructureAt = function (x, y, z) {
+  const w = this.world, found = [];
+  for (const [s, dim, set] of ADV_STRUCT_BLOCKS) {
+    if (dim !== w.dim) continue;
+    let n = 0;
+    for (let dy = -2; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx += 2) for (let dz = -3; dz <= 3; dz += 2) if (set.has(w.getBlock(x + dx, y + dy, z + dz))) n++;
+    if (n < 4) continue;
+    // a stronghold is the one the eyes lead to
+    if (s === 'stronghold') { const pr = w.vanilla ? this.genInfo().nearestPortalRoom(x, z) : nearestPortalRoom(w.seed, x, z); if (!pr || Math.hypot(pr.x - x, pr.z - z) > 120) continue; }
+    found.push(s);
+  }
+  return found;
+};
+Game.prototype.advBiomeName = function () {
+  const p = this.player, w = this.world, x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z);
+  if (w.vanilla && w.dim === 'overworld') return BIOME_NAMES[this.genInfo().biomeAt(x, y - w.yOff, z)];
+  const cave = this.caveBiomeAt ? this.caveBiomeAt(x, y, z) : -1;
+  if (cave >= 0) return BIOME_NAMES[cave];
+  const b = biomeAt(this, x, z);
+  return b >= 0 ? BIOME_NAMES[b] : null;
+};
+const _gameTickAD = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const r = _gameTickAD.call(this), w = this.world, p = this.player;
+  if (!w || !p || p.dead || this.state !== 'playing') return r;
+  const t = w.tick;
+  if (t % 5 === 0) {
+    // inventory_changed
+    const sig = [...p.inv, ...p.armor, ...p.offhand].map(s => s ? s.id : 0).join(',');
+    if (sig !== p._advInv) {
+      p._advInv = sig;
+      const ids = new Set([...p.inv, ...p.armor, ...p.offhand].filter(Boolean).map(s => s.id));
+      this.adv('inv', ids); this.adv('invAll', ids);
+      const mat = p.armor.every(s => s && /^netherite_/.test(ITEMS[s.id].name)) ? 'netherite' : null;
+      if (mat) this.adv('suit', mat);
+    }
+  }
+  if (t % 20 === 7) {
+    if (p.effects && p.effects.size) {
+      const fx = new Set(p.effects.keys());
+      this.adv('effects', fx);
+      if (fx.has('hero_of_the_village') && !p._advHero) this.adv('ev', 'raid_win');
+      p._advHero = fx.has('hero_of_the_village');
+    } else p._advHero = false;
+    const b = this.advBiomeName();
+    if (b) this.adv('biome', b);
+    for (const s of this.advStructureAt(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z))) this.adv('struct', s);
+    // tamed animals report in
+    for (const e of this.entities) if (e instanceof Mob && e.data && e.data.tame && e.data.owner && !e.data.advTamed && e.distTo(p) < 32) { e.data.advTamed = 1; this.adv('tame', e.type, e.data.variant || (e.type === 'cat' ? 'tabby' : e.type === 'wolf' ? 'pale' : null)); }
+    // frogs of every colour on leads, a goat in your boat
+    const frogs = new Set(this.entities.filter(e => e.type === 'frog' && e.leashed === p).map(e => e.data.variant || 'temperate'));
+    if (frogs.size >= 3) this.adv('ev', 'frog_squad');
+    if (p.riding && p.riding.type === 'boat' && this.entities.some(e => e.type === 'goat' && e.riding === p.riding)) this.adv('ev', 'goat_boat');
+    // a sneak past a sculk sensor
+    if (p.sneaking && Math.hypot(p.x - p.px, p.z - p.pz) > 0.01 && w.dim === 'overworld') {
+      const x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z);
+      let near = false;
+      for (let dy = -4; dy <= 4 && !near; dy++) for (let dx = -8; dx <= 8 && !near; dx++) for (let dz = -8; dz <= 8 && !near; dz++) { const id = w.getBlock(x + dx, y + dy, z + dz); if (id === B.SCULK_SENSOR || id === B.CALIBRATED_SCULK_SENSOR || id === B.SCULK_SHRIEKER) near = true; }
+      if (near || this.entities.some(e => e.type === 'warden' && e.distTo(p) < 16)) this.adv('ev', 'avoid_vibration');
+    }
+  }
+  // levitation and wind charges lifting you, falls from the top of the world
+  if (p.effectLevel && p.effectLevel('levitation')) { if (p._advLev === undefined) p._advLev = p.y; else if (p.y - p._advLev >= 50) this.adv('ev', 'levitate50'); } else p._advLev = undefined;
+  if (p._advWind !== undefined) { if (p.y - p._advWind >= 8) { this.adv('ev', 'wind_launch'); p._advWind = undefined; } else if (p.onGround && t - (p._advWindT || 0) > 5) p._advWind = undefined; }
+  if (!p.onGround && !p.flying && p.vy < 0 && p._advFallTop === undefined && p.y - w.yOff >= 319) p._advFallTop = true;
+  if (p.onGround || p.flying || p.inWater) { if (p._advFallTop && p.y - w.yOff <= -59 && !p.dead) this.adv('ev', 'world_fall'); p._advFallTop = undefined; }
+  // walking on powder snow in leather boots
+  if (t % 10 === 3 && p.onGround && p.armor[3] && p.armor[3].id === I.LEATHER_BOOTS && w.getBlock(Math.floor(p.x), Math.floor(p.y - 0.2), Math.floor(p.z)) === B.POWDER_SNOW && Math.hypot(p.x - p.px, p.z - p.pz) > 0.02) this.adv('ev', 'powder_walk');
+  // a spyglass on a parrot, a ghast or the dragon
+  if (t % 5 === 1 && p.using && p.using.kind === 'spyglass') {
+    const e = p.eye(), d = p.look();
+    for (const m of this.entities) {
+      if (!(m instanceof Mob) || (m.type !== 'parrot' && m.type !== 'ghast' && m.type !== 'ender_dragon')) continue;
+      const hw = m.w / 2 + 0.5, r = rayBox(e[0], e[1], e[2], d[0], d[1], d[2], [m.x - hw, m.y - 0.5, m.z - hw, m.x + hw, m.y + m.h + 0.5, m.z + hw]);
+      if (r && r.t < 256) this.adv('ev', 'spyglass', m.type);
+    }
+  }
+  return r;
+};
+
+/* ---------------- the advancements screen ---------------- */
+// AdvancementVisibilityEvaluator: what is done, and what is up to two steps past it (hidden ones once done)
+Game.prototype.advVisible = function (a) {
+  const p = this.player, done = id => p.advDone(id);
+  if (done(a.id)) return true;
+  if (a.hidden) return false;
+  const par = a.parent && ADV_BY_ID.get(a.parent), gp = par && par.parent && ADV_BY_ID.get(par.parent);
+  if ((par && done(par.id)) || (gp && done(gp.id))) return true;
+  // the path down to something visible stays drawn
+  return a.children.some(c => done(c.id) || c.children.some(cc => done(cc.id)));
+};
+const ADV_BG = { story: 'stone', nether: 'netherrack', end: 'end_stone', adventure: 'stone_bricks', husbandry: 'hay_block_side' };
+// TreeNodePosition, simply: one column per step down, each leaf its own row, a parent level with its first child
+function advLayout(root, vis) {
+  const pos = new Map();
+  let row = 0;
+  const walk = (a, depth) => {
+    const kids = a.children.filter(vis);
+    if (!kids.length) { pos.set(a, [depth, row++]); return; }
+    const first = row;
+    for (const k of kids) walk(k, depth + 1);
+    pos.set(a, [depth, first]);
+  };
+  walk(root, 0);
+  return pos;
+}
+const ADV_FRAMES = {};
+function advFrame(kind, done) {
+  const k = kind + done;
+  if (ADV_FRAMES[k]) return ADV_FRAMES[k];
+  const [c, g] = guiCanvas(26, 26), fill = done ? '#e6b422' : '#c6c6c6', edge = done ? '#7a5a00' : '#555';
+  g.fillStyle = '#000';
+  if (kind === 'task') { g.fillRect(1, 1, 24, 24); g.fillStyle = edge; g.fillRect(2, 2, 22, 22); g.fillStyle = fill; g.fillRect(3, 3, 20, 20); }
+  else if (kind === 'goal') { g.beginPath(); g.arc(13, 13, 12, 0, Math.PI * 2); g.fill(); g.fillStyle = edge; g.beginPath(); g.arc(13, 13, 11, 0, Math.PI * 2); g.fill(); g.fillStyle = fill; g.beginPath(); g.arc(13, 13, 10, 0, Math.PI * 2); g.fill(); }
+  else {
+    const star = (r, col) => { g.fillStyle = col; g.beginPath(); for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, rr = i % 2 ? r * 0.78 : r; g.lineTo(13 + Math.cos(a) * rr, 13 + Math.sin(a) * rr); } g.closePath(); g.fill(); };
+    star(13, '#000'); star(12, edge); star(10.5, fill);
+  }
+  return ADV_FRAMES[k] = c.toDataURL();
+}
+UI.prototype.openAdvancements = function () {
+  const g = this.game;
+  if (!g.player) return;
+  g.releasePointer();
+  let scr = $('scr-adv');
+  if (!scr) { scr = el('div', 'screen dim hidden'); scr.id = 'scr-adv'; document.body.appendChild(scr); }
+  this.advOpen = true;
+  if (!this.advTab || !ADV_TABS.some(([k]) => k === this.advTab)) this.advTab = 'story';
+  this.show('scr-adv');
+  this.advRefresh();
+};
+UI.prototype.closeAdvancements = function () {
+  this.advOpen = false; $('tooltip').classList.add('hidden');
+  // back where it was opened from
+  if (this.advFromPause) { this.advFromPause = false; this.show('scr-pause'); } else { this.show(null); this.game.lockPointer(); }
+};
+UI.prototype.advRefresh = function () {
+  const g = this.game, p = g.player, scr = $('scr-adv');
+  if (!scr || !p) return;
+  scr.innerHTML = '';
+  const W = 252, H = 140, IW = 234, IH = 113;
+  const tabs = ADV_TABS.filter(([k]) => g.advVisible(ADV_BY_ID.get(k + '/root')));
+  const box = el('div'); box.style.cssText = `position:relative;width:${W * GS}px;height:${(H + 28) * GS}px`;
+  scr.appendChild(box);
+  if (!tabs.length) {
+    const win = el('div', 'vwin'); win.style.cssText = `position:absolute;left:0;top:${28 * GS}px;width:${W * GS}px;height:${H * GS}px;background:${GUIC.bg};border:${GS}px solid #000;box-sizing:border-box`;
+    this.label(win, 'Advancements', 8, 6);
+    const msg = el('div', 'vl', 'There doesn\'t seem to be anything here... :('); msg.style.cssText += `;left:0;width:100%;text-align:center;top:${70 * GS}px;color:#fff;text-shadow:2px 2px 0 #3f3f3f`;
+    win.appendChild(msg); box.appendChild(win);
+    return;
+  }
+  if (!tabs.some(([k]) => k === this.advTab)) this.advTab = tabs[0][0];
+  tabs.forEach(([k], i) => {
+    const t = el('div'), sel = k === this.advTab, root = ADV_BY_ID.get(k + '/root');
+    t.style.cssText = `position:absolute;left:${(4 + i * 28) * GS}px;top:${(sel ? 0 : 3) * GS}px;width:${28 * GS}px;height:${(sel ? 32 : 29) * GS}px;background:${sel ? GUIC.bg : '#a8a8a8'};border:${GS}px solid #000;border-bottom:0;box-sizing:border-box;cursor:pointer;z-index:${sel ? 2 : 0}`;
+    t.innerHTML = `<img src="${iconFor(advItem(root.icon))}" style="position:absolute;left:${4 * GS}px;top:${7 * GS}px;width:${16 * GS}px;height:${16 * GS}px;image-rendering:pixelated">`;
+    t.addEventListener('mousedown', e => { e.preventDefault(); if (this.advTab !== k) { AUDIO.play('click'); this.advTab = k; this.advScroll = null; this.advRefresh(); } });
+    box.appendChild(t);
+  });
+  const win = el('div', 'vwin');
+  win.style.cssText = `position:absolute;left:0;top:${28 * GS}px;width:${W * GS}px;height:${H * GS}px;background:${GUIC.bg};border:${GS}px solid #000;box-sizing:border-box;z-index:1`;
+  const root = ADV_BY_ID.get(this.advTab + '/root');
+  this.label(win, root.title, 8, 6);
+  const inner = el('div');
+  const bg = (() => { try { return tileCanvas(texL(ADV_BG[this.advTab] || 'stone')).toDataURL(); } catch (e) { return ''; } })();
+  inner.style.cssText = `position:absolute;left:${8 * GS}px;top:${17 * GS}px;width:${IW * GS}px;height:${IH * GS}px;overflow:hidden;background:#333 ${bg ? `url(${bg}) 0 0/${16 * GS}px ${16 * GS}px` : ''};image-rendering:pixelated;cursor:grab`;
+  win.appendChild(inner); box.appendChild(win);
+  const vis = a => g.advVisible(a), pos = advLayout(root, vis);
+  const xs = [...pos.values()].map(v => v[0]), ys = [...pos.values()].map(v => v[1]);
+  const treeW = (Math.max(...xs) + 1) * 28 + 6, treeH = (Math.max(...ys) + 1) * 27 + 6;
+  const layer = el('div'); layer.style.cssText = `position:absolute;left:0;top:0;width:${treeW * GS}px;height:${treeH * GS}px`;
+  inner.appendChild(layer);
+  // the lines between them, then the frames
+  const cv = document.createElement('canvas'); cv.width = treeW; cv.height = treeH;
+  cv.style.cssText = `position:absolute;left:0;top:0;width:${treeW * GS}px;height:${treeH * GS}px;image-rendering:pixelated`;
+  const c2 = cv.getContext('2d');
+  const at = a => { const [x, y] = pos.get(a); return [3 + x * 28, 3 + y * 27]; };
+  for (const pass of [0, 1]) for (const [a] of pos) {
+    if (!a.parent || !pos.has(ADV_BY_ID.get(a.parent))) continue;
+    const [px, py] = at(ADV_BY_ID.get(a.parent)), [cx, cy] = at(a), mx = px + 26 + Math.floor((cx - px - 26) / 2);
+    c2.fillStyle = pass ? '#fff' : '#000';
+    const w = pass ? 1 : 3, o = pass ? 0 : 1;
+    c2.fillRect(px + 26 - o, py + 13 - o, mx - px - 26 + w, w); c2.fillRect(mx - o, Math.min(py, cy) + 13 - o, w, Math.abs(cy - py) + w); c2.fillRect(mx - o, cy + 13 - o, cx - mx + w, w);
+  }
+  layer.appendChild(cv);
+  for (const [a] of pos) {
+    const [x, y] = at(a), done = p.advDone(a.id), n = el('div');
+    n.style.cssText = `position:absolute;left:${x * GS}px;top:${y * GS}px;width:${26 * GS}px;height:${26 * GS}px;background:url(${advFrame(a.frame, done)}) 0 0/100% 100%;image-rendering:pixelated`;
+    n.innerHTML = `<img src="${iconFor(advItem(a.icon))}" style="position:absolute;left:${5 * GS}px;top:${5 * GS}px;width:${16 * GS}px;height:${16 * GS}px;image-rendering:pixelated">`;
+    n.addEventListener('mouseenter', () => this.advTip(a));
+    n.addEventListener('mouseleave', () => $('tooltip').classList.add('hidden'));
+    layer.appendChild(n);
+  }
+  // drag to look around
+  const maxX = Math.max(0, treeW - IW), maxY = Math.max(0, treeH - IH);
+  if (!this.advScroll) this.advScroll = [0, 0];
+  const apply = () => { this.advScroll[0] = Math.max(0, Math.min(maxX, this.advScroll[0])); this.advScroll[1] = Math.max(0, Math.min(maxY, this.advScroll[1])); layer.style.transform = `translate(${-this.advScroll[0] * GS}px,${-this.advScroll[1] * GS}px)`; };
+  apply();
+  inner.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, s0 = this.advScroll.slice();
+    const mv = ev => { this.advScroll[0] = s0[0] - (ev.clientX - sx) / GS; this.advScroll[1] = s0[1] - (ev.clientY - sy) / GS; apply(); };
+    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  });
+};
+UI.prototype.advTip = function (a) {
+  const p = this.game.player, st = p.adv && p.adv[a.id], done = p.advDone(a.id), names = Object.keys(a.crit), have = st ? names.filter(n => st.c[n]).length : 0;
+  const prog = !a.any && names.length > 1 && !done ? `  <span style="color:#fff">${have}/${names.length}</span>` : '';
+  const t = $('tooltip');
+  t.innerHTML = `<div class="tt0" style="color:${done ? '#ffff55' : '#fff'};background:${done ? '#a07a10' : '#2a5a8a'};margin:-6px -8px 4px;padding:6px 8px 4px">${escapeHTML(a.title)}${prog}</div>` +
+    `<div style="color:${a.frame === 'challenge' ? '#ff55ff' : '#55ff55'}">${escapeHTML(a.desc)}</div>`;
+  t.classList.remove('hidden'); this.posCursor();
+};
+// L opens it (KeyMapping key.advancements), and so does the pause menu
+KB_ACTIONS.push({ id: 'advancements', label: 'Advancements', cat: 'Miscellaneous', canon: 'KeyL' }); KB_CANON.add('KeyL');
+document.addEventListener('keydown', e => {
+  const g = window.game;
+  if (!g || g.state !== 'playing' || g.ui.chatOpen) return;
+  if (g.ui.advOpen) { if (e.code === 'KeyL' || e.code === 'Escape') { e.preventDefault(); g.ui.closeAdvancements(); } return; }
+  if (e.code === 'KeyL' && !e.repeat && !g.ui.inv && !g.ui.screen && g.player && !g.player.dead) { e.preventDefault(); g.input.reset(); g.ui.openAdvancements(); }
+});
+{
+  const b = document.createElement('button'); b.className = 'btn'; b.id = 'b-padv'; b.textContent = 'Advancements';
+  const resume = document.getElementById('b-resume');
+  if (resume) resume.insertAdjacentElement('afterend', b);
+  b.addEventListener('click', () => { AUDIO.init(); AUDIO.play('click'); const g = window.game; if (g) { g.ui.openAdvancements(); g.ui.advFromPause = true; } });
+}
+
+/* ---------------- where the triggers come from ---------------- */
+// changed_dimension, and nether_travel: 7 km between where you went in and where you come out
+const _travelAD = Game.prototype.travel;
+Game.prototype.travel = function (dest, how) {
+  const p = this.player, from = this.world && this.world.dim;
+  if (p && from === 'overworld' && dest === 'nether') p._advNetherFrom = [p.x, p.z];
+  if (p && from === 'nether' && dest === 'overworld') p._advFromNether = true;
+  return _travelAD.call(this, dest, how);
+};
+// (the new dimension is only there once it has loaded, so the tick notices the change)
+const _gameTickADdim = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const r = _gameTickADdim.call(this), w = this.world, p = this.player;
+  if (w && p && !p.dead && this.state === 'playing') {
+    if (p._advDim !== undefined && p._advDim !== w.dim) {
+      this.adv('dim', w.dim);
+      if (p._advFromNether && w.dim === 'overworld' && p._advNetherFrom && Math.hypot(p.x - p._advNetherFrom[0], p.z - p._advNetherFrom[1]) >= 7000) this.adv('ev', 'fast_travel');
+      p._advFromNether = false;
+    }
+    p._advDim = w.dim;
+  }
+  return r;
+};
+// the projectile behind each hit
+const _impactAD = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  const g = this.game, p = g.player, mine = p && this.owner === p;
+  const prev = g._advProj; g._advProj = this;
+  try {
+    if (mine && e && this.kind === 'trident') g.adv('ev', 'trident_hit');
+    if (mine && e && this.kind === 'arrow') g.adv('ev', 'arrow_hit');
+    // TargetBlock: the middle of a face from 30 blocks away
+    if (mine && !e && this.kind === 'arrow' && g.world.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.TARGET && this.from && Math.hypot(this.x - this.from[0], this.z - this.from[2]) >= 30) {
+      const fx = this.x - Math.floor(this.x) - 0.5, fy = this.y - Math.floor(this.y) - 0.5, fz = this.z - Math.floor(this.z) - 0.5;
+      const off = [Math.abs(fx), Math.abs(fy), Math.abs(fz)].sort((a, b) => a - b);
+      if (off[0] < 0.07 && off[1] < 0.07) g.adv('ev', 'bullseye');
+    }
+    if (this.kind === 'wind' && mine && Math.hypot(p.x - this.x, p.y + 0.9 - this.y, p.z - this.z) < 2.5) { p._advWind = p.y; p._advWindT = g.world.tick; }
+    return _impactAD.call(this, e);
+  } finally { g._advProj = prev; }
+};
+const _spawnProjectileAD = Game.prototype.spawnProjectile;
+Game.prototype.spawnProjectile = function (kind, x, y, z, vx, vy, vz, owner) {
+  const pr = _spawnProjectileAD.call(this, kind, x, y, z, vx, vy, vz, owner);
+  if (pr && owner && owner === this.player) { pr.from = [owner.x, owner.y, owner.z]; if (this._advShot) pr.shot = this._advShot; }
+  return pr;
+};
+const _shootCrossbowAD = Player.prototype.shootCrossbow;
+Player.prototype.shootCrossbow = function (st, hand) {
+  const g = this.game;
+  g._advShot = { crossbow: true, kills: new Set() };
+  try { return _shootCrossbowAD.call(this, st, hand); } finally { g._advShot = null; g.adv('ev', 'crossbow'); }
+};
+// player_killed_entity, and what it was killed with
+const _dieAD = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  const fresh = this.deathTime === 0, r = _dieAD.call(this, source, attacker), g = this.game, p = g.player;
+  if (!fresh || !p) return r;
+  const pr = g._advProj;
+  if (this.killedByPlayer) {
+    const how = source === 'fireball' && attacker === p ? 'fireball' : pr && pr.shot && pr.shot.crossbow ? 'crossbow' : source === 'wind' ? 'wind' : null;
+    g.adv('kill', this.type, how, g.world.dim);
+    if (this.data && this.data.banner) g.adv('ev', 'kill_captain');
+    if (this.type === 'skeleton' && pr && pr.kind === 'arrow' && Math.hypot(p.x - this.x, p.z - this.z) >= 50) g.adv('ev', 'sniper');
+    if (pr && pr.shot) {
+      pr.shot.kills.add(this.type);
+      if (pr.shot.kills.size >= 5) g.adv('ev', 'arbalistic');
+    }
+    if (pr && this.type === 'phantom') { pr._advPhantoms = (pr._advPhantoms || 0) + 1; if (pr._advPhantoms >= 2) g.adv('ev', 'two_phantoms'); }
+    // a sculk catalyst blooms at the death
+    const w = g.world, x = Math.floor(this.x), y = Math.floor(this.y), z = Math.floor(this.z);
+    let cat = false;
+    for (let dy = -8; dy <= 8 && !cat; dy++) for (let dx = -8; dx <= 8 && !cat; dx++) for (let dz = -8; dz <= 8 && !cat; dz++) if (w.getBlock(x + dx, y + dy, z + dz) === B.SCULK_CATALYST) cat = true;
+    if (cat) g.adv('ev', 'kill_near_catalyst');
+  } else if (attacker && attacker.type === 'axolotl' && this.playerHurtAge !== undefined && this.age - this.playerHurtAge < 200 && this.distTo(p) < 20) g.adv('ev', 'axolotl_team');
+  return r;
+};
+// over-overkill: a mace hit of 100 or more
+const _hurtMobAD = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const g = this.game, p = g.player;
+  if (attacker && attacker === p && source === 'player' && amount >= 100 && p.held && p.held.id === I.MACE) g.adv('ev', 'mace100');
+  return _hurtMobAD.call(this, amount, source, attacker);
+};
+// entity_killed_player
+const _onDeathAD = Game.prototype.onDeath;
+Game.prototype.onDeath = function (source, silent) {
+  if (!silent && MOB_TYPES[source]) this.adv('ev', 'killed_by');
+  return _onDeathAD.call(this, source, silent);
+};
+// a shield stopping a projectile
+const _hurtPlayerAD = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  let blocked = false;
+  if (this.blocking && this.blocking() && attacker && (source === 'arrow' || source === 'trident' || source === 'fireball')) {
+    const lk = this.look(), dx = attacker.x - this.x, dz = attacker.z - this.z, l = Math.hypot(dx, dz) || 1;
+    blocked = (lk[0] * dx + lk[2] * dz) / (Math.hypot(lk[0], lk[2]) || 1) / l > 0;
+  }
+  const r = _hurtPlayerAD.call(this, amount, source, attacker);
+  if (blocked && !r) this.game.adv('ev', 'deflect');
+  return r;
+};
+// consume_item
+const _finishUseAD = Player.prototype.finishUse;
+Player.prototype.finishUse = function (u, st) {
+  const id = st && st.id, food = id && ITEMS[id].food;
+  const r = _finishUseAD.call(this, u, st);
+  if (food) this.game.adv('eat', id);
+  return r;
+};
+// bred_animals: a baby with parents
+const _createMobAD = createMob;
+createMob = function (game, type, x, y, z, opts) {
+  const m = _createMobAD(game, type, x, y, z, opts);
+  if (m && opts && opts.parents && game.player && opts.parents.some(q => q && q.distTo && q.distTo(game.player) < 64)) game.adv('breed', type);
+  return m;
+};
+const _tryTotemAD = Player.prototype.tryTotem;
+Player.prototype.tryTotem = function () { const r = _tryTotemAD.call(this); if (r) this.game.adv('ev', 'totem'); return r; };
+const _checkGolemAD = checkGolem;
+checkGolem = function (g, x, y, z) { const n = g.entities.length, r = _checkGolemAD(g, x, y, z); if (r && g.entities.slice(n).some(e => e.type === 'iron_golem')) g.adv('ev', 'summon_golem'); return r; };
+const _checkWitherAD = checkWither;
+checkWither = function (g, x, y, z) { const r = _checkWitherAD(g, x, y, z); if (r) g.adv('ev', 'summon_wither'); return r; };
+const _tryToSleepAD = Game.prototype.tryToSleep;
+Game.prototype.tryToSleep = function (p, hit) { const r = _tryToSleepAD.call(this, p, hit); if (this.sleeping > 0) this.adv('ev', 'sleep'); return r; };
+const _enterGatewayAD = Game.prototype.enterGateway;
+Game.prototype.enterGateway = function (gx, gy, gz) { const r = _enterGatewayAD.call(this, gx, gy, gz); this.adv('ev', 'gateway'); return r; };
+const _tickDragonRespawnAD = Game.prototype.tickDragonRespawn;
+Game.prototype.tickDragonRespawn = function () { const was = !!this.dragonRespawn, r = _tickDragonRespawnAD.call(this); if (was && !this.dragonRespawn && this.dragon && !this.dragon.dead) this.adv('ev', 'respawn_dragon'); return r; };
+// fishing_rod_hooked with a fish
+const _retrieveAD = FishingHook.prototype.retrieve;
+FishingHook.prototype.retrieve = function () {
+  const g = this.game, n = g.entities.length, r = _retrieveAD.call(this);
+  if (this.owner === g.player && g.entities.slice(n).some(e => e instanceof ItemEntity && [I.COD, I.SALMON, I.PUFFERFISH, I.TROPICAL_FISH].includes(e.stack.id))) g.adv('ev', 'fish');
+  return r;
+};
+// trades, enchanting, trims, potions out of a brewing stand
+const _mTakeAD = SCREEN_LOGIC.merchant.take;
+SCREEN_LOGIC.merchant.take = function (ui) { const r = _mTakeAD.call(this, ui), g = ui.game, p = g.player; g.adv('ev', 'trade'); if (p.y - g.world.yOff >= 318) g.adv('ev', 'trade_high'); return r; };
+const _sTakeAD = SCREEN_LOGIC.smithing.take;
+SCREEN_LOGIC.smithing.take = function (ui) { const res = SCREEN_LOGIC.smithing.result(ui), r = _sTakeAD.call(this, ui); if (res && res.tag && res.tag.trim) ui.game.adv('ev', 'trim', res.tag.trim.pattern); return r; };
+if (SCREEN_LOGIC.enchant && SCREEN_LOGIC.enchant.choose) {
+  const _chooseAD = SCREEN_LOGIC.enchant.choose;
+  SCREEN_LOGIC.enchant.choose = function (ui, k) { const before = JSON.stringify(ui.inv.local[0]), r = _chooseAD.call(this, ui, k); if (JSON.stringify(ui.inv.local[0]) !== before) ui.game.adv('ev', 'enchant'); return r; };
+}
+const _slotClickAD = UI.prototype.slotClick, _quickMoveAD = UI.prototype.quickMove;
+const brewTook = (ui, c, i, before) => { if (ui.inv && ui.inv.type === 'brewing' && c === 'be' && i <= 2 && before && before.id === I.POTION && before.tag && before.tag.potion !== 'water' && !ui.getSlot(c, i)) ui.game.adv('ev', 'brew'); };
+UI.prototype.slotClick = function (c, i, btn) { const before = this.inv && this.getSlot(c, i), r = _slotClickAD.call(this, c, i, btn); brewTook(this, c, i, before); return r; };
+UI.prototype.quickMove = function (c, i) { const before = this.inv && this.getSlot(c, i), r = _quickMoveAD.call(this, c, i); brewTook(this, c, i, before); return r; };
+// construct_beacon, for those standing by
+const _updateBeaconAD = Game.prototype.updateBeacon;
+Game.prototype.updateBeacon = function (s, quiet) {
+  const r = _updateBeaconAD.call(this, s, quiet), p = this.player;
+  if (p && s.levels > 0 && s.beam && Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z) < 20) for (let lv = 1; lv <= s.levels; lv++) this.adv('ev', 'beacon', lv);
+  return r;
+};
+// lightning: a rod that saved a villager, a villager turned into a witch
+const _strikeAtAD = Game.prototype.strikeAt;
+Game.prototype.strikeAt = function (x, y, z, rod) {
+  const r = _strikeAtAD.call(this, x, y, z, rod);
+  if (rod && this.entities.some(e => e.type === 'villager' && !e.dead && Math.hypot(e.x - x, e.z - z) < 30)) this.adv('ev', 'rod_saves_villager');
+  return r;
+};
+const _convertMobAD = Game.prototype.convertMob;
+Game.prototype.convertMob = function (m, type) { if (m && m.type === 'villager' && type === 'witch') this.adv('ev', 'villager_struck'); return _convertMobAD.call(this, m, type); };
+const _crafterCraftAD = Game.prototype.crafterCraft;
+Game.prototype.crafterCraft = function (x, y, z) {
+  const res = crafterResult(this.crafterBE(x, y, z)), p = this.player, r = _crafterCraftAD.call(this, x, y, z);
+  if (res && res.id === I.CRAFTER && p && Math.hypot(p.x - x - 0.5, p.y - y, p.z - z - 0.5) < 6) this.adv('ev', 'crafter_crafter');
+  return r;
+};
+const _brushBlockAD = Game.prototype.brushBlock;
+Game.prototype.brushBlock = function (x, y, z, face, p) {
+  const n = this.entities.length, r = _brushBlockAD.call(this, x, y, z, face, p);
+  if (this.entities.slice(n).some(e => e instanceof ItemEntity && /_pottery_sherd$/.test(ITEMS[e.stack.id].name))) this.adv('ev', 'sherd');
+  return r;
+};
+// using things on blocks
+const _useBlockAD = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const w = this.world, { x, y, z } = hit, id = hit.id, before = held ? held.id : 0;
+  const vb = id === B.VAULT ? w.getBE(x, y, z) : null, vaultWas = vb ? !!vb.rewarded : true;
+  const r = _useBlockAD.call(this, p, hit, held);
+  if (!r) return r;
+  if (id === B.RESPAWN_ANCHOR && (w.getMeta(x, y, z) & 7) === 4) this.adv('ev', 'anchor_full');
+  if (id === B.VAULT && !vaultWas) { const be = w.getBE(x, y, z); if (be && be.rewarded) this.adv('ev', before === I.OMINOUS_TRIAL_KEY ? 'ominous_vault' : 'vault'); }
+  if (id === B.JUKEBOX) { const be = w.getBE(x, y, z); if (be && be.disc && biomeAt(this, x, z) === BI.MEADOW) this.adv('ev', 'jukebox_meadow'); }
+  if (BLK[id] && BLK[id].sign && before === I.GLOW_INK_SAC) this.adv('ev', 'glow_sign');
+  if ((id === B.BEEHIVE || id === B.BEE_NEST) && before === I.GLASS_BOTTLE) {
+    let smoke = false;
+    for (let d = 1; d <= 5 && !smoke; d++) { const b = BLK[w.getBlock(x, y - d, z)]; if (b && b.campfire) smoke = true; else if (SOLID[w.getBlock(x, y - d, z)]) break; }
+    if (smoke) this.adv('ev', 'safe_honey');
+  }
+  return r;
+};
+const _useItemSpecialAD = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  const hid = hit ? hit.id : 0, hname = hid ? BLK[hid].name : '', hold = held ? held.id : 0;
+  const r = _useItemSpecialAD.call(this, p, hit, held, it);
+  if (!r || !hit) return r;
+  if (hold === I.COMPASS && hid === B.LODESTONE) this.adv('ev', 'lodestone');
+  if (hold === I.HONEYCOMB && /copper/.test(hname)) this.adv('ev', 'wax_on');
+  if (it && it.tool && it.tool.type === 'axe' && /copper/.test(hname)) { if (/^waxed_/.test(hname)) this.adv('ev', 'wax_off'); if (/copper_bulb$/.test(hname)) this.adv('ev', 'scrape_bulb'); }
+  return r;
+};
+const _useOnEntityAD = Game.prototype.useOnEntity;
+Game.prototype.useOnEntity = function (p, ent, held) {
+  const hold = held ? held.id : 0, type = ent && ent.type, baby = ent && ent.baby, armored = ent && ent.data && ent.data.armor;
+  const r = _useOnEntityAD.call(this, p, ent, held);
+  if (!r) return r;
+  if (hold === I.WATER_BUCKET) {
+    if (['cod', 'salmon', 'pufferfish', 'tropical_fish'].includes(type)) this.adv('ev', 'bucket_fish');
+    if (type === 'axolotl') this.adv('ev', 'bucket_axolotl');
+    if (type === 'tadpole') this.adv('ev', 'bucket_tadpole');
+  }
+  if (type === 'sniffer' && baby && hold === I.TORCHFLOWER_SEEDS) this.adv('ev', 'feed_snifflet');
+  if (type === 'wolf' && hold === I.SHEARS && armored && !(ent.data && ent.data.armor)) this.adv('ev', 'wolf_armor_off');
+  if (type === 'wolf' && hold === I.ARMADILLO_SCUTE && armored) this.adv('ev', 'wolf_armor_fix');
+  if ((type === 'piglin') && (hold === I.GOLD_INGOT)) this.adv('ev', 'piglin_gold');
+  if ((type === 'allay')) this.adv('ev', 'allay_given');
+  return r;
+};
+// planting, and a comparator reading a chiseled bookshelf
+const SEED_CROPS = () => new Set([B.WHEAT, B.CARROTS, B.POTATOES, B.BEETROOTS, B.MELON_STEM, B.PUMPKIN_STEM, B.TORCHFLOWER_CROP, B.PITCHER_CROP, B.NETHER_WART, B.COCOA].filter(v => v !== undefined));
+let _seedCrops = null;
+const _afterPlaceAD = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const r = _afterPlaceAD.call(this, p, x, y, z, id);
+  if (!p || this.world.getBlock(x, y, z) !== id) return r;
+  if (!_seedCrops) _seedCrops = SEED_CROPS();
+  if (_seedCrops.has(id)) { this.adv('ev', 'plant_seed'); if (id === B.TORCHFLOWER_CROP || id === B.PITCHER_CROP) this.adv('ev', 'plant_sniffer_seed'); }
+  if (id === B.COMPARATOR) for (let f = 0; f < 6; f++) if (DY[f] === 0 && this.world.getBlock(x + DX[f], y, z + DZ[f]) === B.CHISELED_BOOKSHELF) this.adv('ev', 'bookshelf_comparator');
+  return r;
+};
+// Silk Touch on a bee nest with three bees
+const _playerBreakAD = Game.prototype.playerBreak;
+Game.prototype.playerBreak = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z), be = id === B.BEE_NEST ? w.getBE(x, y, z) : null, p = this.player;
+  const bees = be && Array.isArray(be.bees) ? be.bees.length : be && be.bees ? +be.bees : 0;
+  const silk = p && p.toolInfo && p.toolInfo().silk;
+  const r = _playerBreakAD.call(this, x, y, z);
+  if (id === B.BEE_NEST && silk && bees >= 3 && w.getBlock(x, y, z) !== id) this.adv('ev', 'silk_nest');
+  return r;
+};
+// a cured zombie villager
+const _zvTickAD = ZombieVillager.prototype.tick;
+ZombieVillager.prototype.tick = function () {
+  const curing = this.data.curing > 0 && this.data.curedBy === 'player';
+  const r = _zvTickAD.call(this);
+  if (curing && this.dead && !(this.data.curing > 0)) this.game.adv('ev', 'cure');
+  return r;
+};
+// opening a chest in a bastion (its loot is rolled the moment it is first looked into)
+const _openContainerAD = Game.prototype.openContainer;
+Game.prototype.openContainer = function (hit, use) {
+  const c = this.world.getChunk(hit.x >> 4, hit.z >> 4), raw = c && c.be && c.be.get((hit.y << 8) | ((hit.z & 15) << 4) | (hit.x & 15));
+  const table = raw && raw.loot;
+  const r = _openContainerAD.call(this, hit, use);
+  if (table && /^bastion/.test(table) && this.player && this.player.mode !== 3) this.adv('ev', 'loot_bastion');
+  return r;
+};
+// riding a strider with a warped fungus on a stick, and 50 blocks of Overworld lava under it
+const _riddenTickAD = Mob.prototype.riddenTick;
+Mob.prototype.riddenTick = function () {
+  const g = this.game, p = this.rider, ox = this.x, oz = this.z;
+  const r = _riddenTickAD.call(this);
+  if (this.type === 'strider' && p === g.player && p.held && p.held.id === I.WARPED_FUNGUS_ON_A_STICK) {
+    g.adv('ev', 'ride_strider');
+    if (g.world.dim === 'overworld' && (this.inLava || g.world.getBlock(Math.floor(this.x), Math.floor(this.y - 0.3), Math.floor(this.z)) === B.LAVA)) {
+      this._advCruise = (this._advCruise || 0) + Math.hypot(this.x - ox, this.z - oz);
+      if (this._advCruise >= 50) g.adv('ev', 'strider_cruise');
+    } else this._advCruise = 0;
+  }
+  return r;
+};
+// a few more that are easiest to watch for: a slide down honey, an allay coming back, a piglin taking gold
+const _gameTickAD2 = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const r = _gameTickAD2.call(this), w = this.world, p = this.player;
+  if (!w || !p || p.dead) return r;
+  if (!p.onGround && p.vy === -0.05 && [0, 1, 4, 5].some(f => w.getBlock(Math.floor(p.x + DX[f] * 0.4), Math.floor(p.y + 0.5), Math.floor(p.z + DZ[f] * 0.4)) === B.HONEY_BLOCK)) this.adv('ev', 'honey_slide');
+  if (w.tick % 4 === 2) for (const e of this.entities) {
+    if (e.type === 'allay' && !e.dead) { if (e._advHeld && !e.data.holding && e.distTo(p) < 4) this.adv('ev', 'allay_deliver'); e._advHeld = !!e.data.holding; }
+    else if (e.type === 'piglin' && !e.dead) { const a = e.data.admire > 0; if (a && !e._advAdmire && e.distTo(p) < 16) this.adv('ev', 'piglin_gold'); e._advAdmire = a; }
+  }
+  return r;
+};
+
+/* ---------------- the save and /advancement ---------------- */
+const _playerDataAD = Game.prototype.playerData;
+Game.prototype.playerData = function () { const d = _playerDataAD.call(this), p = this.player; if (p.adv) d.adv = p.adv; return d; };
+const _startWorldAD = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) {
+  const r = _startWorldAD.call(this, meta, saved), s = meta.player, p = this.player;
+  if (p && s && s.adv) p.adv = s.adv;
+  this.ui.advOpen = false;
+  return r;
+};
+COMMAND_NAMES.push('advancement'); COMMAND_NAMES.sort();
+const _onChatAD = Game.prototype.onChat;
+Game.prototype.onChat = function (msg) {
+  const m = typeof msg === 'string' && /^\/advancement(?:\s+(\S+))?(?:\s+(@\w))?(?:\s+(\S+))?(?:\s+(\S+))?\s*$/i.exec(msg.trim());
+  if (!m || !this.world || !this.player || !this.cheatsOn()) return _onChatAD.call(this, msg);
+  const bad = t => this.ui.chat(t, '#ff5555'), say = t => this.ui.chat(t, '#ccc');
+  const act = (m[1] || '').toLowerCase(), mode = (m[3] || '').toLowerCase(), id = (m[4] || '').replace(/^minecraft:/, ''), p = this.player;
+  if ((act !== 'grant' && act !== 'revoke') || !['everything', 'only', 'from', 'through', 'until'].includes(mode)) return bad('Usage: /advancement <grant|revoke> @s <everything|only|from|through|until> [advancement]');
+  let list;
+  if (mode === 'everything') list = [...ADV_BY_ID.values()];
+  else {
+    const a = ADV_BY_ID.get(id);
+    if (!a) return bad('Unknown advancement: ' + (m[4] || ''));
+    const down = x => [x, ...x.children.flatMap(down)], up = x => x.parent ? [...up(ADV_BY_ID.get(x.parent)), x] : [x];
+    list = mode === 'only' ? [a] : mode === 'from' ? down(a) : mode === 'until' ? up(a) : [...new Set([...up(a), ...down(a)])];
+  }
+  let n = 0;
+  for (const a of list) {
+    if (act === 'grant') { if (p.advDone(a.id)) continue; for (const c of Object.keys(a.crit)) this.advGrant(a, c, true); if (p.advDone(a.id)) { n++; this.advAnnounce(a); } }
+    else if (p.adv && p.adv[a.id] && (p.adv[a.id].done || Object.keys(p.adv[a.id].c).length)) { delete p.adv[a.id]; n++; }
+  }
+  if (!n) return bad(act === 'grant' ? 'Couldn\'t grant advancements to Player as they already have them' : 'Couldn\'t revoke advancements from Player as they don\'t have them');
+  say(list.length === 1 ? (act === 'grant' ? 'Granted the advancement [' + list[0].title + '] to Player' : 'Revoked the advancement [' + list[0].title + '] from Player') : (act === 'grant' ? 'Granted ' + n + ' advancements to Player' : 'Revoked ' + n + ' advancements from Player'));
+  if (this.ui.advOpen) this.ui.advRefresh();
+};
+
+/* ---------------- F3 shortcuts ---------------- */
+// KeyboardHandler.handleDebugKeys: B hitboxes, G chunk borders, H advanced tooltips, D clear chat, A reload chunks,
+// T reload resource packs, C copy the location, I copy the block you look at, Q this list
+if (OPTIONS.advTooltips === undefined) OPTIONS.advTooltips = false;
+const F3_HELP = ['F3 + A = Reload chunks', 'F3 + B = Show hitboxes', 'F3 + C = Copy location as /tp command', 'F3 + D = Clear chat', 'F3 + G = Show chunk boundaries',
+  'F3 + H = Advanced tooltips', 'F3 + I = Copy block data to clipboard', 'F3 + N = Cycle previous gamemode <-> spectator', 'F3 + Q = Show this list', 'F3 + T = Reload resource packs', 'F3 + F4 = Open game mode switcher'];
+const copyText = t => { try { navigator.clipboard.writeText(t); } catch (e) { } };
+window.addEventListener('keydown', e => {
+  const g = window.game;
+  if (!g || !g.f3Down || g.state !== 'playing' || e.repeat || g.ui.chatOpen) return;
+  const k = e.code, fb = m => debugFeedback(g, m);
+  if (!['KeyA', 'KeyB', 'KeyC', 'KeyD', 'KeyG', 'KeyH', 'KeyI', 'KeyQ', 'KeyT'].includes(k)) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  g.f3Used = true;
+  const p = g.player, w = g.world;
+  switch (k) {
+    case 'KeyB': g.showHitboxes = !g.showHitboxes; fb('Hitboxes: ' + (g.showHitboxes ? 'shown' : 'hidden')); break;
+    case 'KeyG': g.showChunkBorders = !g.showChunkBorders; fb('Chunk borders: ' + (g.showChunkBorders ? 'shown' : 'hidden')); break;
+    case 'KeyH': OPTIONS.advTooltips = !OPTIONS.advTooltips; saveOptions(); fb('Advanced tooltips: ' + (OPTIONS.advTooltips ? 'shown' : 'hidden')); break;
+    case 'KeyD': $('chat').innerHTML = ''; break;
+    case 'KeyA': for (const c of w.chunks.values()) c.dirty.fill(1); g.meshDirtyList = true; fb('Reloading all chunks'); break;
+    case 'KeyT': if (typeof PACKS !== 'undefined' && PACKS.apply) PACKS.apply(); fb('Reloaded resource packs'); break;
+    case 'KeyC': {
+      const dimId = { overworld: 'minecraft:overworld', nether: 'minecraft:the_nether', end: 'minecraft:the_end' }[w.dim];
+      copyText(`/execute in ${dimId} run tp @s ${p.x.toFixed(2)} ${(p.y - w.yOff).toFixed(2)} ${p.z.toFixed(2)} ${(((-p.yaw * 180 / Math.PI) + 540) % 360 - 180).toFixed(2)} ${(-p.pitch * 180 / Math.PI).toFixed(2)}`);
+      fb('Copied location to clipboard'); break;
+    }
+    case 'KeyI': {
+      const t = g.target;
+      if (t) { copyText(`/setblock ${t.x} ${t.y - w.yOff} ${t.z} minecraft:${BLK[t.id].name}`); fb('Copied client-side block data to clipboard'); }
+      break;
+    }
+    case 'KeyQ': fb('Key bindings:'); for (const l of F3_HELP) g.ui.chat(l, '#fff'); break;
+  }
+}, true);
+// advanced tooltips: the item's id, and what is left of its durability
+const _tooltipLinesAD = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesAD(st);
+  if (!OPTIONS.advTooltips || !st || !ITEMS[st.id]) return out;
+  const it = ITEMS[st.id];
+  if (it.dur && st.dmg) out.push(['Durability: ' + (it.dur - st.dmg) + ' / ' + it.dur, '#ffffff']);
+  out.push(['minecraft:' + it.name, '#555555']);
+  return out;
+};
+// the lines: hitboxes (white boxes, the eye height in red, where they look in blue) and the chunk's borders
+const _renderSpawnerMobsF3 = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) {
+  if (_renderSpawnerMobsF3) _renderSpawnerMobsF3.call(this, r, alpha);
+  if (!this.showHitboxes && !this.showChunkBorders) return;
+  const o = r.org || [0, 0, 0], p = this.player, w = this.world;
+  if (this.showHitboxes) {
+    const box = [], eyes = [], looks = [];
+    const add = (L, x0, y0, z0, x1, y1, z1) => {
+      const P = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
+      for (const [a, c] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) L.push(P[a][0] - o[0], P[a][1] - o[1], P[a][2] - o[2], P[c][0] - o[0], P[c][1] - o[1], P[c][2] - o[2]);
+    };
+    for (const e of this.entities) {
+      if (e.dead || (e.w === undefined)) continue;
+      const q = e.ipos ? e.ipos(alpha) : [e.x, e.y, e.z];
+      if (Math.abs(q[0] - o[0]) > 64 || Math.abs(q[2] - o[2]) > 64) continue;
+      const hw = e.w / 2, h = e.h || 0.25;
+      add(box, q[0] - hw, q[1], q[2] - hw, q[0] + hw, q[1] + h, q[2] + hw);
+      if (e instanceof Mob) {
+        const ey = q[1] + (e.eyeY ? e.eyeY() - e.y : h * 0.85);
+        add(eyes, q[0] - hw, ey - 0.01, q[2] - hw, q[0] + hw, ey + 0.01, q[2] + hw);
+        const yaw = (e.bodyYaw || 0) + (e.headYaw || 0), pitch = e.headPitch || 0, d = [Math.sin(yaw) * Math.cos(pitch) * 2, -Math.sin(pitch) * 2, Math.cos(yaw) * Math.cos(pitch) * 2];
+        looks.push(q[0] - o[0], ey - o[1], q[2] - o[2], q[0] + d[0] - o[0], ey + d[1] - o[1], q[2] + d[2] - o[2]);
+      }
+    }
+    if (this.thirdPerson && p) { const q = p.ipos(alpha); add(box, q[0] - 0.3, q[1], q[2] - 0.3, q[0] + 0.3, q[1] + p.h, q[2] + 0.3); }
+    if (box.length) r.drawLines(box, [1, 1, 1, 1]);
+    if (eyes.length) r.drawLines(eyes, [1, 0, 0, 1]);
+    if (looks.length) r.drawLines(looks, [0, 0, 1, 1]);
+  }
+  if (this.showChunkBorders && p) {
+    const cx = Math.floor(p.x) >> 4, cz = Math.floor(p.z) >> 4, X = cx * 16, Z = cz * 16, py = Math.floor(p.y), lo = w.dim === 'overworld' ? 0 : 0, hi = CH_H;
+    const red = [], yellow = [], blue = [], L = (A, x0, y0, z0, x1, y1, z1) => A.push(x0 - o[0], y0 - o[1], z0 - o[2], x1 - o[0], y1 - o[1], z1 - o[2]);
+    for (let dx = -16; dx <= 32; dx += 16) for (let dz = -16; dz <= 32; dz += 16) if (dx < 0 || dx > 16 || dz < 0 || dz > 16) L(red, X + dx, lo, Z + dz, X + dx, hi, Z + dz);
+    for (let k = 0; k <= 16; k += 2) { L(yellow, X + k, lo, Z, X + k, hi, Z); L(yellow, X + k, lo, Z + 16, X + k, hi, Z + 16); L(yellow, X, lo, Z + k, X, hi, Z + k); L(yellow, X + 16, lo, Z + k, X + 16, hi, Z + k); }
+    for (let y = Math.max(lo, py - 32) & ~1; y <= Math.min(hi, py + 32); y += 2) {
+      const A = (y - (w.yOff || 0)) % 16 === 0 ? blue : yellow;
+      L(A, X, y, Z, X + 16, y, Z); L(A, X + 16, y, Z, X + 16, y, Z + 16); L(A, X + 16, y, Z + 16, X, y, Z + 16); L(A, X, y, Z + 16, X, y, Z);
+    }
+    r.drawLines(red, [1, 0, 0, 1]); r.drawLines(yellow, [1, 1, 0, 1]); r.drawLines(blue, [0.25, 0.25, 1, 1]);
+  }
+};
+
+// a pot made of four sherds
+const _takeOutputAD = UI.prototype.takeOutput;
+UI.prototype.takeOutput = function (shift, btn) {
+  const res = this.getSlot('out', 0), r = _takeOutputAD.call(this, shift, btn);
+  if (res && res.id === I.DECORATED_POT && res.tag && Array.isArray(res.tag.sherds) && res.tag.sherds.length === 4 && res.tag.sherds.every(n => n !== 'brick') && this.getSlot('out', 0) !== res) this.game.adv('ev', 'sherd_pot');
+  return r;
+};
+// Allay: a note block played nearby is where it brings things for the next 30 seconds
+const _playNoteAD = Game.prototype.playNote;
+Game.prototype.playNote = function (x, y, z) {
+  const r = _playNoteAD.call(this, x, y, z);
+  for (const m of this.entities) if (m.type === 'allay' && !m.dead && m.data.liked && Math.hypot(m.x - x - 0.5, m.y - y, m.z - z - 0.5) < 16) { m.data.noteBlock = [x, y, z]; m.data.noteT = 600; }
+  return r;
+};
+const _allayGoalAD = GOALS.allay;
+GOALS.allay = function (m) {
+  const nb = m.data.noteBlock;
+  if (nb && m.data.noteT > 0 && m.game.world.getBlock(nb[0], nb[1], nb[2]) === B.NOTE_BLOCK) {
+    m.data.noteT--;
+    if (m.data.holding) {
+      const dx = nb[0] + 0.5 - m.x, dy = nb[1] + 1.5 - m.y, dz = nb[2] + 0.5 - m.z, l = Math.hypot(dx, dy, dz) || 1;
+      m.move = [dx / l, dz / l, m.T.run, false, dy / l];
+      if (l < 2.2) {
+        const st = m.data.holding, g = m.game;
+        g.dropItem(nb[0] + 0.5, nb[1] + 1.2, nb[2] + 0.5, st); m.data.holding = null;
+        if (st.id === I.CAKE && g.player && m.distTo(g.player) < 64) g.adv('ev', 'allay_cake');
+      }
+      return true;
+    }
+  } else if (nb) { m.data.noteBlock = null; m.data.noteT = 0; }
+  return _allayGoalAD.call(this, m);
+};
+
+/* @file 127_statistics.js */
+/* ===================================================================
+   STATISTICS — Java Edition's counters: the general ones (time played,
+   distances by every way of moving, jumps, damage, deaths, kills,
+   workstations used...), each block mined, each item crafted, used,
+   broken, picked up and dropped, each mob killed and killed by; the
+   Statistics screen from the pause menu
+   =================================================================== */
+// [key, name, unit] in the order of the General tab
+const STAT_GENERAL = [
+  ['leave_game', 'Games Quit'], ['play_time', 'Time Played', 'time'], ['total_world_time', 'Time with World Open', 'time'], ['time_since_death', 'Time Since Last Death', 'time'],
+  ['time_since_rest', 'Time Since Last Rest', 'time'], ['sneak_time', 'Sneak Time', 'time'], ['walk_one_cm', 'Distance Walked', 'dist'], ['crouch_one_cm', 'Distance Crouched', 'dist'],
+  ['sprint_one_cm', 'Distance Sprinted', 'dist'], ['walk_on_water_one_cm', 'Distance Walked on Water', 'dist'], ['fall_one_cm', 'Distance Fallen', 'dist'], ['climb_one_cm', 'Distance Climbed', 'dist'],
+  ['fly_one_cm', 'Distance Flown', 'dist'], ['walk_under_water_one_cm', 'Distance Walked under Water', 'dist'], ['minecart_one_cm', 'Distance by Minecart', 'dist'], ['boat_one_cm', 'Distance by Boat', 'dist'],
+  ['pig_one_cm', 'Distance by Pig', 'dist'], ['horse_one_cm', 'Distance by Horse', 'dist'], ['aviate_one_cm', 'Distance by Elytra', 'dist'], ['swim_one_cm', 'Distance Swum', 'dist'],
+  ['strider_one_cm', 'Distance by Strider', 'dist'], ['jump', 'Jumps'], ['drop', 'Items Dropped'], ['damage_dealt', 'Damage Dealt', 'dmg'], ['damage_taken', 'Damage Taken', 'dmg'],
+  ['damage_blocked_by_shield', 'Damage Blocked by Shield', 'dmg'], ['deaths', 'Number of Deaths'], ['mob_kills', 'Mob Kills'], ['animals_bred', 'Animals Bred'], ['fish_caught', 'Fish Caught'],
+  ['talked_to_villager', 'Talked to Villagers'], ['traded_with_villager', 'Traded with Villagers'], ['eat_cake_slice', 'Cake Slices Eaten'], ['fill_cauldron', 'Cauldrons Filled'],
+  ['use_cauldron', 'Water Taken from Cauldron'], ['enchant_item', 'Items Enchanted'], ['play_noteblock', 'Note Blocks Played'], ['tune_noteblock', 'Note Blocks Tuned'],
+  ['pot_flower', 'Plants Potted'], ['play_record', 'Music Discs Played'], ['sleep_in_bed', 'Times Slept in a Bed'], ['open_chest', 'Chests Opened'], ['open_barrel', 'Barrels Opened'],
+  ['open_enderchest', 'Ender Chests Opened'], ['open_shulker_box', 'Shulker Boxes Opened'], ['inspect_dispenser', 'Dispensers Searched'], ['inspect_dropper', 'Droppers Searched'],
+  ['inspect_hopper', 'Hoppers Searched'], ['interact_with_crafting_table', 'Interactions with Crafting Table'], ['interact_with_furnace', 'Interactions with Furnace'],
+  ['interact_with_blast_furnace', 'Interactions with Blast Furnace'], ['interact_with_smoker', 'Interactions with Smoker'], ['interact_with_brewingstand', 'Interactions with Brewing Stand'],
+  ['interact_with_anvil', 'Interactions with Anvil'], ['interact_with_grindstone', 'Interactions with Grindstone'], ['interact_with_stonecutter', 'Interactions with Stonecutter'],
+  ['interact_with_smithing_table', 'Interactions with Smithing Table'], ['interact_with_loom', 'Interactions with Loom'], ['interact_with_cartography_table', 'Interactions with Cartography Table'],
+  ['interact_with_beacon', 'Interactions with Beacon'], ['interact_with_lectern', 'Interactions with Lectern'], ['bell_ring', 'Bells Rung'], ['raid_trigger', 'Raids Triggered'], ['raid_win', 'Raids Won'],
+  ['target_hit', 'Targets Hit'],
+];
+const STAT_OPEN = { chest: 'open_chest', barrel: 'open_barrel', shulker: 'open_shulker_box', ender_chest: 'open_enderchest', dispenser: 'inspect_dispenser', dropper: 'inspect_dropper', hopper: 'inspect_hopper',
+  craft: 'interact_with_crafting_table', furnace: 'interact_with_furnace', blast_furnace: 'interact_with_blast_furnace', smoker: 'interact_with_smoker', brewing: 'interact_with_brewingstand',
+  anvil: 'interact_with_anvil', grindstone: 'interact_with_grindstone', stonecutter: 'interact_with_stonecutter', smithing: 'interact_with_smithing_table', loom: 'interact_with_loom',
+  cartography: 'interact_with_cartography_table', beacon: 'interact_with_beacon', lectern: 'interact_with_lectern' };
+Player.prototype.stat = function (key, n) { if (!this.stats) this.stats = {}; this.stats[key] = (this.stats[key] || 0) + (n === undefined ? 1 : n); };
+Player.prototype.statOf = function (key) { return (this.stats && this.stats[key]) || 0; };
+// per item and per mob: 'mined:stone', 'crafted:stick', 'used:bow', 'broken:iron_pickaxe', 'picked_up:dirt', 'dropped:dirt', 'killed:zombie', 'killed_by:zombie'
+const statItem = (kind, id) => kind + ':' + (ITEMS[id] ? ITEMS[id].name : id);
+
+/* ---------------- counting ---------------- */
+const _playerTickST = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const g = this.game, ox = this.x, oy = this.y, oz = this.z, wasGround = this.onGround;
+  const r = _playerTickST.call(this, inp);
+  if (this !== g.player || this.dead) return r;
+  this.stat('play_time'); this.stat('total_world_time'); this.stat('time_since_death');
+  if (!g.sleeping) this.stat('time_since_rest');
+  if (this.sneaking) this.stat('sneak_time');
+  // StatisticsCounter.checkMovementStatistics, in centimetres
+  const dh = Math.round(Math.hypot(this.x - ox, this.z - oz) * 100), dy = this.y - oy, rid = this.riding;
+  if (rid) {
+    const k = rid.type === 'minecart' ? 'minecart_one_cm' : rid.type === 'boat' || rid.type === 'chest_boat' ? 'boat_one_cm' : rid.type === 'pig' ? 'pig_one_cm' : rid.type === 'strider' ? 'strider_one_cm' : 'horse_one_cm';
+    const d = Math.round(Math.hypot(this.x - ox, dy, this.z - oz) * 100); if (d > 0) this.stat(k, d);
+  } else if (this.gliding) { const d = Math.round(Math.hypot(this.x - ox, dy, this.z - oz) * 100); if (d > 0) this.stat('aviate_one_cm', d); }
+  else if (this.headInWater && this.inWater) { if (dh > 0) this.stat(this.onGround ? 'walk_under_water_one_cm' : 'swim_one_cm', dh); }
+  else if (this.inWater) { if (dh > 0) this.stat('walk_on_water_one_cm', dh); }
+  else if (this.flying || this.mode === 3) { if (dh > 0) this.stat('fly_one_cm', dh); }
+  else if (this.onGround) { if (dh > 0) this.stat(this.sneaking ? 'crouch_one_cm' : this.sprinting ? 'sprint_one_cm' : 'walk_one_cm', dh); }
+  else if (dy > 0 && Math.abs(this.vx) < 0.2 && BLK[g.world.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z))].climb) this.stat('climb_one_cm', Math.round(dy * 100));
+  else if (dy < 0) this.stat('fall_one_cm', Math.round(-dy * 100));
+  if (wasGround && !this.onGround && this.vy > 0.3 && !this.flying && !rid) this.stat('jump');
+  return r;
+};
+const _hurtMobST = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const h0 = this.health, r = _hurtMobST.call(this, amount, source, attacker), p = this.game.player;
+  if (r && p && attacker === p) p.stat('damage_dealt', Math.round(Math.max(0, h0 - Math.max(0, this.health)) * 10));
+  return r;
+};
+const _hurtPlayerST = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  const h0 = this.health + (this.absorb || 0), r = _hurtPlayerST.call(this, amount, source, attacker);
+  if (r) this.stat('damage_taken', Math.round(Math.max(0, h0 - Math.max(0, this.health) - (this.absorb || 0)) * 10));
+  else if (attacker && this.blocking && this.blocking()) this.stat('damage_blocked_by_shield', Math.round(amount * 10));
+  return r;
+};
+const _dieST = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  const fresh = this.deathTime === 0, r = _dieST.call(this, source, attacker), p = this.game.player;
+  if (fresh && p && this.killedByPlayer) { p.stat('mob_kills'); p.stat('killed:' + this.type); }
+  return r;
+};
+const _onDeathST = Game.prototype.onDeath;
+Game.prototype.onDeath = function (source, silent) {
+  const p = this.player;
+  if (p && !silent) { p.stat('deaths'); if (MOB_TYPES[source]) p.stat('killed_by:' + source); if (p.stats) { p.stats.time_since_death = 0; p.stats.time_since_rest = 0; } }
+  return _onDeathST.call(this, source, silent);
+};
+// mined, used, crafted, broken, picked up, dropped
+const _playerBreakST = Game.prototype.playerBreak;
+Game.prototype.playerBreak = function (x, y, z) {
+  const id = this.world.getBlock(x, y, z), r = _playerBreakST.call(this, x, y, z);
+  if (id && this.world.getBlock(x, y, z) !== id && this.player) this.player.stat('mined:' + BLK[id].name);
+  return r;
+};
+const _useItemST = Game.prototype.useItem;
+Game.prototype.useItem = function (p, hit, ent) {
+  const held = p && p.held, id = held && held.id, r = _useItemST.call(this, p, hit, ent);
+  if (r && id && p === this.player) p.stat(statItem('used', id));
+  return r;
+};
+const _finishUseST = Player.prototype.finishUse;
+Player.prototype.finishUse = function (u, st) { const id = st && st.id, r = _finishUseST.call(this, u, st); if (id && this === this.game.player) this.stat(statItem('used', id)); return r; };
+const _wearST = Player.prototype.wear;
+Player.prototype.wear = function (st, amount) { const id = st && st.id, r = _wearST.call(this, st, amount); if (st && !r && this === this.game.player) this.stat(statItem('broken', id)); return r; };
+const _takeOutputST = UI.prototype.takeOutput;
+UI.prototype.takeOutput = function (shift, btn) {
+  const res = this.getSlot('out', 0), g = this.game;
+  g._stCraft = res ? [res.id, res.count] : null;
+  try { return _takeOutputST.call(this, shift, btn); } finally { g._stCraft = null; }
+};
+const _onCraftedST = Game.prototype.onCrafted;
+Game.prototype.onCrafted = function (type, n) {
+  if (_onCraftedST) _onCraftedST.call(this, type, n);
+  const c = this._stCraft, p = this.player;
+  if (c && p && type !== 'anvil' && type !== 'grindstone') p.stat(statItem('crafted', c[0]), c[1] * n);
+};
+const _addItemST = Player.prototype.addItem;
+Player.prototype.addItem = function (stack) {
+  const left = _addItemST.call(this, stack);
+  if (this._stPickup && stack && stack.count > left) this.stat(statItem('picked_up', stack.id), stack.count - left);
+  return left;
+};
+// (the pick up loop is in Player.tick: mark it so only real pickups count)
+const _playerTickST2 = Player.prototype.tick;
+Player.prototype.tick = function (inp) { this._stPickup = this === this.game.player; try { return _playerTickST2.call(this, inp); } finally { this._stPickup = false; } };
+const _dropHeldST = Game.prototype.dropHeld;
+Game.prototype.dropHeld = function (all) {
+  const p = this.player, h = p && p.held, c0 = h ? h.count : 0, r = _dropHeldST.call(this, all);
+  const left = h && p.inv[p.sel] === h ? h.count : 0;
+  if (h && c0 > left) { p.stat('drop'); p.stat(statItem('dropped', h.id), c0 - left); }
+  return r;
+};
+// the rest come from what the player does
+const _openInvST = UI.prototype.openInv;
+UI.prototype.openInv = function (type, data) { const p = this.game.player; if (p && STAT_OPEN[type] && p.mode !== 3) p.stat(STAT_OPEN[type]); return _openInvST.call(this, type, data); };
+const _useBlockST = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const w = this.world, id = hit.id, m0 = w.getMeta(hit.x, hit.y, hit.z), hid = held ? held.id : 0, r = _useBlockST.call(this, p, hit, held);
+  if (!r || p !== this.player) return r;
+  if (id === B.CAKE) p.stat('eat_cake_slice');
+  else if (id === B.NOTE_BLOCK) p.stat('tune_noteblock');
+  else if (id === B.FLOWER_POT && !m0) p.stat('pot_flower');
+  else if (id === B.JUKEBOX && ITEMS[hid] && ITEMS[hid].disc) p.stat('play_record');
+  else if (id === B.CAULDRON) { if (hid === I.WATER_BUCKET || hid === I.LAVA_BUCKET || hid === I.POWDER_SNOW_BUCKET || hid === I.POTION) p.stat('fill_cauldron'); else if (hid === I.BUCKET || hid === I.GLASS_BOTTLE) p.stat('use_cauldron'); }
+  else if (id === B.BELL) p.stat('bell_ring');
+  return r;
+};
+const _tryToSleepST = Game.prototype.tryToSleep;
+Game.prototype.tryToSleep = function (p, hit) { const r = _tryToSleepST.call(this, p, hit); if (this.sleeping > 0 && this.player) { this.player.stat('sleep_in_bed'); if (this.player.stats) this.player.stats.time_since_rest = 0; } return r; };
+const _advST = Game.prototype.adv;
+Game.prototype.adv = function (type, ...args) {
+  const p = this.player;
+  if (p && type === 'breed') p.stat('animals_bred');
+  if (p && type === 'ev') {
+    const k = { fish: 'fish_caught', trade: 'traded_with_villager', enchant: 'enchant_item', raid_win: 'raid_win' }[args[0]];
+    if (k) p.stat(k);
+  }
+  return _advST.call(this, type, ...args);
+};
+const _quitST = Game.prototype.quitToTitle;
+Game.prototype.quitToTitle = function () { if (this.player) this.player.stat('leave_game'); return _quitST.call(this); };
+
+/* ---------------- the Statistics screen ---------------- */
+const fmtStat = (v, unit) => {
+  if (unit === 'time') { const s = v / 20; return s < 60 ? s.toFixed(2) + ' s' : s < 3600 ? (s / 60).toFixed(2) + ' min' : s < 86400 ? (s / 3600).toFixed(2) + ' h' : s < 31536000 ? (s / 86400).toFixed(2) + ' d' : (s / 31536000).toFixed(2) + ' y'; }
+  if (unit === 'dist') { const m = v / 100; return m < 0.5 ? v + ' cm' : m < 500 ? m.toFixed(2) + ' m' : (m / 1000).toFixed(2) + ' km'; }
+  if (unit === 'dmg') return (v / 10).toFixed(1) === Math.round(v / 10).toFixed(1) ? String(Math.round(v / 10)) : (v / 10).toFixed(1);
+  return String(v);
+};
+UI.prototype.openStatistics = function (tab) {
+  const g = this.game, p = g.player;
+  if (!p) return;
+  let scr = $('scr-stats');
+  if (!scr) { scr = el('div', 'screen dirt hidden'); scr.id = 'scr-stats'; document.body.appendChild(scr); }
+  this.statTab = tab || this.statTab || 'general';
+  scr.innerHTML = '';
+  scr.appendChild(el('div', 'h1', 'Statistics'));
+  const list = el('div');
+  list.style.cssText = 'width:min(720px,94vw);height:58vh;overflow-y:auto;background:rgba(0,0,0,.5);padding:6px 14px;box-sizing:border-box;color:#fff;font-size:16px';
+  const S = p.stats || {};
+  if (this.statTab === 'general') {
+    for (const [k, name, unit] of STAT_GENERAL) {
+      const row = el('div'); row.style.cssText = 'display:flex;justify-content:space-between;padding:2px 0';
+      row.innerHTML = `<span>${escapeHTML(name)}</span><span>${fmtStat(S[k] || 0, unit)}</span>`;
+      list.appendChild(row);
+    }
+  } else if (this.statTab === 'items') {
+    const cols = [['mined', 'Mined'], ['broken', 'Broken'], ['crafted', 'Crafted'], ['used', 'Used'], ['picked_up', 'Picked Up'], ['dropped', 'Dropped']];
+    const names = new Set();
+    for (const k in S) { const m = /^(mined|broken|crafted|used|picked_up|dropped):(.+)$/.exec(k); if (m) names.add(m[2]); }
+    const head = el('div'); head.style.cssText = 'display:grid;grid-template-columns:40px repeat(6,1fr);gap:4px;color:#aaa;padding-bottom:4px';
+    head.innerHTML = '<span></span>' + cols.map(c => `<span style="text-align:right">${c[1]}</span>`).join('');
+    list.appendChild(head);
+    if (!names.size) { const e = el('div', '', 'No statistics yet'); e.style.cssText = 'color:#aaa;text-align:center;padding:20px'; list.appendChild(e); }
+    for (const n of [...names].sort()) {
+      const id = ITEM_BY_NAME[n] ? ITEM_BY_NAME[n].id : B[n.toUpperCase()] !== undefined && ITEMS[B[n.toUpperCase()]] ? B[n.toUpperCase()] : null;
+      const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:40px repeat(6,1fr);gap:4px;align-items:center';
+      row.innerHTML = `<span>${id !== null ? `<img src="${iconFor(id)}" style="width:32px;height:32px;image-rendering:pixelated" title="${escapeHTML(ITEMS[id].display)}">` : ''}</span>` + cols.map(c => `<span style="text-align:right">${S[c[0] + ':' + n] || '-'}</span>`).join('');
+      list.appendChild(row);
+    }
+  } else {
+    const types = new Set();
+    for (const k in S) { const m = /^(killed|killed_by):(.+)$/.exec(k); if (m) types.add(m[2]); }
+    if (!types.size) { const e = el('div', '', 'No statistics yet'); e.style.cssText = 'color:#aaa;text-align:center;padding:20px'; list.appendChild(e); }
+    for (const t of [...types].sort()) {
+      const k = S['killed:' + t] || 0, b = S['killed_by:' + t] || 0, nm = mobName(t), row = el('div');
+      row.style.cssText = 'padding:4px 0;border-bottom:1px solid rgba(255,255,255,.1)';
+      row.innerHTML = `<div>${escapeHTML(nm)}</div><div style="color:#aaa">${k ? 'You killed ' + k + ' ' + escapeHTML(nm) : 'You have never killed ' + escapeHTML(nm)}</div><div style="color:#aaa">${b ? escapeHTML(nm) + ' killed you ' + b + ' time(s)' : 'You have never been killed by ' + escapeHTML(nm)}</div>`;
+      list.appendChild(row);
+    }
+  }
+  const tabs = el('div', 'row');
+  for (const [k, n] of [['general', 'General'], ['items', 'Items'], ['mobs', 'Mobs']]) {
+    const b = el('button', 'btn', n); b.style.width = '200px'; b.disabled = k === this.statTab;
+    b.onclick = () => { AUDIO.play('click'); this.openStatistics(k); };
+    tabs.appendChild(b);
+  }
+  const done = el('button', 'btn', 'Done');
+  done.onclick = () => { AUDIO.play('click'); this.show('scr-pause'); };
+  scr.appendChild(tabs); scr.appendChild(list); scr.appendChild(done);
+  this.show('scr-stats');
+};
+{
+  const b = document.createElement('button'); b.className = 'btn'; b.id = 'b-pstats'; b.textContent = 'Statistics';
+  const adv = document.getElementById('b-padv');
+  if (adv) adv.insertAdjacentElement('afterend', b);
+  b.addEventListener('click', () => { AUDIO.init(); AUDIO.play('click'); const g = window.game; if (g) g.ui.openStatistics('general'); });
+}
+document.addEventListener('keydown', e => { const g = window.game; if (g && g.ui.screen === 'scr-stats' && e.code === 'Escape') { e.preventDefault(); g.ui.show('scr-pause'); } });
+// the save
+const _playerDataST = Game.prototype.playerData;
+Game.prototype.playerData = function () { const d = _playerDataST.call(this), p = this.player; if (p.stats) d.stats = p.stats; return d; };
+const _startWorldST = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) { const r = _startWorldST.call(this, meta, saved), s = meta.player, p = this.player; if (p && s && s.stats) p.stats = s.stats; return r; };
 
 </script>
 </body>

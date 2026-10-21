@@ -43,6 +43,9 @@ terrain style; new worlds get Java Edition's terrain, see [Terrain](#java-editio
 | T or / | Chat and commands (Tab completes command names and arguments) |
 | F1 / F2 / F3 / F5 | Hide HUD / screenshot / debug screen / camera perspective |
 | F3+N / F3+F4 | Switch to spectator mode and back / the game mode switcher (hold F3, press F4 to pick, let go of F3); both need Allow Commands |
+| F3+B / F3+G / F3+H | Hitboxes / chunk borders / advanced tooltips (item ids and durability) |
+| F3+C / F3+I / F3+D / F3+A / F3+T / F3+Q | Copy your location as a /tp command / copy the block you look at / clear the chat / reload chunks / reload resource packs / list these |
+| L | Advancements |
 | Esc | Pause menu |
 
 In inventories: shift-click moves a stack across, right-click takes half a stack or places one
@@ -67,6 +70,7 @@ place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots
 | `/gamemode survival\|creative\|adventure\|spectator` | Switch game mode |
 | `/defaultgamemode <mode>` | The world's default game mode |
 | `/recipe give\|take @s <item\|*>` | Unlock or lock recipes in the recipe book |
+| `/advancement grant\|revoke @s everything\|only\|from\|through\|until [advancement]` | Give or take advancements (ids like `story/mine_diamond`) |
 | `/time set day\|noon\|night\|midnight\|<n>`, `/time add <n>` | Change the time |
 | `/weather clear\|rain\|thunder` | Change the weather |
 | `/tp <x> <y> <z>` | Teleport (`~` means relative) |
@@ -201,6 +205,18 @@ block-for-block like Java Edition, and worlds made before this version keep thei
 - Each world keeps its own **difficulty** (the Options setting changes the world you are in;
   on the title screen it is the one new worlds start with). The death screen shows your score
   (the experience collected since your last death).
+
+### Advancements and statistics
+
+- **Advancements**: the 121 advancements of Java Edition 1.21 in its five tabs (the story, the
+  Nether, the End, adventure, husbandry), with vanilla's goals, tree, frames (task, goal,
+  challenge), hidden ones and experience rewards, described in our own words. Each one pops up as
+  a toast and in the chat (`announceAdvancements`); **L** or the pause menu opens the screen with
+  the trees, tooltips and progress (5/53 biomes and so on).
+- **Statistics** (pause menu): time played, distances walked, sprinted, swum, flown, fallen and
+  ridden, jumps, damage dealt and taken, deaths, kills, animals bred, fish caught, trades,
+  workstations used and the rest of the General tab; each block mined and item crafted, used,
+  broken, picked up and dropped; each mob killed and killed by. Kept in the save.
 
 ### Mobs
 
