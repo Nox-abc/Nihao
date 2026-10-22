@@ -12260,6 +12260,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
   const baby = st && st.baby;
   if (baby && def.babyHead) for (const n of def.babyHead) P[n + '#s'] = (P[n + '#s'] || 1) * 1.5;
   const s = (def.scale || 1) * (scale || 1) * (baby ? 0.5 : 1) / 16, cy = Math.cos(yaw), sy = Math.sin(yaw), ct = Math.cos(tilt || 0), stl = Math.sin(tilt || 0);
+  const sxz = st && st.sxz || 1, ssy = st && st.sy || 1;
   // a swimming or crawling player lies flat (PlayerRenderer.setupRotations): lowered, then turned about the X axis
   const sw = st && st.swimRot ? [Math.cos(st.swimRot), Math.sin(st.swimRot), st.swimShift || 0, 0.3 * (st.swimShift || 0)] : null;
   const mats = {};
@@ -12279,7 +12280,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
       const xf = q => {
         const X = M[0] * q[0] + M[1] * q[1] + M[2] * q[2] + M[9], Y = M[3] * q[0] + M[4] * q[1] + M[5] * q[2] + M[10], Z = M[6] * q[0] + M[7] * q[1] + M[8] * q[2] + M[11];
         // model space (y down, front -z) -> entity space (y up, front +z)
-        let ex = X * s, ey = (24 - Y) * s, ez = -Z * s;
+        let ex = X * s * sxz, ey = (24 - Y) * s * ssy, ez = -Z * s * sxz;
         if (sw) { ey -= sw[2]; ez -= sw[3]; const ty = ey * sw[0] - ez * sw[1], tz = ey * sw[1] + ez * sw[0]; ey = ty; ez = tz; }
         if (tilt) { const tx = ex * ct - ey * stl, ty = ex * stl + ey * ct; ex = tx; ey = ty; }
         return [pos[0] + ex * cy + ez * sy, pos[1] + ey, pos[2] - ex * sy + ez * cy];
@@ -12293,7 +12294,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
     const M = name ? mats[name] : [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
     if (!M) return null;
     const X = M[0] * q[0] + M[1] * q[1] + M[2] * q[2] + M[9], Y = M[3] * q[0] + M[4] * q[1] + M[5] * q[2] + M[10], Z = M[6] * q[0] + M[7] * q[1] + M[8] * q[2] + M[11];
-    let ex = X * s, ey = (24 - Y) * s, ez = -Z * s;
+    let ex = X * s * sxz, ey = (24 - Y) * s * ssy, ez = -Z * s * sxz;
     if (sw) { ey -= sw[2]; ez -= sw[3]; const ty = ey * sw[0] - ez * sw[1], tz = ey * sw[1] + ez * sw[0]; ey = ty; ez = tz; }
     if (tilt) { const tx = ex * ct - ey * stl, ty = ex * stl + ey * ct; ex = tx; ey = ty; }
     return [pos[0] + ex * cy + ez * sy, pos[1] + ey, pos[2] - ex * sy + ez * cy];
@@ -14309,7 +14310,6 @@ class Mob extends Entity {
     let dmg = this.data.dmg || T.dmg;
     if (t instanceof Player) dmg = g.difficultyDmg(dmg);
     if (this.data.hand && ITEMS[this.data.hand.id] && ITEMS[this.data.hand.id].dmg) dmg += ITEMS[this.data.hand.id].dmg - 1;
-    if (this.type === 'slime' || this.type === 'magma_cube') dmg = (this.data.size || 1) * (this.type === 'magma_cube' ? 1 : 1) + (this.type === 'magma_cube' ? 1 : 0) - (this.data.size === 1 && this.type === 'slime' ? 1 : 0);
     this.attackAnim = 10;
     if (t.hurt(dmg, this.type, this)) {
       if (T.hitEffect && t.addEffect && OPTIONS.difficulty >= (T.hitEffect[0] === 'poison' ? 2 : 1)) t.addEffect(T.hitEffect[0], T.hitEffect[1] * (OPTIONS.difficulty === 3 ? 1.5 : 1), 0);
@@ -14533,9 +14533,15 @@ const GOALS = {
     const T = m.T, g = m.game, p = g.player;
     if (m.target) {
       const t = m.target, d = m.distTo(t);
-      if (d > T.follow * 1.3 || (t instanceof Player && (!t.survival || t.dead)) || t.dead || t.deathTime > 0) m.target = null;
+      // TargetGoal.canContinueToUse: within the follow range, and (mustSee) a player out of a monster's sight for 60 ticks is let go;
+      // like Java's target goals the sight check runs every other tick
+      if (d > T.follow || (t instanceof Player && (!t.survival || t.dead)) || t.dead || t.deathTime > 0) m.target = null;
       else if (T.neutral && m.anger <= 0 && t instanceof Player) m.target = null;
       else if (T.neutralDay && t instanceof Player && m.anger <= 0 && g.isDay() && m.lightLevel() > 11 && Math.random() < 0.01) m.target = null;
+      else if (T.cat === 'monster' && t instanceof Player && (m.age + m.id) % 2 === 0) {
+        if (m.canSee(t)) m._unseen = 0;
+        else if ((m._unseen = (m._unseen || 0) + 1) > 30) { m.target = null; m._unseen = 0; }
+      }
       if (m.target) return false;
     }
     if ((m.age + m.id) % 10) return false;
@@ -14553,7 +14559,7 @@ const GOALS = {
       if (p.sneaking) range *= 0.8;
       const head = p.armor[0] && p.armor[0].id;
       if ((m.type === 'zombie' && head === B.ZOMBIE_HEAD) || (m.type === 'skeleton' && head === B.SKELETON_SKULL) || (m.type === 'creeper' && head === B.CREEPER_HEAD)) range *= 0.5;
-      if (m.distTo(p) < range && (m.distTo(p) < 4 || m.canSee(p))) { m.target = p; return false; }
+      if (m.distTo(p) < range && m.canSee(p)) { m.target = p; m._unseen = 0; return false; }
     }
     // other mobs
     const want = T.attacks || [], hunt = T.hunts || [];
@@ -20439,6 +20445,7 @@ class Game {
       `Facing: ${facing} (${(((-p.yaw * 180 / Math.PI) + 540) % 360 - 180).toFixed(1)} / ${(-p.pitch * 180 / Math.PI).toFixed(1)})`,
       `Light: ${Math.max(l >> 4, l & 15)} (${l >> 4} sky, ${l & 15} block)`,
       `Biome: ${biome}`,
+      ...(this.localDifficultyLine ? [this.localDifficultyLine(x, z)] : []),
       `Dimension: ${w.dim}${p.portalTime > 0 ? '  (portal ' + p.portalTime + ')' : ''}`,
       `Day ${Math.floor(w.time / 24000)}, time ${w.time % 24000}${w.raining ? ', raining' : ''}`,
       `Seed: ${w.vanilla ? w.seed64 : w.seed}`,
@@ -20453,7 +20460,7 @@ class Game {
     if (this.targetEntity) right.push('Targeted Entity: ' + this.targetEntity.type, 'Health: ' + this.targetEntity.health.toFixed(1));
     // reducedDebugInfo: no coordinates
     const red = this.rule && this.rule('reducedDebugInfo');
-    $('debug').innerHTML = left.filter(s => !red || !/^(XYZ|Block|Chunk|Facing|Biome|Seed|Light)/.test(s)).map(s => s ? `<span>${escapeHTML(s)}</span>` : '').join('\n');
+    $('debug').innerHTML = left.filter(s => !red || !/^(XYZ|Block|Chunk|Facing|Biome|Seed|Light|Local)/.test(s)).map(s => s ? `<span>${escapeHTML(s)}</span>` : '').join('\n');
     $('debugR').innerHTML = (red ? right.slice(0, 4) : right).map(s => s ? `<span>${escapeHTML(s)}</span>` : '').join('\n');
   }
 }
@@ -22061,11 +22068,7 @@ Mob.prototype.die = function (source, attacker) {
   _mobDie.call(this, source, attacker);
   const g = this.game, T = this.T;
   if (g.world.dim === 'overworld' && T.xp && !this.baby && g.sculkBloom) g.sculkBloom(this.x, this.y, this.z, typeof T.xp === 'number' ? T.xp : T.xp[1]);
-  // slimes split
-  if ((this.type === 'slime' || this.type === 'magma_cube') && (this.data.size || 1) > 1) {
-    const n = 2 + Math.floor(Math.random() * 3), s = Math.floor(this.data.size / 2);
-    for (let k = 0; k < n; k++) { const m = createMob(g, this.type, this.x + (Math.random() - 0.5) * this.w, this.y + 0.5, this.z + (Math.random() - 0.5) * this.w, { size: s }); m.target = this.target; g.entities.push(m); }
-  }
+  // (slimes split when the body goes: Part 44)
   // skeletons that kill creepers: music discs
   if (this.type === 'creeper' && attacker instanceof Projectile === false && attacker && (attacker.type === 'skeleton' || attacker.type === 'stray' || attacker.type === 'bogged')) {
     const discs = DISCS.filter(d => !['pigstep', 'otherside', 'relic', '5', 'creator', 'creator_music_box', 'precipice'].includes(d));
@@ -41298,59 +41301,19 @@ Game.prototype.randomTick = function (x, y, z, id) {
   if (ok) this.spawnMob('zombified_piglin', x + 0.5, yy + 1, z + 0.5);
 };
 
-/* ===================================================================
-   Zombie.tick: 30 seconds with its eyes under water, then 15 seconds
-   shaking, and a zombie is a drowned (a husk a zombie). Skeleton.tick:
-   7 seconds in powder snow, then 15 shaking (still in it), and a
-   skeleton is a stray. They keep what they wear and hold
-   =================================================================== */
-function convertKeeping(m, type) {
-  const g = m.game, n = createMob(g, type, m.x, m.y, m.z, { loading: true });
-  if (!n) return null;
-  n.yaw = n.bodyYaw = m.yaw; n.growth = m.growth; n.persistent = m.persistent; if (m.customName) n.customName = m.customName;
-  for (const k of ['hand', 'hand2', 'armor', 'noAI', 'silent']) if (m.data[k] !== undefined) n.data[k] = m.data[k];
-  if (n.afterLoad) n.afterLoad();
-  n.vx = m.vx; n.vy = m.vy; n.vz = m.vz; n.savePrev();
-  g.entities.push(n); m.dead = true; m.removed = true;
-  return n;
-}
+// zombies drowning into drowned (husks into zombies) and skeletons freezing into strays: see Parts 41 and 42
 function inPowderSnow(m) {
   const w = m.game.world, x = Math.floor(m.x), z = Math.floor(m.z);
   for (let y = Math.floor(m.y); y <= Math.floor(m.y + m.h - 0.01); y++) if (w.getBlock(x, y, z) === B.POWDER_SNOW) return true;
   return false;
 }
-const _tickCV = Mob.prototype.tick;
-Mob.prototype.tick = function () {
-  const t = this.type;
-  if ((t === 'zombie' || t === 'husk' || t === 'skeleton') && !this.dead && !(this.deathTime > 0) && !this.data.noAI) {
-    const d = this.data, g = this.game;
-    if (t === 'skeleton') {
-      if (inPowderSnow(this)) {
-        if (d.freezeT !== undefined) { if (--d.freezeT < 0) { g.sound('stray_convert', this.x, this.y, this.z); convertKeeping(this, 'stray'); return; } }
-        else if ((d.snowT = (d.snowT === undefined ? -1 : d.snowT) + 1) >= 140) d.freezeT = 300;
-      } else { d.snowT = -1; delete d.freezeT; }
-    } else if (d.drownT !== undefined) {
-      if (--d.drownT < 0) { g.sound(t === 'husk' ? 'husk_convert' : 'drowned_convert', this.x, this.y, this.z); convertKeeping(this, t === 'husk' ? 'zombie' : 'drowned'); return; }
-    } else if (this.headInWater) { if ((d.waterT = (d.waterT || 0) + 1) >= 600) d.drownT = 300; }
-    else d.waterT = -1;
-  }
-  return _tickCV.call(this);
-};
-// they shake while they change
-const _animStateCV = Mob.prototype.animState;
-Mob.prototype.animState = function (a) {
-  const st = _animStateCV.call(this, a);
-  if (this.data.drownT !== undefined || this.data.freezeT !== undefined) st.shake = true;
-  return st;
-};
 
 /* ---------------- sounds ---------------- */
 for (const [n, t, c] of [['beehive_enter', 'Bee enters hive', 'block'], ['beehive_exit', 'Bee leaves hive', 'block'], ['beehive_work', 'Bees work', 'block'], ['beehive_shear', 'Shears scrape', 'block'],
-  ['bottle_fill', 'Bottle fills', 'block'], ['bee_pollinate', 'Bee buzzes happily', 'neutral'], ['bee_sting', 'Bee stings', 'hostile'], ['dispense_fail', 'Dispenser failed', 'block'],
-  ['drowned_convert', 'Zombie converts to Drowned', 'hostile'], ['husk_convert', 'Husk converts to Zombie', 'hostile'], ['stray_convert', 'Skeleton converts to Stray', 'hostile']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+  ['bottle_fill', 'Bottle fills', 'block'], ['bee_pollinate', 'Bee buzzes happily', 'neutral'], ['bee_sting', 'Bee stings', 'hostile'], ['dispense_fail', 'Dispenser failed', 'block']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
 const _audioPlayBH = AUDIO.play;
 AUDIO.play = function (name, x, y, z, ...rest) {
-  if (!/^(beehive_enter|beehive_exit|beehive_work|beehive_shear|bottle_fill|bee_pollinate|bee_sting|dispense_fail|drowned_convert|husk_convert|stray_convert)$/.test(name)) return _audioPlayBH.call(this, name, x, y, z, ...rest);
+  if (!/^(beehive_enter|beehive_exit|beehive_work|beehive_shear|bottle_fill|bee_pollinate|bee_sting|dispense_fail)$/.test(name)) return _audioPlayBH.call(this, name, x, y, z, ...rest);
   if (!this.ctx) return;
   const dst = this.out(x, y, z, 1);
   if (!dst) return;
@@ -41363,8 +41326,6 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'bee_pollinate': this.tone(dst, 'sawtooth', 260, 340, 0.35, 0.04); break;
     case 'bee_sting': this.noiseHit(dst, 'highpass', 4000, 1, 0.05, 0.3); this.tone(dst, 'square', 900, 400, 0.08, 0.06); break;
     case 'dispense_fail': this.noiseHit(dst, 'bandpass', 2600, 4, 0.04, 0.35); break;
-    case 'drowned_convert': case 'husk_convert': this.tone(dst, 'sawtooth', 160, 90, 0.5, 0.08); this.noiseHit(dst, 'lowpass', 500, 0.7, 0.4, 0.2); break;
-    case 'stray_convert': this.tone(dst, 'triangle', 700, 300, 0.4, 0.08); this.noiseHit(dst, 'highpass', 2500, 0.8, 0.3, 0.15); break;
   }
 };
 
@@ -46121,6 +46082,1289 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'endermite_hurt': this.tone(dst, 'square', 2400 * v, 1500 * v, 0.1, 0.05); break;
     case 'endermite_death': for (let i = 0; i < 3; i++) this.tone(dst, 'square', (2200 - i * 400) * v, (1600 - i * 400) * v, 0.08, 0.04, t0 + i * 0.09); break;
   }
+};
+
+/* @file 152_zombies.js */
+/* ===================================================================
+   Part 41: regional difficulty and zombies like Java
+   - regional difficulty (DifficultyInstance): the world's age, the moon
+     and how long players have spent near each chunk (inhabited time,
+     kept with the world) raise the local difficulty; its "special
+     multiplier" (2 to 4 mapped to 0 to 1) scales mob gear and abilities.
+     F3 shows it as Local Difficulty
+   - zombies, husks and zombie villagers walk and chase at 0.23 speed;
+     babies at 1.5 times that (more than twice as fast)
+   - when spawned: armor by Java's roll (15% x the special multiplier,
+     leather to diamond, stopping early less often on Hard), an iron
+     sword or shovel (5% on Hard, 1% otherwise), door breaking for some,
+     a reinforcement chance of up to 10%, sometimes a longer follow range,
+     and the odd leader zombie (more health, more reinforcements, breaks
+     doors); a carved pumpkin or jack o'lantern on Halloween
+   - on Hard, a hurt zombie with a target may call another zombie 7 to
+     40 blocks away (in the dark, not within 7 blocks of the player);
+     each call makes the next less likely
+   - hitting one makes the other zombies of its kind within 35 blocks
+     that have no target join in
+   - daylight sets zombies, drowned, skeletons, strays, bogged and
+     phantoms on fire like Java (bright light, open sky above the eyes,
+     not when wet); a helmet takes the wear instead and can break
+   - under water for 30 seconds a zombie (or zombie villager) starts to
+     shake and 15 seconds later becomes a drowned; a husk becomes a zombie
+   - on Hard, zombies that can break doors bang on closed wooden doors in
+     their way and break them after 12 seconds, with cracks showing
+   - arms go up only as an attack comes
+   =================================================================== */
+
+/* ---------------- regional difficulty ---------------- */
+// LevelChunk.inhabitedTime: ticks spent with a player (not spectating) within 128 blocks of the chunk's middle;
+// kept with the world for chunks with a minute or more
+Game.prototype.inhabKey = function (cx, cz) { return (DIM_PREFIX[this.world.dim] || '') + cx + ',' + cz; };
+Game.prototype.inhabMap = function () {
+  if (this._inhabOf !== this.meta) { this._inhabOf = this.meta; this.inhab = new Map(Object.entries(this.meta && this.meta.inhab || {})); }
+  return this.inhab;
+};
+Game.prototype.inhabited = function (x, z) { return this.inhabMap().get(this.inhabKey(x >> 4, z >> 4)) || 0; };
+const _gameTickIH = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickIH.call(this);
+  const w = this.world, p = this.player;
+  if (!w || !p || p.dead || p.mode === 3 || w.tick % 20 !== 0) return;
+  const M = this.inhabMap(), pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+  for (let cx = pcx - 8; cx <= pcx + 8; cx++) for (let cz = pcz - 8; cz <= pcz + 8; cz++) {
+    if ((cx * 16 + 8 - p.x) ** 2 + (cz * 16 + 8 - p.z) ** 2 >= 16384) continue;
+    const c = w.getChunk(cx, cz);
+    if (!c || c.state < 2) continue;
+    const k = this.inhabKey(cx, cz);
+    M.set(k, (M.get(k) || 0) + 20);
+  }
+};
+const _saveAllIH = Game.prototype.saveAll;
+Game.prototype.saveAll = function () {
+  if (this.meta && this._inhabOf === this.meta) { const o = {}; for (const [k, v] of this.inhab) if (v >= 1200) o[k] = v; this.meta.inhab = o; }
+  return _saveAllIH.apply(this, arguments);
+};
+// DifficultyInstance: effective difficulty and its special multiplier at a spot
+Game.prototype.difficultyAt = function (x, z) {
+  const d = OPTIONS.difficulty, w = this.world;
+  if (!d || !w) return { eff: 0, special: 0 };
+  const bx = Math.floor(x), bz = Math.floor(z), loaded = w.isLoadedAt(bx, bz), t = w.time;
+  const inh = loaded ? this.inhabited(bx, bz) : 0, moon = loaded ? V_MOON[((Math.floor(t / 24000) % 8) + 8) % 8] : 0;
+  const f1 = Math.min(1, Math.max(0, (t - 72000) / 1440000)) * 0.25;
+  let f2 = Math.min(1, Math.max(0, inh / 3600000)) * (d === 3 ? 1 : 0.75);
+  f2 += Math.min(f1, Math.max(0, moon * 0.25));
+  if (d === 1) f2 *= 0.5;
+  const eff = d * (0.75 + f1 + f2);
+  return { eff, special: eff < 2 ? 0 : eff > 4 ? 1 : (eff - 2) / 2 };
+};
+// the phantom and patrol spawners read the difficulty where the player is
+Game.prototype.vLocalDifficulty = function () { const p = this.player; return p ? this.difficultyAt(p.x, p.z).eff : 0; };
+// the F3 line
+Game.prototype.localDifficultyLine = function (x, z) {
+  const d = this.difficultyAt(x, z);
+  return `Local Difficulty: ${d.eff.toFixed(2)} // ${d.special.toFixed(2)} (Day ${Math.floor(this.world.time / 24000)})`;
+};
+
+/* ---------------- the zombie family ---------------- */
+const ZOMBIE_MS = 43.2 * 0.23 * 0.23;
+for (const t of ['zombie', 'husk', 'zombie_villager', 'drowned']) {
+  const T = MOB_TYPES[t];
+  Object.assign(T, { walk: ZOMBIE_MS, run: ZOMBIE_MS });
+  // only young turtles on land are prey (the hunt list takes young ones only)
+  if (T.attacks && T.attacks.includes('turtle')) { T.attacks = T.attacks.filter(a => a !== 'turtle'); T.hunts = Array.from(new Set([...(T.hunts || []), 'turtle'])); }
+}
+const ZOMBIES = new Set(['zombie', 'husk', 'zombie_villager', 'drowned']);
+// Zombie.supportsBreakDoorGoal: not drowned
+const DOOR_BREAKERS = new Set(['zombie', 'husk', 'zombie_villager']);
+// Mob.populateDefaultEquipmentSlots: 15% x the special multiplier for armor; leather, gold, chain, iron or diamond (each step 9.5%);
+// boots first, then each next piece unless a roll stops it (10% on Hard, 25% otherwise)
+function javaArmor(m, special, R) {
+  if (!(R() < 0.15 * special)) return;
+  let tier = Math.floor(R() * 2);
+  for (let k = 0; k < 3; k++) if (R() < 0.095) tier++;
+  const stop = OPTIONS.difficulty === 3 ? 0.1 : 0.25, set = armorSet(['leather', 'golden', 'chainmail', 'iron', 'diamond'][tier]), a = m.data.armor || [null, null, null, null];
+  let first = true;
+  for (const i of [3, 2, 1, 0]) {
+    if (!first && R() < stop) break;
+    first = false;
+    if (!a[i]) a[i] = set[i];
+  }
+  m.data.armor = a;
+  m.data.armorPts = a.reduce((s, st) => s + (st && ITEMS[st.id].armor ? ITEMS[st.id].armor.pts : 0), 0);
+}
+// Zombie.finalizeSpawn and handleAttributes
+function zombieSpawn(m, o) {
+  if (o.loading) return;
+  const g = m.game, R = Math.random, d = m.data, dif = g.difficultyAt(m.x, m.z), f = dif.special;
+  // gear from Java's rolls in place of the old ones
+  if (!o.keepGear) {
+    // Drowned.populateDefaultEquipmentSlots keeps only its trident or fishing rod
+    d.armor = null; d.armorPts = 0;
+    if (m.type !== 'drowned') { d.hand = null; javaArmor(m, f, R); }
+    if (m.type !== 'drowned' && R() < (OPTIONS.difficulty === 3 ? 0.05 : 0.01)) d.hand = { id: itemOf(Math.floor(R() * 3) === 0 ? 'iron_sword' : 'iron_shovel'), count: 1 };
+  }
+  d.canPickUp = R() < 0.55 * f;
+  d.breakDoors = DOOR_BREAKERS.has(m.type) && R() < f * 0.1;
+  // October 31st: a pumpkin head now and then
+  const now = new Date();
+  if (now.getMonth() === 9 && now.getDate() === 31 && R() < 0.25 && !(d.armor && d.armor[0])) { (d.armor = d.armor || [null, null, null, null])[0] = { id: R() < 0.1 ? B.JACK_O_LANTERN : B.CARVED_PUMPKIN, count: 1 }; d.noDrop = (d.noDrop || []).concat([2]); }
+  zombieAttributes(m, f, R);
+}
+function zombieAttributes(m, f, R) {
+  const d = m.data;
+  d.reinf = R() * 0.1;
+  if (R() * 1.5 * f > 1) d.followMul = 1 + R() * 2 + 1;
+  if (R() < f * 0.05) {
+    d.reinf += R() * 0.25 + 0.5; d.leader = true;
+    m.maxHealth = m.T.hp * (1 + R() * 3 + 1);
+    if (DOOR_BREAKERS.has(m.type)) d.breakDoors = true;
+  }
+}
+for (const t of ZOMBIES) { const base = MOB_INIT[t]; MOB_INIT[t] = (m, o) => { if (base) base(m, o); zombieSpawn(m, o || {}); }; }
+// the longer follow range of some, for the target search
+const _targetZB = GOALS.target;
+GOALS.target = function (m) {
+  const k = m.data.followMul;
+  if (!k) return _targetZB(m);
+  const T = m.T, f0 = T.follow;
+  T.follow = f0 * k;
+  try { return _targetZB(m); } finally { T.follow = f0; }
+};
+// babies: speed x1.5, so more than twice as fast (ground speed goes with the square); the engine's own baby boosts are taken out
+const _walkZB = Mob.prototype.walkPhysics;
+Mob.prototype.walkPhysics = function () {
+  if (!(this.baby && ZOMBIES.has(this.type) && this.move)) return _walkZB.call(this);
+  const s = this.move[2];
+  this.move[2] = s * 2.25 / 1.15 / (this.goal === 'melee' ? 1.3 : 1);
+  try { return _walkZB.call(this); } finally { if (this.move) this.move[2] = s; }
+};
+
+/* ---------------- reinforcements and alerts ---------------- */
+// HurtByTargetGoal.setAlertOthers: others of its kind (zombies count husks, drowned and zombie villagers) within 35 blocks, 10 up or
+// down, without a target, go for the attacker
+const ZOMBIE_ALERTS = { zombie: ZOMBIES, husk: new Set(['husk']), drowned: new Set(['drowned']), zombie_villager: new Set(['zombie_villager']) };
+const _onHurtByZB = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  _onHurtByZB.call(this, a, source);
+  const kin = ZOMBIE_ALERTS[this.type];
+  if (!kin || !a || a.dead || a instanceof Player && (!a.survival || a.mode === 3) || this.target !== a) return;
+  for (const e of this.game.entities) if (e !== this && e instanceof Mob && kin.has(e.type) && !e.dead && !e.target && Math.abs(e.x - this.x) < 35.5 && Math.abs(e.y - this.y) < 10.5 && Math.abs(e.z - this.z) < 35.5) { e.target = a; e.anger = 400; }
+};
+// Zombie.hurt: on Hard, a chance (its reinforcement chance) to call another of its kind 7 to 40 blocks off along each axis,
+// even with the blow that kills it
+const _hurtZB = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const r = _hurtZB.call(this, amount, source, attacker);
+  if (r && ZOMBIES.has(this.type)) zombieReinforce(this, attacker);
+  return r;
+};
+function zombieReinforce(m, attacker) {
+  const g = m.game, d = m.data;
+  let t = m.target;
+  if (!t && (attacker instanceof Mob || attacker instanceof Player)) t = attacker;
+  if (!t || OPTIONS.difficulty !== 3 || !(Math.random() < (d.reinf || 0)) || !g.rule('doMobSpawning')) return;
+  const i = Math.floor(m.x), j = Math.floor(m.y), k = Math.floor(m.z), off = () => (7 + Math.floor(Math.random() * 34)) * (Math.floor(Math.random() * 3) - 1);
+  const p = g.player;
+  for (let l = 0; l < 50; l++) {
+    const x = i + off(), y = j + off(), z = k + off();
+    if (y < 1 || y > CH_TOP - 2 || !g.world.isLoadedAt(x, z)) continue;
+    if (!g.vPlacementOk(m.type, x, y, z) || !g.vSpawnRules(m.type, x, y, z, Math.random, false)) continue;
+    if (p && !p.dead && p.mode !== 3 && (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2 < 49) continue;
+    if (!g.vMobFits(m.type, x, y, z, 0.3, 1.95) || !g.vNoCollision(x - 0.3, y, z - 0.3, x + 0.3, y + 1.95, z + 0.3)) continue;
+    if (aabbHitsBlock(g.world, x - 0.3, y, z - 0.3, x + 0.3, y + 1.95, z + 0.3, id => BLK[id].liquid || WATERY[id])) continue;
+    const z2 = createMob(g, m.type, x, y, z);
+    if (!z2) return;
+    z2.target = t;
+    z2.data.reinf = Math.max(0, (z2.data.reinf || 0) - 0.05);
+    g.entities.push(z2);
+    d.reinf = (d.reinf || 0) - 0.05;
+    return;
+  }
+}
+
+/* ---------------- daylight ---------------- */
+// Mob.isSunBurnTick: by day, brightness over 0.5 at the eyes, a 1 in 30 x (brightness - 0.4) x 2 roll, not wet, open sky at the eyes;
+// a helmet takes 0 or 1 wear instead (Zombie and AbstractSkeleton.aiStep)
+for (const t in MOB_TYPES) { const T = MOB_TYPES[t]; if (T.burns) { T.sunBurns = true; T.burns = false; } }
+function sunBurnTick(m) {
+  const g = m.game, w = g.world;
+  if (w.dim !== 'overworld' || !(g.skyDarken() < 4)) return false;
+  const bx = Math.floor(m.x), bz = Math.floor(m.z), ey = Math.floor(m.eyeY()), l = w.getLightRaw(bx, ey, bz);
+  const lv = Math.max((l >> 4) - g.skyDarken(), l & 15) / 15, f = lv / (4 - 3 * lv);
+  if (!(f > 0.5) || !(Math.random() * 30 < (f - 0.4) * 2)) return false;
+  if (m.inWater || g.rainingAt(bx, Math.floor(m.y), bz) || g.rainingAt(bx, Math.floor(m.y + m.h), bz)) return false;
+  const hw = m.w / 2;
+  if (B.POWDER_SNOW !== undefined && aabbHitsBlock(w, m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw, id => id === B.POWDER_SNOW)) return false;
+  return (l >> 4) >= 15;
+}
+const _tickZB = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickZB.call(this);
+  if (this.dead || this.deathTime > 0) return;
+  if (this.T.sunBurns && !this.T.fireproof && sunBurnTick(this)) {
+    const hel = this.data.armor && this.data.armor[0];
+    if (hel) {
+      const it = ITEMS[hel.id];
+      if (it && it.dur) {
+        hel.dmg = (hel.dmg || 0) + Math.floor(Math.random() * 2);
+        if (hel.dmg >= it.dur) { this.data.armor[0] = null; this.data.armorPts = this.data.armor.reduce((s, st) => s + (st && ITEMS[st.id].armor ? ITEMS[st.id].armor.pts : 0), 0); this.game.sound('break_tool', this.x, this.y + this.h, this.z); }
+      }
+    } else this.fireTicks = Math.max(this.fireTicks || 0, 160);
+  }
+  if (ZOMBIES.has(this.type)) zombieTick(this);
+};
+
+/* ---------------- drowning into a drowned ---------------- */
+// Zombie.tick: 600 ticks with the eyes under water start a 300 tick conversion (it shakes); husks become zombies, zombies drowned
+const ZOMBIE_INTO = { zombie: 'drowned', zombie_villager: 'drowned', husk: 'zombie' };
+function zombieTick(m) {
+  const g = m.game, w = g.world, d = m.data;
+  // arms up as an attack comes (ZombieAttackGoal: 5 ticks in, and less than half the wait left)
+  m._raiseT = m.goal === 'melee' && m.target ? (m._raiseT || 0) + 1 : 0;
+  if (d.noAI) return;
+  const into = ZOMBIE_INTO[m.type];
+  if (!into) return;
+  if (d.convertT !== undefined && d.convertT !== null) {
+    if (--d.convertT < 0) zombieConvert(m, into);
+    return;
+  }
+  const eye = w.getBlock(Math.floor(m.x), Math.floor(m.eyeY()), Math.floor(m.z));
+  if (eye === B.WATER || WATERY[eye]) { d.inWaterT = (d.inWaterT || 0) + 1; if (d.inWaterT >= 600) { d.convertT = 300; d.inWaterT = 0; } }
+  else d.inWaterT = -1;
+}
+function zombieConvert(m, into) {
+  const g = m.game, d = m.data;
+  const z = createMob(g, into, m.x, m.y, m.z, { loading: true });
+  if (!z) return;
+  // Mob.convertTo: gear, youth, name, persistence and silence carry over
+  const zd = z.data;
+  for (const k of ['armor', 'armorPts', 'hand', 'offhand', 'hand2', 'silent', 'canPickUp']) if (d[k] !== undefined) zd[k] = d[k];
+  zd.breakDoors = DOOR_BREAKERS.has(into) && !!d.breakDoors;
+  z.growth = m.growth; z.customName = m.customName; z.persistent = m.persistent;
+  z.yaw = z.bodyYaw = m.bodyYaw !== undefined ? m.bodyYaw : m.yaw; z.headYaw = m.headYaw;
+  z.savePrev();
+  zombieAttributes(z, g.difficultyAt(z.x, z.z).special, Math.random);
+  g.entities.push(z);
+  m.dead = true; m.removed = true;
+  if (!d.silent) g.sound(into === 'drowned' ? 'zombie_converted_to_drowned' : 'husk_converted_to_zombie', m.x, m.y + 1, m.z);
+}
+for (const t of ZOMBIES) {
+  const base = MOB_ANIM[t];
+  MOB_ANIM[t] = (m, st) => {
+    if (base) base(m, st);
+    st.aggressive = !!m.target && (m._raiseT || 0) >= 5 && (m.attackCd || 0) < 10;
+    st.shake = m.data.convertT >= 0;
+  };
+}
+const _renderZB = Mob.prototype.render;
+Mob.prototype.render = function (r, a) {
+  if (!(ZOMBIES.has(this.type) && this.data.convertT >= 0)) return _renderZB.call(this, r, a);
+  const by = this.bodyYaw, py = this.pyaw, k = Math.cos((this.age + a) * 3.25) * Math.PI * 0.4 * Math.PI / 180;
+  this.bodyYaw = by + k; this.pyaw = py + k;
+  try { return _renderZB.call(this, r, a); } finally { this.bodyYaw = by; this.pyaw = py; }
+};
+
+/* ---------------- breaking doors ---------------- */
+// door breakers find their way through wooden (not iron) doors, open or shut
+const isWoodDoor = id => !!(BLK[id] && BLK[id].door && id !== B.IRON_DOOR);
+const _navOpenZB = NAV.open;
+NAV.open = function (w, x, y, z, m) {
+  if (m && m.data && m.data.breakDoors && OPTIONS.difficulty === 3 && isWoodDoor(w.getBlock(x, y, z))) return true;
+  return _navOpenZB.call(this, w, x, y, z, m);
+};
+// DoorInteractGoal and BreakDoorGoal: bumping into a shut wooden door on its path, it bangs on it (sound 1 tick in 20) and breaks it at 240
+function doorAhead(m) {
+  const w = m.game.world, n = m.nav;
+  if (!n || !n.path) return null;
+  const cells = n.path.slice(n.i || 0, (n.i || 0) + 2);
+  cells.push([Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)]);
+  for (const c of cells) for (const dy of [0, 1]) {
+    const x = c[0], y = c[1] + dy, z = c[2];
+    if ((x + 0.5 - m.x) ** 2 + (z + 0.5 - m.z) ** 2 > 2.25 && c !== cells[cells.length - 1]) continue;
+    const id = w.getBlock(x, y, z);
+    if (!isWoodDoor(id)) continue;
+    const base = w.getMeta(x, y, z) & 8 ? y - 1 : y;
+    if (w.getMeta(x, base, z) & 4) return null;
+    return [x, base, z];
+  }
+  return null;
+}
+const _thinkZB = Mob.prototype.think;
+Mob.prototype.think = function () {
+  _thinkZB.call(this);
+  const d = this.data;
+  if (!d.breakDoors) { this._door = null; return; }
+  const g = this.game, w = g.world;
+  let D = this._door;
+  // BreakDoorGoal.canContinueToUse: still shut, close by, still Hard
+  if (D && (!isWoodDoor(w.getBlock(D[0], D[1], D[2])) || w.getMeta(D[0], D[1], D[2]) & 4 || (D[0] + 0.5 - this.x) ** 2 + (D[1] + 0.5 - this.y) ** 2 + (D[2] + 0.5 - this.z) ** 2 >= 4 || OPTIONS.difficulty !== 3 || D[3] > 240)) { g.doorCrack(D, -1); this._door = D = null; }
+  if (!D) {
+    if (OPTIONS.difficulty !== 3 || !g.rule('mobGriefing') || !this.hitWall) return;
+    const at = doorAhead(this);
+    if (!at) return;
+    this._door = D = [at[0], at[1], at[2], 0, -1];
+  }
+  if (Math.random() * 20 < 1) { if (!d.silent) g.sound('zombie_attack_wooden_door', D[0] + 0.5, D[1] + 0.5, D[2] + 0.5); this.attackAnim = 10; }
+  D[3]++;
+  const stage = Math.floor(D[3] / 240 * 10);
+  if (stage !== D[4]) { D[4] = stage; g.doorCrack(D, stage); }
+  if (D[3] === 240) {
+    const id = w.getBlock(D[0], D[1], D[2]);
+    g.doorCrack(D, -1);
+    w.setBlock(D[0], D[1] + 1, D[2], 0, 0); w.setBlock(D[0], D[1], D[2], 0, 0);
+    g.remeshNear(D[0], D[2]);
+    g.sound('zombie_break_wooden_door', D[0] + 0.5, D[1] + 0.5, D[2] + 0.5);
+    g.particles.blockBreak(D[0], D[1], D[2], id); g.particles.blockBreak(D[0], D[1] + 1, D[2], id);
+    this._door = null;
+  }
+};
+// walking into something this tick (Entity.horizontalCollision)
+const _walkHitZB = Mob.prototype.walkPhysics;
+Mob.prototype.walkPhysics = function () {
+  if (!this.data.breakDoors) return _walkHitZB.call(this);
+  const x0 = this.x, z0 = this.z, vx = this.vx, vz = this.vz;
+  const r = _walkHitZB.call(this);
+  this.hitWall = !!this.move && Math.hypot(this.x - x0, this.z - z0) < Math.hypot(vx, vz) * 0.5;
+  return r;
+};
+// the cracks on a door being broken (Level.destroyBlockProgress)
+Game.prototype.doorCrack = function (D, stage) {
+  const M = this.doorCracks || (this.doorCracks = new Map()), k = D[0] + ',' + D[1] + ',' + D[2];
+  if (stage < 0) M.delete(k); else M.set(k, [D[0], D[1], D[2], stage]);
+};
+const _renderSpawnerMobsZB = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) {
+  if (_renderSpawnerMobsZB) _renderSpawnerMobsZB.call(this, r, alpha);
+  if (!this.doorCracks || !this.doorCracks.size) return;
+  const w = this.world;
+  for (const [x, y, z, stage] of this.doorCracks.values()) {
+    const layer = texL('destroy_' + Math.min(9, stage)), e = 0.003;
+    for (const dy of [0, 1]) {
+      const id = w.getBlock(x, y + dy, z);
+      if (!isWoodDoor(id)) continue;
+      const b = selBox(id, w.getMeta(x, y + dy, z), w, x, y + dy, z), l = w.getLightRaw(x, y + dy, z);
+      for (let f = 0; f < 6; f++) for (let q = 0; q < 4; q++) {
+        const v = FV[f][q];
+        r.dv(x + (v[0] ? b[3] + e : b[0] - e), y + dy + (v[1] ? b[4] + e : b[1] - e), z + (v[2] ? b[5] + e : b[2] - e), v[3] / 16, v[4] / 16, layer, 0.5, 0.5, 0.5, 1, l >> 4, l & 15);
+      }
+    }
+  }
+};
+
+/* ---------------- sounds ---------------- */
+const ZB_SOUNDS = [['zombie_converted_to_drowned', 'Zombie converts to Drowned'], ['husk_converted_to_zombie', 'Husk converts to Zombie'],
+  ['zombie_attack_wooden_door', 'Door shakes'], ['zombie_break_wooden_door', 'Door breaks']];
+for (const [n, t] of ZB_SOUNDS) { SND_CAT[n] = 'hostile'; SUB_TEXT[n] = t; }
+const ZB_SOUND_SET = new Set(ZB_SOUNDS.map(s => s[0]));
+const _audioPlayZB = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!ZB_SOUND_SET.has(name)) return _audioPlayZB.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, v = 0.9 + Math.random() * 0.2;
+  if (/converted/.test(name)) { this.tone(dst, 'sawtooth', 160 * v, 90 * v, 0.7, 0.08); this.noiseHit(dst, 'bandpass', 600, 1.2, 0.6, 0.25); this.tone(dst, 'sine', 300 * v, 140 * v, 0.6, 0.05, t0 + 0.1); return; }
+  if (/attack_wooden_door/.test(name)) { this.noiseHit(dst, 'lowpass', 380, 1, 0.12, 0.7); this.tone(dst, 'square', 95 * v, 70 * v, 0.1, 0.12); return; }
+  this.noiseHit(dst, 'lowpass', 900, 0.8, 0.45, 0.8); this.noiseHit(dst, 'bandpass', 2200, 1.5, 0.25, 0.3, t0 + 0.05); this.tone(dst, 'square', 120 * v, 50 * v, 0.3, 0.1);
+};
+
+/* @file 153_skeletons.js */
+/* ===================================================================
+   Part 42: skeletons, strays, bogged and wither skeletons like Java
+   - 0.25 speed; with a bow (RangedBowAttackGoal) they close in until
+     the target has been in sight for a second within 15 blocks, then
+     circle it (switching direction and backing off now and then,
+     backing away when closer than 7.5 blocks), draw for a second and
+     shoot, then wait 2 seconds (1 on Hard; bogged 3.5 and 2.5) before
+     drawing again; arrows leave at 1.6 aimed at a third of the
+     target's height plus a fifth of the distance, spread by 14 - 4 x
+     difficulty, doing 2 + a little more on harder difficulties
+   - stray arrows slow for 30 seconds, bogged arrows poison for 5;
+     wither skeletons with a bow shoot burning arrows
+   - without a bow they fight up close at 1.2 times their speed, arms
+     out like a zombie
+   - they run from wolves within 6 blocks, burning by day with no
+     target they look for shade within 10 blocks (bright shade, not dark
+     caves, as in Java), and by day a skeleton standing in shade won't
+     path out into the sun
+   - a skeleton in powder snow for 7 seconds starts to shake and 15
+     seconds later becomes a stray (leaving the snow stops it)
+   - spawn gear: Java's armor roll and a bow (wither skeletons a stone
+     sword and no armor), a pumpkin head now and then on Halloween
+   =================================================================== */
+
+const SKELETONS = new Set(['skeleton', 'stray', 'bogged', 'wither_skeleton']);
+const SKEL_MS = 43.2 * 0.25 * 0.25;
+for (const t of SKELETONS) {
+  const T = MOB_TYPES[t];
+  if (!T) continue;
+  Object.assign(T, { walk: SKEL_MS, run: SKEL_MS * 1.44 });
+  // RestrictSunGoal, FleeSunGoal, AvoidEntityGoal<Wolf> (part 30's avoid goal), the bow (or melee) goal, strolling, looking
+  T.ai = ['target', 'skelFleeSun', 'avoid', 'skelBow', 'melee', 'wander', 'look'];
+  // iron golems, and baby turtles (the hunt list only takes young turtles)
+  T.attacks = Array.from(new Set([...(T.attacks || []).filter(a => a !== 'turtle'), 'iron_golem']));
+  T.hunts = Array.from(new Set([...(T.hunts || []), 'turtle']));
+}
+// AbstractSkeleton.getHardAttackInterval / getAttackInterval
+const SKEL_INTERVAL = { skeleton: [20, 40], stray: [20, 40], wither_skeleton: [20, 40], bogged: [50, 70] };
+const holdsBow = m => !!(m.data.hand && m.data.hand.id === I.BOW);
+
+/* ---------------- gear ---------------- */
+// AbstractSkeleton.populateDefaultEquipmentSlots: the armor roll, then a bow; WitherSkeleton: a stone sword only
+function skeletonSpawn(m, o) {
+  if (o.loading) return;
+  const R = Math.random, d = m.data, f = m.game.difficultyAt(m.x, m.z).special;
+  d.armor = null; d.armorPts = 0;
+  if (m.type === 'wither_skeleton') d.hand = { id: I.STONE_SWORD, count: 1 };
+  else { javaArmor(m, f, R); d.hand = { id: I.BOW, count: 1 }; }
+  d.canPickUp = R() < 0.55 * f;
+  const now = new Date();
+  if (now.getMonth() === 9 && now.getDate() === 31 && R() < 0.25 && !(d.armor && d.armor[0])) { (d.armor = d.armor || [null, null, null, null])[0] = { id: R() < 0.1 ? B.JACK_O_LANTERN : B.CARVED_PUMPKIN, count: 1 }; d.noDrop = (d.noDrop || []).concat([2]); }
+}
+for (const t of SKELETONS) { const base = MOB_INIT[t]; MOB_INIT[t] = (m, o) => { if (base) base(m, o); skeletonSpawn(m, o || {}); }; }
+
+/* ---------------- the bow ---------------- */
+// RangedBowAttackGoal
+GOALS.skelBow = function (m) {
+  const t = m.target, d = m.data;
+  if (!holdsBow(m) || !t && (!m.nav || m.navDone())) { if (m._bow) skelBowStop(m); return false; }
+  if (!t) { m.followPath(); return true; }
+  const B0 = m._bow || (m._bow = { see: 0, attack: -1, strafe: -1, cw: false, back: false, use: -1 });
+  d.aiming = true;
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2, see = m.canSee(t);
+  if (see !== B0.see > 0) B0.see = 0;
+  B0.see += see ? 1 : -1;
+  if (d2 <= 225 && B0.see >= 20) { m.nav = null; B0.strafe++; }
+  else { if (!m.nav || m.navDone() || m.age % 10 === 0) m.goTo(t.x, t.y, t.z, m.T.walk, 1); else m.followPath(); B0.strafe = -1; }
+  if (B0.strafe >= 20) { if (Math.random() < 0.3) B0.cw = !B0.cw; if (Math.random() < 0.3) B0.back = !B0.back; B0.strafe = 0; }
+  if (B0.strafe > -1) {
+    if (d2 > 225 * 0.75) B0.back = false; else if (d2 < 225 * 0.25) B0.back = true;
+    skelStrafe(m, t, B0.back ? -0.5 : 0.5, B0.cw ? 0.5 : -0.5);
+  }
+  m.lookAt(t.x, emEyeOf(t), t.z);
+  // drawing: 20 ticks, then the shot; then the wait
+  if (B0.use >= 0) {
+    if (!see && B0.see < -60) B0.use = -1;
+    else if (see && ++B0.use >= 20) { B0.use = -1; skelShoot(m, t, 1); B0.attack = (SKEL_INTERVAL[m.type] || [20, 40])[OPTIONS.difficulty === 3 ? 0 : 1]; }
+    else if (!see) B0.use++;
+  } else if (--B0.attack <= 0 && B0.see >= -60) B0.use = 0;
+  d.drawing = B0.use >= 0;
+  return true;
+};
+function skelBowStop(m) { m._bow = null; m.data.aiming = false; m.data.drawing = false; }
+// MoveControl.strafe: a quarter of its speed, forwards and sideways; it won't strafe off an edge
+function skelStrafe(m, t, fwd, side) {
+  const a = Math.atan2(t.x - m.x, t.z - m.z), fx = Math.sin(a), fz = Math.cos(a), rx = Math.cos(a), rz = -Math.sin(a);
+  let mx = fx * fwd + rx * side, mz = fz * fwd + rz * side;
+  const l = Math.hypot(mx, mz) || 1, w = m.game.world;
+  const nx = Math.floor(m.x + mx / l), nz = Math.floor(m.z + mz / l), y = Math.floor(m.y);
+  if (!NAV.stand(w, nx, y, nz, m) && !NAV.stand(w, nx, y + 1, nz, m)) { mx = fx; mz = fz; }
+  // the speed is a quarter of the attribute (0.0625), pushed by an input of 0.5 each way: 0.98 x 0.0625 x |input| / 0.454 a tick
+  const len = Math.hypot(mx, mz) || 1;
+  m.move = [mx / len, mz / len, 2.698 * Math.min(1, Math.hypot(fwd, side)), false];
+}
+// AbstractSkeleton.performRangedAttack and ProjectileUtil.getMobArrow
+const tri = (mode, dev) => mode + dev * (Math.random() - Math.random());
+function skelShoot(m, t, power) {
+  const g = m.game, sx = m.x, sy = m.y + (m.type === 'wither_skeleton' ? 2.1 : 1.74) - 0.1, sz = m.z;
+  const dx = t.x - sx, dy = t.y + t.h / 3 - sy, dz = t.z - sz, hd = Math.hypot(dx, dz);
+  // Projectile.getMovementToShoot: normalized, then a triangle spread of 0.0172275 x inaccuracy on each axis
+  let vx = dx, vy = dy + hd * 0.2, vz = dz;
+  const l = Math.hypot(vx, vy, vz) || 1, inacc = 14 - OPTIONS.difficulty * 4, s = 0.0172275 * inacc;
+  vx = vx / l + tri(0, s); vy = vy / l + tri(0, s); vz = vz / l + tri(0, s);
+  const pr = g.spawnProjectile('arrow', sx, sy, sz, vx * 1.6, vy * 1.6, vz * 1.6, m);
+  pr.pickup = false;
+  // AbstractArrow.setBaseDamageFromMob
+  pr.mobDamage = power * 2 + tri(OPTIONS.difficulty * 0.11, 0.57425);
+  if (m.type === 'stray') pr.customEffects = [['slowness', 600, 0]];
+  if (m.type === 'bogged') pr.customEffects = [['poison', 100, 0]];
+  if (m.type === 'wither_skeleton') pr.flame = true;
+  if (!m.data.silent) g.sound('bow', sx, sy, sz);
+  m.attackAnim = 10;
+}
+// Arrow.doPostHurtEffects: effects the shooter added stay at full length
+const _impactSK = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (!e || !this.customEffects || this.kind !== 'arrow') return _impactSK.call(this, e);
+  const own = Object.prototype.hasOwnProperty.call(e, 'hurt') ? e.hurt : null;
+  let hit = false;
+  e.hurt = function () { const r = Object.getPrototypeOf(e).hurt.apply(this, arguments); if (r) hit = true; return r; };
+  try { return _impactSK.call(this, e); }
+  finally {
+    if (own) e.hurt = own; else delete e.hurt;
+    if (hit && e.addEffect) for (const [k, t, a] of this.customEffects) e.addEffect(k, t, a);
+  }
+};
+
+/* ---------------- melee, wolves and the sun ---------------- */
+// the melee goal: only without a bow, at 1.2 times its speed
+const _meleeSK = GOALS.melee;
+GOALS.melee = function (m) {
+  if (!SKELETONS.has(m.type)) return _meleeSK(m);
+  if (holdsBow(m)) return false;
+  const r = _meleeSK(m);
+  m.data.aiming = false;
+  return r;
+};
+// FleeSunGoal: by day, on fire, under open sky, bareheaded and with no target: a spot within 10 (3 up or down) out of the sky
+// that is still bright (Monster.getWalkTargetValue below 0)
+GOALS.skelFleeSun = function (m) {
+  if (m._sunFlee) { if (!m.nav || m.navDone()) { m._sunFlee = false; return false; } m.followPath(); return true; }
+  const g = m.game, w = g.world;
+  if (m.target || w.dim !== 'overworld' || !(g.skyDarken() < 4) || !(m.fireTicks > 0) || m.data.armor && m.data.armor[0]) return false;
+  const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  if ((w.getLightRaw(bx, by, bz) >> 4) < 15) return false;
+  for (let k = 0; k < 10; k++) {
+    const x = bx + Math.floor(Math.random() * 20) - 10, y = by + Math.floor(Math.random() * 6) - 3, z = bz + Math.floor(Math.random() * 20) - 10;
+    if (y < 1 || y > CH_TOP) continue;
+    const l = w.getLightRaw(x, y, z);
+    if ((l >> 4) >= 15) continue;
+    const lv = Math.max((l >> 4) - g.skyDarken(), l & 15) / 15;
+    if (!(0.5 - lv / (4 - 3 * lv) < 0)) continue;
+    if (m.goTo(x + 0.5, y, z + 0.5, m.T.walk)) { m._sunFlee = true; return true; }
+  }
+  return false;
+};
+// RestrictSunGoal (GroundPathNavigation.avoidSun): by day, a bareheaded skeleton not under the sky cuts its paths at the first open-sky step
+const _goToSK = Mob.prototype.goTo;
+Mob.prototype.goTo = function (x, y, z, speed, near) {
+  const r = _goToSK.call(this, x, y, z, speed, near);
+  if (!r || !SKELETONS.has(this.type) || this.type === 'wither_skeleton' || this.data.armor && this.data.armor[0]) return r;
+  const g = this.game, w = g.world, n = this.nav;
+  if (!n || !n.path || w.dim !== 'overworld' || !(g.skyDarken() < 4)) return r;
+  if ((w.getLightRaw(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z)) >> 4) >= 15) return r;
+  for (let i = n.i || 0; i < n.path.length; i++) {
+    const [px, py, pz] = n.path[i];
+    if ((w.getLightRaw(px, py, pz) >> 4) >= 15) { n.path.length = i; break; }
+  }
+  if (n.path.length <= (n.i || 0)) { this.nav = null; return false; }
+  return r;
+};
+
+/* ---------------- freezing into a stray ---------------- */
+// Skeleton.tick: 140 ticks touching powder snow start a 300 tick change (it shakes); out of the snow it stops
+const _tickSK = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickSK.call(this);
+  if (this.type !== 'skeleton' || this.dead || this.deathTime > 0 || this.data.noAI || B.POWDER_SNOW === undefined) return;
+  const d = this.data, w = this.game.world;
+  const inSnow = aabbHitsBlock(w, this.x - 0.3, this.y, this.z - 0.3, this.x + 0.3, this.y + this.h, this.z + 0.3, id => id === B.POWDER_SNOW);
+  if (!inSnow) { d.snowT = -1; d.freezeT = null; return; }
+  if (d.freezeT !== undefined && d.freezeT !== null) { if (--d.freezeT < 0) skeletonFreeze(this); return; }
+  d.snowT = (d.snowT || 0) + 1;
+  if (d.snowT >= 140) d.freezeT = 300;
+};
+function skeletonFreeze(m) {
+  const g = m.game, d = m.data, s = createMob(g, 'stray', m.x, m.y, m.z, { loading: true });
+  if (!s) return;
+  for (const k of ['armor', 'armorPts', 'hand', 'offhand', 'silent', 'canPickUp']) if (d[k] !== undefined) s.data[k] = d[k];
+  s.customName = m.customName; s.persistent = m.persistent; s.yaw = s.bodyYaw = m.bodyYaw !== undefined ? m.bodyYaw : m.yaw; s.savePrev();
+  g.entities.push(s);
+  m.dead = true; m.removed = true;
+  if (!d.silent) g.sound('skeleton_converted_to_stray', m.x, m.y + 1, m.z);
+}
+
+/* ---------------- looks ---------------- */
+// SkeletonModel: bow raised while the bow goal runs; without one, arms out when fighting
+for (const t of ['skeleton', 'stray', 'bogged', 'wither_skeleton']) {
+  const base = MOB_ANIM[t];
+  MOB_ANIM[t] = (m, st) => {
+    if (base) base(m, st);
+    st.aim = holdsBow(m) && !!m.data.aiming;
+    st.skelMelee = !holdsBow(m) && !!m.target && m.goal === 'melee';
+    st.shake = m.type === 'skeleton' && m.data.freezeT >= 0;
+  };
+}
+const _renderSK = Mob.prototype.render;
+Mob.prototype.render = function (r, a) {
+  if (!(this.type === 'skeleton' && this.data.freezeT >= 0)) return _renderSK.call(this, r, a);
+  const by = this.bodyYaw, py = this.pyaw, k = Math.cos((this.age + a) * 3.25) * Math.PI * 0.4 * Math.PI / 180;
+  this.bodyYaw = by + k; this.pyaw = py + k;
+  try { return _renderSK.call(this, r, a); } finally { this.bodyYaw = by; this.pyaw = py; }
+};
+const SKEL_MODELS = new Set();
+for (const t of ['skeleton', 'stray', 'bogged', 'wither_skeleton']) {
+  const md = MOB_MODELS[t];
+  if (!md || !md.anim || SKEL_MODELS.has(md)) continue;
+  SKEL_MODELS.add(md);
+  const base = md.anim;
+  md.anim = function (P, st) {
+    base(P, st);
+    if (!st.skelMelee) return;
+    // SkeletonModel.setupAnim for an aggressive skeleton without a bow
+    const at = st.attack || 0, f = Math.sin(at * Math.PI), f1 = Math.sin((1 - (1 - at) * (1 - at)) * Math.PI);
+    const bz = Math.cos(st.age * 0.09) * 0.05 + 0.05, bx = Math.sin(st.age * 0.067) * 0.05;
+    P.right_arm = [-Math.PI / 2 - (f * 1.2 - f1 * 0.4) + bx, -(0.1 - f * 0.6), bz];
+    P.left_arm = [-Math.PI / 2 - (f * 1.2 - f1 * 0.4) - bx, 0.1 - f * 0.6, -bz];
+  };
+}
+
+/* ---------------- sounds ---------------- */
+SND_CAT.skeleton_converted_to_stray = 'hostile'; SUB_TEXT.skeleton_converted_to_stray = 'Skeleton converts to Stray';
+const _audioPlaySK = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'skeleton_converted_to_stray') return _audioPlaySK.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime;
+  for (let i = 0; i < 4; i++) this.noiseHit(dst, 'highpass', 2600 + i * 300, 1.5, 0.08, 0.3, t0 + i * 0.07);
+  this.tone(dst, 'triangle', 900, 300, 0.5, 0.06);
+};
+
+/* @file 154_creepers_spiders.js */
+/* ===================================================================
+   Part 43: creepers and spiders like Java
+   - creepers walk up at 0.25 speed (stroll at 0.8 of it); within 3
+     blocks they stop and swell, and keep swelling while the target stays
+     within 7 blocks in sight (else they shrink back); 30 ticks of swell
+     and they blow up (power 3, 6 charged; blocks only with mobGriefing),
+     leaving a cloud of any effects they had; a fall adds swell; flint and
+     steel or a fire charge lights one; they swell visibly and flash
+     white near the end; they never go after goats
+   - a charged creeper's blast makes the first zombie, skeleton, wither
+     skeleton, creeper or piglin it kills drop its head; creepers killed
+     by any skeleton kind (wither skeletons too) drop a music disc
+   - spiders (0.3 speed, stroll at 0.8 of it) only pick a target where
+     the light is below Java's brightness 0.5 (level 11 or less), and
+     in bright light let go 1 time in 100 a tick; they leap at targets 2
+     to 4 blocks off (1 chance in 3 every other tick) and keep away from
+     armadillos that aren't rolled up
+   - cobwebs hold every mob but spiders (a quarter of the speed across,
+     a twentieth up and down, no falling damage)
+   - on Hard, 10% x the special multiplier of spiders spawn with speed,
+     strength, regeneration or invisibility for good
+   - cave spiders poison for 7 seconds on Normal, 15 on Hard
+   =================================================================== */
+
+/* ---------------- creepers ---------------- */
+// SwellGoal, then the cats and ocelots it keeps away from (part 30's avoid goal), then walking up
+Object.assign(MOB_TYPES.creeper, { walk: 43.2 * 0.2 * 0.2, run: 43.2 * 0.25 * 0.25, ai: ['target', 'creeperSwell', 'avoid', 'melee', 'wander', 'look'] });
+const CREEPER_MAX_SWELL = 30;
+// SwellGoal: starts within 3 blocks of the target (or while swelling), and holds the creeper still
+GOALS.creeperSwell = function (m) {
+  const d = m.data, t = m.target;
+  const near = t && !t.dead && (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 < 9;
+  if (!((d.swellDir || 0) > 0 || d.ignited || near)) return false;
+  m.nav = null; m.move = null;
+  if (t) m.lookAt(t.x, emEyeOf(t), t.z);
+  if (!t || t.dead || (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 > 49 || !m.canSee(t)) d.swellDir = -1; else d.swellDir = 1;
+  return true;
+};
+// MeleeAttackGoal: creepers walk up but their "hit" does nothing
+const _attackCR = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) { if (this.type === 'creeper') return true; return _attackCR.call(this, t); };
+// Creeper.tick: the swell moves with the goal's direction (always up once lit); the hiss when it starts
+function creeperTick(m) {
+  const g = m.game, d = m.data;
+  m._swellO = d.swell || 0;
+  if (d.ignited) d.swellDir = 1;
+  const dir = d.swellDir || 0;
+  if (dir > 0 && !(d.swell > 0) && !d.silent) g.sound('fuse', m.x, m.y, m.z);
+  d.swell = Math.max(0, (d.swell || 0) + dir);
+  d.fuse = d.swell;
+  if (d.swell >= CREEPER_MAX_SWELL) { d.swell = CREEPER_MAX_SWELL; creeperExplode(m); }
+}
+// Creeper.explodeCreeper
+function creeperExplode(m) {
+  const g = m.game, d = m.data;
+  if (m.dead) return;
+  m.dead = true; m.noDrops = true;
+  const blast = d.charged ? { by: m, dropped: false } : null;
+  g._chargedBlast = blast;
+  try { g.explode(m.x, m.y, m.z, d.charged ? 6 : 3, !g.rule('mobGriefing'), 'creeper'); } finally { g._chargedBlast = null; }
+  // the lingering cloud of what it was under
+  if (m.effects && m.effects.size) {
+    const fx = [...m.effects].map(([k, e]) => [k, e.ticks, e.amp]);
+    g.entities.push(new CreeperCloud(g, m.x, m.y, m.z, fx));
+  }
+}
+// AreaEffectCloud as the creeper leaves it: radius 2.5 shrinking to nothing over 300 ticks, 10 ticks before it works, 0.5 less each use
+class CreeperCloud extends Entity {
+  constructor(game, x, y, z, fx) { super(game, x, y, z); this.fx = fx; this.r = 2.5; this.life = 300; this.w = 5; this.h = 0.5; this.applied = new Map(); this.col = [0.4, 0.8, 0.3]; }
+  tick() {
+    this.age++;
+    this.r -= 2.5 / 300;
+    if (--this.life <= 0 || this.r < 0.5) { this.dead = true; return; }
+    const g = this.game;
+    for (let k = 0; k < 2; k++) {
+      const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * this.r;
+      g.particles.add({ x: this.x + Math.cos(a) * d, y: this.y + 0.1, z: this.z + Math.sin(a) * d, vx: 0, vy: 0.01, vz: 0, life: 20, layer: texL('particle_generic_3'), u: 0, v: 0, us: 1, size: 0.08, g: 0, col: this.col });
+    }
+    if (this.age < 10 || this.age % 5) return;
+    for (const m of g.mobsAndPlayer()) {
+      if (Math.hypot(m.x - this.x, m.z - this.z) > this.r || Math.abs(m.y - this.y) > 2 || (this.applied.get(m) || 0) > this.age) continue;
+      this.applied.set(m, this.age + 20);
+      for (const [e, t, a] of this.fx) { if (EFFECTS[e] && EFFECTS[e][3]) m.instantEffect(e, a); else if (m.addEffect) m.addEffect(e, Math.max(1, Math.round(t / 4)), a); }
+      this.r -= 0.5;
+      if (this.r < 0.5) { this.dead = true; return; }
+    }
+  }
+  render() { }
+}
+const _tickCR = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const fall0 = this.fallDist || 0, air0 = !this.onGround;
+  _tickCR.call(this);
+  if (this.type !== 'creeper' || this.dead || this.deathTime > 0) return;
+  // Creeper.causeFallDamage: 1.5 swell for each block fallen, up to 25
+  if (air0 && this.onGround && fall0 > 3) this.data.swell = Math.min(CREEPER_MAX_SWELL - 5, (this.data.swell || 0) + Math.floor(fall0 * 1.5));
+  creeperTick(this);
+};
+// the old fuse goal is gone
+GOALS.creeper = () => false;
+// Creeper.setTarget: never a goat
+const _targetCR = GOALS.target;
+GOALS.target = function (m) { const r = _targetCR(m); if (m.type === 'creeper' && m.target && m.target.type === 'goat') m.target = null; return r; };
+// CreeperRenderer: getSwelling, the squash and stretch, and the white flash
+MOB_ANIM.creeper = (m, st) => {
+  const a = st.age - m.age, f0 = ((m._swellO || 0) + ((m.data.swell || 0) - (m._swellO || 0)) * a) / (CREEPER_MAX_SWELL - 2);
+  const f1 = 1 + Math.sin(f0 * 100) * f0 * 0.01;
+  let f = Math.max(0, Math.min(1, f0)); f *= f; f *= f;
+  st.sxz = (1 + f * 0.4) * f1; st.sy = (1 + f * 0.1) / f1;
+};
+defSkin('entity/creeper/flash', 64, 32, () => { const c = document.createElement('canvas'); c.width = 64; c.height = 32; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 64, 32); return c; });
+const _skinsCR = MOB_SKINS.creeper;
+MOB_SKINS.creeper = m => {
+  const s = _skinsCR(m);
+  const sw = (m.data.swell || 0) / (CREEPER_MAX_SWELL - 2);
+  if (Math.floor(sw * 10) % 2 === 1) s.push({ key: 'entity/creeper/flash', tint: [1, 1, 1, Math.max(0.5, Math.min(1, sw)) * 0.8], trans: true, grow: 0.01 });
+  return s;
+};
+// heads from a charged creeper's blast (each mob's dropCustomDeathLoot), one per creeper
+const MOB_HEADS = { zombie: 'zombie_head', skeleton: 'skeleton_skull', wither_skeleton: 'wither_skeleton_skull', creeper: 'creeper_head', piglin: 'piglin_head' };
+const _hurtCR = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const r = _hurtCR.call(this, amount, source, attacker), b = this.game._chargedBlast;
+  if (b && r && (this.health <= 0 || this.deathTime > 0) && !this._chargedBy) this._chargedBy = b;
+  return r;
+};
+const _dropLootCR = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  const r = _dropLootCR.call(this), b = this._chargedBy, head = MOB_HEADS[this.type];
+  if (b && head && !b.dropped && ITEM_BY_NAME[head]) { b.dropped = true; this.game.dropItem(this.x, this.y + 0.5, this.z, { id: itemOf(head), count: 1 }); }
+  return r;
+};
+// the disc: any of the skeleton kinds (EntityTypeTags.SKELETONS) as the killer
+const _dieCR = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  _dieCR.call(this, source, attacker);
+  if (this.type === 'creeper' && attacker && (attacker.type === 'wither_skeleton' || attacker.type === 'skeleton_horse')) {
+    const discs = DISCS.filter(d => !['pigstep', 'otherside', 'relic', '5', 'creator', 'creator_music_box', 'precipice'].includes(d));
+    this.game.dropItem(this.x, this.y + 0.5, this.z, { id: itemOf('music_disc_' + discs[Math.floor(Math.random() * discs.length)]), count: 1 });
+  }
+};
+
+/* ---------------- spiders ---------------- */
+for (const t of ['spider', 'cave_spider']) {
+  const T = MOB_TYPES[t];
+  Object.assign(T, { walk: 43.2 * 0.24 * 0.24, run: 43.2 * 0.3 * 0.3, neutralDay: false, ai: ['target', 'spiderAvoid', 'spiderLeap', 'spiderMelee', 'wander', 'look'] });
+}
+// Mob.getLightLevelDependentMagicValue at the spider
+function spiderBright(m) {
+  const g = m.game, w = g.world, l = w.getLightRaw(Math.floor(m.x), Math.floor(m.eyeY()), Math.floor(m.z));
+  const lv = Math.max((l >> 4) - g.skyDarken(), l & 15) / 15;
+  return lv / (4 - 3 * lv);
+}
+// SpiderTargetGoal: the usual target search, but only where it is dark enough (HurtByTargetGoal still works in the light)
+const _targetSP = GOALS.target;
+GOALS.target = function (m) {
+  if ((m.type === 'spider' || m.type === 'cave_spider') && !m.target && spiderBright(m) >= 0.5) return false;
+  return _targetSP(m);
+};
+// SpiderAttackGoal.canContinueToUse: in bright light it gives up 1 time in 100 (goals check every other tick)
+GOALS.spiderMelee = function (m) {
+  if (m.target && (m.age + m.id) % 2 === 0 && spiderBright(m) >= 0.5 && Math.random() < 0.01) { m.target = null; return false; }
+  return GOALS.melee(m);
+};
+// LeapAtTargetGoal(0.4): 2 to 4 blocks off, on the ground, 1 chance in 3 every other tick
+GOALS.spiderLeap = function (m) {
+  if (m._leaping) { if (m.onGround) m._leaping = false; else return true; }
+  const t = m.target;
+  if (!t || m.passenger || !m.onGround || (m.age + m.id) % 2) return false;
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2;
+  if (d2 < 4 || d2 > 16 || Math.random() * 3 >= 1) return false;
+  let dx = t.x - m.x, dz = t.z - m.z;
+  const l = Math.hypot(dx, dz);
+  if (l > 1e-4) { dx = dx / l * 0.4 + m.vx * 0.2; dz = dz / l * 0.4 + m.vz * 0.2; } else { dx = m.vx; dz = m.vz; }
+  m.vx = dx; m.vz = dz; m.vy = 0.4; m.onGround = false; m._leaping = true; m.nav = null; m.move = null;
+  return true;
+};
+// AvoidEntityGoal<Armadillo>(6): not from one that is rolled up
+GOALS.spiderAvoid = function (m) { return avoidGoal(m, [[e => e.type === 'armadillo' && !(e.data.roll > 0.5), 6]], m.T.walk); };
+// Spider.finalizeSpawn: on Hard, 10% x the special multiplier get a lasting effect (Spider.SpiderEffectsGroupData)
+for (const t of ['spider', 'cave_spider']) {
+  const base = MOB_INIT[t];
+  MOB_INIT[t] = (m, o) => {
+    if (base) base(m, o);
+    if (o && o.loading || OPTIONS.difficulty !== 3) return;
+    const f = m.game.difficultyAt(m.x, m.z).special;
+    if (Math.random() < 0.1 * f) { const i = Math.floor(Math.random() * 5); m.addEffect(i <= 1 ? 'speed' : i <= 2 ? 'strength' : i <= 3 ? 'regeneration' : 'invisibility', 1e9, 0); }
+  };
+}
+// Entity.makeStuckInBlock in a cobweb (0.25, 0.05, 0.25): the step is cut down and the speed lost; spiders don't stick (Spider.makeStuckInBlock)
+const _walkSP = Mob.prototype.walkPhysics;
+Mob.prototype.walkPhysics = function () {
+  if (this.type === 'spider' || this.type === 'cave_spider' || this.T.flying) return _walkSP.call(this);
+  const w = this.game.world, hw = this.w / 2;
+  if (!aabbHitsBlock(w, this.x - hw, this.y, this.z - hw, this.x + hw, this.y + this.h, this.z + hw, id => BLK[id].web)) return _walkSP.call(this);
+  const x0 = this.x, y0 = this.y, z0 = this.z;
+  const r = _walkSP.call(this);
+  this.x = x0 + (this.x - x0) * 0.25; this.y = y0 + (this.y - y0) * 0.05; this.z = z0 + (this.z - z0) * 0.25;
+  // the speed is lost, but gravity comes back next tick (so it stays on the ground)
+  this.vx = this.vz = 0; this.vy = this.inWater || this.inLava ? 0 : -0.0784; this.fallDist = 0;
+  return r;
+};
+// CaveSpider.doHurtTarget: poison 7 seconds on Normal, 15 on Hard
+MOB_TYPES.cave_spider.hitEffect = null;
+const _attackCS = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) {
+  const r = _attackCS.call(this, t);
+  if (r && this.type === 'cave_spider' && t && t.addEffect) { const s = OPTIONS.difficulty === 2 ? 7 : OPTIONS.difficulty === 3 ? 15 : 0; if (s) t.addEffect('poison', s * 20, 0); }
+  return r;
+};
+
+/* @file 155_slimes_silverfish.js */
+/* ===================================================================
+   Part 44: slimes, magma cubes, silverfish and witches like Java
+   - slimes and magma cubes spawn at size 1, 2 or 4, a step bigger
+     half the special multiplier's share of the time; size n has n x n
+     health, 0.2 + 0.1 n speed, n damage (magma cubes 2 more and 3 n
+     armor) and n experience; tiny slimes do no harm, magma cubes always
+   - they hop: on the ground they wait 10 to 29 ticks (a third of that
+     with a target, magma cubes four times as long) and jump with a
+     push of their speed squared, steering a little in the air; without
+     a target they pick a new way every 2 to 5 seconds; they hurt what
+     they touch, so long as they can see it
+   - silverfish hurt by something wake the infested blocks within 10
+     blocks (5 up or down), which break into more silverfish (or just
+     turn back to stone without mobGriefing), each one with a coin flip
+     to stop there; with nothing to do they slip into stone, cobblestone,
+     stone bricks or deepslate next to them
+   - witches walk at 0.25 speed and drop 1 to 3 rolls of their loot
+   =================================================================== */
+
+/* ---------------- slimes and magma cubes ---------------- */
+const SLIMES = new Set(['slime', 'magma_cube']);
+// Slime.setSize: health n^2, speed 0.2 + 0.1n, damage n, experience n; MagmaCube.setSize also 3n armor
+const _setSlimeSizeSL = setSlimeSize;
+setSlimeSize = function (m, s) { _setSlimeSizeSL(m, s); m.data.armorPts = m.type === 'magma_cube' ? 3 * s : 0; };
+// Slime.finalizeSpawn: size 1, 2 or 4, one step up 0.5 x the special multiplier of the time
+for (const t of SLIMES) {
+  const base = MOB_INIT[t];
+  MOB_INIT[t] = (m, o) => {
+    o = o || {};
+    if (o.loading || o.size) { if (base) base(m, o); return; }
+    let i = Math.floor(Math.random() * 3);
+    if (i < 2 && Math.random() < 0.5 * m.game.difficultyAt(m.x, m.z).special) i++;
+    if (base) base(m, Object.assign({}, o, { size: 1 << i }));
+  };
+  Object.assign(MOB_TYPES[t], { ai: ['target', 'slimeHop'] });
+}
+const slimeSpeed = m => 0.2 + 0.1 * (m.data.size || 1);
+// Slime.getJumpDelay (MagmaCube: four times as long), a third with a target
+const slimeDelay = m => (Math.floor(Math.random() * 20) + 10) * (m.type === 'magma_cube' ? 4 : 1);
+// SlimeMoveControl with the attack, random direction and keep jumping goals
+GOALS.slimeHop = function (m) {
+  const d = m.data, t = m.target, size = d.size || 1, g = m.game;
+  m.move = null; m.nav = null;
+  // the way it faces: at the target (turning 10 degrees a tick), or a random way now and then
+  if (t) { m.lookAt(t.x, emEyeOf(t), t.z); const want = Math.atan2(t.x - m.x, t.z - m.z); let k = want - (d.dir || 0); while (k > Math.PI) k -= 2 * Math.PI; while (k < -Math.PI) k += 2 * Math.PI; d.dir = (d.dir || 0) + Math.max(-0.1745, Math.min(0.1745, k)); }
+  else if (m.onGround || m.inWater) { if (!(--d.turnT > 0)) { d.turnT = 40 + Math.floor(Math.random() * 60); d.dir = Math.random() * Math.PI * 2; } }
+  m.yaw = m.bodyYaw = d.dir || 0;
+  const sp = slimeSpeed(m), fx = Math.sin(m.yaw), fz = Math.cos(m.yaw);
+  if (m.onGround) {
+    if ((d.jumpT = (d.jumpT === undefined ? slimeDelay(m) : d.jumpT) - 1) <= 0) {
+      d.jumpT = slimeDelay(m); if (t) d.jumpT = Math.floor(d.jumpT / 3);
+      // the push of a step at its speed (0.98 x speed^2) and the jump
+      m.vx += fx * 0.98 * sp * sp; m.vz += fz * 0.98 * sp * sp;
+      m.vy = 0.42 + (m.type === 'magma_cube' ? size * 0.1 : 0);
+      m.onGround = false; m._slimeJump = true;
+      if (!d.silent) g.sound(size > 1 ? 'slime_jump' : 'slime_jump_small', m.x, m.y, m.z);
+    }
+  } else {
+    // in the air: the flying speed of 0.02
+    m.vx += fx * 0.02 * 0.98 * sp; m.vz += fz * 0.02 * 0.98 * sp;
+  }
+  return true;
+};
+const _tickSL = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const air0 = !this.onGround, slime = SLIMES.has(this.type);
+  // Slime.tick: the drawn squish eases halfway to where it's headed each tick
+  if (slime) this._squish = (this._squish || 0) + ((this._squishT || 0) - (this._squish || 0)) * 0.5;
+  _tickSL.call(this);
+  if (!slime || this.dead || this.deathTime > 0) return;
+  const d = this.data, size = d.size || 1, g = this.game;
+  // the jump tick slows with the ground's grip, not the air's
+  if (this._slimeJump) { this._slimeJump = false; this.vx *= 0.546 / 0.91; this.vz *= 0.546 / 0.91; }
+  // landing: squashed, and a splat of slime (flames for a magma cube), 16 per block of twice its width, out to its width;
+  // leaving the ground: stretched
+  if (air0 && this.onGround) {
+    this._squishT = -0.5;
+    if (!d.silent) g.sound(size > 1 ? 'slime_squish' : 'slime_squish_small', this.x, this.y, this.z);
+    const magma = this.type === 'magma_cube';
+    for (let k = 0; k < this.w * 32; k++) {
+      const a = Math.random() * Math.PI * 2, r = this.w * (Math.random() * 0.5 + 0.5), x = this.x + Math.sin(a) * r, z = this.z + Math.cos(a) * r;
+      if (magma) g.particles.add({ x, y: this.y + 0.05, z, vx: 0, vy: 0, vz: 0, life: 8, layer: texL('particle_flame'), u: 0, v: 0, us: 1, size: 0.06, g: 0, col: [1, 1, 1], bright: true });
+      else g.particles.add({ x, y: this.y + 0.05, z, vx: 0, vy: 0, vz: 0, life: 12, layer: itemLayer(I.SLIME_BALL), u: 0.25 + Math.random() * 0.5, v: 0.25 + Math.random() * 0.5, us: 0.25, size: 0.05, g: 0.04, col: [1, 1, 1] });
+    }
+  } else if (!air0 && !this.onGround) this._squishT = 1;
+  this._squishT = (this._squishT || 0) * 0.6;
+  // Slime.playerTouch / dealDamage: touching the player (or an iron golem) hurts, unless tiny (magma cubes always)
+  if (d.noAI || size === 1 && this.type === 'slime') return;
+  const reach = 0.828;
+  if (g._golemsT !== g.world.tick) { g._golemsT = g.world.tick; g._golems = g.entities.filter(x => x.type === 'iron_golem' && !x.dead); }
+  for (const e of [g.player, ...g._golems]) {
+    if (!e || e.dead || e.deathTime > 0 || e instanceof Player && (e.mode === 1 || e.mode === 3)) continue;
+    const ew = (e.w || 0.6) / 2, hw = this.w / 2 + reach;
+    if (Math.abs(e.x - this.x) < hw + ew && Math.abs(e.z - this.z) < hw + ew && e.y < this.y + this.h && e.y + e.h > this.y && this.canSee(e)) {
+      if (e.invuln > 0) continue;
+      this.attackEntity(e);
+    }
+  }
+};
+// Slime.getAttackDamage: its size (magma cubes 2 more)
+const _attackSL = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) {
+  if (!SLIMES.has(this.type)) return _attackSL.call(this, t);
+  const keep = this.data.dmg, size = this.data.size || 1;
+  this.data.dmg = size + (this.type === 'magma_cube' ? 2 : 0);
+  try {
+    const r = _attackSL.call(this, t);
+    if (r && !this.data.silent) this.game.sound('slime_attack', this.x, this.y, this.z);
+    return r;
+  } finally { this.data.dmg = keep; }
+};
+// no more of the old hop in the attack code path
+GOALS.slime = () => false;
+
+/* ---------------- silverfish ---------------- */
+Object.assign(MOB_TYPES.silverfish, { walk: 43.2 * 0.25 * 0.25, run: 43.2 * 0.25 * 0.25, ai: ['target', 'silverfishWake', 'melee', 'silverfishMerge', 'wander'] });
+// Silverfish.hurt: by something (or magic), wake its friends in 10 (20 game) ticks
+const _hurtSF = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'silverfish' && !this.dead && (attacker || source === 'magic') && !(this.data.wakeT > 0)) this.data.wakeT = 20;
+  return _hurtSF.call(this, amount, source, attacker);
+};
+// HurtByTargetGoal.setAlertOthers: other silverfish within 16 blocks (10 up or down) without a target join in
+const _onHurtBySF = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  _onHurtBySF.call(this, a, source);
+  if (this.type !== 'silverfish' || !a || a.dead || a instanceof Player && (!a.survival || a.mode === 3)) return;
+  for (const e of this.game.entities) if (e !== this && e.type === 'silverfish' && !e.dead && !e.target && Math.abs(e.x - this.x) < 16.5 && Math.abs(e.y - this.y) < 10.5 && Math.abs(e.z - this.z) < 16.5) e.target = a;
+};
+// SilverfishWakeUpFriendsGoal: infested blocks within 10 (5 up or down), nearest rings first, each with a coin flip to stop
+GOALS.silverfishWake = function (m) {
+  const d = m.data;
+  if (!(d.wakeT > 0)) return false;
+  if (--d.wakeT > 0) return false;
+  const g = m.game, w = g.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z), grief = g.rule('mobGriefing');
+  const order = n => { const o = [0]; for (let k = 1; k <= n; k++) o.push(k, -k); return o; };
+  for (const i of order(5)) for (const j of order(10)) for (const k of order(10)) {
+    const x = bx + j, y = by + i, z = bz + k, id = w.getBlock(x, y, z);
+    if (!BLK[id] || !BLK[id].infested) continue;
+    if (grief) { w.setBlock(x, y, z, 0, 0); g.particles.blockBreak(x, y, z, id); g.spawnMob('silverfish', x + 0.5, y, z + 0.5); }
+    else w.setBlock(x, y, z, B[BLK[id].infested.toUpperCase()] || B.STONE, 0);
+    g.remeshNear(x, z);
+    if (Math.random() < 0.5) return false;
+  }
+  return false;
+};
+// SilverfishMergeWithStoneGoal: idle, a chance in 5 every other tick to burrow into the block it faces
+const INFEST_OF = {};
+for (let id = 1; id < MAXB; id++) if (BLK[id] && BLK[id].infested && B[BLK[id].infested.toUpperCase()] !== undefined) INFEST_OF[B[BLK[id].infested.toUpperCase()]] = id;
+GOALS.silverfishMerge = function (m) {
+  const g = m.game;
+  if (m.target || m.nav && !m.navDone() || !g.rule('mobGriefing') || (m.age + m.id) % 2 || Math.random() * 5 >= 1) return false;
+  const f = Math.floor(Math.random() * 6), w = g.world;
+  const x = Math.floor(m.x) + DX[f], y = Math.floor(m.y + 0.5) + DY[f], z = Math.floor(m.z) + DZ[f], host = w.getBlock(x, y, z), inf = INFEST_OF[host];
+  if (!inf) return false;
+  w.setBlock(x, y, z, inf, w.getMeta(x, y, z));
+  g.particles.poof(m.x, m.y + 0.2, m.z, [0.6, 0.6, 0.6], 8);
+  m.dead = true; m.removed = true;
+  return true;
+};
+
+/* ---------------- witches ---------------- */
+Object.assign(MOB_TYPES.witch, { walk: 43.2 * 0.25 * 0.25, run: 43.2 * 0.25 * 0.25 });
+// the witch loot table: 1 to 3 rolls, each 0 to 2 of glowstone dust, sugar, spider eye, glass bottle, gunpowder, stick (twice as likely)
+// or redstone, one more per looting level
+const _dropLootWT = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  if (this.type !== 'witch' || this.noDrops) return _dropLootWT.call(this);
+  const T = this.T, keep = T.drops;
+  T.drops = [];
+  try { _dropLootWT.call(this); } finally { T.drops = keep; }
+  const pool = ['glowstone_dust', 'sugar', 'spider_eye', 'glass_bottle', 'gunpowder', 'stick', 'stick', 'redstone'], loot = this.killedByPlayer ? this.lootingLevel || 0 : 0;
+  const rolls = 1 + Math.floor(Math.random() * 3);
+  for (let k = 0; k < rolls; k++) {
+    const n = Math.floor(Math.random() * 3) + Math.floor(Math.random() * (loot + 1));
+    if (n > 0) this.game.dropItem(this.x, this.y + 0.5, this.z, { id: itemOf(pool[Math.floor(Math.random() * pool.length)]), count: n });
+  }
+};
+
+// SlimeRenderer / MagmaCubeRenderer.scale: the model drawn size times over, stretched up and pulled in by the squish
+// (squashed and spread out when it lands); a magma cube's slices also come apart in the air (MagmaCubeModel)
+for (const t of SLIMES) {
+  const base = MOB_ANIM[t];
+  MOB_ANIM[t] = (m, st) => {
+    if (base) base(m, st);
+    const n = m.data.size || 1, sq = m._squish || 0, k = 1 / (sq / (n * 0.5 + 1) + 1), f = t === 'slime' ? 0.999 : 1;
+    st.sxz = k * n * f; st.sy = n / k * f;
+    st.squish = Math.max(0, sq);
+  };
+}
+MOB_MODELS.magma_cube.anim = function (P, st) { const sq = st.squish || 0; for (let i = 0; i < 8; i++) P['cube' + i + '#p'] = [0, (i - 4) * sq * 1.7, 0]; };
+
+// Slime.remove: when the death animation ends, 2 to 4 of half the size in a square a quarter of its width out from the middle;
+// they keep its name, NoAI and persistence
+const _afterDeathSL = Mob.prototype.afterDeath;
+Mob.prototype.afterDeath = function () {
+  if (_afterDeathSL) _afterDeathSL.call(this);
+  const size = this.data.size || 1;
+  if (!SLIMES.has(this.type) || size <= 1) return;
+  const g = this.game, half = this.w / 2, k = 2 + Math.floor(Math.random() * 3);
+  for (let l = 0; l < k; l++) {
+    const s = createMob(g, this.type, this.x + ((l % 2) - 0.5) * half, this.y + 0.5, this.z + ((l >> 1) - 0.5) * half, { size: size >> 1 });
+    if (!s) continue;
+    if (this.persistent) s.persistent = true;
+    if (this.customName) s.customName = this.customName;
+    if (this.data.noAI) s.data.noAI = true;
+    s.yaw = s.bodyYaw = Math.random() * 2 * Math.PI; s.savePrev();
+    g.entities.push(s);
+  }
+};
+
+/* ---------------- sounds ---------------- */
+const SL_SOUNDS = [['slime_jump', 'Slime squashes'], ['slime_jump_small', 'Slime squashes'], ['slime_squish', 'Slime squashes'], ['slime_squish_small', 'Slime squashes'], ['slime_attack', 'Slime attacks']];
+for (const [n, t] of SL_SOUNDS) { SND_CAT[n] = 'hostile'; SUB_TEXT[n] = t; }
+const SL_SOUND_SET = new Set(SL_SOUNDS.map(s => s[0]));
+const _audioPlaySL = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!SL_SOUND_SET.has(name)) return _audioPlaySL.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const small = /small/.test(name), v = 0.9 + Math.random() * 0.2;
+  if (name === 'slime_attack') { this.noiseHit(dst, 'lowpass', 500, 1, 0.12, 0.4); this.tone(dst, 'sine', 180 * v, 90 * v, 0.12, 0.12); return; }
+  this.noiseHit(dst, 'lowpass', small ? 900 : 450, 1.2, small ? 0.08 : 0.14, small ? 0.25 : 0.4);
+  this.tone(dst, 'sine', (small ? 320 : 160) * v, (small ? 200 : 90) * v, small ? 0.08 : 0.14, 0.12);
+};
+
+/* @file 156_phantoms.js */
+/* ===================================================================
+   Part 45: phantoms like Java
+   - a phantom circles an anchor point 5 to 15 blocks out, a little
+     below it, now and then changing height, widening its circle or
+     reversing; it looks for the highest player (survival or adventure)
+     it can see within 64 blocks every 3 seconds, and gives up on one
+     it loses sight of; hitting a phantom doesn't make it come for you
+   - with a target it moves its anchor 20 to 39 blocks above the target
+     and swoops every 8 to 11 seconds: it flies straight at the target
+     and bites (6 damage, plus its size), then climbs back to circle;
+     bumping into something, being hurt or a cat within 16 blocks ends
+     the swoop (the cats hiss) and it forgets its target for a while
+   - flight like PhantomMoveControl: it turns at most 4 degrees a tick,
+     gathers speed only while heading straight and slows in turns
+   - its goals think every other tick like Java's, so a fast swoop can
+     miss; sunlight sets it on fire; the wings beat once every 48 ticks
+     with a flap you can hear and leave grey specks behind the tips
+   =================================================================== */
+
+Object.assign(MOB_TYPES.phantom, { ai: ['phantomFly'] });
+const PH_DEG = Math.PI / 180;
+const phSize = m => m.data.size || 0;
+// Phantom.finalizeSpawn: the anchor 5 above where it appears, size 0; the box grows 15% per size
+const _initPH = MOB_INIT.phantom;
+MOB_INIT.phantom = (m, o) => {
+  if (_initPH) _initPH(m, o);
+  const d = m.data;
+  if (o && o.loading) { if (o.data && o.data.size) d.size = o.data.size; }
+  else { d.anchor = [Math.floor(m.x), Math.floor(m.y) + 5, Math.floor(m.z)]; d.size = o && o.size || d.size || 0; d.phase = 'circle'; d.speed = 0.1; }
+  const k = 1 + 0.15 * phSize(m);
+  m.w = 0.9 * k; m.h = 0.5 * k;
+};
+// eyes at 0.175 (scaled with the size); LivingEntity.hasLineOfSight: eye to eye through collision shapes, within 128 blocks
+function phSees(m, e) {
+  const ey = m.y + 0.175 * (1 + 0.15 * phSize(m)), ty = emEyeOf(e);
+  return (e.x - m.x) ** 2 + (ty - ey) ** 2 + (e.z - m.z) ** 2 <= 16384 && clipCollider(m.game.world, m.x, ey, m.z, e.x, ty, e.z);
+}
+// TargetingConditions.DEFAULT (forCombat): a player in survival or adventure, not on peaceful, in sight
+const phCanAttack = (m, t) => !!t && !t.dead && !(t.deathTime > 0) && !(t instanceof Player && (!t.survival || t.mode === 3)) && OPTIONS.difficulty > 0 && phSees(m, t);
+function phSetAnchorAbove(m, t) {
+  const sl = m.game.world.seaLevel() + 1;
+  let y = Math.floor(t.y) + 20 + Math.floor(Math.random() * 20);
+  if (y < sl) y = sl + 1;
+  m.data.anchor = [Math.floor(t.x), y, Math.floor(t.z)];
+}
+function phCircleStart(m) {
+  const C = m._circle = { angle: m._circle ? m._circle.angle : 0, dist: 5 + Math.random() * 10, height: -4 + Math.random() * 9, cw: Math.random() < 0.5 ? 1 : -1 };
+  phSelectNext(m, C);
+}
+function phSelectNext(m, C) {
+  const d = m.data;
+  if (!d.anchor) d.anchor = [Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)];
+  C.angle += C.cw * 15 * PH_DEG;
+  m._moveTo = [d.anchor[0] + C.dist * Math.cos(C.angle), d.anchor[1] - 4 + C.height, d.anchor[2] + C.dist * Math.sin(C.angle)];
+}
+// PhantomSweepAttackGoal.canContinueToUse: the target alive and not in creative or spectator, still swooping, and no cat within 16 blocks
+// (looked for once a second; the cats found hiss)
+function phSweepGoes(m, S) {
+  const t = m.target, g = m.game;
+  if (!t || t.dead || t.deathTime > 0 || t instanceof Player && (t.mode === 1 || t.mode === 3) || m.data.phase !== 'swoop') return false;
+  if (m.age > S.catT) {
+    S.catT = m.age + 20;
+    const cats = g.entities.filter(e => e.type === 'cat' && !e.dead && !(e.deathTime > 0) && Math.abs(e.x - m.x) < 16 + (m.w + e.w) / 2 && Math.abs(e.z - m.z) < 16 + (m.w + e.w) / 2
+      && e.y < m.y + m.h + 16 && e.y + e.h > m.y - 16);
+    for (const c of cats) g.sound('cat_hiss', c.x, c.y + 0.5, c.z);
+    S.scared = cats.length > 0;
+  }
+  return !S.scared;
+}
+GOALS.phantomFly = function (m) {
+  const g = m.game, w = g.world, d = m.data, p = g.player;
+  m.nav = null; m.move = null;
+  if (!d.phase) d.phase = 'circle';
+  // Mob.serverAiStep: the goals run every other tick, the move control every tick
+  if (m.age > 1 && (m.age + m.id) % 2) return phFly(m);
+  const S = m._ph || (m._ph = { tgt: false, scan: 10, strat: false, sweepT: 0, sweep: false, circle: false, catT: 0, scared: false });
+  // PhantomAttackPlayerTargetGoal: while it isn't running, every 60 ticks the highest player within 16 blocks across and 64 up or down
+  if (S.tgt && !phCanAttack(m, m.target)) S.tgt = false;
+  if (!S.tgt) {
+    if (S.scan > 0) S.scan--;
+    else {
+      S.scan = 30;
+      if (p && Math.abs(p.x - m.x) < 16 + (m.w + p.w) / 2 && Math.abs(p.z - m.z) < 16 + (m.w + p.w) / 2 && p.y < m.y + m.h + 64 && p.y + p.h > m.y - 64
+        && (p.x - m.x) ** 2 + (p.y - m.y) ** 2 + (p.z - m.z) ** 2 <= emSeenRange(p, 64) ** 2 && phCanAttack(m, p)) { m.target = p; S.tgt = true; }
+    }
+  }
+  // the goals in Java's order: stop the ones that can't go on, start the ones that can, then tick the running ones
+  const sOk = phCanAttack(m, m.target);
+  if (S.strat && !sOk) {
+    // PhantomAttackStrategyGoal.stop: a new anchor 10 to 29 blocks over the ground below the old one
+    S.strat = false;
+    let y = CH_TOP; const ax = d.anchor ? d.anchor[0] : Math.floor(m.x), az = d.anchor ? d.anchor[2] : Math.floor(m.z);
+    while (y > 0 && !(SOLID[w.getBlock(ax, y, az)] || BLK[w.getBlock(ax, y, az)].liquid)) y--;
+    d.anchor = [ax, y + 1 + 10 + Math.floor(Math.random() * 20), az];
+  }
+  if (S.sweep && !phSweepGoes(m, S)) { S.sweep = false; m.target = null; d.phase = 'circle'; }
+  if (S.circle && m.target && d.phase !== 'circle') S.circle = false;
+  if (!S.strat && sOk) { S.strat = true; S.sweepT = 5; d.phase = 'circle'; phSetAnchorAbove(m, m.target); }
+  if (!S.sweep && m.target && d.phase === 'swoop') { S.sweep = true; S.circle = false; }
+  if (!S.circle && !S.sweep && (!m.target || d.phase === 'circle')) { S.circle = true; phCircleStart(m); }
+  // PhantomAttackStrategyGoal.tick: circling, it swoops every 8 to 11 seconds
+  if (S.strat && d.phase === 'circle' && --S.sweepT <= 0 && m.target) {
+    d.phase = 'swoop'; phSetAnchorAbove(m, m.target); S.sweepT = (8 + Math.floor(Math.random() * 4)) * 10;
+    if (!d.silent) g.sound('phantom_swoop', m.x, m.y, m.z);
+  }
+  // PhantomSweepAttackGoal.tick: straight at the target's middle, a bite when the boxes (its own 0.2 bigger) touch; a bump or a hit ends it
+  if (S.sweep && m.target) {
+    const t = m.target;
+    m._moveTo = [t.x, t.y + t.h * 0.5, t.z];
+    const r = (m.w + (t.w || 0.6)) / 2 + 0.2;
+    if (Math.abs(t.x - m.x) < r && Math.abs(t.z - m.z) < r && t.y < m.y + m.h + 0.2 && t.y + t.h > m.y - 0.2) {
+      m.attackEntity(t);
+      d.phase = 'circle';
+      if (!d.silent) g.sound('phantom_bite', m.x, m.y, m.z);
+    } else if (m._hitWall || m.hurtTime > 0) d.phase = 'circle';
+  }
+  // PhantomCircleAroundAnchorGoal.tick
+  if (S.circle) {
+    const C = m._circle;
+    if (Math.floor(Math.random() * 175) === 0) C.height = -4 + Math.random() * 9;
+    if (Math.floor(Math.random() * 125) === 0) { C.dist++; if (C.dist > 15) { C.dist = 5; C.cw = -C.cw; } }
+    if (Math.floor(Math.random() * 225) === 0) { C.angle = Math.random() * 2 * Math.PI; phSelectNext(m, C); }
+    const mt = m._moveTo;
+    if ((mt[0] - m.x) ** 2 + (mt[1] - m.y) ** 2 + (mt[2] - m.z) ** 2 < 4) phSelectNext(m, C);
+    const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+    if (m._moveTo[1] < m.y && w.getBlock(bx, by - 1, bz) !== B.AIR) { C.height = Math.max(1, C.height); phSelectNext(m, C); }
+    if (m._moveTo[1] > m.y && w.getBlock(bx, by + 1, bz) !== B.AIR) { C.height = Math.min(-1, C.height); phSelectNext(m, C); }
+  }
+  return phFly(m);
+};
+// no HurtByTargetGoal: a hit doesn't make a phantom go after anyone (it only breaks off a swoop)
+const _onHurtByPH = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) { if (this.type === 'phantom') return; return _onHurtByPH.call(this, a, source); };
+// PhantomMoveControl: turn towards the point (4 degrees a tick), speed up to 1.8 when lined up, slow to 0.2 in turns, and ease the
+// velocity a fifth of the way to where it should be
+function phFly(m) {
+  const d = m.data, mt = m._moveTo || [m.x, m.y, m.z];
+  if (m._hitWall) { m.yaw += Math.PI; d.speed = 0.1; }
+  let dx = mt[0] - m.x, dy = mt[1] - m.y, dz = mt[2] - m.z, h = Math.hypot(dx, dz);
+  if (h > 1e-5) {
+    const k = 1 - Math.abs(dy * 0.7) / h;
+    dx *= k; dz *= k; h = Math.hypot(dx, dz);
+    const len = Math.hypot(dx, dz, dy), y0 = m.yaw, want = Math.atan2(dx, dz);
+    let diff = want - m.yaw; while (diff > Math.PI) diff -= 2 * Math.PI; while (diff < -Math.PI) diff += 2 * Math.PI;
+    m.yaw += Math.max(-4 * PH_DEG, Math.min(4 * PH_DEG, diff)); m.bodyYaw = m.yaw;
+    let turned = m.yaw - y0; while (turned > Math.PI) turned -= 2 * Math.PI; while (turned < -Math.PI) turned += 2 * Math.PI;
+    const sp = d.speed || 0.1;
+    d.speed = Math.abs(turned) < 3 * PH_DEG ? Math.min(1.8, sp + 0.005 * (1.8 / sp)) : sp > 0.2 ? Math.max(0.2, sp - 0.025) : Math.min(0.2, sp + 0.025);
+    const pitch = Math.atan2(dy, h);
+    d.pitch = -pitch;
+    const vx = d.speed * Math.sin(m.yaw) * Math.abs(dx / len), vz = d.speed * Math.cos(m.yaw) * Math.abs(dz / len), vy = d.speed * Math.sin(pitch) * Math.abs(dy / len);
+    m.vx += (vx - m.vx) * 0.2; m.vy += (vy - m.vy) * 0.2; m.vz += (vz - m.vz) * 0.2;
+  }
+  return true;
+}
+// Phantom.updatePhantomSizeInfo: 6 damage plus its size
+const _attackPH = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) {
+  if (this.type !== 'phantom') return _attackPH.call(this, t);
+  const keep = this.data.dmg;
+  this.data.dmg = 6 + phSize(this);
+  try { return _attackPH.call(this, t); } finally { this.data.dmg = keep; }
+};
+// bumping into walls (Entity.horizontalCollision), and the flap sound once a wingbeat
+const _flyPH = Mob.prototype.flyPhysics;
+Mob.prototype.flyPhysics = function () {
+  if (this.type !== 'phantom') return _flyPH.call(this);
+  const vx = this.vx, vz = this.vz;
+  const r = _flyPH.call(this);
+  this._hitWall = (Math.abs(vx) > 0.01 && this.vx === 0) || (Math.abs(vz) > 0.01 && this.vz === 0);
+  const off = this.id * 3, f0 = Math.cos((off + this.age) * 7.448451 * PH_DEG + Math.PI), f1 = Math.cos((off + this.age + 1) * 7.448451 * PH_DEG + Math.PI);
+  if (f0 > 0 && f1 <= 0 && !this.data.silent) this.game.sound('phantom_flap', this.x, this.y, this.z);
+  // Phantom.tick: a mycelium speck off each wing tip, higher or lower with the wingbeat
+  const p = this.game.player;
+  if (p && (this.x - p.x) ** 2 + (this.y - p.y) ** 2 + (this.z - p.z) ** 2 <= 1024) {
+    const hw = this.w * 1.48, ox = Math.cos(this.yaw) * hw, oz = -Math.sin(this.yaw) * hw, oy = (0.3 + f0 * 0.45) * this.h * 2.5;
+    for (const sg of [1, -1]) {
+      const c = Math.random() * 0.1 + 0.2;
+      this.game.particles.add({ x: this.x + ox * sg, y: this.y + oy, z: this.z + oz * sg, vx: 0, vy: 0, vz: 0, life: Math.floor(20 / (Math.random() * 0.8 + 0.2)), layer: texL('particle_generic_0'),
+        u: 0, v: 0, us: 1, size: (0.1 + Math.random() * 0.1) * (Math.random() * 0.6 + 0.5), g: 0, col: [c, c, c] });
+    }
+  }
+  return r;
+};
+// PhantomModel.setupAnim: wings beat with cos((3 x id + age) x 7.45 degrees), the tail at twice that
+MOB_MODELS.phantom.anim = function (P, st) {
+  const f = ((st.flapOff || 0) + st.age) * 7.448451 * PH_DEG, wing = Math.cos(f) * 16 * PH_DEG, tail = -(5 + Math.cos(f * 2) * 5) * PH_DEG;
+  P.left_wing_base = [0, 0, wing]; P.left_wing_tip = [0, 0, wing]; P.right_wing_base = [0, 0, -wing]; P.right_wing_tip = [0, 0, -wing];
+  P.tail_base = [tail, 0, 0]; P.tail_tip = [tail, 0, 0];
+  P.body = [-0.1 + (st.pitch || 0), 0, 0]; P['body#p'] = [0, 18, 0];
+};
+const _animPH = MOB_ANIM.phantom;
+MOB_ANIM.phantom = (m, st) => { if (_animPH) _animPH(m, st); st.flapOff = m.id * 3; };
+// size scales the body (1 + 0.15 x size)
+const _renderScalePH = Mob.prototype.renderScale;
+Mob.prototype.renderScale = function (a) { if (this.type === 'phantom') return 1 + 0.15 * phSize(this); return _renderScalePH ? _renderScalePH.call(this, a) : 1; };
+// the old circling is gone
+GOALS.phantom = () => false;
+
+/* ---------------- sounds ---------------- */
+const PH_SOUNDS = [['phantom_swoop', 'Phantom swoops'], ['phantom_bite', 'Phantom bites'], ['phantom_flap', 'Phantom flaps']];
+for (const [n, t] of PH_SOUNDS) { SND_CAT[n] = 'hostile'; SUB_TEXT[n] = t; }
+const PH_SOUND_SET = new Set(PH_SOUNDS.map(s => s[0]));
+const _audioPlayPH = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!PH_SOUND_SET.has(name)) return _audioPlayPH.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2;
+  if (name === 'phantom_swoop') { this.tone(dst, 'sawtooth', 900 * v, 300 * v, 0.7, 0.05); this.noiseHit(dst, 'bandpass', 1800, 2, 0.6, 0.15); return; }
+  if (name === 'phantom_bite') { this.noiseHit(dst, 'lowpass', 1200, 1, 0.08, 0.5); this.tone(dst, 'square', 400 * v, 200 * v, 0.06, 0.08); return; }
+  this.noiseHit(dst, 'lowpass', 300, 0.7, 0.2, 0.25);
 };
 
 </script>

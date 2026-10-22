@@ -674,6 +674,40 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Endermites** come with 1 in 20 thrown ender pearls, live 2 minutes unless named, and
   endermen go after them.
 - Splash water bottles put out burning mobs and hurt endermen, blazes, striders and snow golems.
+- **Regional difficulty**: as in Java, the longer you spend around a place, the world's age and
+  the moon make it harder. F3 shows it as Local Difficulty. It decides how often monsters wear
+  armor and carry weapons and how many of them can pick things up or break doors.
+- **Zombies like Java's**: they walk at Java's speed and baby zombies are much faster. On Hard
+  a hurt zombie can call another of its kind out of the dark nearby (even with the blow that
+  kills it), and zombies that can break doors bang on wooden doors and break them after 12
+  seconds. Hitting one brings the others around it after you. A zombie that stays under water
+  for 30 seconds starts to shake and becomes a drowned; husks become zombies. A helmet keeps the
+  sun off (and wears out instead), and baby zombies burn in daylight too.
+- **Monsters lose track of you like in Java**: they need to see you to come after you, give up
+  once you're out of sight for 3 seconds, and only chase you as far as Java lets them (35 blocks
+  for zombies, 16 for skeletons, creepers, spiders and most others).
+- **Skeletons like Java's**: they keep their distance and circle you, draw the bow for a second
+  and shoot every 3 seconds (2 on Hard) with Java's aim, which misses more than before. Stray
+  arrows slow you for 30 seconds and bogged arrows poison you. Skeletons hide from the sun
+  under cover, run from wolves, and one stuck in powder snow turns into a stray.
+- **Creepers like Java's**: once a creeper starts to hiss you have to get more than 7 blocks
+  away (or out of sight) to stop it. It swells up and flashes white before it explodes, falls
+  make it hiss sooner, and a charged creeper's blast drops the head of the first zombie,
+  skeleton, creeper or piglin it kills.
+- **Spiders like Java's**: they only pick a fight in the dark (below light 12), leap at you
+  from 2 to 4 blocks away and walk through cobwebs, which slow down every other mob.
+- **Slimes and magma cubes like Java's**: their size (1, 2 or 4) sets their health, damage and
+  speed, and they're now drawn at that size; they hop with Java's timing and distances, stretch
+  as they jump and squash as they land (magma cubes come apart in the air), and hurt you by
+  touching you (the tiniest slimes don't). A big one splits into 2 to 4 smaller ones when its
+  body vanishes, and they keep its name.
+- **Silverfish** call more silverfish out of nearby infested stone when hurt and hide in stone
+  again when left alone. **Witches** walk at Java's speed and drop Java's loot.
+- **Phantoms like Java's**: they circle high above, pick the player they can see, and every 8
+  to 11 seconds swoop straight at you, bite and climb back up. Bumping into something, getting
+  hit or a cat nearby breaks off the swoop (the cat hisses). Hiding under a roof makes them lose
+  you. They speed up on straight runs and turn slowly, flap with a sound you can hear, leave
+  grey specks behind their wings and burn in daylight.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
