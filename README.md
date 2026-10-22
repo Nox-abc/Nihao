@@ -437,14 +437,17 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   daylight detectors, sculk sensors and lightning rods.
 - Lamps, doors, trapdoors, fence gates, TNT, pistons and sticky pistons, dispensers and droppers,
   hoppers, note blocks, bells, copper bulbs and the crafter all respond. Pistons, dispensers and
-  droppers have Java Edition's quasi-connectivity: power reaching the block above them counts.
+  droppers have Java Edition's quasi-connectivity: power reaching the block above them counts, but
+  they only notice it at the next block update next to them, so block update detectors work.
+  Slime blocks carry power like solid blocks; observers and blocks of redstone don't.
 - Java Edition timings and quirks: repeaters stretch a short pulse to their delay and lock when a
   powered repeater or comparator points into their side, redstone torches burn out when switched
   off eight times in three seconds, pressure plates stay down for a second (weighted ones half a
   second), and observers see crops grow.
 - Hoppers point down or sideways into whatever they were placed against (into a furnace's side
   goes fuel), and pistons break melons, pumpkins, beds, doors, pots and other fragile blocks
-  instead of pushing them, so automatic farms built from Java designs work.
+  instead of pushing them, so automatic farms built from Java designs work. Pistons push up to 12
+  blocks, slime and honey blocks drag the blocks around them, and moved blocks slide for 2 ticks.
 - **Command blocks**: impulse, chain and repeating, conditional or not, needing redstone or always
   active. Type any of the commands above into the command block screen; `~` coordinates count
   from the block, chains run in the same tick and comparators read whether the command worked.
@@ -776,6 +779,15 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   llama armor from the equipment folders, the moon's eight separate pictures, and renamed blocks such as the
   chain and the pillars. Mobs are drawn from both sides like Java's, so thin parts such as a chicken's legs show
   the way the pack paints them. Allays now have their own look instead of being invisible.
+- **Pistons like Java's**: a piston moves up to 12 blocks, and slime and honey blocks drag the blocks
+  around them along (but not each other) and stick to whatever they touch, the ground included. Glazed
+  terracotta can be pushed but not pulled; obsidian, anvils, extended pistons and blocks that hold things
+  (chests, furnaces, hoppers ...) don't move; plants, torches, redstone dust, leaves and melons break. Blocks slide
+  for 2 ticks before they land, and a sticky piston powered for only a moment leaves its block behind. Entities in
+  the way are pushed along, slime blocks launch them, and honey blocks carry what stands on them.
+- **Camel and strider saddles**: a saddled camel wears Java's saddle with its rug, a bridle and, while ridden,
+  reins; a saddled strider wears its saddle. Resource packs' saddles are used, including the separate saddle
+  textures of newer packs.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

@@ -601,6 +601,8 @@ function buildBlockNames() {
   add('nether_portal', 'end_portal', 'end_gateway', 'fire', 'soul_fire');
   // ---- operator utilities (kept last so the ids above stay put)
   add('command_block', 'chain_command_block', 'repeating_command_block', 'structure_block', 'jigsaw', 'barrier', 'light', 'structure_void', 'petrified_oak_slab');
+  // ---- pistons' moving blocks (Part 56)
+  add('moving_piston');
   return out;
 }
 const BLOCK_NAMES = buildBlockNames();
@@ -6338,7 +6340,7 @@ class FlatWorldGen extends VanillaWorldGen {
 const SH = { NONE: 0, CUBE: 1, CROSS: 2, TORCH: 3, LIQUID: 4, LAYER: 5, CACTUS: 6, CROP: 7, SLAB: 8, LADDER: 9, STAIRS: 10, FENCE: 11, DOOR: 12, PANE: 13, LANTERN: 14,
   PORTAL: 15, EPORTAL: 16, FRAME: 17, WALL: 18, GATE: 19, TRAPDOOR: 20, PLATE: 21, BUTTON: 22, CARPET: 23, SIGN: 24, HSIGN: 25, TALL: 26, BOX: 27, CHAIN: 28,
   ROD: 29, CANDLE: 30, BED: 31, HEAD: 32, POT: 33, VINE: 34, FLAT: 35, RAIL: 36, WIRE: 37, FAN: 39, CHEST: 40, BANNER: 41, CHORUS: 42, FIRE: 43,
-  PISTON: 44, DIODE: 45, LEVER: 46, PATH: 47, BAMBOO: 48 };
+  PISTON: 44, DIODE: 45, LEVER: 46, PATH: 47, BAMBOO: 48, MOVING: 49 };
 const BLK = [];
 const OPAQUE = new Uint8Array(MAXB);     // full opaque cube: hides neighbour faces
 const OPACITY = new Uint8Array(MAXB);    // light attenuation 0..15
@@ -6764,6 +6766,8 @@ defB('barrier', { hard: -1, drop: null, rarity: 3, op: true, cutout: true, opaci
 defB('light', { hard: -1, drop: null, rarity: 3, op: true, shape: SH.NONE, noCollide: true, light: 15, tex: 'barrier_block', iconTex: 'light_15' });
 defB('structure_void', { hard: 0, drop: null, rarity: 3, op: true, shape: SH.NONE, noCollide: true, tex: 'barrier_block', iconTex: 'structure_void' });
 defB('petrified_oak_slab', { shape: SH.SLAB, height: 8, slabOf: B.OAK_PLANKS, hard: 2, tool: PICK, lvl: 0, sound: 'wood', tex: 'oak_planks' });
+// a block on its way somewhere, carried by a piston (drawn by the pistons' code)
+defB('moving_piston', { shape: SH.MOVING, hard: -1, item: null, drop: null, tex: 'piston_side' });
 const NONSOLID_SHAPES = new Set([SH.NONE, SH.CROSS, SH.TORCH, SH.LIQUID, SH.CROP, SH.PORTAL, SH.TALL, SH.VINE, SH.FAN, SH.WIRE, SH.RAIL, SH.FIRE, SH.LEVER]);
 for (let id = 0; id < BLOCK_NAMES.length; id++) {
   const d = BLK[id];
@@ -12701,8 +12705,14 @@ Object.assign(MOB_MODELS, {
     P_('head', [0, -3, -19.5], [[60, 24, -3.5, -7, -15, 7, 8, 19], [21, 0, -3.5, -21, -15, 7, 14, 7], [50, 0, -2.5, -21, -21, 5, 5, 6]], null, 'body'),
     P_('left_ear', [3, -21, -9.5], [[45, 0, -0.5, 0.5, -1, 3, 1, 2]], null, 'head'), P_('right_ear', [-3, -21, -9.5], [[67, 0, -2.5, 0.5, -1, 3, 1, 2]], null, 'head'),
     P_('left_hind_leg', [4.9, 1, 9.5], [[58, 16, -2.5, 2, -2.5, 5, 21, 5]]), P_('right_hind_leg', [-4.9, 1, 9.5], [[94, 16, -2.5, 2, -2.5, 5, 21, 5]]),
-    P_('left_front_leg', [4.9, 1, -10.5], [[0, 0, -2.5, 2, -2.5, 5, 21, 5]]), P_('right_front_leg', [-4.9, 1, -10.5], [[0, 26, -2.5, 2, -2.5, 5, 21, 5]])],
+    P_('left_front_leg', [4.9, 1, -10.5], [[0, 0, -2.5, 2, -2.5, 5, 21, 5]]), P_('right_front_leg', [-4.9, 1, -10.5], [[0, 26, -2.5, 2, -2.5, 5, 21, 5]]),
+    // worn when saddled: the saddle over the hump, the bridle on the head, and the reins while ridden
+    P_('saddle', [0, 0, 0], [[74, 64, -4.5, -17, -15.5, 9, 5, 11, 0.05], [92, 114, -3.5, -20, -15.5, 7, 3, 11, 0.05], [0, 89, -7.5, -12, -23.5, 15, 12, 27, 0.05]], null, 'body'),
+    P_('bridle', [0, 0, 0], [[60, 87, -3.5, -7, -15, 7, 8, 19, 0.1], [21, 64, -3.5, -21, -15, 7, 14, 7, 0.1], [50, 64, -2.5, -21, -21, 5, 5, 6, 0.1], [74, 70, 2.5, -19, -18, 1, 2, 2], [74, 70, -3.5, -19, -18, 1, 2, 2, 0, 1]], null, 'head'),
+    P_('reins', [0, 0, 0], [[98, 42, 3.51, -18, -17, 0, 7, 15], [84, 57, -3.5, -18, -2, 7, 7, 0], [98, 42, -3.51, -18, -17, 0, 7, 15]], null, 'head')],
     anim(P, st) {
+      if (!st.saddle) P['saddle#hide'] = P['bridle#hide'] = 1;
+      if (!st.saddle || !st.ridden) P['reins#hide'] = 1;
       P.head = [st.hp * 0.6, -st.hy * 0.6, 0];
       P.right_hind_leg = [legSwing(st, 1), 0, 0]; P.left_hind_leg = [legSwing(st, 1, PI), 0, 0]; P.right_front_leg = [legSwing(st, 1, PI), 0, 0]; P.left_front_leg = [legSwing(st, 1), 0, 0];
       P.tail = [Math.sin(st.age * 0.1) * 0.1, 0, 0];
@@ -13374,6 +13384,30 @@ defSkin('entity/horse/horse_zombie', 64, 64, () => horseSkin([90, 140, 80], [60,
 defSkin('entity/camel/camel', 128, 128, () => skinParts(128, 128, MM.camel.parts, {
   head: (f, x, y, W, H, R, ci) => ci === 2 && f === 'front' && y === 2 && (x === 0 || x === 4) ? [30, 26, 24] : ci === 1 && (f === 'right' && y === 3 && x === 3 || f === 'left' && y === 3 && x === 3) ? [20, 18, 18] : nz([222, 182, 124], R, 0.05),
   hump: (f, x, y, W, H, R) => nz([200, 160, 104], R, 0.06), tail: (f, x, y, W, H, R) => nz([150, 116, 76], R),
+  saddle: (f, x, y, W, H, R, ci) => {
+    const lea = [146, 84, 44], dark = [96, 54, 30], rug = [168, 52, 40], trim = [214, 164, 70];
+    if (ci === 0) return nz(y === H - 1 && f !== 'top' && f !== 'bottom' ? dark : lea, R, 0.05);
+    if (ci === 1) return nz(f === 'top' ? shd(lea, 1.15) : shd(lea, 0.85), R, 0.05);
+    // the rug under it and the girth strap round the belly
+    if (f === 'top') return y >= 6 && y <= 20 ? nz(y === 6 || y === 20 ? trim : rug, R, 0.05) : null;
+    if (f === 'left' || f === 'right') {
+      if (x >= 12 && x <= 14 && y >= 4) return y === 8 ? [150, 150, 156] : nz(dark, R, 0.05);
+      return y < 5 && x >= 6 && x <= 20 ? nz(y === 4 ? trim : rug, R, 0.05) : null;
+    }
+    return f === 'bottom' && y >= 12 && y <= 14 ? nz(dark, R, 0.05) : null;
+  },
+  bridle: (f, x, y, W, H, R, ci) => {
+    const lea = [92, 52, 30];
+    if (ci >= 3) return nz([160, 160, 168], R, 0.05);
+    if (ci === 1) return (f !== 'top' && f !== 'bottom' && y === 1) || (f === 'right' && x === W - 1 && y < 5) || (f === 'left' && x === 0 && y < 5) ? nz(lea, R, 0.05) : null;
+    if (ci === 2) return (f === 'left' || f === 'right') && (x === 2 || x === 3) || (f === 'top' || f === 'bottom') && (y === 2 || y === 3) ? nz(lea, R, 0.05) : null;
+    return null;
+  },
+  reins: (f, x, y, W, H, R, ci) => {
+    if (ci === 1) return y === H - 2 ? nz([92, 52, 30], R, 0.05) : null;
+    const k = f === 'left' ? x : W - 1 - x;
+    return y === 1 + Math.round(k * 4 / (W - 1)) ? nz([92, 52, 30], R, 0.05) : null;
+  },
   '*': (f, x, y, W, H, R) => nz(f === 'bottom' || y >= H - 2 ? [120, 94, 66] : [222, 182, 124], R, 0.05),
 }, 161));
 defSkin('entity/armadillo', 64, 64, () => skinParts(64, 64, MM.armadillo.parts, {
@@ -13784,6 +13818,18 @@ for (const [k, base] of [['strider', [170, 56, 50]], ['strider_cold', [150, 110,
     right_leg: (f, x, y, W, H, R) => nz(shd(base, 0.75), R), left_leg: (f, x, y, W, H, R) => nz(shd(base, 0.75), R),
     '*': (f, x, y, W, H, R) => (x + y) % 2 ? null : nz(shd(base, 1.2), R),
   }, 551));
+// a strider's saddle (drawn over the body)
+defSkin('entity/strider/strider_saddle', 64, 128, () => skinParts(64, 128, MM.strider.parts.filter(p => p.n === 'body'), {
+  body: (f, x, y, W, H, R) => {
+    const lea = [140, 80, 42], dark = [92, 52, 30];
+    if (f === 'top') return x >= 3 && x <= 12 && y >= 3 && y <= 12 ? nz(x === 3 || x === 12 || y === 3 || y === 12 ? dark : lea, R, 0.05) : null;
+    if (f === 'left' || f === 'right') {
+      if (x >= 7 && x <= 8) return y === 10 ? [150, 150, 156] : nz(dark, R, 0.05);
+      return y < 3 && x >= 3 && x <= 12 ? nz(y === 2 ? dark : lea, R, 0.05) : null;
+    }
+    return f === 'bottom' && x >= 7 && x <= 8 ? nz(dark, R, 0.05) : null;
+  },
+}, 553));
 
 /* ---------------- deep dark, trials and bosses ---------------- */
 defSkin('entity/warden/warden', 128, 128, () => skinParts(128, 128, MM.warden.parts, {
@@ -15246,7 +15292,7 @@ Object.assign(MOB_SKINS, {
   piglin: () => [{ key: 'entity/piglin/piglin' }], piglin_brute: () => [{ key: 'entity/piglin/piglin_brute' }], zombified_piglin: () => [{ key: 'entity/piglin/zombified_piglin' }],
   hoglin: () => [{ key: 'entity/hoglin/hoglin' }], zoglin: () => [{ key: 'entity/hoglin/zoglin' }],
   ghast: m => [{ key: m.data.shooting ? 'entity/ghast/ghast_shooting' : 'entity/ghast/ghast' }],
-  strider: m => [{ key: m.data.cold ? 'entity/strider/strider_cold' : 'entity/strider/strider' }],
+  strider: m => [{ key: m.data.cold ? 'entity/strider/strider_cold' : 'entity/strider/strider' }].concat(m.data.saddle ? [{ key: 'entity/strider/strider_saddle', only: ['body'], grow: 0.05 }] : []),
   blaze: () => [{ key: 'entity/blaze' }],
   shulker: () => [{ key: 'entity/shulker/shulker' }],
   allay: () => [{ key: 'entity/allay/allay' }],
@@ -15273,7 +15319,7 @@ const MOB_ANIM = {
   mule: (m, st) => { st.saddle = m.data.saddle; st.chest = m.data.chest; st.longEars = true; },
   skeleton_horse: (m, st) => { st.saddle = m.data.saddle; }, zombie_horse: (m, st) => { st.saddle = m.data.saddle; },
   llama: (m, st) => { st.chest = m.data.chest; }, trader_llama: (m, st) => { st.chest = m.data.chest; },
-  camel: (m, st) => { st.sit = m.data.sitting; },
+  camel: (m, st) => { st.sit = m.data.sitting; st.saddle = m.data.saddle; st.ridden = !!(m.rider || m.passenger); },
   bat: (m, st) => { st.rest = m.data.resting; },
   frog: (m, st) => { st.tongue = m.data.tongue > 0 && m.data.tongue--; },
   squid: (m, st) => { st.tentacle = m.data.tentacle || 0; }, glow_squid: (m, st) => { st.tentacle = m.data.tentacle || 0; },
@@ -23402,7 +23448,8 @@ for (const n of BLOCK_NAMES) {
 }
 const RS_ANY = new Uint8Array(MAXB);
 for (let i = 0; i < MAXB; i++) if (RS_SRC[i] || RS_CON[i]) RS_ANY[i] = 1;
-const conductive = id => OPAQUE[id] === 1 && SHAPE[id] === SH.CUBE;
+// blocks that carry power (Java's isRedstoneConductor): full solid blocks, slime blocks too; observers and blocks of redstone don't
+const conductive = id => id === B.SLIME_BLOCK || (OPAQUE[id] === 1 && SHAPE[id] === SH.CUBE && id !== B.OBSERVER && id !== B.REDSTONE_BLOCK);
 // blocks a piston breaks instead of pushing (PushReaction.DESTROY): melons and pumpkins (so melon and pumpkin farms work),
 // beds, doors, heads, pots, candles, lanterns, amethyst buds, dripstone, eggs, cobwebs and the like
 const PISTON_DESTROY = new Uint8Array(MAXB);
@@ -50663,9 +50710,13 @@ AUDIO.play = function (name, x, y, z, ...rest) {
      pictures, beds as block faces, the cow's muzzle as its own box (put
      back on its face); the redrawn rabbit and magma cube can't be
      fitted, so the game's own are drawn for those
-   - saddles from the newer packs are drawn on horses, donkeys, mules
-     and skeleton and zombie horses; llama carpets cover the neck as
-     well as the body, as Java's do
+   - saddles from the newer packs are drawn on horses, donkeys, mules,
+     skeleton and zombie horses, camels and striders; llama carpets
+     cover the neck as well as the body, as Java's do
+   - camels wear Java's saddle, bridle and (while ridden) reins, and
+     striders their saddle, with the built-in art too
+   - models are drawn from both sides where their texture is see-through,
+     as Java draws them, so thin parts such as a chicken's legs show
    - a pack added before this update shows a note to add it again
    =================================================================== */
 
@@ -50728,7 +50779,8 @@ const PACK_ALIASES = (() => {
   for (const r of ['activator_rail', 'detector_rail', 'powered_rail', 'rail', 'lever', 'lily_pad', 'tripwire_hook', 'twisting_vines', 'weeping_vines']) set('item/' + r, 'block/' + r);
   set('item/debug_stick', 'item/stick'); set('item/enchanted_golden_apple', 'item/golden_apple');
   // the saddles newer packs keep apart from the horses
-  for (const t of ['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse']) set('saddle/' + t, 'entity/equipment/' + t + '_saddle/saddle');
+  for (const t of ['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse', 'camel']) set('saddle/' + t, 'entity/equipment/' + t + '_saddle/saddle');
+  set('entity/strider/strider_saddle', 'entity/equipment/strider_saddle/saddle');
   return A;
 })();
 // files read from a pack besides the ones named above: the moon's phases and the bed faces
@@ -50803,6 +50855,15 @@ for (const t of ['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse']) {
     return s.map(x => Object.assign({}, x, { skip: ['saddle'] })).concat([{ key: 'saddle/' + t, only: ['saddle'] }]);
   };
 }
+// a camel's saddle, bridle and reins (the newer camel texture leaves them out)
+defSkin('saddle/camel', 128, 128, () => { const [c] = packCanvas(128, 128); return c; });
+SKINS['saddle/camel'].packOnly = true;
+const CAMEL_TACK = ['saddle', 'bridle', 'reins'], _camelSkinNP = MOB_SKINS.camel;
+MOB_SKINS.camel = m => {
+  const s = _camelSkinNP(m), sk = VTEX['saddle/camel'];
+  if (!m.data.saddle || !sk || !sk.pack) return s;
+  return s.map(x => Object.assign({}, x, { skip: CAMEL_TACK })).concat([{ key: 'saddle/camel', only: CAMEL_TACK }]);
+};
 
 /* ---------------- packs added before this ---------------- */
 // a pack read before these names were known lacks its newer textures until it is added again
@@ -50825,6 +50886,505 @@ PackScreen.render = async function () {
     const info = rows[i].querySelector('.pinfo');
     if (info && !info.querySelector('.preadd')) { const n = el('div', 'pdesc preadd'); n.textContent = 'Some textures are missing. Add this pack again to load all of them.'; n.style.color = '#ffd080'; info.appendChild(n); }
   });
+};
+
+/* @file 166_pistons.js */
+/* ===================================================================
+   Part 56: pistons like Java's (PistonBaseBlock, PistonStructureResolver,
+   PistonMovingBlockEntity)
+   - what moves: up to 12 blocks. Slime and honey blocks drag the blocks
+     around them along (but not each other); glazed terracotta can be
+     pushed but not pulled or dragged; obsidian, anvils, blocks with a
+     block entity (chests, furnaces, hoppers ...) and extended pistons
+     stay put; plants, torches, dust, leaves, melons and the like break
+   - a piston starts moving in a block event, run after the scheduled
+     ticks of the tick; the blocks then slide for 2 ticks as moving
+     blocks (minecraft:moving_piston) before they land, and a retracting
+     piston is a moving block itself until its head is back in
+   - a sticky piston that loses power before its block has landed leaves
+     the block behind (short pulses spit blocks out)
+   - moving blocks push entities along, slime blocks launch them, and
+     honey blocks carry what stands on them sideways
+   =================================================================== */
+const PUSH_NORMAL = 0, PUSH_DESTROY = 1, PUSH_BLOCK = 2, PUSH_ONLY = 3;
+const PUSH = new Uint8Array(MAXB), HAS_BE = new Uint8Array(MAXB);
+(() => {
+  const ids = s => s.split(' ').map(n => B[n.toUpperCase()]).filter(v => v !== undefined);
+  for (let i = 1; i < MAXB; i++) {
+    const d = BLK[i];
+    if (!d || !d.name) continue;
+    if (d.liquid || REPL[i] || d.fire || d.leaves || d.shulker || PISTON_DESTROY[i] || (d.needs && !SOLID[i] && SHAPE[i] !== SH.RAIL)) PUSH[i] = PUSH_DESTROY;
+    if (d.glazed) PUSH[i] = PUSH_ONLY;
+    if (IMMOVABLE.has(i) || d.hard < 0) PUSH[i] = PUSH_BLOCK;
+  }
+  for (const i of ids('snow ladder bell cactus sugar_cane bamboo bamboo_sapling suspicious_sand suspicious_gravel repeater comparator redstone_wire lever tripwire tripwire_hook ' +
+    'moss_carpet pink_petals azalea flowering_azalea big_dripleaf_stem small_dripleaf glow_lichen sculk_vein hanging_roots spore_blossom lily_pad sea_pickle kelp kelp_plant ' +
+    'seagrass tall_seagrass nether_wart sweet_berry_bush cave_vines cave_vines_plant')) PUSH[i] = PUSH_DESTROY;
+  for (const i of ids('anvil chipped_anvil damaged_anvil grindstone lodestone')) PUSH[i] = PUSH_BLOCK;
+  // blocks with a block entity stay where they are
+  for (const i of ids('chest trapped_chest ender_chest furnace lit_furnace smoker blast_furnace hopper dispenser dropper brewing_stand beacon spawner enchanting_table jukebox ' +
+    'daylight_detector lectern campfire soul_campfire barrel conduit beehive bee_nest sculk_sensor calibrated_sculk_sensor sculk_catalyst sculk_shrieker chiseled_bookshelf crafter ' +
+    'trial_spawner vault end_gateway end_portal command_block chain_command_block repeating_command_block structure_block jigsaw creaking_heart')) HAS_BE[i] = 1;
+  PUSH[B.CONDUIT] = PUSH_NORMAL;
+  PUSH[B.MOVING_PISTON] = PUSH_BLOCK;
+})();
+// PistonBaseBlock.isPushable: dir is the way the block would move, facing the piston's (or the slime branch's) direction
+function pistonPushable(w, x, y, z, id, meta, dir, allowDestroy, facing) {
+  if (y < 0 || y > CH_TOP) return false;
+  if (id === 0) return true;
+  if (id === B.OBSIDIAN || id === B.CRYING_OBSIDIAN || id === B.RESPAWN_ANCHOR || id === B.REINFORCED_DEEPSLATE) return false;
+  if ((dir === 3 && y === 0) || (dir === 2 && y === CH_TOP)) return false;
+  if (!BLK[id].piston) {
+    if (BLK[id].hard < 0) return false;
+    const r = PUSH[id];
+    if (r === PUSH_BLOCK) return false;
+    if (r === PUSH_DESTROY) return allowDestroy;
+    if (r === PUSH_ONLY && dir !== facing) return false;
+  } else if (meta & 8) return false;
+  return !HAS_BE[id] && !w.getBE(x, y, z);
+}
+const pistonSticky = id => id === B.SLIME_BLOCK || id === B.HONEY_BLOCK;
+const pistonStick = (a, b) => !((a === B.HONEY_BLOCK && b === B.SLIME_BLOCK) || (a === B.SLIME_BLOCK && b === B.HONEY_BLOCK)) && (pistonSticky(a) || pistonSticky(b));
+// Direction.values() order: down, up, north, south, west, east
+const JAVA_DIRS = [3, 2, 5, 4, 1, 0];
+
+/* ---------------- what moves ---------------- */
+class PistonResolver {
+  constructor(w, x, y, z, facing, extending) {
+    this.w = w; this.px = x; this.py = y; this.pz = z; this.facing = facing; this.extending = extending;
+    this.dir = extending ? facing : facing ^ 1;
+    const k = extending ? 1 : 2;
+    this.sx = x + DX[facing] * k; this.sy = y + DY[facing] * k; this.sz = z + DZ[facing] * k;
+    this.toPush = []; this.toDestroy = [];
+  }
+  at(x, y, z) { const t = this.toPush; for (let i = 0; i < t.length; i++) if (t[i][0] === x && t[i][1] === y && t[i][2] === z) return i; return -1; }
+  isPiston(x, y, z) { return x === this.px && y === this.py && z === this.pz; }
+  resolve() {
+    const w = this.w, { sx, sy, sz } = this, id = w.getBlock(sx, sy, sz);
+    this.toPush = []; this.toDestroy = [];
+    if (!pistonPushable(w, sx, sy, sz, id, w.getMeta(sx, sy, sz), this.dir, false, this.facing)) {
+      if (this.extending && PUSH[id] === PUSH_DESTROY) { this.toDestroy.push([sx, sy, sz]); return true; }
+      return false;
+    }
+    if (!this.addLine(sx, sy, sz, this.dir)) return false;
+    for (let i = 0; i < this.toPush.length; i++) { const p = this.toPush[i]; if (pistonSticky(w.getBlock(p[0], p[1], p[2])) && !this.addBranches(p)) return false; }
+    return true;
+  }
+  addLine(ox, oy, oz, from) {
+    const w = this.w, d = this.dir, b = d ^ 1;
+    let id = w.getBlock(ox, oy, oz);
+    if (id === 0 || !pistonPushable(w, ox, oy, oz, id, w.getMeta(ox, oy, oz), d, false, from) || this.isPiston(ox, oy, oz) || this.at(ox, oy, oz) >= 0) return true;
+    let i = 1;
+    if (i + this.toPush.length > 12) return false;
+    // blocks stuck on behind it come too
+    while (pistonSticky(id)) {
+      const bx = ox + DX[b] * i, by = oy + DY[b] * i, bz = oz + DZ[b] * i, prev = id;
+      id = w.getBlock(bx, by, bz);
+      if (id === 0 || !pistonStick(prev, id) || !pistonPushable(w, bx, by, bz, id, w.getMeta(bx, by, bz), d, false, b) || this.isPiston(bx, by, bz)) break;
+      if (++i + this.toPush.length > 12) return false;
+    }
+    let l = 0;
+    for (let j = i - 1; j >= 0; j--) { this.toPush.push([ox + DX[b] * j, oy + DY[b] * j, oz + DZ[b] * j]); l++; }
+    // and the blocks in front of it
+    for (let n = 1; ; n++) {
+      const x1 = ox + DX[d] * n, y1 = oy + DY[d] * n, z1 = oz + DZ[d] * n, k = this.at(x1, y1, z1);
+      if (k > -1) {
+        this.reorder(l, k);
+        for (let j = 0; j <= k + l; j++) { const p = this.toPush[j]; if (pistonSticky(w.getBlock(p[0], p[1], p[2])) && !this.addBranches(p)) return false; }
+        return true;
+      }
+      id = w.getBlock(x1, y1, z1);
+      if (id === 0) return true;
+      if (!pistonPushable(w, x1, y1, z1, id, w.getMeta(x1, y1, z1), d, true, d) || this.isPiston(x1, y1, z1)) return false;
+      if (PUSH[id] === PUSH_DESTROY) { this.toDestroy.push([x1, y1, z1]); return true; }
+      if (this.toPush.length >= 12) return false;
+      this.toPush.push([x1, y1, z1]); l++;
+    }
+  }
+  reorder(offsets, index) {
+    const t = this.toPush;
+    this.toPush = t.slice(0, index).concat(t.slice(t.length - offsets), t.slice(index, t.length - offsets));
+  }
+  addBranches(p) {
+    const w = this.w, id = w.getBlock(p[0], p[1], p[2]), axis = this.dir >> 1;
+    for (const g of JAVA_DIRS) {
+      if ((g >> 1) === axis) continue;
+      const nx = p[0] + DX[g], ny = p[1] + DY[g], nz = p[2] + DZ[g];
+      if (pistonStick(w.getBlock(nx, ny, nz), id) && !this.addLine(nx, ny, nz, g)) return false;
+    }
+    return true;
+  }
+}
+
+/* ---------------- moving blocks ---------------- */
+// one per moving_piston block: { x, y, z, id, meta (the block it carries), dir (the piston's facing), ext, src (the piston's own head or base), p, p0 }
+const mvKey = (x, y, z) => x + ',' + y + ',' + z;
+const mvGet = (w, x, y, z) => w.moving ? w.moving.get(mvKey(x, y, z)) : undefined;
+function mvAdd(w, x, y, z, r) {
+  const M = w.moving || (w.moving = new Map()), k = mvKey(x, y, z);
+  Object.assign(r, { x, y, z, p: 0, p0: 0, t: -1 });
+  M.delete(k); M.set(k, r);
+  return r;
+}
+// how far a moving block still is from where it lands, along its piston's facing
+const mvOffset = (r, p) => r.ext ? p - 1 : 1 - p;
+Game.prototype.tickMoving = function () {
+  const w = this.world, M = w.moving;
+  if (!M || !M.size) return;
+  for (const [k, r] of [...M]) {
+    if (M.get(k) !== r) continue;
+    r.t = w.tick; r.p0 = r.p;
+    if (r.p0 >= 1) this.mvLand(r, false);
+    else { const f = r.p + 0.5; this.mvPushEntities(r, f); this.mvCarry(r, f); r.p = Math.min(1, f); }
+  }
+};
+// the block lands; forced (finalTick): a piston head that hasn't arrived is dropped
+Game.prototype.mvLand = function (r, forced) {
+  const w = this.world, k = mvKey(r.x, r.y, r.z);
+  if (forced && r.p0 >= 1) return;
+  if (w.moving && w.moving.get(k) === r) w.moving.delete(k);
+  r.p = r.p0 = 1;
+  if (w.getBlock(r.x, r.y, r.z) !== B.MOVING_PISTON) return;
+  let id = forced && r.src ? 0 : r.id, meta = forced && r.src ? 0 : r.meta;
+  // a head whose piston is gone, or a block that can't stay where it lands, doesn't stay
+  if (id === B.PISTON_HEAD) { const bx = r.x - DX[r.dir], by = r.y - DY[r.dir], bz = r.z - DZ[r.dir], b = w.getBlock(bx, by, bz); const bm = w.getMeta(bx, by, bz); if (!BLK[b].piston || (bm & 7) !== r.dir || !(bm & 8) || (b === B.STICKY_PISTON) !== !!(meta & 16)) id = meta = 0; }
+  let drop = null;
+  if (id && BLK[id].needs && !w.canStay(id, r.x, r.y, r.z, meta)) { drop = id; id = meta = 0; }
+  // a moved observer that was sending a pulse stops
+  if (id === B.OBSERVER) meta &= ~8;
+  w.setBlock(r.x, r.y, r.z, id, meta, false);
+  if (drop) for (const st of this.dropsFor(drop, r.meta, null)) this.dropItem(r.x + 0.5, r.y + 0.3, r.z + 0.5, st);
+  w.notify(r.x, r.y, r.z);
+  this.remeshNear(r.x, r.z);
+};
+// collision boxes (pixels) of a block state
+function mvShapeOf(id, meta) {
+  if (!id || !SOLID[id] || id === B.MOVING_PISTON) return [];
+  if (SHAPE[id] === SH.CUBE) return [[0, 0, 0, 16, 16, 16]];
+  return shapeBoxes(id, meta, 0, true);
+}
+// what a moving block pushes with (blocks): what it carries, or the head of a retracting piston
+function mvShape(r) {
+  const head = r.src && !r.ext;
+  return mvShapeOf(head ? B.PISTON_HEAD : r.id, head ? r.dir | (r.sticky ? 16 : 0) : r.meta).map(b => b.map(v => v / 16));
+}
+// what stands in the way at a moving block (PistonMovingBlockEntity.getCollisionShape): the carried block (or the head)
+// where it is now, and the base of a retracting piston; blocks moving the way a piston is pushing an entity let it through
+let MV_NOCLIP = -1;
+function mvCollision(r) {
+  if (!r) return [];
+  const out = r.src && !r.ext ? mvShapeOf(r.id, r.meta | 8).slice() : [];
+  if (MV_NOCLIP === (r.ext ? r.dir : r.dir ^ 1) && r.p < 1) return out;
+  const o = mvOffset(r, r.p) * 16, ox = DX[r.dir] * o, oy = DY[r.dir] * o, oz = DZ[r.dir] * o;
+  for (const b of mvShapeOf(r.src ? B.PISTON_HEAD : r.id, r.src ? r.dir | (r.sticky ? 16 : 0) : r.meta)) out.push([b[0] + ox, b[1] + oy, b[2] + oz, b[3] + ox, b[4] + oy, b[5] + oz]);
+  return out;
+}
+MDL[SH.MOVING] = () => [];
+DYNAMIC_SHAPES.add(SH.MOVING);
+TARGET[B.MOVING_PISTON] = 0;
+const _shapeCtxPS = World.prototype.shapeCtx;
+World.prototype.shapeCtx = function (x, y, z, id) { return id === B.MOVING_PISTON ? { conn: 0, moving: mvGet(this, x, y, z) } : _shapeCtxPS.call(this, x, y, z, id); };
+const _modelCollisionPS = modelCollision;
+modelCollision = function (id, meta, ctx) { return id === B.MOVING_PISTON ? mvCollision(ctx && ctx.moving) : _modelCollisionPS(id, meta, ctx); };
+// PistonMath.getMovementArea: the slab in front of a box that it sweeps through
+function mvSweep(b, d, t) {
+  const s = (d & 1) ? -t : t, lo = Math.min(s, 0), hi = Math.max(s, 0);
+  switch (d) {
+    case 1: return [b[0] + lo, b[1], b[2], b[0] + hi, b[4], b[5]];
+    case 0: return [b[3] + lo, b[1], b[2], b[3] + hi, b[4], b[5]];
+    case 3: return [b[0], b[1] + lo, b[2], b[3], b[1] + hi, b[5]];
+    case 2: return [b[0], b[4] + lo, b[2], b[3], b[4] + hi, b[5]];
+    case 5: return [b[0], b[1], b[2] + lo, b[3], b[4], b[2] + hi];
+    default: return [b[0], b[1], b[5] + lo, b[3], b[4], b[5] + hi];
+  }
+}
+const mvHit = (a, b) => a[0] < b[3] && a[3] > b[0] && a[1] < b[4] && a[4] > b[1] && a[2] < b[5] && a[5] > b[2];
+const mvBox = e => [e.x - e.w / 2, e.y, e.z - e.w / 2, e.x + e.w / 2, e.y + e.h, e.z + e.w / 2];
+// how far the entity must go to clear the swept box
+function mvDepth(a, d, e) {
+  switch (d) {
+    case 0: return a[3] - e[0];
+    case 1: return e[3] - a[0];
+    case 2: return a[4] - e[1];
+    case 3: return e[4] - a[1];
+    case 4: return a[5] - e[2];
+    default: return e[5] - a[2];
+  }
+}
+Game.prototype.mvEntities = function () {
+  const out = [];
+  for (const e of this.entities) {
+    if (e.dead || (typeof Hanging !== 'undefined' && e instanceof Hanging) || (typeof EffectCloud !== 'undefined' && e instanceof EffectCloud) ||
+      (typeof CreeperCloud !== 'undefined' && e instanceof CreeperCloud) || (typeof DragonBreath !== 'undefined' && e instanceof DragonBreath) || !(e.w > 0)) continue;
+    out.push(e);
+  }
+  const p = this.player;
+  if (p && !p.dead && p.mode !== 3) out.push(p);
+  return out;
+};
+// Entity.move(MoverType.PISTON): no more than 0.51 blocks along each axis in a tick, however many blocks push
+Game.prototype.mvMoveEntity = function (e, d, t) {
+  const w = this.world, axis = d >> 1;
+  if (e._pmT !== w.tick) { e._pmT = w.tick; e._pm = [0, 0, 0]; }
+  const want = ((d & 1) ? -t : t), total = Math.max(-0.51, Math.min(0.51, want + e._pm[axis])), step = total - e._pm[axis];
+  e._pm[axis] = total;
+  if (Math.abs(step) <= 1e-5) return;
+  MV_NOCLIP = d;
+  try { moveEntity(w, e, axis === 0 ? step : 0, axis === 1 ? step : 0, axis === 2 ? step : 0); } finally { MV_NOCLIP = -1; }
+};
+// PistonMovingBlockEntity.moveCollidedEntities
+Game.prototype.mvPushEntities = function (r, f) {
+  const shape = mvShape(r);
+  if (!shape.length) return;
+  const d = r.ext ? r.dir : r.dir ^ 1, t = f - r.p, o = mvOffset(r, r.p);
+  const ox = r.x + DX[r.dir] * o, oy = r.y + DY[r.dir] * o, oz = r.z + DZ[r.dir] * o;
+  const boxes = shape.map(b => [b[0] + ox, b[1] + oy, b[2] + oz, b[3] + ox, b[4] + oy, b[5] + oz]);
+  const bb = boxes.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]), Math.max(a[3], b[3]), Math.max(a[4], b[4]), Math.max(a[5], b[5])]);
+  const sw = mvSweep(bb, d, t), area = [Math.min(sw[0], bb[0]), Math.min(sw[1], bb[1]), Math.min(sw[2], bb[2]), Math.max(sw[3], bb[3]), Math.max(sw[4], bb[4]), Math.max(sw[5], bb[5])];
+  const slime = r.id === B.SLIME_BLOCK && !r.src;
+  for (const e of this.mvEntities()) {
+    const eb = mvBox(e);
+    if (!mvHit(area, eb)) continue;
+    // a slime block throws what it hits
+    if (slime) { if ((d >> 1) === 0) e.vx = DX[d]; else if ((d >> 1) === 1) e.vy = DY[d]; else e.vz = DZ[d]; }
+    let need = 0;
+    for (const b of boxes) { const a = mvSweep(b, d, t); if (mvHit(a, eb)) { need = Math.max(need, mvDepth(a, d, eb)); if (need >= t) break; } }
+    if (need > 0) this.mvMoveEntity(e, d, Math.min(need, t) + 0.01);
+  }
+};
+// PistonMovingBlockEntity.moveStuckEntities: honey takes along what stands on it when it moves sideways
+Game.prototype.mvCarry = function (r, f) {
+  if (r.id !== B.HONEY_BLOCK || r.src) return;
+  const d = r.ext ? r.dir : r.dir ^ 1;
+  if ((d >> 1) === 1) return;
+  const o = mvOffset(r, r.p), ox = r.x + DX[r.dir] * o, oy = r.y + DY[r.dir] * o, oz = r.z + DZ[r.dir] * o, box = [ox, oy + 1, oz, ox + 1, oy + 1.500001, oz + 1];
+  for (const e of this.mvEntities()) {
+    if (!e.onGround || !mvHit(box, mvBox(e)) || e.x < box[0] || e.x > box[3] || e.z < box[2] || e.z > box[5]) continue;
+    this.mvMoveEntity(e, d, f - r.p);
+  }
+};
+
+/* ---------------- the piston ---------------- */
+// PistonBaseBlock.checkIfExtend: power (also the block above's, quasi-connectivity) starts a block event
+Game.prototype.pistonCheck = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  if (!BLK[id].piston) return;
+  const m = w.getMeta(x, y, z), facing = m & 7, ext = !!(m & 8), on = RS.poweredQC(w, x, y, z, facing);
+  if (on && !ext) {
+    if (new PistonResolver(w, x, y, z, facing, true).resolve()) this.blockEvent(x, y, z, id, 0, facing);
+  } else if (!on && ext) {
+    // its block still on the way out: a sticky piston lets go of it
+    let type = 1;
+    const fx = x + DX[facing] * 2, fy = y + DY[facing] * 2, fz = z + DZ[facing] * 2;
+    if (w.getBlock(fx, fy, fz) === B.MOVING_PISTON) {
+      const r = mvGet(w, fx, fy, fz);
+      if (r && r.dir === facing && r.ext && (r.p0 < 0.5 || r.t === w.tick || w.handlingTick)) type = 2;
+    }
+    this.blockEvent(x, y, z, id, type, facing);
+  }
+};
+Game.prototype.blockEvent = function (x, y, z, id, type, param) {
+  const q = this.bev || (this.bev = { list: [], keys: new Set() }), k = mvKey(x, y, z) + ',' + id + ',' + type + ',' + param;
+  if (q.keys.has(k)) return;
+  q.keys.add(k); q.list.push({ w: this.world, x, y, z, id, type, param, k });
+};
+Game.prototype.runBlockEvents = function () {
+  const q = this.bev;
+  if (!q || !q.list.length) return;
+  for (let n = 0; q.list.length && n < 65536; n++) {
+    const e = q.list.shift();
+    q.keys.delete(e.k);
+    if (e.w === this.world && this.world.getBlock(e.x, e.y, e.z) === e.id) this.pistonEvent(e.x, e.y, e.z, e.type, e.param);
+  }
+};
+// PistonBaseBlock.triggerEvent: 0 extends, 1 retracts, 2 retracts without pulling
+Game.prototype.pistonEvent = function (x, y, z, type, param) {
+  const w = this.world, id = w.getBlock(x, y, z), m = w.getMeta(x, y, z), facing = m & 7, sticky = id === B.STICKY_PISTON;
+  const on = RS.poweredQC(w, x, y, z, facing);
+  if (on && type !== 0) { if (!(m & 8)) w.setBlock(x, y, z, id, m | 8, false); return false; }
+  if (!on && type === 0) return false;
+  const hx = x + DX[facing], hy = y + DY[facing], hz = z + DZ[facing];
+  if (type === 0) {
+    if (!this.pistonMove(x, y, z, facing, true, sticky)) return false;
+    w.setBlock(x, y, z, id, m | 8, false);
+    w.notify(x, y, z);
+    this.sound('piston_out', x + 0.5, y + 0.5, z + 0.5);
+    if (this.vibrate) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block', null);
+  } else {
+    // the head still on its way out lands at once (and is gone); the piston itself becomes a moving block
+    const h = mvGet(w, hx, hy, hz);
+    if (h) this.mvLand(h, true);
+    w.setBlock(x, y, z, B.MOVING_PISTON, 0, false);
+    mvAdd(w, x, y, z, { id, meta: param & 7, dir: facing, ext: false, src: true, sticky });
+    if (sticky) {
+      const fx = x + DX[facing] * 2, fy = y + DY[facing] * 2, fz = z + DZ[facing] * 2, fid = w.getBlock(fx, fy, fz);
+      let dropped = false;
+      if (fid === B.MOVING_PISTON) { const r = mvGet(w, fx, fy, fz); if (r && r.dir === facing && r.ext) { this.mvLand(r, true); dropped = true; } }
+      if (!dropped) {
+        if (type !== 1 || fid === 0 || !pistonPushable(w, fx, fy, fz, fid, w.getMeta(fx, fy, fz), facing ^ 1, false, facing) || (PUSH[fid] !== PUSH_NORMAL && !BLK[fid].piston)) w.setBlock(hx, hy, hz, 0, 0, false);
+        else this.pistonMove(x, y, z, facing, false, sticky);
+      }
+    } else w.setBlock(hx, hy, hz, 0, 0, false);
+    w.notify(x, y, z); w.notify(hx, hy, hz);
+    this.sound('piston_in', x + 0.5, y + 0.5, z + 0.5);
+    if (this.vibrate) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block', null);
+  }
+  this.remeshNear(x, z);
+  return true;
+};
+// PistonBaseBlock.moveBlocks
+Game.prototype.pistonMove = function (x, y, z, facing, extending, sticky) {
+  const w = this.world, hx = x + DX[facing], hy = y + DY[facing], hz = z + DZ[facing];
+  if (!extending && w.getBlock(hx, hy, hz) === B.PISTON_HEAD) w.setBlock(hx, hy, hz, 0, 0, false);
+  const res = new PistonResolver(w, x, y, z, facing, extending);
+  if (!res.resolve()) return false;
+  const push = res.toPush, destroy = res.toDestroy, d = extending ? facing : facing ^ 1;
+  const states = push.map(p => [w.getBlock(p[0], p[1], p[2]), w.getMeta(p[0], p[1], p[2])]);
+  const left = new Map(push.map(p => [mvKey(p[0], p[1], p[2]), p])), changed = [];
+  for (let j = destroy.length - 1; j >= 0; j--) { const p = destroy[j]; this.pistonBreak(p[0], p[1], p[2]); changed.push(p); }
+  for (let k = push.length - 1; k >= 0; k--) {
+    const p = push[k], tx = p[0] + DX[d], ty = p[1] + DY[d], tz = p[2] + DZ[d];
+    left.delete(mvKey(tx, ty, tz));
+    w.setBlock(tx, ty, tz, B.MOVING_PISTON, 0, false);
+    mvAdd(w, tx, ty, tz, { id: states[k][0], meta: states[k][1], dir: facing, ext: extending, src: false });
+    changed.push([tx, ty, tz], p);
+  }
+  if (extending) {
+    left.delete(mvKey(hx, hy, hz));
+    w.setBlock(hx, hy, hz, B.MOVING_PISTON, 0, false);
+    mvAdd(w, hx, hy, hz, { id: B.PISTON_HEAD, meta: facing | (sticky ? 16 : 0), dir: facing, ext: true, src: true, sticky });
+    changed.push([hx, hy, hz]);
+  }
+  for (const p of left.values()) w.setBlock(p[0], p[1], p[2], 0, 0, false);
+  const seen = new Set();
+  for (const p of changed) { const k = mvKey(p[0], p[1], p[2]); if (seen.has(k)) continue; seen.add(k); w.notify(p[0], p[1], p[2]); }
+  const cs = new Set();
+  for (const p of changed) { const k = (p[0] >> 4) + ',' + (p[2] >> 4); if (!cs.has(k)) { cs.add(k); this.remeshNear(p[0], p[2]); } }
+  return true;
+};
+// blocks a piston breaks drop as if mined (a shulker box keeps its contents)
+Game.prototype.pistonBreak = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z), d = BLK[id];
+  if (!id) return;
+  if (d.liquid || d.fire) { w.setBlock(x, y, z, 0, 0, false); return; }
+  if (d.shulker) {
+    const be = w.getBE(x, y, z), st = { id, count: 1 };
+    if (be && be.items && be.items.some(s => s)) st.tag = { items: be.items.map(saveStack) };
+    w.setBlock(x, y, z, 0, 0, false); this.dropItem(x + 0.5, y + 0.5, z + 0.5, st); this.particles.blockBreak(x, y, z, id);
+    return;
+  }
+  this.breakBlock(x, y, z, null, true);
+};
+// older code paths ask a piston to move directly
+Game.prototype.movePiston = function (x, y, z) { this.pistonCheck(x, y, z); };
+
+/* ---------------- hooks ---------------- */
+// pistons, dispensers and droppers look at their power only when a block update reaches them (neighborChanged): a change
+// next to them, or a redstone component (dust, torch, lever, button, repeater ...) changing within two blocks. Power that
+// arrives some other way, like a block of redstone set diagonally above (quasi-connectivity), waits for the next update,
+// so block update detectors work
+const RS_UPDATERS = new Uint8Array(MAXB);
+for (let i = 0; i < MAXB; i++) if (RS_SRC[i] && RS_SRC[i] !== S_BLOCK && RS_SRC[i] !== S_TARGET && RS_SRC[i] !== S_DAYLIGHT) RS_UPDATERS[i] = 1;
+const _processPS = RS.process, _updateWirePS = RS.updateWire;
+RS.process = function (w, x, y, z) {
+  const s0 = this._cx, s1 = this._cy, s2 = this._cz, s3 = this._ctrId, s4 = this._wires;
+  this._cx = x; this._cy = y; this._cz = z; this._ctrId = w.getBlock(x, y, z); this._wires = null;
+  try { return _processPS.call(this, w, x, y, z); } finally { this._cx = s0; this._cy = s1; this._cz = s2; this._ctrId = s3; this._wires = s4; }
+};
+RS.updateWire = function (w, x, y, z, done) {
+  const ch = _updateWirePS.call(this, w, x, y, z, done);
+  if (ch.length) { if (!this._wires) this._wires = []; for (const q of ch) this._wires.push(q); }
+  return ch;
+};
+function rsUpdated(x, y, z) {
+  if (RS._cx === undefined) return true;
+  const d = Math.abs(RS._cx - x) + Math.abs(RS._cy - y) + Math.abs(RS._cz - z);
+  if (d <= 1 || (d <= 2 && RS_UPDATERS[RS._ctrId])) return true;
+  if (RS._wires) for (const q of RS._wires) if (Math.abs(q[0] - x) + Math.abs(q[1] - y) + Math.abs(q[2] - z) <= 2) return true;
+  return false;
+}
+const _reactPS = RS.react;
+RS.react = function (w, x, y, z) {
+  const k = RS_CON[w.getBlock(x, y, z)];
+  if ((k === C_PISTON || k === C_DISPENSER) && !rsUpdated(x, y, z)) return;
+  if (k === C_PISTON) { const g = window.game; if (g && g.world === w) g.pistonCheck(x, y, z); return; }
+  return _reactPS.call(this, w, x, y, z);
+};
+const _onScheduledPS = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) { if (kind === 'rs_piston') { this.pistonCheck(x, y, z); return; } return _onScheduledPS.call(this, kind, x, y, z); };
+// the tick: scheduled ticks, random ticks, block events, ... entities, then the moving blocks (block entities)
+const _runScheduledPS = World.prototype.runScheduled;
+World.prototype.runScheduled = function (game) { this.handlingTick = true; try { return _runScheduledPS.call(this, game); } finally { this.handlingTick = false; } };
+const _randomTicksPS = Game.prototype.randomTicks;
+Game.prototype.randomTicks = function () { _randomTicksPS.apply(this, arguments); this.runBlockEvents(); };
+const _gameTickPS = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickPS.call(this); if (this.world) { this.runBlockEvents(); this.tickMoving(); } };
+// a chunk saved in the middle of a move keeps the blocks where they land
+const _serializePS = World.prototype.serializeChunk;
+World.prototype.serializeChunk = function (c, ents) {
+  const M = this.moving, undo = [];
+  if (M && M.size) for (const r of M.values()) {
+    if ((r.x >> 4) !== c.cx || (r.z >> 4) !== c.cz || this.getBlock(r.x, r.y, r.z) !== B.MOVING_PISTON) continue;
+    const i = (r.y << 8) | ((r.z & 15) << 4) | (r.x & 15);
+    undo.push(i); c.blocks[i] = r.id; c.meta[i] = r.meta;
+  }
+  try { return _serializePS.call(this, c, ents); } finally { for (const i of undo) { c.blocks[i] = B.MOVING_PISTON; c.meta[i] = 0; } }
+};
+// and one saved by anything else loses its stray moving blocks
+const _onChunkDataPS = Game.prototype.onChunkData;
+Game.prototype.onChunkData = function (cx, cz, seed, blocks, biomes, meta) {
+  _onChunkDataPS.apply(this, arguments);
+  const w = this.world, c = w && w.chunks.get(w.key(cx, cz));
+  if (!meta || !c || !c.blocks || c.blocks !== blocks) return;
+  for (let i = blocks.indexOf(B.MOVING_PISTON); i >= 0; i = blocks.indexOf(B.MOVING_PISTON, i + 1)) { blocks[i] = 0; c.meta[i] = 0; }
+};
+
+/* ---------------- drawing ---------------- */
+// the moving blocks go through the chunk mesher's own code, one block on its own, into the entity pass
+const MV_PI = 9 * PAD2 + 9 * PADW + 9, MV_TINT = new Uint8Array([145, 189, 89, 119, 171, 47, 63, 118, 228]);
+const MV_MB = {
+  out: null, x: 0, y: 0, z: 0, nm: 0,
+  v(x, y, z, layer, u, v, sky, blk, r, g, b) { this.out.dv(this.x + x / 16, this.y + y / 16, this.z + z / 16, u / 16, v / 16, layer, r / 255, g / 255, b / 255, 1, sky / 16, blk / 16); },
+};
+function mvDrawBlock(w, r, id, meta, cx, cy, cz, ox, oy, oz) {
+  const L = w.getLightRaw(cx, cy, cz);
+  for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const i = MV_PI + dy * PAD2 + dz * PADW + dx; pBlk[i] = 0; pMeta[i] = 0; pLight[i] = L; }
+  pBlk[MV_PI] = id; pMeta[MV_PI] = meta;
+  MV_MB.out = TRANSL[id] ? transRenderer : r; MV_MB.x = ox; MV_MB.y = oy; MV_MB.z = oz;
+  const c = w.getChunk(cx >> 4, cz >> 4);
+  if (c && c.blocks && c.biomes && !c.tint) { try { computeTints(w, c); } catch (e) { } }
+  const tint = c && c.tint ? c.tint : MV_TINT, to = c && c.tint ? (((cz & 15) << 4) | (cx & 15)) * 9 : 0, shape = SHAPE[id];
+  if (shape === SH.CUBE) {
+    let tr = 255, tg = 255, tb = 255;
+    if (TINT[id]) { const t = tintRGB(TINT[id], tint, to, meta); tr = t[0]; tg = t[1]; tb = t[2]; }
+    for (let f = 0; f < 6; f++) {
+      if (id === B.GRASS_BLOCK) {
+        if (f === 2) emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, TEX_GRASS_TOP, tint[to], tint[to + 1], tint[to + 2], 0, 0);
+        else if (f === 3) emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, TEX_DIRT, 255, 255, 255, 0, 0);
+        else { emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, TEX_DIRT, 255, 255, 255, 0, 0); emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, TEX_GRASS_OVERLAY, tint[to], tint[to + 1], tint[to + 2], 0, 0); }
+        continue;
+      }
+      emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, faceLayer(id, meta, f), tr, tg, tb, 0, 0);
+    }
+  } else if (shape === SH.STAIRS || shape === SH.SLAB || shape === SH.LAYER || shape === SH.FENCE || shape === SH.PANE) {
+    emitBoxList(MV_MB, shapeBoxes(id, meta, 0, false), 0, 0, 0, MV_PI, id, meta, null);
+  } else if (MDL[shape]) {
+    const ps = blockParts(id, meta, DYNAMIC_SHAPES.has(shape) ? padCtx(MV_PI, id) : null);
+    if (ps) emitParts(MV_MB, ps, 0, 0, 0, MV_PI, id, meta, tint, to, 0);
+  }
+}
+const _renderSpawnerMobsPS = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) {
+  if (_renderSpawnerMobsPS) _renderSpawnerMobsPS.call(this, r, alpha);
+  const w = this.world, M = w && w.moving;
+  if (!M || !M.size) return;
+  for (const m of M.values()) {
+    if (w.getBlock(m.x, m.y, m.z) !== B.MOVING_PISTON) continue;
+    const o = mvOffset(m, m.p0 + (m.p - m.p0) * Math.min(1, Math.max(0, alpha))), ox = m.x + DX[m.dir] * o, oy = m.y + DY[m.dir] * o, oz = m.z + DZ[m.dir] * o;
+    // a retracting piston: its head slides back into the base
+    if (m.src && !m.ext) { mvDrawBlock(w, r, B.PISTON_HEAD, m.dir | (m.sticky ? 16 : 0), m.x, m.y, m.z, ox, oy, oz); mvDrawBlock(w, r, m.id, m.meta | 8, m.x, m.y, m.z, m.x, m.y, m.z); }
+    else if (m.id) mvDrawBlock(w, r, m.id, m.meta, m.x, m.y, m.z, ox, oy, oz);
+  }
 };
 
 </script>
