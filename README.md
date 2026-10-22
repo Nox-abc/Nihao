@@ -46,18 +46,50 @@ terrain style; new worlds get Java Edition's terrain, see [Terrain](#java-editio
 | F3+B / F3+G / F3+H | Hitboxes / chunk borders / advanced tooltips (item ids and durability) |
 | F3+C / F3+I / F3+D / F3+A / F3+T / F3+Q | Copy your location as a /tp command / copy the block you look at / clear the chat / reload chunks / reload resource packs / list these |
 | L | Advancements |
+| C+1–9 / X+1–9 | Save / load a whole hotbar (creative mode; the saved ones are also in the Saved Hotbars tab) |
+| Tab (hold) | Player list (shows a scoreboard objective set to the `list` slot) |
+| Ctrl+B | Narrator on/off |
 | Esc | Pause menu |
 
 In inventories: shift-click moves a stack across, right-click takes half a stack or places one
 item, dragging spreads a stack over several slots, double-click gathers matching items, 1–9 swap
 with the hotbar, F swaps with the offhand and Q drops.
 
-**Every control can be changed**: open **Options... → Controls...** and click a binding, then press
-the new key or mouse button (Esc clears it). Clashing bindings turn red; **Reset Keys** puts all of
-them back. The bindings are saved in your browser.
+**Every control can be changed**: open **Options... → Controls... → Key Binds...** and click a
+binding, then press the new key or mouse button (Esc clears it). Clashing bindings turn red;
+**Reset Keys** puts all of them back. The bindings are saved in your browser.
 
-**Night Vision** (in **Options...**) lets you always see, in caves and at night, as if you had
-drunk a potion of Night Vision.
+**Night Vision** (in **Options... → Video Settings**) lets you always see, in caves and at night,
+as if you had drunk a potion of Night Vision.
+
+### Options
+
+The Options screen is laid out like Java Edition 1.21's: FOV and the world's difficulty (with the
+lock that keeps it for good) on top, then **Skin Customization**, **Music & Sounds**, **Video
+Settings**, **Controls**, **Language**, **Chat Settings**, **Resource Packs**, **Accessibility
+Settings**, **Telemetry Data** and **Credits & Attribution**. Menus blur the world behind them, and
+the settings do what they do in Java:
+
+- **Video**: Graphics Fast / Fancy / Fabulous! (leaves, rain distance, the dark screen edges in dark
+  places; Fabulous! also shows particles and rain behind water and glass), render and simulation
+  distance (mobs move and crops grow only that far), Chunk Builder, Max Framerate, GUI Scale (Auto
+  and 1 up to what the window allows), the Attack Indicator under the crosshair or beside the
+  hotbar, Clouds Off / Fast / Fancy, Particles All / Decreased / Minimal, Mipmap Levels, round
+  **entity shadows**, Distortion and FOV Effects, Entity Distance, the autosave note, enchantment
+  Glint Speed and Strength, Menu Background Blur and Biome Blend.
+- **Music & Sounds**: a volume for each category (music, jukeboxes and note blocks, weather,
+  blocks, hostile and friendly creatures, players, ambient), **subtitles** with arrows showing where
+  a sound comes from, and Directional Audio (3D sound for headphones).
+- **Controls**: mouse sensitivity, Invert Mouse, scroll sensitivity and discrete scrolling, raw
+  input, Sneak and Sprint as Hold or Toggle, **Auto-Jump**, the **Operator Utilities** creative tab
+  (command blocks, structure blocks, barriers, light...) and the key binds.
+- **Chat**: Shown / Commands Only / Hidden, colours, clickable web links, text opacity, background
+  opacity, size, line spacing, delay, width and heights, command suggestions while you type, and the
+  **narrator** (your browser reads the chat aloud).
+- **Accessibility**: High Contrast buttons, text backgrounds everywhere, notification time, Darkness
+  Pulsing, Damage Tilt, hiding lightning flashes and splash texts, panorama speed.
+- **Skin Customization**: the jacket, sleeves, pants legs and hat layers of your skin, and **Main
+  Hand** Right or Left (the hands, the off-hand slot and the attack indicator swap sides).
 
 **Touch screens** (phones/tablets) get on-screen controls automatically: left stick to move
 (push all the way to sprint), drag anywhere on the right to look, hold to break, tap to

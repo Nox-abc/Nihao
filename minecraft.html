@@ -77,7 +77,7 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 @keyframes splash { from { transform: rotate(-18deg) scale(1); } to { transform: rotate(-18deg) scale(1.08); } }
 .foot { position: absolute; bottom: 4px; left: 6px; right: 6px; display: flex; justify-content: space-between; font-size: 20px; text-shadow: 2px 2px 0 #3f3f3f; }
 .h1 { font-size: 30px; margin-bottom: 18px; text-shadow: 2px 2px 0 #3f3f3f; }
-.worldlist { width: 620px; max-width: 94vw; height: 52vh; overflow-y: auto; background: rgba(0,0,0,.5); border-top: 2px solid #000; border-bottom: 2px solid #000; margin-bottom: 10px; padding: 6px; }
+.worldlist { width: 620px; max-width: calc(var(--zvw, 100vw) * 0.94); height: calc(var(--zvh, 100vh) * 0.52); overflow-y: auto; background: rgba(0,0,0,.5); border-top: 2px solid #000; border-bottom: 2px solid #000; margin-bottom: 10px; padding: 6px; }
 .world { padding: 6px 10px; border: 2px solid transparent; cursor: pointer; line-height: 22px; }
 .world.sel { border-color: #aaa; background: rgba(0,0,0,.5); }
 .world .wn { color: #fff; font-size: 24px; }
@@ -113,13 +113,13 @@ canvas#gl.blur { filter: blur(2px) brightness(0.85); }
 .cpage { display: flex; flex-direction: column; align-items: center; min-height: 300px; }
 .field.wide { width: 620px; max-width: 94vw; }
 .flathead { width: 620px; max-width: 94vw; display: flex; justify-content: space-between; font-size: 20px; color: #a0a0a0; padding: 0 12px; }
-.flatlist { height: 42vh; }
+.flatlist { height: calc(var(--zvh, 100vh) * 0.42); }
 .flatrow { display: flex; align-items: center; gap: 10px; padding: 3px 8px; border: 2px solid transparent; cursor: pointer; font-size: 22px; }
 .flatrow.sel { border-color: #aaa; background: rgba(0,0,0,.5); }
 .flatrow canvas { width: 32px; height: 32px; image-rendering: pixelated; flex: none; }
 .flatrow .fn { flex: 1; color: #fff; }
 .flatrow .fh { color: #ccc; }
-.rulelist { height: 56vh; width: 700px; }
+.rulelist { height: calc(var(--zvh, 100vh) * 0.56); width: 700px; max-width: calc(var(--zvw, 100vw) * 0.94); }
 .rulecat { color: #ffff55; font-size: 22px; font-weight: bold; margin: 10px 0 2px; text-align: center; }
 .rulerow { display: flex; align-items: center; justify-content: space-between; padding: 2px 8px; font-size: 21px; }
 .rulerow .rn { color: #fff; }
@@ -208,6 +208,53 @@ body.touch #hotbar { pointer-events: auto; }
 .btn.pbtn.sq { width: 40px; }
 #scr-packs.drop .worldlist { outline: 3px dashed #ffff80; }
 #scr-packs .hint b { color: #ffff80; font-weight: normal; }
+/* ---------- menus like Java 1.21: over the blurred panorama or the world ---------- */
+.menubg { background: rgba(0,0,0,.4); }
+.ohead { font-size: 24px; margin: 0 0 14px; text-shadow: 2px 2px 0 #3f3f3f; text-align: center; }
+.olist { width: 100%; max-height: calc(var(--zvh, 100vh) - 170px); overflow-y: auto; background: rgba(0,0,0,.42); border-top: 2px solid #000; border-bottom: 2px solid #000; box-shadow: 0 -2px 0 rgba(255,255,255,.12), 0 2px 0 rgba(255,255,255,.12); padding: 8px 0; margin-bottom: 14px; scrollbar-width: thin; }
+.orow { display: flex; gap: 20px; justify-content: center; margin: 0 0 10px; }
+.orow:last-child { margin-bottom: 0; }
+.btn.ob, .slider.ob { width: 300px; margin: 0; }
+.btn.ob, .btn.obig, .slider .lab { white-space: nowrap; overflow: hidden; }
+.btn.ob span, .btn.obig span, .slider .lab span { display: inline-block; transform-origin: center; }
+.btn.obig, .slider.obig { width: 620px; max-width: 94vw; margin: 0; }
+.ogrid { display: grid; grid-template-columns: 300px 300px; gap: 8px 16px; margin-bottom: 18px; }
+.otop { display: flex; gap: 16px; margin-bottom: 26px; }
+.btn.icon { width: 40px; padding: 0; flex: none; }
+.btn.icon img { width: 30px; height: 30px; image-rendering: pixelated; vertical-align: middle; pointer-events: none; }
+.otext { width: 620px; max-width: 94vw; margin: 0 auto; font-size: 20px; line-height: 26px; color: #e0e0e0; text-shadow: 2px 2px 0 #3f3f3f; padding: 4px 12px; box-sizing: border-box; }
+.otext h3 { color: #ffff55; font-size: 22px; margin: 14px 0 4px; font-weight: normal; text-align: center; }
+.otext p { margin: 4px 0; }
+.olang { width: 620px; max-width: 94vw; margin: 0 auto; padding: 6px 10px; text-align: center; border: 2px solid transparent; cursor: pointer; box-sizing: border-box; }
+.olang.sel { border-color: #aaa; background: rgba(0,0,0,.5); }
+.btn.ghost, .btn.ghost:hover { background: #2c2c2c; color: #a0a0a0; box-shadow: none; cursor: default; }
+/* subtitles, the hotbar attack indicator, the autosave note and the player list */
+#subtitles { position: absolute; right: 4px; bottom: 60px; display: flex; flex-direction: column-reverse; align-items: stretch; font-size: 18px; line-height: 20px; }
+#subtitles .sl { display: flex; justify-content: space-between; gap: 8px; padding: 0 2px; white-space: nowrap; background: rgba(0,0,0,var(--sbo,.8)); }
+#subtitles .sl i { font-style: normal; width: 10px; }
+#atkhot { position: absolute; bottom: 2px; left: 376px; width: 36px; height: 36px; display: none; }
+#atkhot img { position: absolute; left: 0; bottom: 0; width: 36px; image-rendering: pixelated; }
+#atkhot .fill { position: absolute; left: 0; bottom: 0; width: 36px; overflow: hidden; }
+#atkhot .fill img { position: absolute; left: 0; bottom: 0; height: 36px; }
+#cooldown { height: 8px; mix-blend-mode: difference; }
+#atkfull { position: absolute; left: 50%; top: 50%; margin: 18px 0 0 -16px; width: 32px; height: 32px; display: none; image-rendering: pixelated; mix-blend-mode: difference; }
+#autosave { position: absolute; right: 10px; bottom: 8px; font-size: 20px; text-shadow: 2px 2px 0 #3f3f3f; opacity: 0; transition: opacity .5s; }
+#plist { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.5); padding: 2px; display: none; font-size: 20px; line-height: 22px; min-width: 180px; }
+#plist .pr { display: flex; justify-content: space-between; gap: 24px; background: rgba(255,255,255,.13); padding: 0 6px; }
+#plist .pr b { color: #ffff55; font-weight: normal; }
+#chat.nocolor div, #chat.nocolor span { color: #fff !important; }
+#chat a { color: inherit; text-decoration: underline; pointer-events: auto; cursor: pointer; }
+#chatsug { position: fixed; left: 4px; bottom: 44px; background: rgba(0,0,0,.8); font-size: 20px; line-height: 22px; padding: 2px 6px; color: #a8a8a8; white-space: pre; display: none; z-index: 6; }
+#chatsug .on { color: #ffff55; }
+html.tbg #itemname span.tb { background: rgba(0,0,0,var(--tbo,.5)); padding: 0 4px; }
+/* High Contrast: darker panels, brighter text, stronger outlines */
+html.hc .btn { background: #000; color: #fff; border-color: #fff; box-shadow: none; text-shadow: none; }
+html.hc .btn:hover { background: #000; color: #ffff55; border-color: #ffff55; box-shadow: none; }
+html.hc .btn:disabled, html.hc .btn.ghost { background: #000; color: #8c8c8c; border-color: #8c8c8c; }
+html.hc .slider { box-shadow: inset 0 0 0 2px #fff; }
+html.hc .slider .knob { background: #fff; box-shadow: none; }
+html.hc .hint, html.hc .field label { color: #fff; }
+html.hc #tooltip { background: #000; }
 /* ---------- pixel font (one font pixel = 2 css pixels) ---------- */
 html.pixfont body { font-family: 'BlockcraftPixel', 'Courier New', monospace; font-size: 16px; }
 html.pixfont .btn { font-size: 16px; }
@@ -240,6 +287,10 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
 <div id="hud" class="hidden">
   <div id="crosshair"></div>
   <div id="cooldown"><i></i></div>
+  <img id="atkfull" alt="">
+  <div id="subtitles"></div>
+  <div id="autosave">Saving world</div>
+  <div id="plist"></div>
   <div id="bossbar" class="hidden"><div class="bossname">Ender Dragon</div><div class="bb"><i id="bossfill"></i></div></div>
   <div id="debug"></div>
   <div id="debugR"></div>
@@ -251,6 +302,7 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
     <div id="xpbar"><div id="xpfill"></div><div id="xplevel"></div></div>
     <div id="hotbar"></div>
     <div id="offhand-slot" class="hidden"></div>
+    <div id="atkhot"><img class="bg" alt=""><div class="fill"><img alt=""></div></div>
   </div>
 </div>
 <div id="touch" class="hidden">
@@ -264,6 +316,7 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <button class="tb" id="t-chat" style="right:192px;top:16px;font-size:20px">/</button>
 </div>
 <div id="chatbox" class="hidden"><input id="chatin" autocomplete="off" spellcheck="false" maxlength="256"></div>
+<div id="chatsug"></div>
 
 <div id="scr-title" class="screen hidden">
   <img id="logo-img" class="hidden" alt="">
@@ -272,18 +325,18 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <div class="splash" id="splash" style="left: calc(50% + 190px); top: calc(50% - 160px);">100% one file!</div>
   <button class="btn" id="b-single">Singleplayer</button>
   <button class="btn" id="b-quick">Quick Play (new random world)</button>
-  <div class="row"><button class="btn half" id="b-options">Options...</button><button class="btn half" id="b-controls">Controls</button></div>
+  <div class="row"><button class="btn icon" id="b-lang" title="Language"><img alt=""></button><button class="btn half" id="b-options">Options...</button><button class="btn half" id="b-controls">Controls</button><button class="btn icon" id="b-access" title="Accessibility Settings"><img alt=""></button></div>
   <div class="foot"><span>Blockcraft 1.21-style (HTML5), a fan-made game</span><span>NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</span></div>
 </div>
 
-<div id="scr-worlds" class="screen dirt hidden">
+<div id="scr-worlds" class="screen menubg hidden">
   <div class="h1">Select World</div>
   <div class="worldlist" id="worldlist"></div>
   <div class="row"><button class="btn half" id="b-play" disabled>Play Selected World</button><button class="btn half" id="b-create">Create New World</button></div>
   <div class="row"><button class="btn half" id="b-delete" disabled>Delete</button><button class="btn half" id="b-wback">Cancel</button></div>
 </div>
 
-<div id="scr-create" class="screen dirt hidden">
+<div id="scr-create" class="screen menubg hidden">
   <div class="h1">Create New World</div>
   <div class="cwtabs" id="ctabs"><button class="cwtab sel" data-tab="game">Game</button><button class="cwtab" data-tab="world">World</button><button class="cwtab" data-tab="more">More</button></div>
   <div class="cpage" id="cpage-game">
@@ -310,7 +363,7 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <div class="row"><button class="btn half" id="b-docreate">Create New World</button><button class="btn half" id="b-cback">Cancel</button></div>
 </div>
 
-<div id="scr-flat" class="screen dirt hidden">
+<div id="scr-flat" class="screen menubg hidden">
   <div class="h1">Superflat Customization</div>
   <div class="flathead"><span>Layer Material</span><span>Height</span></div>
   <div class="worldlist flatlist" id="flatlist"></div>
@@ -318,33 +371,33 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <div class="row"><button class="btn half" id="b-fldone">Done</button><button class="btn half" id="b-flcancel">Cancel</button></div>
 </div>
 
-<div id="scr-flatpresets" class="screen dirt hidden">
+<div id="scr-flatpresets" class="screen menubg hidden">
   <div class="h1">Select a Preset</div>
   <div class="field wide"><label>Copy this text to share the world's layers, or paste one to use it</label><input id="in-flatpreset"></div>
   <div class="worldlist flatlist" id="presetlist"></div>
   <div class="row"><button class="btn half" id="b-fpuse">Use Preset</button><button class="btn half" id="b-fpcancel">Cancel</button></div>
 </div>
 
-<div id="scr-buffet" class="screen dirt hidden">
+<div id="scr-buffet" class="screen menubg hidden">
   <div class="h1">Single Biome</div>
   <div class="worldlist flatlist" id="biomelist"></div>
   <div class="row"><button class="btn half" id="b-bdone">Done</button><button class="btn half" id="b-bcancel">Cancel</button></div>
 </div>
 
-<div id="scr-rules" class="screen dirt hidden">
+<div id="scr-rules" class="screen menubg hidden">
   <div class="h1">Edit Game Rules</div>
   <div class="worldlist rulelist" id="rulelist"></div>
   <div class="row"><button class="btn half" id="b-rdone">Done</button><button class="btn half" id="b-rcancel">Cancel</button></div>
 </div>
 
-<div id="scr-options" class="screen dirt hidden">
+<div id="scr-options" class="screen menubg hidden">
   <div class="h1">Options</div>
   <div class="opts" id="opts"></div>
   <div class="sep"></div>
   <button class="btn" id="b-oback">Done</button>
 </div>
 
-<div id="scr-controls" class="screen dirt hidden">
+<div id="scr-controls" class="screen menubg hidden">
   <div class="h1">Controls</div>
   <div class="keys">
     <div><b>W A S D</b> Move</div><div><b>Space</b> Jump / swim up</div><div><b>Space x2</b> Toggle flight (creative)</div>
@@ -358,10 +411,14 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <button class="btn" id="b-kback">Done</button>
 </div>
 
+<div id="scr-osub" class="screen menubg hidden"></div>
+
 <div id="scr-pause" class="screen dim hidden">
   <div class="h1">Game Menu</div>
   <button class="btn" id="b-resume">Back to Game</button>
-  <div class="row"><button class="btn half" id="b-popts">Options...</button><button class="btn half" id="b-pcontrols">Controls</button></div>
+  <div class="row" id="pause-row1"></div>
+  <div class="row"><button class="btn half" id="b-popts">Options...</button><button class="btn half ghost" id="b-plan">Open to LAN</button></div>
+  <button class="btn half hidden" id="b-pcontrols">Controls</button>
   <button class="btn" id="b-quit">Save and Quit to Title</button>
   <div class="hint" id="pause-hint"></div>
 </div>
@@ -381,7 +438,7 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <div class="progress"><i id="load-bar"></i></div>
 </div>
 
-<div id="scr-packs" class="screen dirt hidden">
+<div id="scr-packs" class="screen menubg hidden">
   <div class="h1">Resource Packs</div>
   <div class="hint">Use a Java Edition resource pack (.zip) or your own Minecraft version file (.jar). Packs higher in the list win; anything a pack does not cover falls back to the next pack, then to Blockcraft's built-in art. Files stay in this browser.</div>
   <div class="worldlist" id="packlist"></div>
@@ -9666,7 +9723,8 @@ const MESH_OPTS = { fancyLeaves: true, smooth: true };
 
 function computeTints(world, c) {
   const t = new Uint8Array(256 * 9);
-  const R = 2;
+  // Biome Blend: the colours of (2R+1) x (2R+1) columns are averaged (5x5 by default)
+  const R = MESH_OPTS.blend === undefined ? 2 : MESH_OPTS.blend;
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     let s = [0, 0, 0, 0, 0, 0, 0, 0, 0], n = 0;
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
@@ -10911,18 +10969,18 @@ const SH_DYN_F = `#version 300 es
 precision highp float; precision highp sampler2DArray;
 ${SH_TEX_FN}
 uniform sampler2D uAtlas;
-uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright; uniform float uGlint; uniform float uTime;
+uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright; uniform float uGlint; uniform float uTime; uniform vec2 uGlintK;
 ${SH_LIGHT_FN}
 in vec3 vUV; in vec4 vCol; in vec2 vLight; in float vDist; out vec4 o;
 void main(){
   vec4 c = vUV.z < -0.5 ? texture(uAtlas, vUV.xy) : texArr(vUV);
   if (c.a < 0.1) discard;
   if (uGlint > 0.5) {
-    // enchantment glint: two diagonal bands scrolling over the item, added on top
-    float a = fract(dot(vUV.xy, vec2(0.55, 1.0)) * 0.9 - uTime * 0.32);
-    float b = fract(dot(vUV.xy, vec2(-1.0, 0.45)) * 0.8 + uTime * 0.21);
+    // enchantment glint: two diagonal bands scrolling over the item, added on top (uGlintK: Glint Speed and Strength)
+    float a = fract(dot(vUV.xy, vec2(0.55, 1.0)) * 0.9 - uTime * 0.32 * uGlintK.x);
+    float b = fract(dot(vUV.xy, vec2(-1.0, 0.45)) * 0.8 + uTime * 0.21 * uGlintK.x);
     float g = smoothstep(0.0, 0.25, a) * smoothstep(0.6, 0.25, a) + 0.7 * smoothstep(0.0, 0.2, b) * smoothstep(0.5, 0.2, b);
-    o = vec4(vec3(0.5, 0.2, 0.9) * (0.25 + g * 0.75) * vCol.a, 1.0);
+    o = vec4(vec3(0.5, 0.2, 0.9) * (0.25 + g * 0.75) * vCol.a * uGlintK.y, 1.0);
     return;
   }
   vec3 L = uFullBright > 0.5 ? vec3(1.0) : lightCol(vLight);
@@ -11044,14 +11102,22 @@ class Renderer {
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
       gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, R, R, Math.max(1, count), 0, gl.RGBA, gl.UNSIGNED_BYTE, count ? data.subarray(from * P, (from + count) * P) : new Uint8Array(P));
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAX_LEVEL, Math.round(Math.log2(R)));
       gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
       return t;
     };
     if (this.arrs) for (const t of this.arrs) gl.deleteTexture(t);
     this.arrs = [];
     for (let from = 0; from < n; from += per) this.arrs.push(mkArr(from, Math.min(per, n - from)));
+    this.setMipmaps(OPTIONS.mipmaps === undefined ? 4 : OPTIONS.mipmaps);
+  }
+  // Mipmap Levels: how many smaller copies far-away blocks may use (0 turns them off)
+  setMipmaps(n) {
+    const gl = this.gl, max = Math.round(Math.log2(TEX.res || 16)), lv = Math.max(0, Math.min(n, max));
+    for (const t of this.arrs || []) {
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAX_LEVEL, lv);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, lv > 0 ? gl.NEAREST_MIPMAP_LINEAR : gl.NEAREST);
+    }
   }
   // sun, moon and end sky images from a resource pack (null = built-in look)
   setSkyTexture(kind, img) {
@@ -11108,10 +11174,13 @@ class Renderer {
     const out = [];
     const S = 12, H = 4;
     const push = (pts, shade) => { for (const p of pts) out.push(p[0], p[1], p[2], shade); };
+    const fast = OPTIONS.clouds === 1;
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       const cx = ccx + dx, cz = ccz + dz;
       if (!on(cx, cz)) continue;
       const x0 = dx * S, z0 = dz * S, x1 = x0 + S, z1 = z0 + S;
+      // fast clouds are a single flat layer
+      if (fast) { push([[x0, 0, z1], [x1, 0, z1], [x1, 0, z0], [x0, 0, z0]], 0.95); continue; }
       push([[x0, H, z1], [x1, H, z1], [x1, H, z0], [x0, H, z0]], 1.0);
       push([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], 0.7);
       if (!on(cx + 1, cz)) push([[x1, 0, z1], [x1, 0, z0], [x1, H, z0], [x1, H, z1]], 0.85);
@@ -11266,7 +11335,7 @@ class Renderer {
     const drift = worldTime * 0.6;
     const wx = cam[0] + drift;
     const ccx = Math.floor(wx / S), ccz = Math.floor(cam[2] / S);
-    const key = ccx + ',' + ccz;
+    const key = ccx + ',' + ccz + ',' + OPTIONS.clouds;
     if (key !== this.cloudKey) { this.cloudKey = key; this.buildClouds(ccx, ccz); }
     gl.useProgram(this.progCloud);
     gl.uniformMatrix4fv(u.uVP, false, this.vp);
@@ -11303,6 +11372,7 @@ class Renderer {
     gl.uniform1f(u.uFullBright, opts && opts.fullBright ? 1 : 0);
     gl.uniform1f(u.uGlint, opts && opts.glint ? 1 : 0);
     gl.uniform1f(u.uTime, (performance.now() / 1000) % 1000);
+    if (u.uGlintK) gl.uniform2f(u.uGlintK, (OPTIONS.glintSpeed === undefined ? 0.5 : OPTIONS.glintSpeed) / 0.5, (OPTIONS.glintStrength === undefined ? 0.75 : OPTIONS.glintStrength) / 0.75);
     this.bindTex(u);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.atlas); gl.uniform1i(u.uAtlas, 1);
     gl.activeTexture(gl.TEXTURE0);
@@ -16843,15 +16913,16 @@ function creativeBg(kind) {
 function creativeTabBg(top, sel) {
   const key = 'tab_' + top + sel;
   if (GUI_BG[key]) return GUI_BG[key];
-  const [c, g] = guiCanvas(28, 32);
+  // 26 x 32 like the vanilla tab sprites
+  const [c, g] = guiCanvas(26, 32);
   const col = sel ? GUIC.bg : '#a5a5a5';
   if (top) {
-    guiPanel(g, 0, 0, 28, 36, col);
-    if (sel) { g.fillStyle = col; g.fillRect(1, 28, 26, 4); g.fillStyle = GUIC.hi; g.fillRect(1, 28, 2, 4); g.fillStyle = GUIC.lo; g.fillRect(25, 28, 2, 4); }
+    guiPanel(g, 0, 0, 26, 36, col);
+    if (sel) { g.fillStyle = col; g.fillRect(1, 28, 24, 4); g.fillStyle = GUIC.hi; g.fillRect(1, 28, 2, 4); g.fillStyle = GUIC.lo; g.fillRect(23, 28, 2, 4); }
   } else {
-    g.save(); g.translate(0, 32); g.scale(1, -1); guiPanel(g, 0, 0, 28, 36, col); g.restore();
-    g.fillStyle = col; g.fillRect(3, 4, 22, 24);
-    if (sel) { g.fillStyle = col; g.fillRect(1, 0, 26, 4); g.fillStyle = GUIC.hi; g.fillRect(1, 0, 2, 4); g.fillStyle = GUIC.lo; g.fillRect(25, 0, 2, 4); }
+    g.save(); g.translate(0, 32); g.scale(1, -1); guiPanel(g, 0, 0, 26, 36, col); g.restore();
+    g.fillStyle = col; g.fillRect(3, 4, 20, 24);
+    if (sel) { g.fillStyle = col; g.fillRect(1, 0, 24, 4); g.fillStyle = GUIC.hi; g.fillRect(1, 0, 2, 4); g.fillStyle = GUIC.lo; g.fillRect(23, 0, 2, 4); }
   }
   return GUI_BG[key] = c.toDataURL();
 }
@@ -17155,12 +17226,13 @@ Object.assign(UI.prototype, {
     const C = PACK_GUI_STATE.containers, packBg = tab === 'inventory' ? C.creative_tab_inventory : tab === 'search' ? C.creative_tab_item_search : C.creative_tab_items;
     win.style.backgroundImage = `url(${packBg || creativeBg(tab === 'inventory' ? 'inventory' : tab === 'search' ? 'search' : 'items')})`;
     // tabs
+    // CreativeModeInventoryScreen.getTabX: 27 pixels a column, the right-hand tabs counted back from the edge
     let ti = [0, 0];
     for (const t of CREATIVE_TABS) {
-      const top = t.row === 0, x = t.right ? 167 : (ti[t.row]++) * 29, sel = t.key === tab;
+      const top = t.row === 0, col = t.right ? (t.col === undefined ? 6 : t.col) : ti[t.row]++, x = t.right ? 195 - 27 * (7 - col) + 1 : 27 * col, sel = t.key === tab;
       const d = el('div', 'ctab' + (sel ? ' sel' : ''));
-      d.style.cssText = `left:${x * GS}px;top:${(top ? 0 : 28 + 136 - 4) * GS}px;width:${28 * GS}px;height:${32 * GS}px;background-image:url(${creativeTabBg(top, sel)})`;
-      d.innerHTML = `<img src="${iconFor(itemOf(t.icon))}" style="left:${6 * GS}px;top:${(top ? 9 : 7) * GS}px">`;
+      d.style.cssText = `left:${x * GS}px;top:${(top ? 0 : 28 + 136 - 4) * GS}px;width:${26 * GS}px;height:${32 * GS}px;background-image:url(${creativeTabBg(top, sel)})`;
+      d.innerHTML = `<img src="${iconFor(itemOf(t.icon))}" style="left:${5 * GS}px;top:${(top ? 9 : 7) * GS}px">`;
       d.title = t.name;
       d.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); if (this.creativeTab !== t.key) { this.creativeTab = t.key; this.inv.scroll = 0; AUDIO.play('click'); this.buildWindow(); this.renderInv(); } });
       d.addEventListener('mouseenter', () => { this.tabTip = t.name; this.showTip(); });
@@ -17182,7 +17254,7 @@ Object.assign(UI.prototype, {
       const knob = el('div', 'cknob'); knob.style.backgroundImage = `url(${CREATIVE_SCROLL_KNOB()})`; this.knobEl = knob; win.appendChild(knob);
       knob.addEventListener('mousedown', e => {
         e.preventDefault(); e.stopPropagation();
-        const r = win.getBoundingClientRect(), mv = ev => { const t = (ev.clientY - r.top - 25 * GS) / (95 * GS); this.setScroll(t * this.maxScroll()); };
+        const r = win.getBoundingClientRect(), z = window.UIZ || 1, mv = ev => { const t = (ev.clientY - r.top - 25 * GS * z) / (95 * GS * z); this.setScroll(t * this.maxScroll()); };
         const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
         document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
       });
@@ -18415,6 +18487,8 @@ const NETHER_FOG = { [BI.NETHER_WASTES]: [0.2, 0.03, 0.03], [BI.CRIMSON_FOREST]:
 // ambient particles drifting through the nether biomes
 const NETHER_MOTES = { [BI.CRIMSON_FOREST]: [0.9, 0.25, 0.2], [BI.WARPED_FOREST]: [0.3, 0.9, 0.85], [BI.SOUL_SAND_VALLEY]: [0.55, 0.85, 0.9], [BI.BASALT_DELTAS]: [0.85, 0.85, 0.85] };
 function mobName(t) { return titleCase(t); }
+// screens that pause a single-player world while they are open
+const PAUSE_SCREENS = new Set(['scr-pause', 'scr-options', 'scr-osub', 'scr-controls', 'scr-packs', 'scr-adv', 'scr-stats']);
 const SPLASHES = ['100% one file!', 'Now with cherry trees!', 'Punch a tree!', 'Procedurally textured!', 'Made of blocks!', 'Also try the original!', 'Infinite terrain!',
   'Synthesized sounds!', 'WebGL2!', 'Mind the creepy zombies!', 'Mountains reach the clouds!', 'Deep caves!', 'Crafting included!', 'Look up at night!', 'Don\'t dig straight down!',
   'Now with the Nether!', 'Beware the Ender Dragon!', 'Follow the eye!', 'Bring a bow to the End!', 'Huge fungi!'];
@@ -19112,16 +19186,11 @@ class Game {
     cv.addEventListener('contextmenu', e => e.preventDefault());
     document.addEventListener('mousemove', e => {
       if (!this.locked || !this.player || this.state !== 'playing') return;
-      const s = OPTIONS.sens * 0.0045;
-      const p = this.player;
-      p.yaw -= e.movementX * s; p.pitch -= e.movementY * s;
-      p.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, p.pitch));
+      this.mouseLook(e.movementX, e.movementY);
     });
     cv.addEventListener('wheel', e => {
       if (!this.locked || !this.player) return;
-      const d = Math.sign(e.deltaY);
-      this.player.sel = (this.player.sel + d + 9) % 9;
-      this.ui.refreshHotbar(); this.ui.showItemName(this.player.held);
+      this.scrollHotbar(Math.sign(e.deltaY), e);
     }, { passive: true });
     document.addEventListener('keydown', e => {
       if (['F1', 'F2', 'F3', 'F5', 'Tab', 'Space'].includes(e.code) || (e.code === 'Slash' && this.locked)) e.preventDefault();
@@ -19154,6 +19223,17 @@ class Game {
     });
     document.addEventListener('keyup', e => inp.keys.delete(e.code));
     window.addEventListener('blur', () => inp.reset());
+  }
+  // turning with the mouse
+  mouseLook(dx, dy) {
+    const s = OPTIONS.sens * 0.0045, p = this.player;
+    p.yaw -= dx * s; p.pitch -= dy * s;
+    p.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, p.pitch));
+  }
+  scrollHotbar(d) {
+    if (!d) return;
+    this.player.sel = (this.player.sel + d + 9) % 9;
+    this.ui.refreshHotbar(); this.ui.showItemName(this.player.held);
   }
   lockPointer() {
     if (this.state !== 'playing' || (this.touch && this.touch.supported)) return;
@@ -19190,12 +19270,19 @@ class Game {
   titleFrame(dt) {
     if (!this.pano) { const gl = this.r.gl; this.r.resize(); gl.viewport(0, 0, this.canvas.width, this.canvas.height); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); return; }
     const pn = this.pano, w = this.world, p = this.player;
-    pn.yaw += dt * 0.04;
+    pn.yaw += dt * 0.04 * (OPTIONS.panoramaSpeed === undefined ? 1 : OPTIONS.panoramaSpeed);
     p.yaw = pn.yaw; p.pitch = -0.12;
     this.updateChunks(6);
     if (!pn.y) {
-      const c = w.getChunk(Math.floor(pn.x) >> 4, Math.floor(pn.z) >> 4);
-      if (c && c.state >= 2) { let y = CH_TOP - 1; while (y > 1 && !SOLID[w.getBlock(Math.floor(pn.x), y, Math.floor(pn.z))] && w.getBlock(Math.floor(pn.x), y, Math.floor(pn.z)) !== B.WATER) y--; pn.y = y + 6; }
+      // a few blocks above the highest thing around, so the view never starts inside a tree
+      const cx = Math.floor(pn.x), cz = Math.floor(pn.z);
+      let ok = true;
+      for (let dz = -1; dz <= 1 && ok; dz++) for (let dx = -1; dx <= 1; dx++) { const c = w.getChunk((cx >> 4) + dx, (cz >> 4) + dz); if (!c || c.state < 2) { ok = false; break; } }
+      if (ok) {
+        let top = 0;
+        for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) { let y = CH_TOP - 1; while (y > 1 && !SOLID[w.getBlock(cx + dx, y, cz + dz)] && w.getBlock(cx + dx, y, cz + dz) !== B.WATER) y--; top = Math.max(top, y); }
+        pn.y = top + 3;
+      }
     }
     p.x = p.px = pn.x; p.z = p.pz = pn.z; p.y = p.py = (pn.y || 100) - 1.62;
     w.time += dt * 2;
@@ -19219,7 +19306,7 @@ class Game {
     if (done === total) this.finishLoading();
   }
   playFrame(dt) {
-    const paused = this.ui.screen === 'scr-pause' || this.ui.screen === 'scr-options' || this.ui.screen === 'scr-controls' || this.ui.screen === 'scr-packs';
+    const paused = PAUSE_SCREENS.has(this.ui.screen);
     this.touch.update();
     this.input.enabled = (this.locked || this.touch.active) && !this.ui.inv && !this.ui.chatOpen && !this.ui.screen;
     if (!paused) {
@@ -19258,7 +19345,7 @@ class Game {
     this.tickBrewers();
     if (this.sleeping) { this.sleepTick(); this.input.reset(); }
     p.tick(this.input);
-    for (const e of this.entities) if (!e.dead) e.tick();
+    for (const e of this.entities) if (!e.dead && this.inSimChunk(Math.floor(e.x) >> 4, Math.floor(e.z) >> 4)) e.tick();
     this.entities = this.entities.filter(e => !e.dead);
     this.pushEntities();
     this.particles.tick();
@@ -19295,12 +19382,22 @@ class Game {
       if (col) for (let k = 0; k < 3; k++) P.add({ x: p.x + (Math.random() - 0.5) * 24, y: p.y + (Math.random() - 0.3) * 12, z: p.z + (Math.random() - 0.5) * 24, vx: (Math.random() - 0.5) * 0.01, vy: bi === BI.BASALT_DELTAS ? -0.012 : 0.004, vz: (Math.random() - 0.5) * 0.01, life: 80 + Math.random() * 60, layer: texL('particle_generic_5'), u: 0, v: 0, us: 1, size: 0.05, g: 0, col, bright: true });
     }
   }
+  // the simulation distance: entities tick and blocks get random ticks only in chunks this close (a square)
+  simDistance() { return Math.max(1, Math.min((OPTIONS.simDist || 12) - 1, OPTIONS.renderDist)); }
+  inSimChunk(cx, cz) {
+    const p = this.player;
+    if (!p) return true;
+    const d = Math.max(Math.abs(cx - (Math.floor(p.x) >> 4)), Math.abs(cz - (Math.floor(p.z) >> 4)));
+    return d <= this.simDistance();
+  }
+  // random ticks: ticking chunks whose middle is within 128 blocks of the player
   randomTicks() {
     const w = this.world, p = this.player;
-    const pcx = Math.floor(p.x / 16), pcz = Math.floor(p.z / 16), R = 4, n = this.rule ? this.rule('randomTickSpeed') : 3;
+    const pcx = Math.floor(p.x / 16), pcz = Math.floor(p.z / 16), R = Math.min(8, this.simDistance()), n = this.rule ? this.rule('randomTickSpeed') : 3;
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       const c = w.getChunk(pcx + dx, pcz + dz);
       if (!c || c.state < 2) continue;
+      if (((pcx + dx) * 16 + 8 - p.x) ** 2 + ((pcz + dz) * 16 + 8 - p.z) ** 2 >= 16384) continue;
       for (let sy = 0; sy < CH_SECS; sy++) {
         if (!c.meshes[sy]) continue;
         for (let k = 0; k < n; k++) {
@@ -19824,6 +19921,8 @@ class Game {
     this.underFluid(env, eye, 1);
     return this.statusEnv(env);
   }
+  // is this entity close enough to draw?
+  entityInView(e, eye) { const dx = e.x - eye[0], dz = e.z - eye[2]; return dx * dx + dz * dz < (OPTIONS.renderDist * 16) ** 2; }
   renderWorld(alpha, dt, panorama) {
     const r = this.r, gl = r.gl, w = this.world, p = this.player;
     r.resize();
@@ -19838,9 +19937,11 @@ class Game {
       bobX = Math.sin(wd * Math.PI) * ba * 0.5; bobY = -Math.abs(Math.cos(wd * Math.PI) * ba);
       roll = Math.sin(wd * Math.PI) * ba * 0.05;
     }
-    if (p.hurtTime > 0 && !panorama) roll += Math.sin((p.hurtTime - alpha) / 10 * Math.PI) * 0.12;
-    const nausea = !panorama && p.effects && p.effects.get('nausea');
-    if (nausea) { const k = Math.min(1, nausea.ticks / 60), t = (p.age + alpha) * 0.07; roll += Math.sin(t) * 0.16 * k; bobX += Math.sin(t * 1.3) * 0.05 * k; }
+    // GameRenderer.bobHurt: up to 14 degrees, scaled by Damage Tilt
+    if (p.hurtTime > 0 && !panorama) { const g = Math.max(0, (p.hurtTime - alpha) / 10); roll += Math.sin(g * g * g * g * Math.PI) * 14 * Math.PI / 180 * (OPTIONS.damageTilt === undefined ? 1 : OPTIONS.damageTilt); }
+    // nausea warps the view as much as Distortion Effects allows (squared, as in Java)
+    const nausea = !panorama && p.effects && p.effects.get('nausea'), dist = OPTIONS.distortion === undefined ? 1 : OPTIONS.distortion, dk = dist * dist;
+    if (nausea) { const k = Math.min(1, nausea.ticks / 60) * dk, t = (p.age + alpha) * 0.07; roll += Math.sin(t) * 0.16 * k; bobX += Math.sin(t * 1.3) * 0.05 * k; }
     const look = p.look();
     if (this.thirdPerson && !panorama) {
       const back = this.thirdPerson === 1 ? -1 : 1;
@@ -19854,8 +19955,10 @@ class Game {
     // fov
     const scoped = !panorama && !this.thirdPerson && p.using && p.using.kind === 'spyglass';
     const spd = p.effects && p.effects.get('speed'), slw = p.effects && p.effects.get('slowness');
-    let fovT = OPTIONS.fov * (p.sprinting ? 1.12 : 1) * (p.flying && p.sprinting ? 1.05 : 1) * (env.under === 'water' ? 0.88 : 1) * (p.drawT > 0 ? 1 - Math.min(1, p.drawT / 20) * 0.15 : 1)
-      * (spd ? 1 + 0.05 * (spd.amp + 1) : 1) * (slw ? Math.max(0.85, 1 - 0.04 * (slw.amp + 1)) : 1) * (nausea ? 1 + 0.08 * Math.sin((p.age + alpha) * 0.05) : 1);
+    // FOV Effects scales what sprinting, flying, water, bows and speed do to the field of view
+    const fovMod = (p.sprinting ? 1.12 : 1) * (p.flying && p.sprinting ? 1.05 : 1) * (env.under === 'water' ? 0.88 : 1) * (p.drawT > 0 ? 1 - Math.min(1, p.drawT / 20) * 0.15 : 1)
+      * (spd ? 1 + 0.05 * (spd.amp + 1) : 1) * (slw ? Math.max(0.85, 1 - 0.04 * (slw.amp + 1)) : 1);
+    let fovT = OPTIONS.fov * (1 + (fovMod - 1) * (OPTIONS.fovEffect === undefined ? 1 : OPTIONS.fovEffect)) * (nausea ? 1 + 0.08 * dk * Math.sin((p.age + alpha) * 0.05) : 1);
     if (scoped) fovT = OPTIONS.fov * 0.1;
     this.fovCur += (fovT - this.fovCur) * Math.min(1, scoped ? 1 : dt * 10);
     const far = Math.max(64, OPTIONS.renderDist * 16 + 64) + 400;
@@ -19869,23 +19972,27 @@ class Game {
     r.org = eye;
     r.dynReset();
     this.camYaw = camYaw;
-    const maxD2 = (OPTIONS.renderDist * 16) ** 2;
-    for (const e of this.entities) { const dx = e.x - eye[0], dz = e.z - eye[2]; if (dx * dx + dz * dz < maxD2) e.render(r, alpha); }
+    for (const e of this.entities) if (this.entityInView(e, eye)) e.render(r, alpha);
     if (this.renderSpawnerMobs) this.renderSpawnerMobs(r, alpha);
     if (this.thirdPerson && !panorama && !p.dead) this.renderPlayerModel(r, p, alpha);
     r.dynFlush(r.vp, env);
     this.flushGlint(r.vp, env);
     // block selection + cracks
     if (!panorama && this.target && !this.ui.hudHidden) this.renderSelection(eye, env);
-    // translucent
-    r.drawChunks(w, eye, env, true);
-    // particles
+    // particles, beams and weather; Fabulous! graphics draw them before the translucent blocks so they show through water and glass
     const right = [Math.cos(camYaw), 0, -Math.sin(camYaw)];
     const up = [Math.sin(camYaw) * Math.sin(camPitch), Math.cos(camPitch), Math.cos(camYaw) * Math.sin(camPitch)];
-    this.particles.render(r, eye, right, up);
-    this.renderBeams(r, alpha);
-    r.dynFlush(r.vp, env, { blend: true, noCull: true });
-    if (env.rain > 0.02) this.renderWeather(eye, env, alpha);
+    const late = () => {
+      this.particles.render(r, eye, right, up);
+      this.renderBeams(r, alpha);
+      r.dynFlush(r.vp, env, { blend: true, noCull: true });
+      if (env.rain > 0.02) this.renderWeather(eye, env, alpha);
+    };
+    const fab = OPTIONS.graphics === 2;
+    if (fab) late();
+    // translucent
+    r.drawChunks(w, eye, env, true);
+    if (!fab) late();
     if (w.dim === 'overworld') r.drawClouds(eye, env, w.time / 20 + (this.cloudOff || 0), 192 + w.yOff);
     if (!panorama && !this.thirdPerson && !this.ui.hudHidden && !p.dead) { gl.clear(gl.DEPTH_BUFFER_BIT); this.renderHand(alpha, env); }
     // overlays
@@ -19950,7 +20057,8 @@ class Game {
   }
   renderWeather(eye, env, alpha) {
     const r = this.r, w = this.world;
-    const R = 9, cx = Math.floor(eye[0]), cz = Math.floor(eye[2]);
+    // LevelRenderer.renderSnowAndRain: 10 blocks around the camera with fancy graphics, 5 with fast
+    const R = OPTIONS.graphics === 0 ? 5 : 10, cx = Math.floor(eye[0]), cz = Math.floor(eye[2]);
     const rainL = texL('rain'), snowL = texL('snowfall');
     const t = performance.now() / 1000;
     r.org = eye;
@@ -27059,7 +27167,7 @@ Game.prototype.computeEnv = function (eye, look) {
     if (env.cloudCol) env.cloudCol = env.cloudCol.map(v => v * (1 - 0.35 * th));
   }
   // a lightning flash lights up the whole sky for a moment
-  if (s.flash > 0) {
+  if (s.flash > 0 && !OPTIONS.hideLightningFlash) {
     const f = Math.min(1, s.flash / 2);
     env.skyTop = env.skyTop.map(v => v + (0.9 - v) * 0.6 * f); env.fogCol = env.fogCol.map(v => v + (0.85 - v) * 0.5 * f); env.day = Math.min(1, env.day + 0.5 * f);
   }
@@ -28424,7 +28532,7 @@ UI.prototype.openControls = function (back) {
   scr.innerHTML = '';
   scr.appendChild(el('div', 'h1', 'Key Binds'));
   const list = el('div', 'kblist');
-  list.style.cssText = 'width:min(660px,94vw);max-height:62vh;overflow-y:auto;background:rgba(0,0,0,.45);padding:6px 14px;box-sizing:border-box';
+  list.style.cssText = 'width:min(660px,calc(var(--zvw,100vw)*0.94));max-height:calc(var(--zvh,100vh)*0.62);overflow-y:auto;background:rgba(0,0,0,.45);padding:6px 14px;box-sizing:border-box';
   let cat = null;
   for (const a of KB_ACTIONS) {
     if (a.cat !== cat) { cat = a.cat; const h = el('div', '', cat); h.style.cssText = 'text-align:center;color:#fff;margin:10px 0 4px;font-weight:bold'; list.appendChild(h); }
@@ -28792,7 +28900,7 @@ function drawPlayerPreview(c) {
   g.imageSmoothingEnabled = false;
   // vanilla: the body turns up to 20 degrees per unit of atan, the head twice as far, and the view tilts
   const gui = box.height / (c.dataset.k ? 1 : 1), guiPx = box.height / (c.parentNode ? Math.max(1, Math.round(box.height / (GS || 2))) : 70);
-  const mx = (box.left + box.width / 2 - PV_MOUSE[0]) / GS, my = (box.top + box.height / 2 - PV_MOUSE[1]) / GS;
+  const z = window.UIZ || 1, mx = (box.left + box.width / 2 - PV_MOUSE[0]) / GS / z, my = (box.top + box.height / 2 - PV_MOUSE[1]) / GS / z;
   const h = Math.atan(mx / 40), i = Math.atan(my / 40);
   const bodyYaw = h * 20 * D2R, headYaw = h * 20 * D2R, headPitch = -i * 20 * D2R, tilt = i * 20 * D2R;
   // model pixels to canvas pixels
@@ -29311,7 +29419,7 @@ Object.assign(Game.prototype, {
     const open = cats.filter(k => (counts[k] || 0) < V_MOBCAT[k][0]);
     if (!open.length) return;
     const chunks = [];
-    for (const c of w.chunks.values()) if (c.state >= 2 && c.blocks && (c.cx * 16 + 8 - p.x) ** 2 + (c.cz * 16 + 8 - p.z) ** 2 < 16384) chunks.push(c);
+    for (const c of w.chunks.values()) if (c.state >= 2 && c.blocks && (c.cx * 16 + 8 - p.x) ** 2 + (c.cz * 16 + 8 - p.z) ** 2 < 16384 && this.inSimChunk(c.cx, c.cz)) chunks.push(c);
     for (let i = chunks.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)), t = chunks[i]; chunks[i] = chunks[j]; chunks[j] = t; }
     for (const c of chunks) for (const cat of open) if ((local[cat] || 0) < V_MOBCAT[cat][0]) this.vSpawnInChunk(cat, c, counts, local, R);
   },
@@ -32675,7 +32783,7 @@ UI.prototype.advRefresh = function () {
   inner.addEventListener('mousedown', e => {
     e.preventDefault();
     const sx = e.clientX, sy = e.clientY, s0 = this.advScroll.slice();
-    const mv = ev => { this.advScroll[0] = s0[0] - (ev.clientX - sx) / GS; this.advScroll[1] = s0[1] - (ev.clientY - sy) / GS; apply(); };
+    const z = window.UIZ || 1, mv = ev => { this.advScroll[0] = s0[0] - (ev.clientX - sx) / GS / z; this.advScroll[1] = s0[1] - (ev.clientY - sy) / GS / z; apply(); };
     const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
     document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
   });
@@ -33320,7 +33428,7 @@ UI.prototype.openStatistics = function (tab) {
   const g = this.game, p = g.player;
   if (!p) return;
   let scr = $('scr-stats');
-  if (!scr) { scr = el('div', 'screen dirt hidden'); scr.id = 'scr-stats'; document.body.appendChild(scr); }
+  if (!scr) { scr = el('div', 'screen menubg hidden'); scr.id = 'scr-stats'; document.body.appendChild(scr); }
   this.statTab = tab || this.statTab || 'general';
   scr.innerHTML = '';
   scr.appendChild(el('div', 'h1', 'Statistics'));
@@ -35622,6 +35730,1384 @@ CMDS.help = function (r, ctx) {
   const names = Object.keys(CMD_USAGE).concat(Object.keys(CMD_ALIAS)).sort();
   for (const n of names) this.ui.chat('/' + n + ' ' + (CMD_USAGE[CMD_ALIAS[n] || n] || ''), '#ccc');
   return names.length;
+};
+
+/* @file 130_options.js */
+/* ===================================================================
+   OPTIONS LIKE JAVA EDITION 1.21 — the Options screen and its
+   sub-screens: Video Settings, Music & Sounds, Controls (with Mouse
+   Settings and Key Binds), Chat Settings, Accessibility Settings, Skin
+   Customization, Language, Telemetry Data and Credits & Attribution.
+   What the settings do is in the next two parts.
+   =================================================================== */
+// the defaults of Options.java, for what options saved before this update don't have
+const OPT_DEFAULTS = {
+  graphics: 1, chunkBuilder: 0, simDist: 12, maxFps: 120, attackIndicator: 1, particles: 0, mipmaps: 4, entityShadows: true, distortion: 1, entityDist: 1,
+  fovEffect: 1, autosaveIndicator: true, glintSpeed: 0.5, glintStrength: 0.75, menuBlur: 5, biomeBlend: 2,
+  vol: { record: 1, weather: 1, block: 1, hostile: 1, neutral: 1, player: 1, ambient: 1, voice: 1 }, subtitles: false, directionalAudio: false,
+  invertMouse: false, scrollSens: 1, discreteScroll: false, rawInput: true, toggleCrouch: false, toggleSprint: false, autoJump: false, opTab: false,
+  chatVisibility: 0, chatColors: true, chatLinks: true, chatLinksPrompt: true, chatOpacity: 1, textBgOpacity: 0.5, chatScale: 1, chatLineSpacing: 0, chatDelay: 0,
+  chatWidth: 1, chatHeightFocused: 1, chatHeightUnfocused: 0.4375, narrator: 0, autoSuggestions: true, reducedDebugInfo: false,
+  highContrast: false, bgForChatOnly: true, notificationTime: 1, darknessScale: 1, damageTilt: 1, hideLightningFlash: false, panoramaSpeed: 1, hideSplashTexts: false,
+  narratorHotkey: true, mainHand: 0, forceUnicode: false,
+  skin: { cape: true, jacket: true, left_sleeve: true, right_sleeve: true, left_pants_leg: true, right_pants_leg: true, hat: true },
+};
+function optFill() {
+  // the old settings: Graphics was a leaves switch and Clouds an on/off switch
+  if (OPTIONS.graphics === undefined && OPTIONS.fancyLeaves === false) OPTIONS.graphics = 0;
+  if (OPTIONS.clouds === true) OPTIONS.clouds = 2; else if (OPTIONS.clouds === false) OPTIONS.clouds = 0;
+  for (const [k, v] of Object.entries(OPT_DEFAULTS)) {
+    if (v && typeof v === 'object') { const o = OPTIONS[k] && typeof OPTIONS[k] === 'object' ? OPTIONS[k] : {}; for (const [k2, v2] of Object.entries(v)) if (o[k2] === undefined) o[k2] = v2; OPTIONS[k] = o; }
+    else if (OPTIONS[k] === undefined) OPTIONS[k] = v;
+  }
+  OPTIONS.fancyLeaves = OPTIONS.graphics > 0;
+  // a browser only goes full screen when the player asks
+  OPTIONS.fullscreen = false;
+}
+optFill();
+const _loadOptionsOP = loadOptions;
+loadOptions = function () { _loadOptionsOP(); optFill(); };
+
+const optGet = k => k.split('.').reduce((o, p) => o === undefined || o === null ? undefined : o[p], OPTIONS);
+const optSet = (k, v) => { const ps = k.split('.'), last = ps.pop(); let o = OPTIONS; for (const p of ps) o = o[p] || (o[p] = {}); o[last] = v; };
+const optPct = v => Math.round(v * 100) + '%';
+const optOffPct = v => v <= 0 ? 'OFF' : optPct(v);
+const optGame = () => window.game;
+const optRemesh = () => { const g = optGame(); if (g && g.world) for (const c of g.world.chunks.values()) c.dirty.fill(1); };
+
+/* ---------------- the settings ---------------- */
+// slider: [min, max, step]; names: the values a button cycles through; bool: ON/OFF; fixed: a value that can't change;
+// dis: why it can't (shown as its tooltip); tip: what it does; apply: run after a change
+const OPT = {
+  fov: { label: 'FOV', slider: [30, 110, 1], fmt: v => v === 70 ? 'Normal' : v === 110 ? 'Quake Pro' : v },
+  graphics: { label: 'Graphics', names: ['Fast', 'Fancy', 'Fabulous!'], apply: () => { OPTIONS.fancyLeaves = OPTIONS.graphics > 0; },
+    tip: v => ['Fast: solid leaves, rain and snow drawn closer, no dark screen edges.', 'Fancy: see-through leaves, weather further out and darker screen edges in dark places.',
+      'Fabulous!: like Fancy, and particles and rain also show behind water and stained glass.'][v] },
+  renderDist: { label: 'Render Distance', slider: [2, 16, 1], fmt: v => v + ' chunks' },
+  chunkBuilder: { label: 'Chunk Builder', names: ['Threaded', 'Semi Blocking', 'Fully Blocking'],
+    tip: v => ['Threaded: changed chunks are redrawn a few at a time between frames, so a broken block can leave a hole for a moment.',
+      'Semi Blocking: blocks you place or break are redrawn at once.', 'Fully Blocking: chunks close to you are always redrawn at once. Can make the game stutter.'][v] },
+  simDist: { label: 'Simulation Distance', slider: [5, 32, 1], fmt: v => v + ' chunks', tip: 'How far away mobs move and crops grow. It never goes beyond the render distance.' },
+  smooth: { label: 'Smooth Lighting', bool: true, apply: optRemesh },
+  maxFps: { label: 'Max Framerate', slider: [10, 260, 10], fmt: v => v >= 260 ? 'Unlimited' : v + ' fps' },
+  vsync: { label: 'VSync', fixed: 'ON', dis: 'A browser always draws in step with the screen.' },
+  bobbing: { label: 'View Bobbing', bool: true },
+  gui: { label: 'GUI Scale', cycle: () => { const n = guiMaxScale(), a = [0]; for (let i = 1; i <= n; i++) a.push(i); return a; }, fmt: v => v === 0 ? 'Auto' : v, apply: () => applyGuiScale() },
+  attackIndicator: { label: 'Attack Indicator', names: ['OFF', 'Crosshair', 'Hotbar'] },
+  brightness: { label: 'Brightness', slider: [0, 1, 0.01], fmt: v => v <= 0 ? 'Moody' : v >= 1 ? 'Bright' : '+' + Math.round(v * 100) + '%' },
+  clouds: { label: 'Clouds', names: ['OFF', 'Fast', 'Fancy'] },
+  fullscreen: { label: 'Fullscreen', bool: true, apply: () => { try { if (OPTIONS.fullscreen && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => { OPTIONS.fullscreen = false; }); else if (!OPTIONS.fullscreen && document.fullscreenElement) document.exitFullscreen(); } catch (e) { OPTIONS.fullscreen = false; } } },
+  particles: { label: 'Particles', names: ['All', 'Decreased', 'Minimal'], tip: v => ['All particles.', 'About a third fewer particles.', 'Only the bits of broken blocks.'][v] },
+  mipmaps: { label: 'Mipmap Levels', slider: [0, 4, 1], fmt: v => v === 0 ? 'OFF' : v, apply: () => { const g = optGame(); if (g && g.r) g.r.setMipmaps(OPTIONS.mipmaps); }, tip: 'Blends the textures of far-away blocks so they shimmer less.' },
+  entityShadows: { label: 'Entity Shadows', bool: true },
+  distortion: { label: 'Distortion Effects', slider: [0, 1, 0.01], fmt: optOffPct, tip: 'How much nausea warps the view.' },
+  entityDist: { label: 'Entity Distance', slider: [0.5, 5, 0.25], fmt: optPct, tip: 'How far away mobs and items are drawn. Big ones are seen from further away.' },
+  fovEffect: { label: 'FOV Effects', slider: [0, 1, 0.01], fmt: optOffPct, tip: 'How much sprinting, flying, bows, water and speed change the field of view.' },
+  autosaveIndicator: { label: 'Autosave Indicator', bool: true },
+  glintSpeed: { label: 'Glint Speed', slider: [0, 1, 0.01], fmt: optPct, apply: () => applyGlintCSS(), tip: 'How fast the shimmer of enchanted items moves.' },
+  glintStrength: { label: 'Glint Strength', slider: [0, 1, 0.01], fmt: optPct, apply: () => applyGlintCSS(), tip: 'How bright the shimmer of enchanted items is.' },
+  menuBlur: { label: 'Menu Background Blur', slider: [0, 10, 1], fmt: v => v, apply: () => { const g = optGame(); if (g) applyMenuBlur(g.ui.screen); } },
+  biomeBlend: { label: 'Biome Blend', slider: [0, 7, 1], fmt: v => v === 0 ? 'OFF' : (v * 2 + 1) + 'x' + (v * 2 + 1), apply: () => applyBiomeBlend(), tip: 'How many blocks grass, leaves and water blend their biome colours over.' },
+  nightVision: { label: 'Night Vision', bool: true, tip: 'See in the dark everywhere, as with a potion of Night Vision.' },
+  resScale: { label: 'Render Resolution', slider: [0.4, 1, 0.05], fmt: optPct, tip: 'Draws the world at a lower resolution, which is faster on slow computers.' },
+  // music & sounds
+  volume: { label: 'Master Volume', slider: [0, 1, 0.01], fmt: optOffPct },
+  music: { label: 'Music', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.record': { label: 'Jukebox/Note Blocks', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.weather': { label: 'Weather', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.block': { label: 'Blocks', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.hostile': { label: 'Hostile Creatures', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.neutral': { label: 'Friendly Creatures', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.player': { label: 'Players', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.ambient': { label: 'Ambient/Environment', slider: [0, 1, 0.01], fmt: optOffPct },
+  'vol.voice': { label: 'Voice/Speech', slider: [0, 1, 0.01], fmt: optOffPct },
+  device: { label: 'Device', fixed: 'Default', dis: 'The browser picks where the sound goes.' },
+  subtitles: { label: 'Show Subtitles', bool: true },
+  directionalAudio: { label: 'Directional Audio', bool: true, tip: 'Sounds come from all around you, above and below too. Best with headphones.' },
+  // controls
+  sens: { label: 'Sensitivity', slider: [0.05, 1.5, 0.005], fmt: v => Math.round(v * 200) + '%' },
+  invertMouse: { label: 'Invert Mouse', bool: true },
+  scrollSens: { label: 'Scroll Sensitivity', slider: [0.01, 10, 0.01], log: true, fmt: v => v.toFixed(2) },
+  discreteScroll: { label: 'Discrete Scrolling', bool: true, tip: 'One hotbar slot for each step of the mouse wheel, however far it turns.' },
+  touchscreen: { label: 'Touchscreen Mode', fixed: () => optGame() && optGame().touch && optGame().touch.supported ? 'ON' : 'OFF', dis: 'Turns on by itself on touch screens.' },
+  rawInput: { label: 'Raw Input', bool: true, tip: 'Reads the mouse without the speed-up of the operating system, when the browser can.' },
+  toggleCrouch: { label: 'Sneak', names: ['Hold', 'Toggle'] },
+  toggleSprint: { label: 'Sprint', names: ['Hold', 'Toggle'] },
+  autoJump: { label: 'Auto-Jump', bool: true },
+  opTab: { label: 'Operator Items Tab', bool: true, tip: 'Shows command blocks, structure blocks, barriers and the other operator items in the Creative inventory of worlds with commands.' },
+  // chat
+  chatVisibility: { label: 'Chat', names: ['Shown', 'Commands Only', 'Hidden'], apply: () => applyChatCSS() },
+  chatColors: { label: 'Colors', bool: true, apply: () => applyChatCSS() },
+  chatLinks: { label: 'Web Links', bool: true },
+  chatLinksPrompt: { label: 'Prompt on Links', bool: true },
+  chatOpacity: { label: 'Chat Text Opacity', slider: [0, 1, 0.01], fmt: v => Math.round(v * 90 + 10) + '%', apply: () => applyChatCSS() },
+  textBgOpacity: { label: 'Text Background Opacity', slider: [0, 1, 0.01], fmt: optPct, apply: () => applyChatCSS() },
+  chatScale: { label: 'Chat Text Size', slider: [0, 1, 0.01], fmt: optOffPct, apply: () => applyChatCSS() },
+  chatLineSpacing: { label: 'Line Spacing', slider: [0, 1, 0.01], fmt: optPct, apply: () => applyChatCSS() },
+  chatDelay: { label: 'Chat Delay', slider: [0, 6, 0.1], fmt: v => v <= 0 ? 'None' : v.toFixed(1) + ' Seconds' },
+  chatWidth: { label: 'Width', slider: [0, 1, 0.01], fmt: v => Math.floor(v * 280 + 40) + 'px', apply: () => applyChatCSS() },
+  chatHeightFocused: { label: 'Focused Height', slider: [0, 1, 0.01], fmt: v => Math.floor(v * 160 + 20) + 'px', apply: () => applyChatCSS() },
+  chatHeightUnfocused: { label: 'Unfocused Height', slider: [0, 1, 0.01], fmt: v => Math.floor(v * 160 + 20) + 'px', apply: () => applyChatCSS() },
+  narrator: { label: 'Narrator', names: ['OFF', 'Narrates All', 'Narrates Chat', 'Narrates System'], dis: () => window.speechSynthesis ? null : 'This browser cannot speak.',
+    apply: () => narrate(['Narrator Off', 'Narrator Narrates All', 'Narrator Narrates Chat', 'Narrator Narrates System'][OPTIONS.narrator], true) },
+  autoSuggestions: { label: 'Command Suggestions', bool: true, tip: 'Shows what a command can take while you type it. Tab fills it in.' },
+  hideMatchedNames: { label: 'Hide Matched Names', fixed: 'ON', dis: 'Only for multiplayer servers.' },
+  reducedDebugInfo: { label: 'Reduced Debug Info', bool: true, tip: 'Leaves coordinates and other details out of the debug screen.' },
+  onlyShowSecureChat: { label: 'Only Show Secure Chat', fixed: 'OFF', dis: 'Only for multiplayer servers.' },
+  // accessibility
+  highContrast: { label: 'High Contrast', bool: true, apply: () => applyAccessCSS(), tip: 'Black buttons with white outlines and brighter text.' },
+  bgForChatOnly: { label: 'Text Background', names: ['Everywhere', 'Chat'], get: () => OPTIONS.bgForChatOnly ? 1 : 0, set: v => { OPTIONS.bgForChatOnly = v === 1; }, apply: () => applyAccessCSS() },
+  notificationTime: { label: 'Notification Time', slider: [0.5, 10, 0.5], fmt: v => v.toFixed(1) + 'x', tip: 'How long toasts and subtitles stay on the screen.' },
+  darknessScale: { label: 'Darkness Pulsing', slider: [0, 1, 0.01], fmt: optPct, tip: 'How much the Darkness effect pulses.' },
+  damageTilt: { label: 'Damage Tilt', slider: [0, 1, 0.01], fmt: optPct, tip: 'How much the view shakes when you are hurt.' },
+  hideLightningFlash: { label: 'Hide Lightning Flashes', bool: true, tip: 'Lightning no longer lights up the whole sky. The bolts still show.' },
+  panoramaSpeed: { label: 'Panorama Scroll Speed', slider: [0, 1, 0.01], fmt: optPct },
+  hideSplashTexts: { label: 'Hide Splash Texts', bool: true, apply: () => applyAccessCSS() },
+  narratorHotkey: { label: 'Narrator Hotkey', bool: true, tip: 'Ctrl+B turns the narrator on and off.' },
+  // skin customization
+  'skin.cape': { label: 'Cape', fixed: 'ON', dis: 'Blockcraft players have no cape.' },
+  'skin.jacket': { label: 'Jacket', bool: true },
+  'skin.left_sleeve': { label: 'Left Sleeve', bool: true },
+  'skin.right_sleeve': { label: 'Right Sleeve', bool: true },
+  'skin.left_pants_leg': { label: 'Left Pants Leg', bool: true },
+  'skin.right_pants_leg': { label: 'Right Pants Leg', bool: true },
+  'skin.hat': { label: 'Hat', bool: true },
+  mainHand: { label: 'Main Hand', names: ['Right', 'Left'], apply: () => { const g = optGame(); if (g && g.ui) g.ui.refreshHotbar(); } },
+  forceUnicode: { label: 'Force Unicode Font', bool: true, apply: () => applyFontChoice() },
+  glyphVariants: { label: 'Japanese Glyph Variants', fixed: 'OFF', dis: 'Blockcraft is only in English.' },
+};
+// the order of the lists, as in Java Edition
+const OPT_SCREENS = {
+  video: { title: 'Video Settings', items: ['graphics', 'renderDist', 'chunkBuilder', 'simDist', 'smooth', 'maxFps', 'vsync', 'bobbing', 'gui', 'attackIndicator', 'brightness', 'clouds',
+    'fullscreen', 'particles', 'mipmaps', 'entityShadows', 'distortion', 'entityDist', 'fovEffect', 'autosaveIndicator', 'glintSpeed', 'glintStrength', 'menuBlur', 'biomeBlend',
+    'nightVision', 'resScale'] },
+  sounds: { title: 'Music & Sound Options', items: [['volume'], 'music', 'vol.record', 'vol.weather', 'vol.block', 'vol.hostile', 'vol.neutral', 'vol.player', 'vol.ambient', 'vol.voice', ['device'], 'subtitles', 'directionalAudio'] },
+  controls: { title: 'Controls', items: [{ link: 'Mouse Settings...', to: 'mouse' }, { link: 'Key Binds...', to: 'keybinds' }, 'toggleCrouch', 'toggleSprint', 'autoJump', 'opTab'] },
+  mouse: { title: 'Mouse Settings', parent: 'controls', items: ['sens', 'invertMouse', 'scrollSens', 'discreteScroll', 'touchscreen', 'rawInput'] },
+  chat: { title: 'Chat Settings', items: ['chatVisibility', 'chatColors', 'chatLinks', 'chatLinksPrompt', 'chatOpacity', 'textBgOpacity', 'chatScale', 'chatLineSpacing', 'chatDelay', 'chatWidth',
+    'chatHeightFocused', 'chatHeightUnfocused', 'narrator', 'autoSuggestions', 'hideMatchedNames', 'reducedDebugInfo', 'onlyShowSecureChat'] },
+  access: { title: 'Accessibility Settings', items: ['narrator', 'subtitles', 'highContrast', 'autoJump', 'menuBlur', 'textBgOpacity', 'bgForChatOnly', 'chatOpacity', 'chatLineSpacing', 'chatDelay',
+    'notificationTime', 'toggleCrouch', 'toggleSprint', 'distortion', 'fovEffect', 'darknessScale', 'damageTilt', 'glintSpeed', 'glintStrength', 'hideLightningFlash', 'panoramaSpeed',
+    'hideSplashTexts', 'narratorHotkey'] },
+  skin: { title: 'Skin Customization', items: ['skin.cape', 'skin.jacket', 'skin.left_sleeve', 'skin.right_sleeve', 'skin.left_pants_leg', 'skin.right_pants_leg', 'skin.hat', 'mainHand'] },
+};
+const optValue = (k, d) => d.get ? d.get() : optGet(k);
+// a label too long for its button is squeezed to fit (Java scrolls it)
+function optFit(node, inner) {
+  requestAnimationFrame(() => {
+    if (!node.isConnected) return;
+    inner.style.transform = '';
+    const room = node.clientWidth - 8, w = inner.offsetWidth;
+    if (w > room && room > 0) inner.style.transform = `scaleX(${(room / w).toFixed(3)})`;
+  });
+}
+function optLabel(k) {
+  const d = OPT[k], v = optValue(k, d);
+  if (d.fixed !== undefined) return d.label + ': ' + (typeof d.fixed === 'function' ? d.fixed() : d.fixed);
+  if (d.bool) return d.label + ': ' + (v ? 'ON' : 'OFF');
+  if (d.names) return d.label + ': ' + d.names[+v];
+  return d.label + ': ' + (d.fmt ? d.fmt(v) : v);
+}
+
+/* ---------------- tooltips over the options ---------------- */
+function optTipEl() {
+  let t = $('otip');
+  if (!t) {
+    t = el('div'); t.id = 'otip';
+    t.style.cssText = 'position:fixed;z-index:60;pointer-events:none;display:none;max-width:400px;background:rgba(16,0,16,.94);border:2px solid #2a0a5e;box-shadow:0 0 0 2px rgba(16,0,16,.94);color:#fff;font-size:16px;line-height:20px;padding:4px 8px;text-shadow:2px 2px 0 #3f3f3f';
+    document.body.appendChild(t);
+    document.addEventListener('mousemove', e => { if (t.style.display !== 'none') optTipPos(t, e.clientX, e.clientY); });
+  }
+  return t;
+}
+function optTipPos(t, x, y) {
+  const z = typeof UIZ === 'number' ? UIZ : 1, w = t.offsetWidth * z, h = t.offsetHeight * z;
+  let px = x + 14, py = y - 28;
+  if (px + w > innerWidth - 4) px = x - w - 10;
+  if (py + h > innerHeight - 4) py = innerHeight - h - 4;
+  if (py < 4) py = 4;
+  t.style.left = px / z + 'px'; t.style.top = py / z + 'px';
+}
+function optTip(node, text) {
+  node.addEventListener('mouseenter', e => {
+    const s = typeof text === 'function' ? text() : text;
+    if (!s) return;
+    const t = optTipEl(); t.textContent = s; t.style.display = 'block'; t.style.zoom = typeof UIZ === 'number' && UIZ !== 1 ? UIZ : ''; optTipPos(t, e.clientX, e.clientY);
+  });
+  node.addEventListener('mouseleave', () => { optTipEl().style.display = 'none'; });
+}
+const optTipHide = () => { const t = $('otip'); if (t) t.style.display = 'none'; };
+
+/* ---------------- widgets ---------------- */
+UI.prototype.optWidget = function (k, wide) {
+  const d = OPT[k], cls = wide ? 'obig' : 'ob', ui = this;
+  const after = () => { if (d.apply) d.apply(); this.game.applyOptions(true); };
+  if (d.slider) {
+    const [min, max, step] = d.slider, dec = (String(step).split('.')[1] || '').length;
+    const s = el('div', 'slider ' + cls), kn = el('div', 'knob'), lab = el('div', 'lab'), txt = el('span');
+    lab.appendChild(txt); s.append(kn, lab);
+    const toT = v => d.log ? (Math.log10(v) - Math.log10(min)) / (Math.log10(max) - Math.log10(min)) : (v - min) / (max - min);
+    const fromT = t => {
+      if (d.log) { const v = Math.pow(10, Math.log10(min) + t * (Math.log10(max) - Math.log10(min))); return Math.max(min, Math.min(max, Number(v.toFixed(2)))); }
+      return Math.max(min, Math.min(max, Number((min + Math.round(t * (max - min) / step) * step).toFixed(dec))));
+    };
+    const upd = () => { const t = Math.max(0, Math.min(1, toT(optValue(k, d)))); kn.style.left = t * ((s.clientWidth || (wide ? 616 : 296)) - 16) + 'px'; txt.textContent = optLabel(k); optFit(lab, txt); };
+    const set = e => {
+      const r = s.getBoundingClientRect(), z = r.width / (s.offsetWidth || r.width || 1);
+      const t = Math.max(0, Math.min(1, (e.clientX - r.left - 8 * z) / (r.width - 16 * z)));
+      const v = fromT(t);
+      if (v !== optValue(k, d)) { if (d.set) d.set(v); else optSet(k, v); upd(); after(); }
+    };
+    s.addEventListener('mousedown', e => {
+      e.preventDefault(); set(e);
+      const mv = ev => set(ev), up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); AUDIO.play('click'); };
+      document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+    });
+    // the arrow keys move a slider under the mouse one step
+    s.tabIndex = 0;
+    s.addEventListener('keydown', e => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault(); e.stopPropagation();
+      const v0 = optValue(k, d), v = d.log ? fromT(toT(v0) + (e.key === 'ArrowRight' ? 0.01 : -0.01)) : Math.max(min, Math.min(max, Number((v0 + (e.key === 'ArrowRight' ? step : -step)).toFixed(dec))));
+      if (d.set) d.set(v); else optSet(k, v); upd(); after();
+    });
+    if (d.tip) optTip(s, () => typeof d.tip === 'function' ? d.tip(optValue(k, d)) : d.tip);
+    s._upd = upd; setTimeout(upd, 0); upd();
+    return s;
+  }
+  const b = el('button', 'btn ' + cls);
+  b.dataset.opt = k;
+  const why = typeof d.dis === 'function' ? d.dis() : d.dis;
+  const upd = () => { b.innerHTML = '<span>' + escapeHTML(optLabel(k)) + '</span>'; optFit(b, b.firstChild); };
+  // greyed out but still showing why on hover
+  if (d.fixed !== undefined || (why && d.dis)) b.classList.add('ghost');
+  b.addEventListener('click', e => {
+    if (b.disabled || b.classList.contains('ghost')) return;
+    AUDIO.play('click');
+    const vals = d.cycle ? d.cycle() : d.names ? d.names.map((_, i) => i) : [false, true];
+    const cur = optValue(k, d), i = vals.findIndex(x => x === cur || (d.bool && !!x === !!cur));
+    const n = vals[((i < 0 ? 0 : i) + (e.shiftKey ? vals.length - 1 : 1)) % vals.length];
+    if (d.set) d.set(n); else optSet(k, n);
+    upd(); after();
+    // what changed may change other buttons on the page
+    for (const o of document.querySelectorAll('#scr-osub [data-opt]')) if (o !== b && o._upd) o._upd();
+  });
+  b._upd = upd;
+  const tip = () => why || (typeof d.tip === 'function' ? d.tip(optValue(k, d)) : d.tip);
+  optTip(b, tip);
+  upd();
+  return b;
+};
+const optButton = (text, fn, cls, tip) => {
+  const b = el('button', 'btn ' + (cls || 'ob'), escapeHTML(text));
+  if (fn) b.addEventListener('click', () => { if (b.disabled || b.classList.contains('ghost')) return; AUDIO.init(); AUDIO.play('click'); optTipHide(); fn(); });
+  else if (tip) b.classList.add('ghost'); else b.disabled = true;
+  if (tip) optTip(b, tip);
+  return b;
+};
+
+/* ---------------- small pixel icons: language, accessibility, the difficulty lock ---------------- */
+const OPT_ICONS = {};
+function optIcon(kind) {
+  if (OPT_ICONS[kind]) return OPT_ICONS[kind];
+  const c = document.createElement('canvas'); c.width = c.height = 15;
+  const g = c.getContext('2d'), px = (x, y, col) => { g.fillStyle = col; g.fillRect(x, y, 1, 1); };
+  const rows = {
+    // a globe
+    lang: ['.....#####.....', '...##.#.#.##...', '..#..#...#..#..', '.#..#.....#..#.', '.#############.', '#...#.....#...#', '#...#.....#...#', '###############', '#...#.....#...#',
+      '#...#.....#...#', '.#############.', '.#..#.....#..#.', '..#..#...#..#..', '...##.#.#.##...', '.....#####.....'],
+    // a person with open arms
+    access: ['......###......', '......###......', '......###......', '...............', '.#############.', '......###......', '......###......', '......###......', '......###......',
+      '.....#...#.....', '.....#...#.....', '....##...##....', '....#.....#....', '...##.....##...', '...............'],
+    locked: ['...............', '.....#####.....', '....#.....#....', '...#.......#...', '...#.......#...', '...#.......#...', '..###########..', '..#.........#..', '..#....#....#..',
+      '..#...###...#..', '..#....#....#..', '..#....#....#..', '..#.........#..', '..###########..', '...............'],
+    unlocked: ['.........#####.', '........#.....#', '.......#.......', '.......#.......', '.......#.......', '.......#.......', '..###########..', '..#.........#..', '..#....#....#..',
+      '..#...###...#..', '..#....#....#..', '..#....#....#..', '..#.........#..', '..###########..', '...............'],
+  }[kind];
+  rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch === '#') px(x, y, kind === 'locked' || kind === 'unlocked' ? '#e0e0e0' : '#ffffff'); }));
+  return OPT_ICONS[kind] = c.toDataURL();
+}
+
+/* ---------------- the Options screen ---------------- */
+UI.prototype.openOptions = function (back) {
+  if (back) this.back = back;
+  optTipHide();
+  const box = $('opts'), g = this.game, m = g && g.meta, inWorld = !!(g && g.state === 'playing' && m && g.world);
+  box.innerHTML = ''; box.className = '';
+  const top = el('div', 'otop');
+  top.appendChild(this.optWidget('fov'));
+  if (inWorld) {
+    const names = ['Peaceful', 'Easy', 'Normal', 'Hard'];
+    if (m.hardcore) { const b = optButton('Difficulty: Hard', null, 'ob'); top.appendChild(b); }
+    else {
+      const row = el('div', 'row'); row.style.gap = '0';
+      const b = optButton('Difficulty: ' + names[OPTIONS.difficulty], () => { OPTIONS.difficulty = (OPTIONS.difficulty + 1) % 4; b.textContent = 'Difficulty: ' + names[OPTIONS.difficulty]; }, 'ob');
+      b.style.width = '260px';
+      if (m.diffLocked) b.disabled = true;
+      const lk = el('button', 'btn icon', `<img src="${optIcon(m.diffLocked ? 'locked' : 'unlocked')}" alt="">`);
+      lk.style.margin = '0';
+      optTip(lk, () => m.diffLocked ? 'The difficulty of this world is locked' : 'Lock the difficulty of this world');
+      if (m.diffLocked) lk.disabled = true;
+      lk.addEventListener('click', () => { if (lk.disabled) return; AUDIO.play('click'); optTipHide(); this.openOptLock(); });
+      row.append(b, lk); top.appendChild(row);
+    }
+  } else top.appendChild(optButton('Online...', null, 'ob', 'Blockcraft is a single-player game.'));
+  box.appendChild(top);
+  const grid = el('div', 'ogrid');
+  const sub = (name) => () => this.openOptSub(name, 'options');
+  for (const [t, fn] of [['Skin Customization...', sub('skin')], ['Music & Sounds...', sub('sounds')], ['Video Settings...', sub('video')], ['Controls...', sub('controls')],
+    ['Language...', sub('language')], ['Chat Settings...', sub('chat')], ['Resource Packs...', () => { saveOptions(); PackScreen.open('scr-options'); }], ['Accessibility Settings...', sub('access')],
+    ['Telemetry Data...', sub('telemetry')], ['Credits & Attribution...', sub('credits')]]) grid.appendChild(optButton(t, fn));
+  box.appendChild(grid);
+  this.show('scr-options');
+};
+// LockIconButton: a confirmation, then the world keeps its difficulty for good
+UI.prototype.openOptLock = function () {
+  const scr = $('scr-osub'), m = this.game.meta, names = ['Peaceful', 'Easy', 'Normal', 'Hard'];
+  scr.innerHTML = '';
+  scr.appendChild(el('div', 'ohead', 'Lock World Difficulty'));
+  const t = el('div', 'otext'); t.style.textAlign = 'center';
+  t.textContent = 'Lock this world on ' + names[OPTIONS.difficulty] + '? The difficulty can never be changed again in this world.';
+  scr.appendChild(t);
+  const row = el('div', 'row'); row.style.marginTop = '24px';
+  row.append(optButton('Yes', () => { m.diffLocked = true; this.game.saveAll(); this.openOptions(); }, 'half'), optButton('No', () => this.openOptions(), 'half'));
+  scr.appendChild(row);
+  this.oSub = { name: 'lock', parent: 'options' };
+  this.show('scr-osub');
+};
+
+/* ---------------- the sub-screens ---------------- */
+UI.prototype.openOptSub = function (name, parent) {
+  optTipHide();
+  const scr = $('scr-osub'), S = OPT_SCREENS[name];
+  if (name === 'keybinds') { this.oSub = { name: 'controls', parent: (this.oSub && this.oSub.parent) || 'options' }; this.openControls('scr-osub'); return; }
+  const par = parent || (S && S.parent) || (this.oSub && this.oSub.name === name ? this.oSub.parent : 'options');
+  this.oSub = { name, parent: par };
+  if (name === 'controls') this.ctrlParent = par;
+  scr.innerHTML = '';
+  if (name === 'language' || name === 'telemetry' || name === 'credits') return this.openOptInfo(name);
+  scr.appendChild(el('div', 'ohead', S.title));
+  const list = el('div', 'olist');
+  let row = null;
+  for (const it of S.items) {
+    if (Array.isArray(it)) { const r = el('div', 'orow'); r.appendChild(this.optWidget(it[0], true)); list.appendChild(r); row = null; continue; }
+    if (!row || row.children.length >= 2) { row = el('div', 'orow'); list.appendChild(row); }
+    if (typeof it === 'object') row.appendChild(optButton(it.link, () => this.openOptSub(it.to, it.to === 'mouse' ? 'controls' : undefined)));
+    else row.appendChild(this.optWidget(it));
+  }
+  scr.appendChild(list);
+  scr.appendChild(optButton('Done', () => this.optDone(), 'btn'));
+  this.show('scr-osub');
+  list.scrollTop = 0;
+};
+// Done (or Escape): back to the screen this one came from
+UI.prototype.optDone = function () {
+  optTipHide();
+  saveOptions();
+  if (this.game) this.game.applyOptions();
+  const s = this.oSub || {};
+  if (s.parent === 'controls') return this.openOptSub('controls', this.ctrlParent || 'options');
+  if (s.parent === 'title') { this.oSub = null; return this.show('scr-title'); }
+  this.oSub = null;
+  this.openOptions();
+};
+// Language, Telemetry Data and Credits & Attribution
+UI.prototype.openOptInfo = function (name) {
+  const scr = $('scr-osub');
+  const head = { language: 'Language...', telemetry: 'Telemetry Data', credits: 'Credits & Attribution' }[name];
+  scr.appendChild(el('div', 'ohead', head));
+  const list = el('div', 'olist');
+  if (name === 'language') {
+    const l = el('div', 'olang sel', 'English (US)'); list.appendChild(l);
+    scr.appendChild(list);
+    scr.appendChild(el('div', 'hint', 'Blockcraft is only in English for now.'));
+    const r = el('div', 'orow'); r.style.margin = '6px 0 14px';
+    r.append(this.optWidget('forceUnicode'), this.optWidget('glyphVariants'));
+    scr.appendChild(r);
+  } else {
+    const t = el('div', 'otext');
+    t.innerHTML = name === 'telemetry'
+      ? '<h3>No data leaves your computer</h3><p>Blockcraft collects no telemetry and sends nothing anywhere. Your worlds, options and resource packs are kept in this browser only.</p>'
+        + '<p>The game makes no network requests while you play; it works offline once the file is downloaded.</p>'
+      : '<h3>Blockcraft</h3><p>A fan-made game inspired by Minecraft Java Edition 1.21, in one HTML file.</p>'
+        + '<p><b>NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</b> "Minecraft" is a trademark of Mojang Synergies AB.</p>'
+        + '<h3>Made in code</h3><p>Every texture, model, sound and piece of music is generated by the game\'s own code when it starts. Paintings are original pictures and music discs play original generated tunes.</p>'
+        + '<h3>Your own textures</h3><p>Resource packs you add, including the textures of your own copy of Minecraft, stay in this browser and are never shared.</p>';
+    list.appendChild(t);
+    scr.appendChild(list);
+  }
+  scr.appendChild(optButton('Done', () => this.optDone(), 'btn'));
+  this.show('scr-osub');
+};
+// Escape goes back one screen, as Done does
+document.addEventListener('keydown', e => {
+  const g = window.game;
+  if (!g || e.code !== 'Escape' || KB.waiting) return;
+  const s = g.ui.screen;
+  if (s === 'scr-osub') { e.preventDefault(); e.stopImmediatePropagation(); if (g.ui.oSub && g.ui.oSub.name === 'lock') g.ui.openOptions(); else g.ui.optDone(); }
+  else if (s === 'scr-options') { e.preventDefault(); e.stopImmediatePropagation(); $('b-oback').click(); }
+  else if (s === 'scr-controls') { e.preventDefault(); e.stopImmediatePropagation(); g.ui.show(g.ui.ctrlBack || 'scr-title'); }
+}, true);
+// the Controls buttons on the title and pause screens open the Controls page of the options
+// (their old handlers, added when the menus are bound, are dropped with the old buttons)
+const _bindMenusOP = UI.prototype.bindMenus;
+UI.prototype.bindMenus = function () {
+  const r = _bindMenusOP.call(this);
+  for (const [id, back] of [['b-controls', 'scr-title'], ['b-pcontrols', 'scr-pause']]) {
+    const b = $(id);
+    if (!b) continue;
+    const nb = b.cloneNode(true); b.replaceWith(nb);
+    nb.addEventListener('click', () => { AUDIO.init(); AUDIO.play('click'); this.back = back; this.openOptSub('controls', back === 'scr-title' ? 'title' : 'options'); });
+  }
+  return r;
+};
+// the language and accessibility buttons beside Options on the title screen
+{
+  const lb = $('b-lang'), ab = $('b-access');
+  if (lb) { lb.firstChild.src = optIcon('lang'); lb.addEventListener('click', () => { const g = window.game; if (!g) return; AUDIO.init(); AUDIO.play('click'); g.ui.back = 'scr-title'; g.ui.openOptSub('language', 'title'); }); }
+  if (ab) { ab.firstChild.src = optIcon('access'); ab.addEventListener('click', () => { const g = window.game; if (!g) return; AUDIO.init(); AUDIO.play('click'); g.ui.back = 'scr-title'; g.ui.openOptSub('access', 'title'); }); }
+}
+// the Key Binds screen comes back to the Controls page; its list is in Java's order, by category and then by name
+const KB_CAT_ORDER = ['Movement', 'Gameplay', 'Inventory', 'Creative Mode', 'Multiplayer', 'Miscellaneous'];
+KB_ACTIONS.push({ id: 'loadToolbar', label: 'Load Hotbar Activator', cat: 'Creative Mode', canon: 'KeyX' }, { id: 'saveToolbar', label: 'Save Hotbar Activator', cat: 'Creative Mode', canon: 'KeyC' },
+  { id: 'playerlist', label: 'List Players', cat: 'Multiplayer', canon: 'Tab' }, { id: 'cinematic', label: 'Toggle Cinematic Camera', cat: 'Miscellaneous', canon: 'Unbound.cinematic' });
+for (const c of ['KeyX', 'KeyC', 'Tab']) KB_CANON.add(c);
+KB_ACTIONS.sort((a, b) => KB_CAT_ORDER.indexOf(a.cat) - KB_CAT_ORDER.indexOf(b.cat) || a.label.localeCompare(b.label, 'en', { numeric: true }));
+const _keyNameOP = keyName;
+keyName = function (code) { return code && code.startsWith('Unbound.') ? 'Not Bound' : _keyNameOP(code); };
+const _openControlsOP = UI.prototype.openControls;
+UI.prototype.openControls = function (back) {
+  optTipHide();
+  const r = _openControlsOP.call(this, back);
+  // the list across the whole width between its two lines, like the other option lists
+  const scr = $('scr-controls'), list = scr.querySelector('.kblist'), h = scr.querySelector('.h1');
+  if (list) { list.classList.add('olist'); list.style.cssText = 'padding:6px max(14px, calc(50% - 330px));box-sizing:border-box'; }
+  if (h) h.className = 'ohead';
+  return r;
+};
+
+/* ---------------- the pause menu like Java's ---------------- */
+{
+  const row = $('pause-row1'), adv = $('b-padv'), st = $('b-pstats');
+  if (row && adv && st) { adv.classList.add('half'); st.classList.add('half'); row.append(adv, st); }
+  const lan = $('b-plan');
+  if (lan) optTip(lan, 'Blockcraft is a single-player game.');
+}
+
+/* @file 131_video_audio.js */
+/* ===================================================================
+   WHAT THE VIDEO AND SOUND SETTINGS DO — GUI scale, menu blur, the
+   frame rate cap, the chunk builder, the vignette, the attack
+   indicator, particles, entity shadows and distance, the autosave
+   indicator, glint, biome blend; sound categories, subtitles and
+   directional audio
+   =================================================================== */
+
+/* ---------------- GUI Scale ---------------- */
+// Window.calculateScale: the largest scale that still leaves 320 x 240 GUI pixels (here in CSS pixels)
+var UIZ = 1;
+function guiMaxScale() { let i = 1; while (i < 8 && innerWidth / (i + 1) >= 320 && innerHeight / (i + 1) >= 240) i++; return i; }
+function guiScaleNow() { const m = guiMaxScale(); return OPTIONS.gui > 0 ? Math.min(OPTIONS.gui, m) : m; }
+// the game draws its HUD and menus at 2 CSS pixels per GUI pixel; other scales zoom them
+const GUI_ZOOMED = ['hud', 'cursor-item', 'tooltip', 'chatbox', 'chatsug', 'toasts', 'otip'];
+function applyGuiScale() {
+  UIZ = guiScaleNow() / 2;
+  const z = UIZ === 1 ? '' : String(UIZ);
+  for (const id of GUI_ZOOMED) { const e = $(id); if (e) e.style.zoom = z; }
+  for (const s of document.querySelectorAll('.screen')) s.style.zoom = z;
+  const r = document.documentElement.style;
+  r.setProperty('--zvh', innerHeight / UIZ + 'px'); r.setProperty('--zvw', innerWidth / UIZ + 'px');
+}
+window.addEventListener('resize', () => { applyGuiScale(); });
+// the item on the cursor and the tooltip follow the mouse in zoomed pixels
+UI.prototype.posCursor = function () {
+  const z = UIZ, c = $('cursor-item');
+  c.style.left = this.mx / z + 'px'; c.style.top = this.my / z + 'px';
+  const t = $('tooltip');
+  let x = this.mx + 24, y = this.my - 30;
+  if (!t.classList.contains('hidden')) { const w = t.offsetWidth * z, h = t.offsetHeight * z; if (x + w > innerWidth - 4) x = this.mx - w - 16; if (y + h > innerHeight - 4) y = innerHeight - h - 4; if (y < 4) y = 4; }
+  t.style.left = x / z + 'px'; t.style.top = y / z + 'px';
+};
+
+/* ---------------- menus: the blurred world or panorama behind them ---------------- */
+// Java 1.21 blurs what is behind a menu, but not behind the title screen, inventories, signs or the death screen
+const NO_BLUR = new Set(['scr-title', 'scr-inv', 'scr-death', 'scr-loading', 'scr-error']);
+function applyMenuBlur(id) {
+  const cv = $('gl');
+  if (!cv) return;
+  const s = id && $(id), on = !!(s && !NO_BLUR.has(id) && !s.classList.contains('tscreen') && OPTIONS.menuBlur > 0);
+  cv.style.filter = on ? `blur(${OPTIONS.menuBlur}px)` : 'none';
+  // the HUD is blurred with the world
+  const hud = $('hud');
+  if (hud) hud.style.filter = on ? `blur(${OPTIONS.menuBlur}px)` : '';
+}
+const _showVA = UI.prototype.show;
+UI.prototype.show = function (id) {
+  const r = _showVA.call(this, id);
+  applyMenuBlur(id);
+  if (id) { const s = $(id); if (s) s.style.zoom = UIZ === 1 ? '' : String(UIZ); }
+  optTipHide();
+  return r;
+};
+
+/* ---------------- Max Framerate ---------------- */
+// menus outside a world are drawn at 60 frames a second at most, as in Java
+const _frameVA = Game.prototype.frame;
+Game.prototype.frame = function (now) {
+  const lim = this.state === 'title' ? Math.min(60, OPTIONS.maxFps) : OPTIONS.maxFps;
+  if (lim < 260) {
+    const step = 1000 / lim;
+    if (this._fNext && now < this._fNext - 1) { requestAnimationFrame(t => this.frame(t)); return; }
+    this._fNext = Math.max((this._fNext || now) + step, now - step);
+  } else this._fNext = 0;
+  return _frameVA.call(this, now);
+};
+
+/* ---------------- Chunk Builder ---------------- */
+// Semi Blocking: what the player changes is redrawn at once; Fully Blocking: also everything within 27.7 blocks (LevelRenderer.compileSections)
+const _touchVA = World.prototype.touch;
+World.prototype.touch = function (x, y, z) {
+  _touchVA.call(this, x, y, z);
+  const g = this.game || window.game;
+  if (g && g.plTouched && OPTIONS.chunkBuilder > 0) g.plTouched.add(this.key(x >> 4, z >> 4));
+};
+Game.prototype.meshNow = function (c, only) {
+  if (!c || c.state < 2 || !this.neighborsLit(c)) return;
+  for (let sy = 0; sy < CH_SECS; sy++) {
+    if (!c.dirty[sy] || (only && !only(sy))) continue;
+    c.dirty[sy] = 0;
+    this.r.uploadSection(c, sy, meshSection(this.world, c, sy));
+    c.meshed = true;
+  }
+};
+const _playerTickVA = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const g = this.game, me = g && this === g.player && OPTIONS.chunkBuilder > 0 && g.state === 'playing';
+  if (!me) return _playerTickVA.call(this, inp);
+  g.plTouched = new Set();
+  try { return _playerTickVA.call(this, inp); }
+  finally {
+    const w = g.world, keys = g.plTouched;
+    g.plTouched = null;
+    if (w) for (const k of keys) { const c = w.chunks.get(k); if (!c) continue; g.meshNow(c); for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = w.getChunk(c.cx + dx, c.cz + dz); if (n) g.meshNow(n); } }
+  }
+};
+const _updateChunksVA = Game.prototype.updateChunks;
+Game.prototype.updateChunks = function (budget) {
+  const r = _updateChunksVA.call(this, budget);
+  if (OPTIONS.chunkBuilder === 2 && this.world && this.player && this.state === 'playing') {
+    const p = this.player, w = this.world, ex = p.x, ey = p.y + 1.62, ez = p.z;
+    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+      const c = w.getChunk((Math.floor(ex) >> 4) + dx, (Math.floor(ez) >> 4) + dz);
+      if (!c) continue;
+      this.meshNow(c, sy => (c.cx * 16 + 8 - ex) ** 2 + (sy * 16 + 8 - ey) ** 2 + (c.cz * 16 + 8 - ez) ** 2 < 768);
+    }
+  }
+  return r;
+};
+
+/* ---------------- the vignette (fancy graphics) ---------------- */
+// Gui.renderVignette: the darker it is where the player stands, the darker the screen edges
+const _playFrameVA = Game.prototype.playFrame;
+Game.prototype.playFrame = function (dt) {
+  const r = _playFrameVA.call(this, dt);
+  const vg = $('fx-vignette'), p = this.player, w = this.world;
+  if (vg && p && w) {
+    const on = OPTIONS.graphics > 0 && !this.ui.hudHidden && !p.dead && this.state === 'playing';
+    if (on) {
+      const l = w.getLightRaw(Math.floor(p.x), Math.floor(p.y + 1.62), Math.floor(p.z));
+      const raw = Math.max((l >> 4) - (w.dim === 'overworld' && this.skyDarken ? this.skyDarken() : 0), l & 15) / 15;
+      const amb = w.dim === 'nether' ? 0.1 : 0, b = amb + (1 - amb) * raw / (4 - 3 * raw), target = Math.max(0, Math.min(1, 1 - b));
+      this._vig = this._vig === undefined ? target : this._vig + (target - this._vig) * (1 - Math.pow(0.99, dt * 60));
+      if (!vg._init) { vg._init = true; vg.style.background = 'radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,.75) 100%)'; }
+      vg.classList.remove('hidden'); vg.style.opacity = this._vig.toFixed(3);
+    } else vg.classList.add('hidden');
+  }
+  this.updateSubtitles();
+  this.updatePlayerList();
+  return r;
+};
+
+/* ---------------- Attack Indicator ---------------- */
+function atkIcons() {
+  if (atkIcons.c) return atkIcons.c;
+  const mk = (rows, col) => { const c = document.createElement('canvas'); c.width = c.height = rows.length; const g = c.getContext('2d'); rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch !== '.') { g.fillStyle = ch === '#' ? col : '#000'; g.fillRect(x, y, 1, 1); } })); return c.toDataURL(); };
+  // a sword pointing up and to the right, 18 x 18 for the hotbar
+  const sword = ['..................', '..............###.', '.............#ooo#', '............#ooo#.', '...........#ooo#..', '..........#ooo#...', '.........#ooo#....', '..#.....#ooo#.....',
+    '..##...#ooo#......', '...##.#ooo#.......', '....##ooo#........', '.....##o#.........', '....#o##..........', '...#o#.##.........', '..#o#...##........', '.#o#..............', '..#...............', '..................'];
+  const back = sword.map(r => r.replace(/o/g, '#')), full = ['.......#........', '......###.......', '.......#........', '.......#........', '.......#........', '..#....#....#...', '...#...#...#....', '....#..#..#.....',
+    '.....#####......', '................', '................', '................', '................', '................', '................', '................'];
+  return atkIcons.c = { bg: mk(back, '#3c3c3c'), fill: mk(back, '#e0e0e0'), full: mk(full, '#ffffff') };
+}
+UI.prototype.updateCooldown = function () {
+  const p = this.game.player, c = $('cooldown'), hb = $('atkhot'), fl = $('atkfull');
+  const hide = () => { c.style.display = 'none'; if (hb) hb.style.display = 'none'; if (fl) fl.style.display = 'none'; };
+  if (!p || p.dead || this.hudHidden || p.mode === 3 || !OPTIONS.attackIndicator) return hide();
+  const k = p.attackStrength(0), mode = OPTIONS.attackIndicator, ic = atkIcons();
+  if (mode === 1) {
+    if (hb) hb.style.display = 'none';
+    // a full indicator when the hit would be a full one on the mob under the crosshair
+    const t = this.game.targetEntity, delay = 20 / (p.attackSpeed ? p.attackSpeed() : 4);
+    const full = k >= 1 && t && !t.dead && t instanceof Mob && delay > 5;
+    if (fl) { if (fl.src !== ic.full && !fl._s) { fl.src = ic.full; fl._s = true; } fl.style.display = full ? 'block' : 'none'; }
+    c.style.display = k < 1 ? 'block' : 'none';
+    if (k < 1) c.firstChild.style.width = Math.floor(k * 17) * 2 + 'px';
+  } else {
+    c.style.display = 'none'; if (fl) fl.style.display = 'none';
+    if (!hb) return;
+    if (!hb._s) { hb._s = true; hb.querySelector('img.bg').src = ic.bg; hb.querySelector('.fill img').src = ic.fill; }
+    hb.style.display = k < 1 ? 'block' : 'none';
+    // beside the hotbar on the side of the off hand's opposite
+    hb.style.left = OPTIONS.mainHand === 1 ? '-48px' : '376px';
+    if (k < 1) hb.querySelector('.fill').style.height = Math.floor(k * 19) * 2 + 'px';
+  }
+};
+// the off-hand slot sits on the other side for left-handed players
+const _refreshHotbarVA = UI.prototype.refreshHotbar;
+UI.prototype.refreshHotbar = function () {
+  const r = _refreshHotbarVA.apply(this, arguments);
+  const oh = $('offhand-slot');
+  if (oh) oh.style.left = OPTIONS.mainHand === 1 ? '374px' : '-58px';
+  return r;
+};
+
+/* ---------------- Particles ---------------- */
+// LevelRenderer.calculateParticleLevel: Decreased drops a third of them, Minimal all but block cracks and breaking
+const _pAddVA = Particles.prototype.add;
+Particles.prototype.add = function (p) {
+  const lv = OPTIONS.particles;
+  if (lv && !this._force) { if (lv === 2) return; if (Math.random() < 1 / 3) return; }
+  return _pAddVA.call(this, p);
+};
+for (const k of ['blockBreak', 'hitBlock']) {
+  const f = Particles.prototype[k];
+  Particles.prototype[k] = function () { this._force = true; try { return f.apply(this, arguments); } finally { this._force = false; } };
+}
+
+/* ---------------- Entity Distance ---------------- */
+// Entity.shouldRenderAtSqrDistance: 64 blocks per block of the entity's size, times the view scale
+// (render distance / 8, between 1 and 2.5, times Entity Distance); paintings and frames are seen from far, arrows ten times as far
+Game.prototype.entityInView = function (e, eye) {
+  const dx = e.x - eye[0], dy = e.y + (e.h || 0) / 2 - eye[1], dz = e.z - eye[2], h2 = dx * dx + dz * dz;
+  if (h2 >= (OPTIONS.renderDist * 16) ** 2) return false;
+  let size = ((e.w || 0.6) * 2 + (e.h || 0.6)) / 3;
+  if (typeof Hanging !== 'undefined' && e instanceof Hanging) size = 16;
+  else if (e instanceof Projectile) size *= 10;
+  const lim = size * 64 * Math.max(1, Math.min(2.5, OPTIONS.renderDist / 8)) * OPTIONS.entityDist;
+  return h2 + dy * dy < lim * lim;
+};
+
+/* ---------------- Entity Shadows ---------------- */
+TEXGEN.push(function texShadow() {
+  // a soft round spot, darkest in the middle
+  T('shadow', d => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const r = Math.hypot(x + 0.5 - 8, y + 0.5 - 8) / 8; sp(d, x, y, [0, 0, 0], r >= 1 ? 0 : Math.round(255 * Math.min(1, (1 - r) * 1.6))); } });
+});
+// EntityRenderer.shadowRadius of each kind (blocks)
+const SHADOW_R = { player: 0.5, zombie: 0.5, husk: 0.5, drowned: 0.5, zombie_villager: 0.5, skeleton: 0.5, stray: 0.5, bogged: 0.5, wither_skeleton: 0.7, creeper: 0.5, spider: 0.8, cave_spider: 0.56,
+  enderman: 0.5, cow: 0.7, mooshroom: 0.7, pig: 0.7, sheep: 0.7, chicken: 0.3, wolf: 0.5, cat: 0.4, ocelot: 0.4, fox: 0.4, rabbit: 0.3, horse: 0.75, donkey: 0.75, mule: 0.75,
+  skeleton_horse: 0.75, zombie_horse: 0.75, llama: 0.7, trader_llama: 0.7, goat: 0.7, camel: 0.7, panda: 0.9, polar_bear: 0.9, iron_golem: 0.7, snow_golem: 0.5, villager: 0.5,
+  wandering_trader: 0.5, witch: 0.5, pillager: 0.5, vindicator: 0.5, evoker: 0.5, illusioner: 0.5, ravager: 1.1, wither: 1.0, ghast: 1.5, blaze: 0.5, bat: 0.25, squid: 0.7, glow_squid: 0.7,
+  dolphin: 0.7, turtle: 0.7, axolotl: 0.5, frog: 0.3, tadpole: 0.14, bee: 0.4, parrot: 0.3, strider: 0.5, hoglin: 0.7, zoglin: 0.7, piglin: 0.5, piglin_brute: 0.5, zombified_piglin: 0.5,
+  warden: 0.9, allay: 0.4, vex: 0.3, phantom: 0.75, guardian: 0.5, elder_guardian: 1.2, silverfish: 0.3, endermite: 0.3, armadillo: 0.4, sniffer: 0.6, breeze: 0.5, cod: 0.3, salmon: 0.4,
+  pufferfish: 0.2, tropical_fish: 0.15, slime: 0.25, magma_cube: 0.25, shulker: 0, ender_dragon: 0, armor_stand: 0, crystal: 0 };
+Game.prototype.shadowOf = function (e) {
+  if (e.dead || e.invisible || (e.effects && e.effects.get && e.effects.get('invisibility'))) return 0;
+  if (e instanceof ItemEntity) return 0.15;
+  if (e instanceof Player) return 0.5;
+  if (typeof Boat !== 'undefined' && e instanceof Boat) return 0.8;
+  if (typeof Minecart !== 'undefined' && e instanceof Minecart) return 0.7;
+  if (e instanceof PrimedTNT || e instanceof FallingBlock) return 0.5;
+  if (typeof Hanging !== 'undefined' && e instanceof Hanging) return 0;
+  if (!(e instanceof Mob)) return typeof XPOrb !== 'undefined' && e instanceof XPOrb ? 0.15 : 0;
+  let r = SHADOW_R[e.type];
+  if (r === undefined) r = Math.max(0.15, Math.min(1.5, (e.w || 0.6) * 0.8));
+  if ((e.type === 'slime' || e.type === 'magma_cube') && e.data && e.data.size) r *= e.data.size;
+  if (e.baby || (e.data && e.data.baby)) r *= 0.5;
+  return r;
+};
+// EntityRenderDispatcher.renderShadow: a spot on the top of each full block under the entity
+Game.prototype.renderShadows = function (r, alpha) {
+  if (!OPTIONS.entityShadows || !this.player) return;
+  const w = this.world, eye = r.org, layer = texL('shadow'), list = [];
+  for (const e of this.entities) list.push(e);
+  if (this.thirdPerson && !this.player.dead) list.push(this.player);
+  for (const e of list) {
+    const size = this.shadowOf(e);
+    if (!(size > 0)) continue;
+    const [x, y, z] = e.ipos ? e.ipos(alpha) : [e.x, e.y, e.z];
+    const d2 = (x - eye[0]) ** 2 + (y - eye[1]) ** 2 + (z - eye[2]) ** 2;
+    const weight = (1 - d2 / 256) * (e instanceof ItemEntity || (typeof XPOrb !== 'undefined' && e instanceof XPOrb) ? 0.75 : 1);
+    if (weight <= 0) continue;
+    const s = Math.min(size, 32), gy = Math.min(weight / 0.5, s);
+    for (let by = Math.floor(y - gy); by <= Math.floor(y); by++) for (let bz = Math.floor(z - s); bz <= Math.floor(z + s); bz++) for (let bx = Math.floor(x - s); bx <= Math.floor(x + s); bx++) {
+      const below = w.getBlock(bx, by - 1, bz);
+      if (!below || SHAPE[below] !== SH.CUBE || SOLID[below] !== 1) continue;
+      const l = w.getLightRaw(bx, by, bz), raw = Math.max((l >> 4) - (w.dim === 'overworld' && this.skyDarken ? this.skyDarken() : 0), l & 15);
+      if (raw <= 3) continue;
+      const f = raw / 15, br = f / (4 - 3 * f), a = Math.min(1, weight * 0.5 * br);
+      if (a <= 0) continue;
+      const x0 = Math.max(bx, x - s), x1 = Math.min(bx + 1, x + s), z0 = Math.max(bz, z - s), z1 = Math.min(bz + 1, z + s);
+      if (x1 <= x0 || z1 <= z0) continue;
+      const u = q => (q - x) / 2 / s + 0.5, v = q => (q - z) / 2 / s + 0.5, yy = by + 0.002;
+      r.dv(x0, yy, z0, u(x0), v(z0), layer, 0, 0, 0, a, 15, 15);
+      r.dv(x0, yy, z1, u(x0), v(z1), layer, 0, 0, 0, a, 15, 15);
+      r.dv(x1, yy, z1, u(x1), v(z1), layer, 0, 0, 0, a, 15, 15);
+      r.dv(x1, yy, z0, u(x1), v(z0), layer, 0, 0, 0, a, 15, 15);
+    }
+  }
+};
+const _renderBeamsVA = Game.prototype.renderBeams;
+Game.prototype.renderBeams = function (r, alpha) { this.renderShadows(r, alpha); return _renderBeamsVA.call(this, r, alpha); };
+
+/* ---------------- Autosave Indicator ---------------- */
+// Gui.renderSavingIndicator: "Saving world" in the bottom right corner while the world is saved
+const _autosaveVA = Game.prototype.autosave;
+Game.prototype.autosave = function () {
+  const a = $('autosave');
+  if (a && OPTIONS.autosaveIndicator && this.state === 'playing') {
+    a.style.opacity = 1; clearTimeout(this._asT);
+    this._asT = setTimeout(() => { a.style.opacity = 0; }, 1200);
+  }
+  return _autosaveVA.call(this);
+};
+
+/* ---------------- Glint Speed and Strength in the inventories ---------------- */
+function applyGlintCSS() {
+  const r = document.documentElement.style, sp = OPTIONS.glintSpeed / 0.5, st = OPTIONS.glintStrength / 0.75;
+  r.setProperty('--glint-dur', sp > 0.001 ? (2.6 / sp).toFixed(3) + 's' : '0s');
+  r.setProperty('--glint-play', sp > 0.001 ? 'running' : 'paused');
+  r.setProperty('--glint-a', Math.max(0, Math.min(1.34, st)).toFixed(3));
+}
+
+/* ---------------- Biome Blend ---------------- */
+function applyBiomeBlend() {
+  if (MESH_OPTS.blend === OPTIONS.biomeBlend) return;
+  MESH_OPTS.blend = OPTIONS.biomeBlend;
+  const g = window.game;
+  if (g && g.world) for (const c of g.world.chunks.values()) { c.tint = null; c.dirty.fill(1); }
+}
+
+/* ---------------- Darkness Pulsing ---------------- */
+const _statusEnvVA = Game.prototype.statusEnv;
+Game.prototype.statusEnv = function (env) {
+  const r = _statusEnvVA.call(this, env);
+  if (r && r.lm && r.lm.dark) r.lm = Object.assign({}, r.lm, { dark: r.lm.dark * OPTIONS.darknessScale });
+  return r;
+};
+
+/* ---------------- everything the options set up when they change ---------------- */
+const _applyOptionsVA = Game.prototype.applyOptions;
+Game.prototype.applyOptions = function (live) {
+  OPTIONS.fancyLeaves = OPTIONS.graphics > 0;
+  if (MESH_OPTS.blend !== OPTIONS.biomeBlend) applyBiomeBlend();
+  const r = _applyOptionsVA.call(this, live);
+  applyGuiScale(); applyGlintCSS();
+  if (typeof applyChatCSS === 'function') applyChatCSS();
+  if (typeof applyAccessCSS === 'function') applyAccessCSS();
+  if (typeof applyFontChoice === 'function') applyFontChoice();
+  if (this.r && this.r.arrs && this._mip !== OPTIONS.mipmaps) { this._mip = OPTIONS.mipmaps; this.r.setMipmaps(OPTIONS.mipmaps); }
+  return r;
+};
+document.addEventListener('fullscreenchange', () => { OPTIONS.fullscreen = !!document.fullscreenElement; for (const b of document.querySelectorAll('[data-opt="fullscreen"]')) if (b._upd) b._upd(); });
+
+/* ===================================================================
+   SOUND: the categories of Music & Sounds, subtitles, directional audio
+   =================================================================== */
+// SoundSource of each sound: what is not listed is a block sound, and a sound without a place is the interface's (master only)
+const SND_CAT = {};
+for (const [cat, names] of Object.entries({
+  player: 'pop hurt eat burp xp levelup break_tool splash drink shield_block shield_break totem crit sweep strong weak knockback throw bow equip',
+  hostile: 'groan hiss zhurt zdeath blaze enderman shoot ender_dragon dragon_hurt dragon_death heartbeat warden warden_roar warden_sniff sonic_charge sonic_boom rattle creeper slime ghast piglin breeze elder_curse end_portal_open',
+  neutral: 'hurt_animal oink moo baa cluck villager villager_yes villager_no villager_trade golem golem_hit bat wolf cat frog bee horse arrow_hit wind raid_horn cast reel wind_burst',
+  weather: 'thunder lightning_impact',
+  ambient: 'portal_trigger travel fireworks blast',
+})) for (const n of names.split(' ')) SND_CAT[n] = cat;
+function sndCategory(name, x, src) {
+  if (x === undefined) return 'master';
+  if (src && src.T && src.T.sounds && src.T.sounds.includes(name)) return src.T.cat === 'monster' ? 'hostile' : 'neutral';
+  const kind = name.split('_')[0];
+  if (kind === 'step') return 'player';
+  if (kind === 'hit' || kind === 'break' || kind === 'place') return SND_CAT[name] || 'block';
+  return SND_CAT[name] || 'block';
+}
+AUDIO.catNode = function (cat) {
+  if (!this.ctx || cat === 'master') return this.sfx;
+  if (!this.cats) this.cats = {};
+  let n = this.cats[cat];
+  if (!n) { n = this.cats[cat] = this.ctx.createGain(); n.connect(this.sfx); n.gain.value = OPTIONS.vol[cat] === undefined ? 1 : OPTIONS.vol[cat]; }
+  return n;
+};
+const _applyVolumeVA = AUDIO.applyVolume;
+AUDIO.applyVolume = function () {
+  _applyVolumeVA.call(this);
+  if (this.cats) for (const [k, n] of Object.entries(this.cats)) n.gain.value = OPTIONS.vol[k] === undefined ? 1 : OPTIONS.vol[k];
+};
+// the rain loop is weather
+const _initVA = AUDIO.init;
+AUDIO.init = function () {
+  const had = !!this.ctx;
+  const r = _initVA.call(this);
+  if (!had && this.ctx && this.rainGain) { try { this.rainGain.disconnect(); this.rainGain.connect(this.catNode('weather')); } catch (e) { } }
+  return r;
+};
+// every sound goes through its category's volume (and is skipped when that is off)
+AUDIO.src = null;
+const _playVA = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!this.ctx) return _playVA.call(this, name, x, y, z, ...rest);
+  const cat = sndCategory(name, x, this.src);
+  if (cat !== 'master' && !(OPTIONS.vol[cat] > 0)) return;
+  if (OPTIONS.subtitles && x !== undefined) subtitleFor(name, x, y, z, this.src);
+  const s = this.sfx;
+  this.sfx = this.catNode(cat);
+  try { return _playVA.call(this, name, x, y, z, ...rest); } finally { this.sfx = s; }
+};
+// note blocks, jukeboxes and goat horns are Jukebox/Note Blocks
+for (const k of ['note', 'horn', 'playDisc']) {
+  const f = AUDIO[k].bind ? AUDIO[k] : null;
+  if (!f) continue;
+  AUDIO[k] = function (...a) {
+    if (!this.ctx) return f.apply(this, a);
+    if (!(OPTIONS.vol.record > 0) && k !== 'playDisc') return;
+    if (OPTIONS.subtitles) { const [x, y, z] = k === 'note' ? a.slice(2, 5) : k === 'horn' ? a.slice(0, 3) : a.slice(1, 4); subtitleText(k === 'note' ? 'Note block plays' : k === 'horn' ? 'Goat horn plays' : 'Music disc plays', x, y, z); }
+    const s = this.sfx; this.sfx = this.catNode('record');
+    try { return f.apply(this, a); } finally { this.sfx = s; }
+  };
+}
+// a mob's own noises count as its sounds (for the categories and the subtitles)
+for (const k of ['hurt', 'die', 'tick']) {
+  const f = Mob.prototype[k];
+  Mob.prototype[k] = function (...a) { const s = AUDIO.src; AUDIO.src = this; try { return f.apply(this, a); } finally { AUDIO.src = s; } };
+}
+// Directional Audio: an HRTF panner places each sound around the listener instead of plain left/right panning
+const _outVA = AUDIO.out;
+AUDIO.out = function (x, y, z, vol) {
+  if (!OPTIONS.directionalAudio || x === undefined || !this.ctx || !this.ctx.createPanner) return _outVA.call(this, x, y, z, vol);
+  const c = this.ctx, [lx, ly, lz, yaw] = this.listener, dx = x - lx, dy = y - ly, dz = z - lz, d = Math.hypot(dx, dy, dz);
+  const v = vol * Math.max(0, 1 - d / 24);
+  if (v <= 0.001) return null;
+  const g = c.createGain(), p = c.createPanner();
+  p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1; p.maxDistance = 10000;
+  // into the listener's frame: right = (cos, -sin), forward = (-sin, -cos); the panner's forward is -z
+  const rx = dx * Math.cos(yaw) - dz * Math.sin(yaw), fw = -dx * Math.sin(yaw) - dz * Math.cos(yaw);
+  if (p.positionX) { p.positionX.value = rx; p.positionY.value = dy; p.positionZ.value = -fw; } else p.setPosition(rx, dy, -fw);
+  g.gain.value = v; g.connect(p); p.connect(this.sfx);
+  return g;
+};
+
+/* ---------------- subtitles ---------------- */
+const SUB_TEXT = {
+  step: 'Footsteps', hit: 'Block breaking', break: 'Block broken', place: 'Block placed', pop: 'Item picked up', click: 'Click', piston_out: 'Piston moves', piston_in: 'Piston moves',
+  hurt: 'Player hurts', explode: 'Explosion', fuse: 'TNT fizzes', fizz: 'Fizzing', splash: 'Splashing', eat: 'Eating', burp: 'Burp', xp: 'Experience gained', levelup: 'Level up',
+  break_tool: 'Item breaks', bucket: 'Bucket used', door: 'Door creaks', chest: 'Chest opens', door_open: 'Door opens', door_close: 'Door closes', teleport: 'Teleport',
+  shoot: 'Fireball whooshes', throw: 'Something thrown', bow: 'Arrow fired', arrow_hit: 'Arrow hits', scrape: 'Axe scrapes', lavapop: 'Lava pops', portal: 'Portal hums',
+  portal_trigger: 'Portal whooshes', portal_ignite: 'Portal opens', travel: 'Portal travel', eye_place: 'Eye of Ender placed', drink: 'Drinking', shield_block: 'Shield blocks',
+  shield_break: 'Shield breaks', totem: 'Totem used', crit: 'Critical hit', sweep: 'Sweeping attack', strong: 'Strong attack', weak: 'Weak attack', knockback: 'Knockback',
+  brew: 'Potion bubbles', anvil: 'Anvil used', anvil_land: 'Anvil lands', anvil_break: 'Anvil breaks', enchant: 'Enchanting', grindstone: 'Grindstone used', smithing: 'Smithing',
+  cartography: 'Map drawn', loom: 'Loom used', stonecutter: 'Stonecutter used', fireworks: 'Firework launches', blast: 'Firework blasts', bell: 'Bell rings', chain: 'Chain clinks',
+  amethyst: 'Amethyst chimes', sculk: 'Sculk spreads', sculk_click: 'Sculk sensor clicks', shriek: 'Sculk shrieker shrieks', heartbeat: 'Heart beats', thunder: 'Thunder roars',
+  lightning_impact: 'Lightning strikes', raid_horn: 'Raid horn blares', spawner: 'Spawner hums', vault: 'Vault rewards', end_portal_open: 'End portal opens', elder_curse: 'Elder Guardian curses',
+  cast: 'Bobber thrown', reel: 'Fishing rod reels in', equip: 'Gear equipped', frame_rotate: 'Item frame clicks', frame_remove: 'Item frame emptied', page: 'Page turns', book_put: 'Book placed',
+  book_sign: 'Book signed', glow_ink: 'Ink applied', brush_sand: 'Brushing', brush_done: 'Brushing done', crafter_craft: 'Crafter crafts', beacon_on: 'Beacon activates', beacon_off: 'Beacon deactivates',
+  beacon_power: 'Beacon power chosen', conduit_attack: 'Conduit attacks', pot_insert: 'Pot filled', pot_fail: 'Pot wobbles', pot_shatter: 'Pot shatters', wind_burst: 'Wind bursts',
+  trial_detect: 'Trial spawner notices you', trial_spawn: 'Mob summoned', trial_ominous: 'Trial spawner turns ominous', trial_open: 'Trial spawner opens', trial_close: 'Trial spawner closes',
+  trial_eject: 'Trial spawner ejects items', vault_open: 'Vault opens', vault_close: 'Vault closes', vault_eject: 'Vault ejects an item', vault_insert: 'Key inserted', vault_fail: 'Key rejected',
+  vault_reject: 'Vault rejects you', vault_activate: 'Vault lights up', vault_deactivate: 'Vault goes dark',
+};
+const SUB_AMBIENT = { zombie: 'groans', husk: 'groans', drowned: 'gurgles', zombie_villager: 'groans', skeleton: 'rattles', stray: 'rattles', wither_skeleton: 'rattles', bogged: 'rattles',
+  creeper: 'hisses', spider: 'hisses', cave_spider: 'hisses', enderman: 'vwoops', cow: 'moos', mooshroom: 'moos', pig: 'oinks', sheep: 'baas', goat: 'bleats', chicken: 'clucks', wolf: 'pants',
+  cat: 'meows', ocelot: 'purrs', horse: 'neighs', donkey: 'brays', mule: 'brays', villager: 'mumbles', wandering_trader: 'mumbles', witch: 'giggles', pillager: 'murmurs', vindicator: 'mutters',
+  evoker: 'murmurs', blaze: 'breathes', ghast: 'cries', slime: 'squishes', magma_cube: 'squishes', bat: 'squeaks', bee: 'buzzes', frog: 'croaks', warden: 'growls', piglin: 'snorts',
+  piglin_brute: 'snorts', hoglin: 'growls', zoglin: 'growls', parrot: 'chatters', fox: 'yips', polar_bear: 'grumbles', llama: 'bleats', ender_dragon: 'roars', wither: 'rages', guardian: 'moans',
+  elder_guardian: 'moans', breeze: 'whirls', allay: 'hums', ravager: 'grunts', turtle: 'chirps', dolphin: 'whistles', iron_golem: 'creaks', squid: 'squishes', glow_squid: 'squishes',
+  silverfish: 'hisses', endermite: 'scuttles', vex: 'shrieks', phantom: 'screeches', panda: 'sniffs', rabbit: 'squeaks', strider: 'chirrups', axolotl: 'chirps', camel: 'grumbles',
+  armadillo: 'snuffles', sniffer: 'sniffs', sheep_baby: 'baas' };
+const SUBS = [];
+function subtitleText(text, x, y, z) {
+  if (!text || x === undefined) return;
+  const g = window.game, p = g && g.player;
+  if (!p || Math.hypot(x - p.x, y - p.y - 1.6, z - p.z) > 24) return;
+  const now = performance.now(), s = SUBS.find(q => q.text === text);
+  if (s) { s.t = now; s.x = x; s.y = y; s.z = z; } else SUBS.push({ text, x, y, z, t: now });
+}
+function subtitleFor(name, x, y, z, src) {
+  let text = null;
+  if (src && src.T && src.T.sounds && src.T.sounds.includes(name)) {
+    const nm = titleCase(String(src.type || '').replace(/_/g, ' ')), i = src.T.sounds.indexOf(name), dying = src.dead || src.health <= 0;
+    text = dying && src.T.sounds[2] === name ? nm + ' dies' : src.hurtTime > 0 && src.T.sounds[1] === name ? nm + ' hurts' : i === 0 ? nm + ' ' + (SUB_AMBIENT[src.type] || 'calls') : nm + ' hurts';
+  } else {
+    text = SUB_TEXT[name];
+    if (!text) { const k = name.split('_')[0]; if (k === 'step' || k === 'hit' || k === 'break' || k === 'place') text = SUB_TEXT[k]; }
+  }
+  subtitleText(text, x, y, z);
+}
+Game.prototype.updateSubtitles = function () {
+  const box = $('subtitles');
+  if (!box) return;
+  const now = performance.now(), life = 3000 * OPTIONS.notificationTime;
+  for (let i = SUBS.length - 1; i >= 0; i--) if (now - SUBS[i].t > life) SUBS.splice(i, 1);
+  if (!OPTIONS.subtitles || !SUBS.length || this.ui.hudHidden || !this.player) { if (box.childElementCount) box.innerHTML = ''; return; }
+  if (this._subT && now - this._subT < 100) return;
+  this._subT = now;
+  const p = this.player, ex = p.x, ey = p.y + 1.62, ez = p.z, yaw = p.yaw, pitch = p.pitch;
+  // SubtitleOverlay: an arrow shows the side of a sound that is not in front of you
+  const fw = [-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)], rt = [Math.cos(yaw), 0, -Math.sin(yaw)];
+  box.style.setProperty('--sbo', OPTIONS.bgForChatOnly ? 0.8 : OPTIONS.textBgOpacity);
+  // the first one heard is at the bottom (the list is drawn bottom up)
+  box.innerHTML = SUBS.map(s => {
+    const dx = s.x - ex, dy = s.y - ey, dz = s.z - ez, l = Math.hypot(dx, dy, dz) || 1;
+    const front = (dx * fw[0] + dy * fw[1] + dz * fw[2]) / l, side = (dx * rt[0] + dz * rt[2]) / l;
+    const c = Math.round(255 - (255 - 75) * Math.min(1, (now - s.t) / life)), col = `rgb(${c},${c},${c})`;
+    return `<div class="sl" style="color:${col}"><i>${front <= 0.5 && side < 0 ? '&lt;' : ''}</i><span>${escapeHTML(s.text)}</span><i>${front <= 0.5 && side > 0 ? '&gt;' : ''}</i></div>`;
+  }).join('');
+};
+
+/* @file 132_controls_chat.js */
+/* ===================================================================
+   WHAT THE CONTROLS, CHAT, ACCESSIBILITY AND SKIN SETTINGS DO — the
+   mouse, Sneak/Sprint toggles, Auto-Jump, saved hotbars, the
+   Operator Utilities tab, the player list, the cinematic camera; chat
+   look, delay, links and suggestions, the narrator; high contrast,
+   text backgrounds, splash texts; the skin layers and the main hand
+   =================================================================== */
+
+/* ---------------- the mouse ---------------- */
+// Invert Mouse, and the cinematic camera: the turning is smoothed over the following frames
+const _mouseLookCC = Game.prototype.mouseLook;
+Game.prototype.mouseLook = function (dx, dy) {
+  if (OPTIONS.invertMouse) dy = -dy;
+  if (this.cinematic) { this.cineX = (this.cineX || 0) + dx; this.cineY = (this.cineY || 0) + dy; return; }
+  return _mouseLookCC.call(this, dx, dy);
+};
+// Scroll Sensitivity and Discrete Scrolling: a wheel step is one slot, a trackpad's small steps add up
+Game.prototype.scrollHotbar = function (d, e) {
+  const p = this.player;
+  if (!p) return;
+  let n = d;
+  if (e && !OPTIONS.discreteScroll) {
+    const raw = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY : e.deltaY / 100;
+    this.wheelAcc = (this.wheelAcc || 0) + raw * OPTIONS.scrollSens;
+    // one step of a mouse wheel is at least one slot, whatever size the browser gives it
+    if (Math.abs(raw) >= 0.5 && Math.abs(this.wheelAcc) < 1) this.wheelAcc = Math.sign(raw);
+    n = Math.trunc(this.wheelAcc);
+    this.wheelAcc -= n;
+  }
+  if (!n) return;
+  p.sel = ((p.sel + n) % 9 + 9) % 9;
+  this.ui.refreshHotbar(); this.ui.showItemName(p.held);
+};
+// Raw Input: the pointer lock asks for unaccelerated movement when the browser has it
+Game.prototype.lockPointer = function () {
+  if (this.state !== 'playing' || (this.touch && this.touch.supported)) return;
+  const cv = this.canvas;
+  try {
+    const r = OPTIONS.rawInput ? cv.requestPointerLock({ unadjustedMovement: true }) : cv.requestPointerLock();
+    if (r && r.catch) r.catch(() => { if (OPTIONS.rawInput) { try { const r2 = cv.requestPointerLock(); if (r2 && r2.catch) r2.catch(() => { }); } catch (e) { } } });
+  } catch (e) { try { cv.requestPointerLock(); } catch (e2) { } }
+};
+
+/* ---------------- keys: toggles, saved hotbars, the player list, the cinematic camera ---------------- */
+const kbInPlay = () => { const g = window.game; return !!(g && g.state === 'playing' && g.player && !g.player.dead && !g.ui.inv && !g.ui.screen && !g.ui.chatOpen); };
+const SNEAK_KEYS = ['ShiftLeft', 'ShiftRight'], SPRINT_KEYS = ['ControlLeft', 'ControlRight'];
+window.addEventListener('keydown', e => {
+  const g = window.game;
+  if (!g || kbTyping(e) || KB.waiting) return;
+  const code = e.code;
+  // Sneak and Sprint set to Toggle: a press switches them on or off
+  if ((OPTIONS.toggleCrouch && SNEAK_KEYS.includes(code)) || (OPTIONS.toggleSprint && SPRINT_KEYS.includes(code))) {
+    if (!kbInPlay()) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.repeat) return;
+    const k = SNEAK_KEYS.includes(code) ? 'sneak' : 'sprint';
+    g.toggled = g.toggled || {};
+    g.toggled[k] = !g.toggled[k];
+    if (g.toggled[k]) g.input.pressQ.add(k === 'sneak' ? 'ShiftLeft' : 'ControlLeft');
+    return;
+  }
+  if (!kbInPlay()) return;
+  const inp = g.input, p = g.player;
+  // C or X held with a hotbar key saves or loads a hotbar (creative only)
+  if (/^Digit[1-9]$/.test(code) && (inp.keys.has('KeyC') || inp.keys.has('KeyX')) && p.mode === 1) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (!e.repeat) g.hotbarActivate(+code.slice(5) - 1, inp.keys.has('KeyC'));
+    return;
+  }
+  if (code === 'Unbound.cinematic' && !e.repeat) { g.cinematic = !g.cinematic; g.cineX = g.cineY = 0; g.ui.actionBar('Cinematic camera ' + (g.cinematic ? 'on' : 'off')); }
+  if (code === 'Tab') g.plistHeld = true;
+}, true);
+window.addEventListener('keyup', e => {
+  const g = window.game;
+  if (!g || kbTyping(e)) return;
+  if ((OPTIONS.toggleCrouch && SNEAK_KEYS.includes(e.code)) || (OPTIONS.toggleSprint && SPRINT_KEYS.includes(e.code))) { e.stopImmediatePropagation(); return; }
+  if (e.code === 'Tab') g.plistHeld = false;
+}, true);
+window.addEventListener('blur', () => { const g = window.game; if (g) g.plistHeld = false; });
+// the toggled keys stay down while the toggle is on; the cinematic camera turns a little every frame
+const _playerTickCC = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const g = this.game;
+  if (!g || this !== g.player) return _playerTickCC.call(this, inp);
+  const t = g.toggled || {};
+  if (OPTIONS.toggleCrouch) { if (t.sneak) inp.keys.add('ShiftLeft'); else for (const k of SNEAK_KEYS) inp.keys.delete(k); } else if (t.sneak) t.sneak = false;
+  if (OPTIONS.toggleSprint) { if (t.sprint) inp.keys.add('ControlLeft'); else for (const k of SPRINT_KEYS) inp.keys.delete(k); } else if (t.sprint) t.sprint = false;
+  // Auto-Jump: walking into a step one block high jumps onto it
+  let auto = false;
+  if (OPTIONS.autoJump && inp.enabled && !inp.key('Space') && this.autoJumpOK()) { inp.keys.add('Space'); auto = true; }
+  try { return _playerTickCC.call(this, inp); }
+  finally { if (auto) inp.keys.delete('Space'); }
+};
+// LocalPlayer.updateAutoJump, simplified: on the ground, moving, not sneaking, something in the way at the feet
+// whose top a jump reaches but a step doesn't, with room to stand on it and to rise
+const boxOverlaps = (b, x0, y0, z0, x1, y1, z1) => b[3] > x0 && b[0] < x1 && b[4] > y0 && b[1] < y1 && b[5] > z0 && b[2] < z1;
+Player.prototype.autoJumpOK = function () {
+  const g = this.game, w = g.world, inp = g.input;
+  if (!this.onGround || this.flying || this.sneaking || this.inWater || this.inLava || this.riding || this.gliding || this.mode === 3) return false;
+  let f = 0, s = 0;
+  if (inp.key('KeyW')) f++; if (inp.key('KeyS')) f--; if (inp.key('KeyA')) s--; if (inp.key('KeyD')) s++;
+  if (!f && !s) return false;
+  const l = Math.hypot(f, s), sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+  const dx = (-sy * f + cy * s) / l, dz = (-cy * f - sy * s) / l, hw = this.w / 2;
+  const ox = this.x + dx * 0.45, oz = this.z + dz * 0.45, y = this.y;
+  const jb = this.effectLevel ? this.effectLevel('jump_boost') : 0, reach = 1.2 + 0.75 * jb;
+  let top = -Infinity;
+  for (const b of collectBoxes(w, ox - hw, y + 0.01, oz - hw, ox + hw, y + reach + 0.1, oz + hw)) if (boxOverlaps(b, ox - hw, y + 0.01, oz - hw, ox + hw, y + reach + 0.1, oz + hw)) top = Math.max(top, b[4]);
+  const rise = top - y;
+  if (!(rise > (this.stepH || 0.6) + 0.001 && rise <= reach)) return false;
+  for (const b of collectBoxes(w, ox - hw, top + 0.001, oz - hw, ox + hw, top + this.h, oz + hw)) if (boxOverlaps(b, ox - hw, top + 0.001, oz - hw, ox + hw, top + this.h, oz + hw)) return false;
+  for (const b of collectBoxes(w, this.x - hw, y + this.h, this.z - hw, this.x + hw, top + this.h, this.z + hw)) if (boxOverlaps(b, this.x - hw, y + this.h, this.z - hw, this.x + hw, top + this.h, this.z + hw)) return false;
+  return true;
+};
+// the cinematic camera follows the mouse slowly (SmoothDouble)
+const _playFrameCC = Game.prototype.playFrame;
+Game.prototype.playFrame = function (dt) {
+  if (this.cinematic && this.player && (this.cineX || this.cineY)) {
+    const k = Math.min(1, dt * 4), mx = this.cineX * k, my = this.cineY * k;
+    this.cineX -= mx; this.cineY -= my;
+    _mouseLookCC.call(this, mx, my);
+  }
+  return _playFrameCC.call(this, dt);
+};
+
+/* ---------------- saved hotbars (C and X with a number, the Saved Hotbars tab) ---------------- */
+function savedHotbars() {
+  if (savedHotbars.v) return savedHotbars.v;
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem('blockcraft.hotbars') || 'null'); } catch (e) { }
+  return savedHotbars.v = Array.isArray(v) && v.length === 9 ? v : Array(9).fill(null);
+}
+Game.prototype.hotbarActivate = function (n, save) {
+  const p = this.player, hb = savedHotbars();
+  if (save) {
+    hb[n] = p.inv.slice(0, 9).map(st => st ? saveStack(st) : null);
+    try { localStorage.setItem('blockcraft.hotbars', JSON.stringify(hb)); } catch (e) { }
+    this.ui.actionBar('Saved hotbar ' + (n + 1) + ' (load it with ' + keyName(kbBind(KB_ACTIONS.find(a => a.id === 'loadToolbar'))) + '+' + (n + 1) + ')');
+  } else {
+    const row = hb[n];
+    for (let i = 0; i < 9; i++) p.inv[i] = row && row[i] ? loadStack(row[i]) : null;
+    this.ui.refreshHotbar(); this.ui.showItemName(p.held);
+  }
+};
+CREATIVE_TABS.splice(CREATIVE_TABS.findIndex(t => t.key === 'search'), 0, { key: 'hotbar', name: 'Saved Hotbars', icon: 'bookshelf', row: 0, right: true, col: 5 });
+CREATIVE_TABS.splice(CREATIVE_TABS.findIndex(t => t.key === 'inventory'), 0, { key: 'op_blocks', name: 'Operator Utilities', icon: 'command_block', row: 1, op: true });
+for (const t of CREATIVE_TABS) if (t.right && t.col === undefined) t.col = 6;
+const OP_TAB_ITEMS = ['command_block', 'chain_command_block', 'repeating_command_block', 'command_block_minecart', 'jigsaw', 'structure_block', 'structure_void', 'barrier', 'debug_stick', 'light'];
+const opTabShown = g => !!(OPTIONS.opTab && g && g.cheatsOn && g.cheatsOn());
+const _buildCreativeCC = UI.prototype.buildCreative;
+UI.prototype.buildCreative = function () {
+  const show = opTabShown(this.game), all = CREATIVE_TABS.slice();
+  if (!show && this.creativeTab === 'op_blocks') this.creativeTab = 'building';
+  if (!show) { CREATIVE_TABS.length = 0; for (const t of all) if (!t.op) CREATIVE_TABS.push(t); }
+  try { return _buildCreativeCC.call(this); } finally { CREATIVE_TABS.length = 0; CREATIVE_TABS.push(...all); }
+};
+const _paletteListCC = UI.prototype.paletteList;
+UI.prototype.paletteList = function () {
+  if (this.creativeTab === 'op_blocks') return CREATIVE.op_blocks || (CREATIVE.op_blocks = OP_TAB_ITEMS.filter(n => ITEM_BY_NAME[n]).map(n => ({ id: ITEM_BY_NAME[n].id })));
+  if (this.creativeTab === 'hotbar') {
+    const out = [];
+    for (const row of savedHotbars()) for (let i = 0; i < 9; i++) { const st = row && row[i] ? loadStack(row[i]) : null; out.push(st ? { id: st.id, tag: st.tag, count: st.count } : null); }
+    return out;
+  }
+  return _paletteListCC.call(this);
+};
+// a saved hotbar gives its stacks whole
+const _getSlotCC = UI.prototype.getSlot;
+UI.prototype.getSlot = function (c, i) {
+  if (c === 'palette' && this.inv && this.creativeTab === 'hotbar') { const e = this.inv.palette[this.inv.scroll * 9 + i]; return e ? { id: e.id, count: e.count || 1, tag: e.tag } : null; }
+  return _getSlotCC.call(this, c, i);
+};
+
+/* ---------------- List Players (Tab) ---------------- */
+// PlayerTabOverlay: in single player it only shows when an objective is shown in the list
+Game.prototype.updatePlayerList = function () {
+  const box = $('plist');
+  if (!box) return;
+  const sb = this.meta && this.meta.sb, obj = sb && sb.disp && sb.disp.list;
+  const show = this.plistHeld && kbInPlay() && obj && sb.obj && sb.obj[obj];
+  if (!show) { if (box.style.display !== 'none') box.style.display = 'none'; return; }
+  const name = 'Player', score = sb.scores && sb.scores[name] && sb.scores[name][obj];
+  const key = obj + ':' + score;
+  if (box._k !== key) { box._k = key; box.innerHTML = `<div class="pr"><span>${escapeHTML(name)}</span>${score !== undefined ? `<b>${score}</b>` : ''}</div>`; }
+  box.style.display = 'block';
+};
+
+/* ===================================================================
+   CHAT
+   =================================================================== */
+// ChatComponent: line height 9 GUI pixels times (1 + Line Spacing), width 40 to 320, heights 20 to 180
+function applyChatCSS() {
+  const c = $('chat');
+  if (!c) return;
+  const O = OPTIONS, pix = document.documentElement.classList.contains('pixfont'), base = pix ? 18 : 22, lh = Math.round(base * (1 + O.chatLineSpacing));
+  c.classList.toggle('nocolor', !O.chatColors);
+  c.style.width = Math.floor(O.chatWidth * 280 + 40) * 2 + 'px';
+  c.style.maxWidth = 'none';
+  c.style.lineHeight = lh + 'px';
+  c.style.zoom = O.chatScale > 0 && O.chatScale !== 1 ? String(O.chatScale) : '';
+  c.style.visibility = O.chatScale > 0 && O.chatVisibility !== 2 ? '' : 'hidden';
+  c.style.setProperty('--cta', (O.chatOpacity * 0.9 + 0.1).toFixed(3));
+  c.style.setProperty('--cbg', O.textBgOpacity.toFixed(3));
+  c.classList.toggle('cmdonly', O.chatVisibility === 1);
+  const open = c.classList.contains('open'), h = Math.floor((open ? O.chatHeightFocused : O.chatHeightUnfocused) * 160 + 20) * 2;
+  c.style.maxHeight = h + 'px';
+  c.style.overflowY = open ? 'auto' : 'hidden';
+  c.scrollTop = c.scrollHeight;
+}
+{
+  const st = document.createElement('style');
+  st.textContent = '#chat { scrollbar-width: none; } #chat div { background: rgba(0,0,0,var(--cbg,.45)); } #chat div .ct { opacity: var(--cta,1); } #chat.cmdonly div.pc { display: none !important; }'
+    + ' .item .gl { animation-duration: var(--glint-dur, 2.6s); animation-play-state: var(--glint-play, running); opacity: var(--glint-a, 1); }';
+  document.head.appendChild(st);
+}
+// web links become clickable while the chat is open
+const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
+function chatLinkify(node) {
+  if (!OPTIONS.chatLinks) return;
+  const walk = n => {
+    for (const ch of [...n.childNodes]) {
+      if (ch.nodeType === 3) {
+        const t = ch.nodeValue; URL_RE.lastIndex = 0;
+        if (!URL_RE.test(t)) continue;
+        URL_RE.lastIndex = 0;
+        const frag = document.createDocumentFragment(); let last = 0, m;
+        while ((m = URL_RE.exec(t))) {
+          frag.appendChild(document.createTextNode(t.slice(last, m.index)));
+          const a = document.createElement('a'); a.textContent = m[0]; a.dataset.href = m[0]; frag.appendChild(a); last = m.index + m[0].length;
+        }
+        frag.appendChild(document.createTextNode(t.slice(last)));
+        ch.replaceWith(frag);
+      } else if (ch.nodeType === 1 && ch.tagName !== 'A') walk(ch);
+    }
+  };
+  walk(node);
+}
+$('chat').addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a[data-href]');
+  if (!a || !$('chat').classList.contains('open')) return;
+  e.preventDefault();
+  const url = a.dataset.href;
+  if (OPTIONS.chatLinksPrompt && !confirm('Open this web page in a new tab?\n\n' + url + '\n\nNever open links from people you don\'t trust.')) return;
+  try { window.open(url, '_blank', 'noopener'); } catch (err) { }
+});
+// each line: the text inside its own span (for the text opacity), player chat marked, links, the narrator
+const _chatCC = UI.prototype.chat;
+UI.prototype.chat = function (msg, color, kind) {
+  const r = _chatCC.call(this, msg, color);
+  const box = $('chat'), d = box.lastChild;
+  if (d && !d._wrapped) {
+    d._wrapped = true;
+    const s = document.createElement('span'); s.className = 'ct';
+    while (d.firstChild) s.appendChild(d.firstChild);
+    d.appendChild(s);
+    if (kind === 'pc') d.classList.add('pc');
+    chatLinkify(s);
+  }
+  box.scrollTop = box.scrollHeight;
+  if (OPTIONS.narrator === 1 || (OPTIONS.narrator === 2 && kind === 'pc') || (OPTIONS.narrator === 3 && kind !== 'pc')) narrate(msg);
+  return r;
+};
+UI.prototype.chatSpans = function (spans, color) {
+  if (this.chat !== UI.prototype.chat) return this.chat(spansText(spans), color);
+  this.chat(spansText(spans), color);
+  const d = $('chat').lastChild, s = d && d.querySelector('.ct');
+  if (s) { s.innerHTML = spansHTML(spans.map(q => Object.assign({ color }, q))); chatLinkify(s); }
+};
+for (const k of ['openChat', 'closeChat']) {
+  const f = UI.prototype[k];
+  UI.prototype[k] = function (...a) { const r = f.apply(this, a); applyChatCSS(); if (k === 'closeChat') chatSuggestHide(); else chatSuggest(); return r; };
+}
+// what the player types: delayed by Chat Delay, hidden by Commands Only
+const _onChatCC = Game.prototype.onChat;
+Game.prototype.onChat = function (msg) {
+  if (typeof msg === 'string' && msg[0] !== '/' && !this.cmdSource) {
+    const show = () => this.ui.chat('<Player> ' + msg, null, 'pc');
+    if (OPTIONS.chatDelay > 0) setTimeout(show, OPTIONS.chatDelay * 1000); else show();
+    return;
+  }
+  return _onChatCC.call(this, msg);
+};
+
+/* ---------------- command suggestions ---------------- */
+const SEL_NAMES = ['@a', '@e', '@n', '@p', '@r', '@s'];
+function chatSuggestList(v) {
+  if (!/^\//.test(v)) return null;
+  const parts = v.slice(1).split(' '), cmd = (parts[0] || '').toLowerCase(), cur = parts[parts.length - 1], i = parts.length - 1;
+  const low = s => s.toLowerCase();
+  if (i === 0) return { list: COMMAND_NAMES.filter(n => n.startsWith(low(cur))), cur };
+  const name = (typeof CMD_ALIAS !== 'undefined' && CMD_ALIAS[cmd]) || cmd;
+  const items = () => Object.keys(ITEM_BY_NAME), blocks = () => Object.keys(ITEM_BY_NAME).filter(n => ITEM_BY_NAME[n].block), mobs = () => Object.keys(MOB_TYPES).concat(['lightning_bolt', 'tnt', 'item', 'experience_orb', 'falling_block', 'end_crystal']);
+  const pools = {
+    give: { 1: SEL_NAMES, 2: items }, summon: { 1: mobs }, setblock: { 4: blocks }, fill: { 7: blocks }, clear: { 1: SEL_NAMES, 2: items },
+    effect: { 1: ['give', 'clear'], 2: SEL_NAMES, 3: () => Object.keys(EFFECTS) }, enchant: { 1: SEL_NAMES, 2: () => ENCHANTS.map(e => e.key) },
+    gamemode: { 1: ['adventure', 'creative', 'spectator', 'survival'], 2: SEL_NAMES }, defaultgamemode: { 1: ['adventure', 'creative', 'spectator', 'survival'] },
+    gamerule: { 1: () => Object.keys(GAMERULES), 2: ['true', 'false'] }, weather: { 1: ['clear', 'rain', 'thunder'] }, time: { 1: ['add', 'query', 'set'], 2: ['day', 'midnight', 'night', 'noon'] },
+    difficulty: { 1: ['easy', 'hard', 'normal', 'peaceful'] }, kill: { 1: SEL_NAMES }, teleport: { 1: SEL_NAMES }, experience: { 1: ['add', 'query', 'set'], 2: SEL_NAMES, 4: ['levels', 'points'] },
+    scoreboard: { 1: ['objectives', 'players'], 2: ['add', 'enable', 'get', 'list', 'modify', 'operation', 'remove', 'reset', 'set', 'setdisplay'] },
+    execute: { 1: ['align', 'anchored', 'as', 'at', 'facing', 'if', 'in', 'on', 'positioned', 'rotated', 'run', 'store', 'summon', 'unless'] },
+    locate: { 1: ['biome', 'structure'] }, tag: { 1: SEL_NAMES, 2: ['add', 'list', 'remove'] }, title: { 1: SEL_NAMES, 2: ['actionbar', 'clear', 'reset', 'subtitle', 'times', 'title'] },
+  };
+  const P = pools[name] && pools[name][i];
+  if (P) { const pool = typeof P === 'function' ? P() : P, c = low(cur).replace(/^minecraft:/, ''); return { list: [...new Set(pool)].filter(n => n.startsWith(c)).sort(), cur }; }
+  if (cur.startsWith('@')) return { list: SEL_NAMES.filter(n => n.startsWith(cur)), cur };
+  if (typeof CMD_USAGE !== 'undefined' && CMD_USAGE[name] !== undefined) return { usage: '/' + cmd + ' ' + CMD_USAGE[name] };
+  return null;
+}
+function chatSuggest() {
+  const box = $('chatsug'), inp = $('chatin'), g = window.game;
+  if (!box || !inp || !g || !g.ui.chatOpen || !OPTIONS.autoSuggestions) return chatSuggestHide();
+  const s = chatSuggestList(inp.value);
+  if (!s || (s.list && (!s.list.length || (s.list.length === 1 && s.list[0] === s.cur)))) return chatSuggestHide();
+  if (s.usage) box.textContent = s.usage;
+  else box.innerHTML = s.list.slice(0, 10).map((n, k) => `<div${k === 0 ? ' class="on"' : ''}>${escapeHTML(n)}</div>`).join('') + (s.list.length > 10 ? '<div>...</div>' : '');
+  const pre = inp.value.slice(0, inp.value.length - (s.cur || '').length);
+  box.style.left = 4 + Math.min(innerWidth / UIZ - 300, pre.length * 12) + 'px';
+  box.style.display = 'block';
+}
+function chatSuggestHide() { const b = $('chatsug'); if (b) b.style.display = 'none'; }
+$('chatin').addEventListener('input', () => chatSuggest());
+$('chatin').addEventListener('keyup', e => { if (e.key === 'Tab') chatSuggest(); });
+
+/* ---------------- the narrator ---------------- */
+function narrate(text, always) {
+  if (!window.speechSynthesis || (!always && !OPTIONS.narrator)) return;
+  try { const u = new SpeechSynthesisUtterance(String(text).replace(/§./g, '')); u.rate = 1.1; speechSynthesis.speak(u); } catch (e) { }
+}
+// Ctrl+B switches it (Narrator Hotkey)
+window.addEventListener('keydown', e => {
+  if (e.code !== 'KeyB' || !(e.ctrlKey || e.metaKey) || !OPTIONS.narratorHotkey || kbTyping(e)) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.repeat) return;
+  if (!window.speechSynthesis) return;
+  OPTIONS.narrator = (OPTIONS.narrator + 1) % 4; saveOptions();
+  const names = ['OFF', 'Narrates All', 'Narrates Chat', 'Narrates System'];
+  narrate('Narrator ' + names[OPTIONS.narrator], true);
+  const g = window.game;
+  if (g && g.ui.toast) g.ui.toast({ kind: 'narrator', icons: [], title: 'Narrator', text: names[OPTIONS.narrator], color: '#500050', ms: 3000 });
+  for (const b of document.querySelectorAll('[data-opt="narrator"]')) if (b._upd) b._upd();
+}, true);
+
+/* ===================================================================
+   ACCESSIBILITY
+   =================================================================== */
+function applyAccessCSS() {
+  const h = document.documentElement;
+  h.classList.toggle('hc', !!OPTIONS.highContrast);
+  h.classList.toggle('tbg', !OPTIONS.bgForChatOnly);
+  h.style.setProperty('--tbo', OPTIONS.textBgOpacity.toFixed(3));
+  const sp = $('splash');
+  if (sp) sp.style.display = OPTIONS.hideSplashTexts ? 'none' : '';
+}
+// Text Background: Everywhere puts a backdrop behind the item name and action bar text too
+for (const k of ['showItemName', 'actionBar']) {
+  const f = UI.prototype[k];
+  if (!f) continue;
+  UI.prototype[k] = function (...a) {
+    const r = f.apply(this, a), n = $('itemname');
+    if (n && !OPTIONS.bgForChatOnly && n.textContent && !n.querySelector('span.tb')) { const s = document.createElement('span'); s.className = 'tb'; s.textContent = n.textContent; n.textContent = ''; n.appendChild(s); }
+    return r;
+  };
+}
+// Notification Time: toasts stay that much longer
+const _toastCC = UI.prototype.toast;
+UI.prototype.toast = function (o) {
+  const t = _toastCC.call(this, Object.assign({}, o, { ms: (o.ms || 5000) * OPTIONS.notificationTime }));
+  const box = $('toasts');
+  if (box) box.style.zoom = UIZ === 1 ? '' : String(UIZ);
+  return t;
+};
+// Force Unicode Font: the plain font instead of the pixel one
+function applyFontChoice() {
+  const h = document.documentElement;
+  if (OPTIONS.forceUnicode) h.classList.remove('pixfont');
+  else if (typeof FONT !== 'undefined' && FONT.ready) h.classList.add('pixfont');
+  applyChatCSS();
+}
+const _installFontCC = installFont;
+installFont = async function (glyphs) { const r = await _installFontCC(glyphs); applyFontChoice(); return r; };
+
+/* ===================================================================
+   SKIN CUSTOMIZATION: the outer layers and the main hand
+   =================================================================== */
+// the overlay cubes of each part of the player model, and the option that shows them
+const SKIN_PART_OPT = { hat: 'hat', body: 'jacket', right_arm: 'right_sleeve', left_arm: 'left_sleeve', right_leg: 'right_pants_leg', left_leg: 'left_pants_leg' };
+function skinPartsFiltered(fn) {
+  const def = MOB_MODELS.player;
+  if (!def || !def.parts) return fn();
+  const saved = def.parts.map(p => p.c);
+  for (const p of def.parts) {
+    const opt = SKIN_PART_OPT[p.n];
+    if (!opt || OPTIONS.skin[opt]) continue;
+    p.c = p.n === 'hat' ? [] : p.c.filter(c => !c[8]);
+  }
+  try { return fn(); } finally { def.parts.forEach((p, i) => { p.c = saved[i]; }); }
+}
+const _renderPlayerModelCC = Game.prototype.renderPlayerModel;
+Game.prototype.renderPlayerModel = function (r, p, alpha) {
+  const left = OPTIONS.mainHand === 1 && p === this.player;
+  if (!left) return skinPartsFiltered(() => _renderPlayerModelCC.call(this, r, p, alpha));
+  // left-handed: the main hand item is in the left hand and the off hand's in the right
+  const held = p.held, off = p.offhand[0];
+  const hd = Object.getOwnPropertyDescriptor(p, 'held');
+  try {
+    Object.defineProperty(p, 'held', { configurable: true, get: () => off || null });
+    p.offhand[0] = held;
+    return skinPartsFiltered(() => _renderPlayerModelCC.call(this, r, p, alpha));
+  } finally {
+    p.offhand[0] = off;
+    if (hd) Object.defineProperty(p, 'held', hd); else delete p.held;
+  }
+};
+const _drawPreviewCC = drawPlayerPreview;
+drawPlayerPreview = function (c) { return skinPartsFiltered(() => _drawPreviewCC(c)); };
+// the first-person arm with or without its sleeve (a left-handed player's is the right arm drawn mirrored)
+Game.prototype.pushVanillaArm = function (r, m, l) {
+  const vt = VTEX['entity/player/wide/steve'];
+  if (!vt) return;
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th, def = MOB_MODELS.player;
+  const uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+  let cubes = vt.legacy ? def.legacy.right_arm : def.parts.find(q => q.n === 'right_arm').c;
+  if (!OPTIONS.skin[OPTIONS.mainHand === 1 ? 'left_sleeve' : 'right_sleeve']) cubes = cubes.filter(c => !c[8]);
+  for (const c of cubes) emitVCube(r, c, q => M4.xform(m, (q[0] - 5) / 16, (q[1] + 2) / 16, q[2] / 16), uvx, [1, 1, 1, 1], l);
+};
+// Main Hand: Left mirrors the first-person hands (the main hand on the left, the off hand on the right)
+const _renderHandSideCC = Game.prototype.renderHandSide;
+Game.prototype.renderHandSide = function (held, s, alpha, l) {
+  if (OPTIONS.mainHand !== 1) return _renderHandSideCC.call(this, held, s, alpha, l);
+  // drawn mirrored: x is flipped (the hand pass is drawn around the camera at 0, 0, 0)
+  const r = this.r, start = r.dynN, gq = this.glintQ ? this.glintQ.length : 0;
+  const res = _renderHandSideCC.call(this, held, s, alpha, l);
+  const d = r.dyn;
+  for (let i = start; i < r.dynN; i++) d[i * 12] = -d[i * 12];
+  // each quad keeps its winding (and so stays visible) by swapping two of its corners
+  for (let q = start; q + 3 < r.dynN; q += 4) {
+    const a = (q + 1) * 12, b = (q + 3) * 12;
+    for (let k = 0; k < 12; k++) { const t = d[a + k]; d[a + k] = d[b + k]; d[b + k] = t; }
+  }
+  const G = this.glintQ;
+  if (G) {
+    for (let i = gq; i < G.length; i++) G[i][0] = -G[i][0];
+    for (let q = gq; q + 3 < G.length; q += 4) { const t = G[q + 1]; G[q + 1] = G[q + 3]; G[q + 3] = t; }
+  }
+  return res;
 };
 
 </script>
