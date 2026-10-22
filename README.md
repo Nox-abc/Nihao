@@ -571,6 +571,21 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   drowned (a husk becomes a zombie first); a skeleton that stays in powder snow for 7 seconds
   shakes and becomes a stray. They keep what they wear and hold.
 - **Shulker boxes** keep their contents when placed again, and when one blown up drops.
+- **Turtles** remember the beach they hatched on. Bred, one of the pair carries an egg home and
+  digs 1 to 4 eggs into sand there; eggs crack and hatch (mostly in the hour before dawn), and a
+  baby turtle drops a turtle scute when it grows up. Walking on eggs breaks them (sneak to be
+  safe); zombies, husks, drowned and zombified piglins seek eggs out and stamp on them, so eggs
+  lure them like in Java's gold farms.
+- **Frogs** that breed lay frogspawn on still water beside land. It hatches 2 to 5 tadpoles after
+  3 to 10 minutes; a tadpole grows into a frog after 20 minutes (a slime ball speeds it up), and
+  the biome it grows up in decides its colour. Frogs eat small slimes and magma cubes, and a
+  magma cube eaten by a frog leaves a froglight of that frog's colour.
+- **Foxes** carry one item in their mouth (some spawn holding one) and pick up what they find,
+  swapping it for food once they have eaten; they eat food they hold after 30 seconds (with its
+  effects; chorus fruit teleports them). They pick sweet berries and glow berries, sleep in the
+  shade by day and wake when anything comes near, stalk chickens and rabbits, crouch and pounce
+  (landing nose first in snow), and run from players, wolves and polar bears. A fox bred by you
+  trusts you and attacks whatever hurts you. Foxes have their own sounds now.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

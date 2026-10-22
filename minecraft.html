@@ -41336,6 +41336,737 @@ AUDIO.play = function (name, x, y, z, ...rest) {
   }
 };
 
+/* @file 143_wildlife.js */
+/* ===================================================================
+   PART 32: turtles, frogs and foxes like Java's
+   - a turtle remembers the beach it hatched on. Bred, one of the pair
+     carries an egg home and digs 1 to 4 eggs into sand there; eggs
+     crack and hatch (mostly just before dawn), and a baby turtle drops
+     a scute when it grows up. Treading on eggs breaks them; zombies,
+     husks, drowned and zombified piglins seek them out and stamp on them
+   - bred frogs lay frogspawn on water beside land; it hatches 2 to 5
+     tadpoles in 3 to 10 minutes; a tadpole becomes a frog after 20
+     minutes (slime balls hurry it), of the kind its biome gives. Frogs
+     eat small slimes and magma cubes; a magma cube eaten leaves a
+     froglight of the frog's colour
+   - foxes carry one item in their mouth (some spawn with one), pick up
+     what they come across, eat food they hold, pick sweet and glow
+     berries, sleep in the shade by day and wake when anything comes
+     near, stalk chickens and rabbits and pounce on them (nose first
+     into snow), and keep away from players, wolves and polar bears;
+     a fox you bred trusts you and goes for whatever hurts you
+   =================================================================== */
+
+// MoveToBlockGoal.findNearestBlock: rings outward from the mob, the layer under its feet first, then its own, then the next lower
+function nearestBlockFrom(m, range, vrange, ok) {
+  const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  for (let k = 0; k <= vrange; k = k > 0 ? -k : 1 - k)
+    for (let l = 0; l < range; l++)
+      for (let i = 0; i <= l; i = i > 0 ? -i : 1 - i)
+        for (let j = i < l && i > -l ? l : 0; j <= l; j = j > 0 ? -j : 1 - j)
+          if (ok(bx + i, by + k - 1, bz + j)) return [bx + i, by + k - 1, bz + j];
+  return null;
+}
+const walkTowards = (m, x, y, z, speed, near) => { if (!m.nav || m.navDone() || m.age % 20 === 0) { if (!m.goTo(x, y, z, speed, near)) { const dx = x - m.x, dz = z - m.z, l = Math.hypot(dx, dz) || 1; m.move = [dx / l, dz / l, speed, false, m.inWater ? Math.sign(y - m.y) * 0.3 : 0]; } } else m.followPath(); };
+
+/* ---------------- breeding: an egg or frogspawn instead of a baby ---------------- */
+const _breedTF = GOALS.breed;
+GOALS.breed = function (m) {
+  if (m.type !== 'turtle' && m.type !== 'frog') return _breedTF(m);
+  // TurtleBreedGoal: not while carrying an egg; Frog: not while carrying spawn
+  if (m.love <= 0 || m.baby || m.data.hasEgg || m.data.pregnant) return false;
+  let mate = null, best = 8;
+  for (const e of m.game.entities) if (e !== m && e instanceof Mob && e.type === m.type && e.love > 0 && !e.baby && !e.dead && e.deathTime === 0) { const d = m.distTo(e); if (d < best) { best = d; mate = e; } }
+  if (!mate) return false;
+  m.lookAt(mate.x, mate.y + mate.h * 0.8, mate.z);
+  if (best > 1.6) { walkTowards(m, mate.x, mate.y, mate.z, m.T.walk, 1); return true; }
+  m.nav = null;
+  m.loveT = (m.loveT || 0) + 1;
+  if (m.loveT > 60 && m.id < mate.id) {
+    m.love = mate.love = 0; m.loveT = mate.loveT = 0; m.breedCd = mate.breedCd = 6000;
+    if (m.type === 'turtle') m.data.hasEgg = true; else m.data.pregnant = true;
+    for (let k = 0; k < 7; k++) m.game.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5));
+    if (m.game.rule('doMobLoot') !== false) m.game.spawnXP(m.x, m.y + 0.5, m.z, 1 + Math.floor(Math.random() * 7));
+  }
+  return true;
+};
+
+/* ---------------- turtles ---------------- */
+let _sandIds = null;
+const isSandBlock = id => (_sandIds || (_sandIds = new Set(['sand', 'red_sand', 'suspicious_sand'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined)))).has(id);
+// the beach it was born on (Turtle.homePos)
+const turtleHome = m => m.data.beach || (m.data.beach = [Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)]);
+const turtleHomeDist = m => { const h = turtleHome(m); return Math.hypot(h[0] + 0.5 - m.x, h[1] + 0.5 - m.y, h[2] + 0.5 - m.z); };
+const _initTU = MOB_INIT.turtle;
+MOB_INIT.turtle = (m, o) => { if (_initTU) _initTU(m, o); if (!o.loading) turtleHome(m); };
+Object.assign(GOALS, {
+  // TurtleLayEggGoal: within 9 blocks of home, to sand with air above (16 blocks around), then 10 seconds digging
+  turtleLayEgg(m) {
+    const d = m.data, g = m.game, w = g.world;
+    if (!d.hasEgg || turtleHomeDist(m) >= 9) { d.laying = false; d.layN = 0; d.eggSpot = null; return false; }
+    const ok = (x, y, z) => isSandBlock(w.getBlock(x, y, z)) && w.getBlock(x, y + 1, z) === 0;
+    if (d.eggSpot && !ok(...d.eggSpot)) d.eggSpot = null;
+    if (!d.eggSpot) { if ((d.eggCd = (d.eggCd || 0) - 1) > 0) return false; d.eggSpot = nearestBlockFrom(m, 16, 1, ok); d.eggCd = 200 + Math.floor(Math.random() * 200); if (!d.eggSpot) return false; }
+    const [sx, sy, sz] = d.eggSpot;
+    if (Math.hypot(sx + 0.5 - m.x, sy + 1.5 - m.y, sz + 0.5 - m.z) >= 1) { walkTowards(m, sx + 0.5, sy + 1, sz + 0.5, m.T.walk, 0); return true; }
+    m.nav = null;
+    if (m.inWater) return true;
+    if (!d.laying) { d.laying = true; d.layN = 0; }
+    else if (d.layN > 200) {
+      const n = 1 + Math.floor(Math.random() * 4);
+      w.setBlock(sx, sy + 1, sz, B.TURTLE_EGG, n - 1);
+      g.sound('turtle_lay_egg', m.x, m.y, m.z);
+      d.hasEgg = false; d.laying = false; d.layN = 0; d.eggSpot = null; m.love = 600;
+      return true;
+    }
+    d.layN++;
+    // Turtle.aiStep: sand kicked up while it digs
+    if (d.layN % 5 === 0 && isSandBlock(w.getBlock(Math.floor(m.x), Math.floor(m.y) - 1, Math.floor(m.z)))) g.particles.blockBreak(Math.floor(m.x), Math.floor(m.y) - 1, Math.floor(m.z), w.getBlock(Math.floor(m.x), Math.floor(m.y) - 1, Math.floor(m.z)));
+    return true;
+  },
+  // TurtleGoToWaterGoal: off to water within 24 blocks (always for babies; not while heading home or carrying an egg)
+  turtleGoWater(m) {
+    const d = m.data, w = m.game.world;
+    if (m.inWater || (!m.baby && (d.goingHome || d.hasEgg))) { d.water = null; return false; }
+    if (!d.water) {
+      if ((d.waterCd = (d.waterCd || 0) - 1) > 0) return false;
+      d.waterCd = 200 + Math.floor(Math.random() * 200);
+      d.water = nearestBlockFrom(m, 24, 1, (x, y, z) => w.getBlock(x, y, z) === B.WATER);
+      if (!d.water) return false;
+    }
+    walkTowards(m, d.water[0] + 0.5, d.water[1], d.water[2] + 0.5, m.T.walk, 0);
+    return true;
+  },
+  // TurtleGoHomeGoal: with an egg, or now and then when more than 64 blocks away; until within 7 (or 30 seconds once within 16)
+  turtleGoHome(m) {
+    const d = m.data;
+    if (m.baby) { d.goingHome = false; return false; }
+    const dh = turtleHomeDist(m);
+    if (!d.goingHome) {
+      if (!d.hasEgg && !(Math.random() < 1 / 700 && dh >= 64)) return false;
+      d.goingHome = true; d.homeT = 0;
+    }
+    if (dh < 7 || d.homeT > 600) { d.goingHome = false; return false; }
+    if (dh < 16) d.homeT++;
+    const h = turtleHome(m), dx = h[0] + 0.5 - m.x, dz = h[2] + 0.5 - m.z, l = Math.hypot(dx, dz) || 1, s = Math.min(16, l);
+    if (m.inWater) { const dy = h[1] + 0.5 - m.y; m.move = [dx / l, dz / l, m.T.run, false, Math.max(-0.5, Math.min(0.5, dy / 8))]; }
+    else walkTowards(m, m.x + dx / l * s, l < 16 ? h[1] : m.y, m.z + dz / l * s, m.T.walk, 2);
+    return true;
+  },
+});
+if (MOB_TYPES.turtle) MOB_TYPES.turtle.ai = ['panic', 'breed', 'turtleLayEgg', 'tempt', 'turtleGoWater', 'turtleGoHome', 'swim', 'wander', 'look'];
+// Turtle.ageBoundaryReached: a baby that grows up drops a scute
+const _tickTU = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const baby = this.type === 'turtle' && this.growth < 0;
+  const r = _tickTU.call(this);
+  if (baby && this.growth >= 0 && !this.dead && this.game.rule('doMobLoot') !== false) this.game.dropItem(this.x, this.y + 0.3, this.z, { id: itemOf('turtle_scute'), count: 1 });
+  return r;
+};
+// TurtleEggBlock.randomTick: on sand, a crack at a time (always in the hour before dawn, else 1 in 500), then the babies
+const _randomTickTU = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  if (id !== B.TURTLE_EGG) return _randomTickTU.call(this, x, y, z, id);
+  const w = this.world;
+  if (!isSandBlock(w.getBlock(x, y - 1, z))) return;
+  const tod = vanillaTimeOfDay(w.time);
+  if (!(tod < 0.69 && tod > 0.65) && Math.floor(Math.random() * 500) !== 0) return;
+  const m = w.getMeta(x, y, z), hatch = (m >> 2) & 3, eggs = (m & 3) + 1;
+  if (hatch < 2) { w.setMeta(x, y, z, (m & 3) | ((hatch + 1) << 2)); this.sound('turtle_egg_crack', x + 0.5, y + 0.5, z + 0.5); return; }
+  w.setBlock(x, y, z, 0, 0);
+  this.sound('turtle_egg_hatch', x + 0.5, y + 0.5, z + 0.5);
+  for (let j = 0; j < eggs; j++) {
+    this.particles.blockBreak(x, y, z, B.TURTLE_EGG);
+    const t = createMob(this, 'turtle', x + 0.3 + j * 0.2, y, z + 0.3);
+    if (t) { t.growth = -24000; t.data.beach = [x, y, z]; t.savePrev(); this.entities.push(t); }
+  }
+};
+// TurtleEggBlock.stepOn / fallOn: treading breaks an egg 1 time in 100 a tick, landing 1 in 3 (but zombies don't land on them hard)
+function treadEgg(g, e, landing) {
+  const w = g.world, x = Math.floor(e.x), y = Math.floor(e.y - 0.05), z = Math.floor(e.z);
+  if (w.getBlock(x, y, z) !== B.TURTLE_EGG) return;
+  if (e instanceof Mob && (e.type === 'turtle' || e.type === 'bat' || e.T.cat === 'misc')) return;
+  if (!(e instanceof Player) && !g.rule('mobGriefing')) return;
+  if (landing && e instanceof Mob && ZOMBIE_KIN.has(e.type)) return;
+  if (Math.floor(Math.random() * (landing ? 3 : 100)) !== 0) return;
+  const m = w.getMeta(x, y, z);
+  g.sound('turtle_egg_break', x + 0.5, y + 0.5, z + 0.5);
+  if ((m & 3) === 0) { w.setBlock(x, y, z, 0, 0); g.particles.blockBreak(x, y, z, B.TURTLE_EGG); }
+  else { w.setMeta(x, y, z, m - 1); g.particles.poof(x + 0.5, y + 0.2, z + 0.5, [0.9, 0.9, 0.8], 4); }
+  g.remeshNear(x, z);
+}
+const ZOMBIE_KIN = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'zombified_piglin']);
+const _tickEG = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const air = !this.onGround, fall = this.fallDist || 0;
+  const r = _tickEG.call(this);
+  if (!this.dead && this.onGround && !(this.deathTime > 0)) treadEgg(this.game, this, air && fall > 0);
+  return r;
+};
+const _tickEGP = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const air = !this.onGround, fall = this.fallDist || 0;
+  const r = _tickEGP.call(this, inp);
+  if (!this.dead && this.onGround && this.mode !== 3 && (!this.sneaking || (air && fall > 0))) treadEgg(this.game, this, air && fall > 0);
+  return r;
+};
+// Zombie.ZombieAttackTurtleEggGoal (RemoveBlockGoal): eggs within 24 blocks (3 up or down) are jumped on for 3 seconds, then gone
+GOALS.stampEggs = function (m) {
+  const d = m.data, g = m.game, w = g.world;
+  if (m.target || !g.rule('mobGriefing')) { d.eggAt = null; return false; }
+  const ok = (x, y, z) => w.getBlock(x, y, z) === B.TURTLE_EGG && w.getBlock(x, y + 1, z) === 0 && w.getBlock(x, y + 2, z) === 0;
+  if (d.eggAt && !ok(...d.eggAt)) d.eggAt = null;
+  if (!d.eggAt) {
+    if ((d.eggCd = (d.eggCd === undefined ? Math.floor(Math.random() * 200) : d.eggCd) - 1) > 0) return false;
+    d.eggAt = nearestBlockFrom(m, 24, 3, ok);
+    d.eggCd = d.eggAt ? 20 : 200 + Math.floor(Math.random() * 200);
+    if (!d.eggAt) return false;
+    d.stampT = 0; d.eggTry = 0;
+  }
+  const [ex, ey, ez] = d.eggAt;
+  if (++d.eggTry > 1200) { d.eggAt = null; return false; }
+  if (Math.hypot(ex + 0.5 - m.x, ey + 1.5 - m.y, ez + 0.5 - m.z) >= 1.5) { walkTowards(m, ex + 0.5, ey + 1, ez + 0.5, m.T.walk, 0); return true; }
+  m.nav = null;
+  // up and down on it
+  if (d.stampT > 0) m.vy = 0.3;
+  if (d.stampT % 2 === 0) { m.vy = -0.3; if (d.stampT % 6 === 0) g.sound('turtle_egg_crack', ex + 0.5, ey + 0.5, ez + 0.5); }
+  if (d.stampT > 60) {
+    w.setBlock(ex, ey, ez, 0, 0); g.particles.blockBreak(ex, ey, ez, B.TURTLE_EGG); g.sound('turtle_egg_break', ex + 0.5, ey + 0.5, ez + 0.5); g.remeshNear(ex, ez);
+    d.eggAt = null;
+  }
+  d.stampT++;
+  return true;
+};
+for (const t of ZOMBIE_KIN) {
+  const T = MOB_TYPES[t];
+  if (!T || T.ai.includes('stampEggs')) continue;
+  const at = T.ai.indexOf('wander');
+  T.ai = T.ai.slice(); T.ai.splice(at < 0 ? T.ai.length : at, 0, 'stampEggs');
+}
+// eggs crack in stages
+TEXGEN.push(function texEggs() {
+  const crack = (n) => (d) => { d.set(copyOf('turtle_egg')); const pts = [[3, 4], [4, 5], [5, 5], [6, 6], [10, 3], [10, 4], [11, 5], [8, 9], [9, 10], [9, 11], [4, 11], [5, 12]]; for (const [x, y] of pts.slice(0, n)) sp(d, x, y, [70, 66, 54]); };
+  T('turtle_egg_slightly_cracked', crack(6)); T('turtle_egg_very_cracked', crack(12));
+});
+BOX_MODELS.turtle_egg = (d, m) => {
+  const t = [null, 'turtle_egg_slightly_cracked', 'turtle_egg_very_cracked'][Math.min(2, (m >> 2) & 3)];
+  return [[6, 6], [9, 9], [3, 9], [10, 3]].slice(0, (m & 3) + 1).map(([x, z]) => BX(x, 0, z, x + 4, 7, z + 4, t));
+};
+
+/* ---------------- frogs and tadpoles ---------------- */
+// TryLaySpawnOnWaterNearLand: a frog with spawn, on land, lays it on still water beside it with air above
+GOALS.frogSpawn = function (m) {
+  const d = m.data, g = m.game, w = g.world;
+  if (!d.pregnant || m.target) return false;
+  if (!m.inWater && m.onGround) {
+    const bx = Math.floor(m.x), by = Math.floor(m.y) - 1, bz = Math.floor(m.z);
+    for (const f of [5, 0, 4, 1]) {
+      const x = bx + DX[f], z = bz + DZ[f];
+      if (w.getBlock(x, by, z) === B.WATER && w.getMeta(x, by, z) === 0 && w.getBlock(x, by + 1, z) === 0) {
+        w.setBlock(x, by + 1, z, B.FROGSPAWN, 0);
+        w.setBE(x, by + 1, z, { type: 'frogspawn', left: 3600 + Math.floor(Math.random() * 8401) });
+        g.sound('frog_lay_spawn', m.x, m.y, m.z); g.remeshNear(x, z);
+        d.pregnant = false; d.spawnSpot = null;
+        return true;
+      }
+    }
+  }
+  // TryFindLandNearWater: a standable spot within 8 blocks with air over water beside it
+  if (!d.spawnSpot || m.age % 40 === 0) {
+    const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+    let best = null, bd = 1e9;
+    for (let dx = -8; dx <= 8; dx++) for (let dz = -8; dz <= 8; dz++) for (let dy = -8; dy <= 8; dy++) {
+      const md = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
+      if (md > 8 || md >= bd || (dx === 0 && dz === 0)) continue;
+      const x = bx + dx, y = by + dy, z = bz + dz;
+      if (blockCollides(w, x, y, z) || !blockCollides(w, x, y - 1, z) || BLK[w.getBlock(x, y, z)].liquid) continue;
+      for (const f of [5, 0, 4, 1]) if (w.getBlock(x + DX[f], y, z + DZ[f]) === 0 && w.getBlock(x + DX[f], y - 1, z + DZ[f]) === B.WATER) { best = [x, y, z]; bd = md; break; }
+    }
+    d.spawnSpot = best;
+  }
+  if (!d.spawnSpot) return false;
+  walkTowards(m, d.spawnSpot[0] + 0.5, d.spawnSpot[1], d.spawnSpot[2] + 0.5, m.T.walk, 0);
+  return true;
+};
+// frogspawn placed by hand hatches too
+const _afterPlaceFS = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  if (id === B.FROGSPAWN && this.world.getBlock(x, y, z) === id) this.world.setBE(x, y, z, { type: 'frogspawn', left: 3600 + Math.floor(Math.random() * 8401) });
+  return _afterPlaceFS.call(this, p, x, y, z, id);
+};
+// FrogspawnBlock.hatchFrogspawn: 2 to 5 tadpoles, which stay
+const spawnSet = c => c._fsp || (c._fsp = new Set());
+const _setBEFS = World.prototype.setBE;
+World.prototype.setBE = function (x, y, z, be) {
+  _setBEFS.call(this, x, y, z, be);
+  if (be && be.type === 'frogspawn') { const c = this.getChunk(x >> 4, z >> 4); if (c) spawnSet(c).add((y << 8) | ((z & 15) << 4) | (x & 15)); }
+};
+const _onChunkDataFS = Game.prototype.onChunkData;
+Game.prototype.onChunkData = function (cx, cz, ...rest) {
+  _onChunkDataFS.call(this, cx, cz, ...rest);
+  const w = this.world, c = w && w.chunks.get(w.key(cx, cz));
+  if (c && c.be) for (const [i, v] of c.be) if (v && v.type === 'frogspawn') spawnSet(c).add(i);
+};
+const _tickHivesFS = Game.prototype.tickHives;
+Game.prototype.tickHives = function () {
+  _tickHivesFS.call(this);
+  const w = this.world, p = this.player;
+  if (!p) return;
+  const R = this.simDistance(), pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+  for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || !c._fsp || !c._fsp.size || c.state < 2) continue;
+    for (const i of c._fsp) {
+      const be = c.be.get(i);
+      if (!be || be.type !== 'frogspawn' || c.blocks[i] !== B.FROGSPAWN) { c._fsp.delete(i); continue; }
+      if (--be.left > 0) continue;
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15);
+      c._fsp.delete(i);
+      this.hatchFrogspawn(x, y, z);
+    }
+  }
+};
+Game.prototype.hatchFrogspawn = function (x, y, z) {
+  const w = this.world;
+  w.setBlock(x, y, z, 0, 0); this.remeshNear(x, z);
+  this.sound('frogspawn_hatch', x + 0.5, y, z + 0.5);
+  for (let j = 2 + Math.floor(Math.random() * 4); j > 0; j--) {
+    const o = () => Math.max(0.2, Math.min(0.8, Math.random()));
+    const t = createMob(this, 'tadpole', x + o(), y - 0.5, z + o());
+    if (t) { t.persistent = true; t.yaw = t.bodyYaw = Math.random() * Math.PI * 2; t.savePrev(); this.entities.push(t); }
+  }
+};
+// Tadpole.ageUp: a frog after 20 minutes, of the kind its biome gives
+const _tickTP = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'tadpole' && !this.dead && !(this.deathTime > 0)) {
+    const d = this.data;
+    d.grow = (d.grow || 0) + 1;
+    if (d.grow >= 24000) {
+      const g = this.game, f = createMob(g, 'frog', this.x, this.y, this.z);
+      if (f) {
+        f.yaw = f.bodyYaw = this.yaw; f.persistent = true; if (this.customName) f.customName = this.customName;
+        if (this.data.noAI) f.data.noAI = true;
+        f.savePrev(); g.entities.push(f); g.sound('tadpole_grow_up', this.x, this.y, this.z);
+        this.dead = true; this.removed = true;
+        return;
+      }
+    }
+  }
+  return _tickTP.call(this);
+};
+// a slime ball hurries a tadpole by a tenth of what's left
+const _interactTP = MOB_INTERACT.tadpole;
+MOB_INTERACT.tadpole = (m, p, held) => {
+  if (held && held.id === I.SLIME_BALL) {
+    const left = Math.max(0, 24000 - (m.data.grow || 0));
+    m.data.grow = (m.data.grow || 0) + Math.floor(Math.floor(left / 20) * 0.1) * 20;
+    p.consumeHeld(1); m.game.particles.icon(m.x, m.y + 0.3, m.z, 'happy', 3);
+    return true;
+  }
+  return _interactTP ? _interactTP(m, p, held) : false;
+};
+// Frog.canEat: slimes and magma cubes of the smallest size, seen within 10 blocks; the tongue reaches a couple of blocks
+GOALS.eatSlime = function (m) {
+  const d = m.data, g = m.game;
+  if (d.tongue > 0) { d.tongue--; m.nav = null; return true; }
+  if (d.huntCd > 0) { d.huntCd--; return false; }
+  let t = m._prey;
+  if (t && (t.dead || t.deathTime > 0 || m.distTo(t) > 10)) t = m._prey = null;
+  if (!t && (m.age + m.id) % 10 === 0) {
+    let bd = 10;
+    for (const e of g.entities) if (e instanceof Mob && (e.type === 'slime' || e.type === 'magma_cube') && (e.data.size || 1) === 1 && !e.dead && !(e.deathTime > 0)) { const k = m.distTo(e); if (k < bd && m.canSee(e)) { bd = k; t = e; } }
+    m._prey = t;
+  }
+  if (!t) return false;
+  m.lookAt(t.x, t.y + t.h / 2, t.z);
+  if (m.distTo(t) <= 2.5) {
+    d.tongue = 10; m._prey = null; d.huntCd = 100;
+    g.sound('frog_tongue', m.x, m.y, m.z);
+    if (t.type === 'magma_cube') t.data.frogKill = d.variant || 'temperate';
+    t.invuln = 0; t.hurt(10, 'frog', m);
+    return true;
+  }
+  walkTowards(m, t.x, t.y, t.z, m.T.walk * 1.25, 1);
+  return true;
+};
+// MagmaCube loot: one eaten by a frog leaves a froglight of the frog's kind
+const _dropLootMC = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  _dropLootMC.call(this);
+  if (this.type === 'magma_cube' && this.data.frogKill && this.game.rule('doMobLoot') !== false) {
+    const k = this.data.frogKill;
+    this.game.dropItem(this.x, this.y, this.z, { id: B[(k === 'warm' ? 'PEARLESCENT' : k === 'cold' ? 'VERDANT' : 'OCHRE') + '_FROGLIGHT'], count: 1 });
+  }
+};
+if (MOB_TYPES.frog) MOB_TYPES.frog.ai = ['panic', 'breed', 'frogSpawn', 'tempt', 'eatSlime', 'wander', 'look'];
+
+/* ---------------- foxes ---------------- */
+const FOX_PREY = new Set(['chicken', 'rabbit']);
+const foxFood = st => !!(st && ITEMS[st.id] && ITEMS[st.id].food);
+// Fox.populateDefaultEquipmentSlots: one in five has something in its mouth; FoxBreedGoal: a baby takes a parent's colour and trusts its breeder
+const _initFX = MOB_INIT.fox;
+MOB_INIT.fox = (m, o) => {
+  if (_initFX) _initFX(m, o);
+  if (o.loading) return;
+  if (o.parents && o.parents.length === 2) {
+    m.data.variant = (Math.random() < 0.5 ? o.parents[0] : o.parents[1]).data.variant || m.data.variant;
+    if (o.parents.some(q => q.breeder)) m.data.trusting = true;
+    return;
+  }
+  if (Math.random() < 0.2) {
+    const f = Math.random(), n = f < 0.05 ? 'emerald' : f < 0.2 ? 'egg' : f < 0.4 ? (Math.random() < 0.5 ? 'rabbit_foot' : 'rabbit_hide') : f < 0.6 ? 'wheat' : f < 0.8 ? 'leather' : 'feather';
+    m.data.hand = { id: itemOf(n), count: 1 };
+  }
+};
+// Fox.spitOutItem: out in front, not to be picked up again for 2 seconds
+function foxSpit(m, st) {
+  if (!st) return;
+  const e = m.game.dropItem(m.x + Math.sin(m.yaw), m.y + 1, m.z + Math.cos(m.yaw), st);
+  if (e) e.pickupDelay = 40;
+  m.game.sound('fox_spit', m.x, m.y, m.z);
+}
+// Fox.canHoldItem: anything when its mouth is empty; food instead of something else once it has eaten
+const foxCanHold = (m, st) => !m.data.hand || ((m.data.eatT || 0) > 0 && foxFood(st) && !foxFood(m.data.hand));
+function foxPickUp(m, e) {
+  const g = m.game, st = e.stack, d = m.data;
+  if (st.count > 1) g.dropItem(m.x, m.y, m.z, copyStack(st, st.count - 1));
+  foxSpit(m, d.hand);
+  d.hand = copyStack(st, 1); d.eatT = 0;
+  e.dead = true;
+  g.sound('pop', m.x, m.y, m.z);
+}
+// Fox.aiStep: what it holds is eaten after 30 seconds, like a player eats it (effects, chorus fruit, the bowl or bottle left)
+function foxEat(m) {
+  const d = m.data, st = d.hand, it = ITEMS[st.id], g = m.game;
+  g.sound('fox_eat', m.x, m.y, m.z);
+  for (const [e, t, a, ch] of it.effects || []) if (ch === undefined || Math.random() < ch) m.addEffect(e, t, a);
+  if (st.id === I.SUSPICIOUS_STEW && st.tag && st.tag.effect) m.addEffect(st.tag.effect[0], st.tag.effect[1], 0);
+  if (st.id === I.HONEY_BOTTLE && m.removeEffect) m.removeEffect('poison');
+  d.hand = it.bowl ? { id: I.BOWL, count: 1 } : it.bottle ? { id: I.GLASS_BOTTLE, count: 1 } : null;
+  if (it.chorus) Player.prototype.chorusTeleport.call(m);
+}
+// FoxAlertableEntitiesSelector: anything alive in 12 blocks it can see, but foxes, pets, sneaking or trusted players
+function foxAlert(m) {
+  const d = m.data;
+  if (m.age % 10 && m._alert !== undefined) return m._alert;
+  const g = m.game, p = g.player;
+  const near = e => Math.abs(e.x - m.x) <= 12.3 && Math.abs(e.z - m.z) <= 12.3 && Math.abs(e.y - m.y) <= 6.7 && m.distTo(e) <= 12 && m.canSee(e);
+  let a = !!(p && !p.dead && p.survival && !p.sneaking && !d.trusting && near(p));
+  if (!a) for (const e of g.entities) if (e instanceof Mob && e !== m && !e.dead && !(e.deathTime > 0) && e.type !== 'fox' && !e.data.tame && e.T.cat !== 'misc' && near(e)) { a = true; break; }
+  return m._alert = a;
+}
+// Fox.isPathClear: three blocks of air over the line to the prey
+function foxPathClear(m, t) {
+  const w = m.game.world, dz = t.z - m.z, dx = t.x - m.x, r = dz / dx;
+  for (let j = 0; j < 6; j++) {
+    const oz = r === 0 ? 0 : dz * (j / 6), ox = r === 0 ? dx * (j / 6) : oz / r;
+    for (let k = 1; k < 4; k++) { const id = w.getBlock(Math.floor(m.x + ox), Math.floor(m.y + k), Math.floor(m.z + oz)); if (id && !REPL[id]) return false; }
+  }
+  return true;
+}
+const foxSkyHidden = m => { const w = m.game.world; return (w.getLightRaw(Math.floor(m.x), Math.floor(m.y + m.h), Math.floor(m.z)) >> 4) < 15; };
+Object.assign(GOALS, {
+  // FaceplantGoal: two seconds with its nose in the snow
+  foxFaceplant(m) {
+    const d = m.data;
+    if (!(d.faceplant > 0)) return false;
+    d.faceplant--; m.nav = null;
+    if (Math.random() < 0.2) m.game.particles.poof(m.x + Math.sin(m.yaw) * 0.6, m.y + 0.1, m.z + Math.cos(m.yaw) * 0.6, [0.95, 0.95, 1], 2);
+    return true;
+  },
+  // AvoidEntityGoal: players within 16 blocks (unless sneaking or trusted), untamed wolves and polar bears within 8
+  foxAvoid(m) {
+    const d = m.data, g = m.game, p = g.player;
+    if (d.defending) { m._flee = null; return false; }
+    if (m._flee && !m._flee.dead && m.age % 10 && !m.navDone()) return m.followPath() || true;
+    m._flee = null;
+    let best = null, bd = 1e9;
+    const consider = (e, rad) => { const k = m.distTo(e); if (k < rad && k < bd && Math.abs(e.y - m.y) < 3.7 && m.canSee(e)) { best = e; bd = k; } };
+    if (p && !p.dead && p.survival && !p.sneaking && !d.trusting) consider(p, 16);
+    for (const e of g.entities) if (e instanceof Mob && !e.dead && ((e.type === 'wolf' && !e.data.tame) || e.type === 'polar_bear')) consider(e, 8);
+    if (!best) return false;
+    for (let k = 0; k < 10; k++) {
+      const a = Math.atan2(m.x - best.x, m.z - best.z) + (Math.random() - 0.5) * 2, r = 6 + Math.random() * 10, x = m.x + Math.sin(a) * r, z = m.z + Math.cos(a) * r;
+      if (Math.hypot(x - best.x, z - best.z) <= bd) continue;
+      m.goTo(x, m.y, z, m.T.run, 2);
+      m._flee = best; d.sleeping = false; d.sitting = false;
+      return true;
+    }
+    return false;
+  },
+  // DefendTrustedTargetGoal: whatever just hurt the player it trusts
+  foxDefend(m) {
+    const d = m.data, p = m.game.player;
+    if (!d.trusting || !p || p.dead) return false;
+    const a = p.lastAttacker;
+    if (a instanceof Mob && a !== m && !a.dead && !(a.deathTime > 0) && p.lastHurtAge !== undefined && p.lastHurtAge !== d.defendAt && p.age - p.lastHurtAge < 100 && !(a.data && a.data.trusting)) {
+      d.defendAt = p.lastHurtAge; m.target = a; d.defending = true; d.sleeping = false;
+      m.game.sound('fox_aggro', m.x, m.y, m.z);
+    }
+    return false;
+  },
+  // StalkPreyGoal: up to 6 blocks from a chicken or rabbit, then crouch; FoxPounceGoal: fully crouched, it leaps
+  foxStalk(m) {
+    const d = m.data, t = m.target;
+    if (!t || t.dead || t.deathTime > 0 || !FOX_PREY.has(t.type) || d.sitting || d.pounce) { d.crouch = false; return false; }
+    m.lookAt(t.x, t.y + t.h * 0.5, t.z);
+    if (!d.crouch) {
+      if (m.distTo(t) > 6) { walkTowards(m, t.x, t.y, t.z, m.T.walk * 1.5, 1); return true; }
+      if (!foxPathClear(m, t)) return false;
+      d.crouch = true; m._crouchAmt = 0;
+    }
+    m.nav = null;
+    if ((m._crouchAmt || 0) >= 3 && m.onGround) {
+      if (foxPathClear(m, t)) {
+        const dx = t.x - m.x, dy = t.y - m.y, dz = t.z - m.z, l = Math.hypot(dx, dy, dz) || 1;
+        m.vx += dx / l * 0.8; m.vy += 0.9; m.vz += dz / l * 0.8;
+        d.pounce = true; m._pounceAt = m.age;
+        m.game.sound('fox_aggro', m.x, m.y, m.z);
+      }
+      d.crouch = false;
+    }
+    return true;
+  },
+  // in the air after the prey: a bite when within 2 blocks; landing in snow buries its nose and it forgets the prey
+  foxPounce(m) {
+    const d = m.data, t = m.target, w = m.game.world;
+    if (!d.pounce) return false;
+    if (!t || t.dead || t.deathTime > 0) { d.pounce = false; return false; }
+    m.nav = null;
+    if (m.distTo(t) <= 2 && !((m.attackCd || 0) > 0)) { m.attackCd = 20; if (m.attackEntity(t)) m.game.sound('fox_bite', m.x, m.y, m.z); }
+    if (m.attackCd > 0) m.attackCd--;
+    if (m.onGround && m.age - (m._pounceAt || 0) > 2) {
+      if (w.getBlock(Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)) === B.SNOW) { d.faceplant = 40; m.target = null; }
+      d.pounce = false;
+    }
+    return true;
+  },
+  // FoxMeleeAttackGoal: not while sitting, asleep, crouched or nose down
+  foxMelee(m) {
+    const d = m.data;
+    if (!m.target || d.sitting || d.sleeping || d.crouch || d.faceplant > 0 || d.pounce) return false;
+    const before = m.attackCd || 0, r = GOALS.melee(m);
+    if (r && before <= 0 && m.attackCd > 0) m.game.sound('fox_bite', m.x, m.y, m.z);
+    return r;
+  },
+  // SleepGoal: by day, with no sky overhead, nothing around it and nothing to do (a few seconds' wait first)
+  foxSleep(m) {
+    const d = m.data, g = m.game;
+    const can = () => g.world.dim === 'overworld' && g.skyDarken() < 4 && foxSkyHidden(m) && !foxAlert(m) && !m.inWater && !m.target && !inPowderSnow(m);
+    if (d.sleeping) { if (can()) { m.nav = null; return true; } d.sleeping = false; d.sleepCd = Math.floor(Math.random() * 140); return false; }
+    if (m.nav && !m.navDone()) return false;
+    if (d.sleepCd === undefined) d.sleepCd = Math.floor(Math.random() * 140);
+    if (d.sleepCd > 0) { d.sleepCd--; return false; }
+    if (!can()) return false;
+    d.sleeping = true; d.sitting = false; d.crouch = false; m.nav = null;
+    return true;
+  },
+  // FoxEatBerriesGoal: ripe sweet berries or glow berries within 12 blocks, two seconds' wait beside them, then picked
+  foxBerries(m) {
+    const d = m.data, g = m.game, w = g.world;
+    if (d.sleeping) { d.berry = null; return false; }
+    const ok = (x, y, z) => { const id = w.getBlock(x, y, z), mm = w.getMeta(x, y, z); return (id === B.SWEET_BERRY_BUSH && (mm & 3) >= 2) || (id === B.CAVE_VINES && (mm & 1) === 1); };
+    if (d.berry && !ok(...d.berry)) d.berry = null;
+    if (!d.berry) {
+      if ((d.berryCd = (d.berryCd === undefined ? Math.floor(Math.random() * 200) : d.berryCd) - 1) > 0) return false;
+      d.berryCd = 200 + Math.floor(Math.random() * 200);
+      d.berry = nearestBlockFrom(m, 12, 1, ok);
+      if (!d.berry) return false;
+      d.berryWait = 0; d.berryTry = 0; d.sitting = false;
+    }
+    const [bx, by, bz] = d.berry;
+    if (++d.berryTry > 1200) { d.berry = null; return false; }
+    if (Math.hypot(bx + 0.5 - m.x, by + 1.5 - m.y, bz + 0.5 - m.z) > 2) { walkTowards(m, bx + 0.5, by, bz + 0.5, m.T.walk * 1.2, 1); if (Math.random() < 0.05) g.sound('fox_sniff', m.x, m.y, m.z); return true; }
+    m.nav = null; m.lookAt(bx + 0.5, by + 0.5, bz + 0.5);
+    if (d.berryWait++ < 40) return true;
+    if (g.rule('mobGriefing') !== false) {
+      const id = w.getBlock(bx, by, bz), mm = w.getMeta(bx, by, bz);
+      if (id === B.SWEET_BERRY_BUSH) {
+        let n = 1 + Math.floor(Math.random() * 2) + ((mm & 3) === 3 ? 1 : 0);
+        if (!d.hand) { d.hand = { id: I.SWEET_BERRIES, count: 1 }; n--; }
+        if (n > 0) g.dropItem(bx + 0.5, by + 0.5, bz + 0.5, { id: I.SWEET_BERRIES, count: n });
+        w.setMeta(bx, by, bz, (mm & ~3) | 1); g.sound('break_grass', bx + 0.5, by + 0.5, bz + 0.5);
+      } else if (id === B.CAVE_VINES) { g.dropItem(bx + 0.5, by + 0.5, bz + 0.5, { id: I.GLOW_BERRIES, count: 1 }); w.setMeta(bx, by, bz, mm & ~1); g.sound('break_grass', bx + 0.5, by + 0.5, bz + 0.5); }
+    }
+    d.berry = null;
+    return true;
+  },
+  // FoxSearchForItemsGoal: an empty mouth goes after an item within 8 blocks
+  foxSearch(m) {
+    const d = m.data, g = m.game;
+    if (d.hand || m.target || m.age - (m.lastHurtAge === undefined ? -1e9 : m.lastHurtAge) < 100 || d.sleeping || d.sitting || d.faceplant > 0) { m._seek = null; return false; }
+    if (m._seek && (m._seek.dead || m._seek.pickupDelay > 0)) m._seek = null;
+    if (!m._seek) {
+      if (Math.random() >= 0.1) return false;
+      m._seek = g.entities.find(e => e instanceof ItemEntity && !e.dead && e.pickupDelay <= 0 && Math.abs(e.x - m.x) <= 8.3 && Math.abs(e.y - m.y) <= 8.7 && Math.abs(e.z - m.z) <= 8.3) || null;
+      if (!m._seek) return false;
+    }
+    walkTowards(m, m._seek.x, m._seek.y, m._seek.z, m.T.walk * 1.2, 0);
+    return true;
+  },
+  // PerchAndSearchGoal: now and then it sits and looks about, two to four times
+  foxPerch(m) {
+    const d = m.data;
+    if (d.perch > 0) {
+      if (--d.perchT <= 0) { d.perch--; d.perchT = 80 + Math.floor(Math.random() * 20); d.perchA = Math.random() * Math.PI * 2; }
+      if (d.perch <= 0) { d.sitting = false; return false; }
+      d.sitting = true; m.nav = null; m.lookAt(m.x + Math.cos(d.perchA), m.y + m.h, m.z + Math.sin(d.perchA));
+      return true;
+    }
+    if (Math.random() >= 0.02 || d.sleeping || m.target || (m.nav && !m.navDone()) || d.pounce || d.crouch || m.age - (m.lastHurtAge === undefined ? -1e9 : m.lastHurtAge) < 100 || foxAlert(m)) return false;
+    d.perch = 2 + Math.floor(Math.random() * 3); d.perchT = 80 + Math.floor(Math.random() * 20); d.perchA = Math.random() * Math.PI * 2; d.sitting = true; m.nav = null;
+    return true;
+  },
+});
+if (MOB_TYPES.fox) {
+  const T = MOB_TYPES.fox;
+  T.ai = ['foxFaceplant', 'panic', 'breed', 'foxAvoid', 'foxDefend', 'target', 'foxStalk', 'foxPounce', 'foxMelee', 'foxSleep', 'followParent', 'foxBerries', 'foxSearch', 'wander', 'foxPerch', 'look'];
+  if (!T.hunts.includes('tropical_fish')) T.hunts.push('tropical_fish');
+  if (!T.hunts.includes('turtle')) T.hunts.push('turtle');
+  T.sounds = ['fox_ambient', 'fox_hurt', 'fox_death'];
+}
+const _tickFX = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type !== 'fox' || this.dead || this.deathTime > 0) return _tickFX.call(this);
+  const m = this, d = m.data, g = m.game;
+  // Fox.tick: water, a target or thunder wakes it
+  if (d.sleeping && (m.inWater || m.target || (g.storm && (g.storm.level || 0) > 0.9))) d.sleeping = false;
+  if (m.inWater || d.sleeping) d.sitting = false;
+  m._crouchAmt = d.crouch ? Math.min(3, (m._crouchAmt || 0) + 0.2) : 0;
+  // Fox.aiStep: eating what it holds
+  d.eatT = (d.eatT || 0) + 1;
+  if (foxFood(d.hand) && !m.target && m.onGround && !d.sleeping) {
+    if (d.eatT > 600) { foxEat(m); d.eatT = 0; }
+    else if (d.eatT > 560 && Math.random() < 0.1) { g.sound('fox_eat', m.x, m.y, m.z); g.particles.poof(m.x + Math.sin(m.yaw) * 0.4, m.y + 0.5, m.z + Math.cos(m.yaw) * 0.4, [0.8, 0.5, 0.3], 2); }
+  }
+  // Mob.aiStep: picking up what it walks over (with mobGriefing)
+  if (!d.sleeping && g.rule('mobGriefing') !== false) {
+    for (const e of g.entities) if (e instanceof ItemEntity && !e.dead && e.pickupDelay <= 0 && Math.abs(e.x - m.x) < m.w / 2 + 1.125 && Math.abs(e.z - m.z) < m.w / 2 + 1.125 && e.y + 0.25 > m.y && e.y < m.y + m.h && foxCanHold(m, e.stack)) { foxPickUp(m, e); break; }
+  }
+  if (d.defending && !m.target) d.defending = false;
+  if (d.defending && Math.random() < 0.05) g.sound('fox_aggro', m.x, m.y, m.z);
+  // its call: asleep, or a screech at night with no player about
+  const T = m.T;
+  T.sounds[0] = d.sleeping ? 'fox_sleep' : !g.isDay() && Math.random() < 0.1 && !(g.player && Math.abs(g.player.x - m.x) < 16.3 && Math.abs(g.player.y - m.y) < 16.7 && Math.abs(g.player.z - m.z) < 16.3) ? 'fox_screech' : 'fox_ambient';
+  const r = _tickFX.call(this);
+  // a pose belongs to the goal that holds it
+  if (d.noAI) return r;
+  if (d.sitting && m.goal !== 'foxPerch') { d.sitting = false; d.perch = 0; }
+  if (d.crouch && m.goal !== 'foxStalk') d.crouch = false;
+  if (d.sleeping && m.goal !== 'foxSleep' && m.goal !== 'foxDefend') d.sleeping = false;
+  return r;
+};
+// a hit wakes it; what it holds always drops when it dies
+const _hurtFX = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'fox') { this.data.sleeping = false; this.data.sitting = false; this.data.perch = 0; }
+  return _hurtFX.call(this, amount, source, attacker);
+};
+const _dropLootFX = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  if (this.type === 'fox' && this.data.hand && !this.noDrops) { this.game.dropItem(this.x, this.y + 0.3, this.z, this.data.hand); this.data.hand = null; }
+  return _dropLootFX.call(this);
+};
+// FoxModel: sitting, asleep, crouched (and interested), nose down in snow, the leap
+MOB_MODELS.fox.anim = function (P, st) {
+  lookHead(P, st);
+  const c = Math.cos, a = st.swing * 0.6662, amt = st.amt;
+  P.body = [HPI, 0, 0]; P.tail = [-0.05235988, 0, 0];
+  P.right_hind_leg = [c(a) * 1.4 * amt, 0, 0]; P.left_hind_leg = [c(a + PI) * 1.4 * amt, 0, 0];
+  P.right_front_leg = [c(a + PI) * 1.4 * amt, 0, 0]; P.left_front_leg = [c(a) * 1.4 * amt, 0, 0];
+  if (st.crouch) {
+    const f = c(st.age) * 0.01, k = st.crouchAmt || 0;
+    P.body = [1.6755161, f, 0]; P['body#p'] = [0, 16 + k, -6]; P['head#p'] = [-1, 16.5 + k, -3]; P.head = [0, 0, 0.3];
+    P.right_hind_leg[2] = f; P.left_hind_leg[2] = f; P.right_front_leg[2] = f / 2; P.left_front_leg[2] = f / 2;
+  } else if (st.sleep) {
+    P.body = [HPI, 0, -HPI]; P['body#p'] = st.baby ? [0, 21, -2] : [0, 21, -6]; P.tail = [st.baby ? -2.1816616 : -2.6179938, 0, 0];
+    P['head#p'] = [1, 19.49, -3]; P.head = [0, -2.0943951, c(st.age * 0.027) / 22];
+    for (const n of ['right_hind_leg', 'left_hind_leg', 'right_front_leg', 'left_front_leg']) P[n + '#hide'] = 1;
+  } else if (st.sit) {
+    P.body = [PI / 6, 0, 0]; P['body#p'] = [0, 9, -3]; P.tail = [PI / 4, 0, 0]; P['tail#p'] = [-4, 15, -1];
+    P['head#p'] = st.baby ? [-1, 13, -3.75] : [-1, 10, -0.25];
+    P.right_hind_leg = [-PI * 5 / 12, 0, 0]; P['right_hind_leg#p'] = [-5, 21.5, 6.75]; P.left_hind_leg = [-PI * 5 / 12, 0, 0]; P['left_hind_leg#p'] = [-1, 21.5, 6.75];
+    P.right_front_leg = [-PI / 12, 0, 0]; P['right_front_leg#p'] = [-5, 17.75, 0]; P.left_front_leg = [-PI / 12, 0, 0]; P['left_front_leg#p'] = [-1, 17.75, 0];
+  }
+  if (st.faceplant) {
+    const k = st.age * 0.67 * 0.4662;
+    P.head = [1.05, 0, 0]; P['head#p'] = [-1, 19, -4];
+    P.right_hind_leg = [c(k) * 0.1, 0, 0]; P.left_hind_leg = [c(k + PI) * 0.1, 0, 0]; P.right_front_leg = [c(k + PI) * 0.1, 0, 0]; P.left_front_leg = [c(k) * 0.1, 0, 0];
+  } else if (st.pounce) { P.right_hind_leg = [0.9, 0, 0]; P.left_hind_leg = [0.9, 0, 0]; P.right_front_leg = [-0.9, 0, 0]; P.left_front_leg = [-0.9, 0, 0]; }
+};
+const _animFX = MOB_ANIM.fox;
+MOB_ANIM.fox = (m, st) => { if (_animFX) _animFX(m, st); st.sleep = !!m.data.sleeping; st.crouch = !!m.data.crouch; st.crouchAmt = m._crouchAmt || 0; st.faceplant = m.data.faceplant > 0; st.pounce = !!m.data.pounce; };
+// FoxHeldItemLayer: the item lies across its mouth
+function drawFoxMouthItem(r, g, st, at, hx, light) {
+  if (!ITEMS[st.id]) return;
+  if (itemStyle(st.id) !== 'sprite') {
+    const s = 4;
+    for (let f = 0; f < 6; f++) for (let q = 0; q < 4; q++) {
+      const v = FV[f][q], w = at('head', [hx[0] + (v[0] - 0.5) * s, hx[1] - (v[1] - 0.5) * s, hx[2] + (0.5 - v[2]) * s]);
+      if (!w) return;
+      const fs = FSHADE[f];
+      r.dv(w[0], w[1], w[2], v[3] / 16, v[4] / 16, faceLayer(st.id, 0, f), fs, fs, fs, 1, light[0], light[1]);
+    }
+    return;
+  }
+  const mdl = g.itemModel(st.id), tint = stackTint(st), k = 8;
+  for (const quad of mdl.q) for (const v of quad) {
+    const w = at('head', [hx[0] + v[0] * k, hx[1] - v[2] * k, hx[2] - v[1] * k]);
+    if (!w) return;
+    const t = tint ? [tint[0] / 255 * v[5], tint[1] / 255 * v[5], tint[2] / 255 * v[5]] : [v[5], v[5], v[5]];
+    r.dv(w[0], w[1], w[2], v[3], v[4], mdl.layer, t[0], t[1], t[2], 1, light[0], light[1]);
+  }
+}
+const _renderExtraFX = Mob.prototype.renderExtra;
+Mob.prototype.renderExtra = function (r, a, p, yaw, st, light, at) {
+  if (_renderExtraFX) _renderExtraFX.call(this, r, a, p, yaw, st, light, at);
+  if (this.type === 'fox' && this.data.hand && at) drawFoxMouthItem(r, this.game, this.data.hand, at, this.data.sleeping ? [7.36, 4.16, 3.52] : [0.96, 4.32, -8], light);
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t, c] of [['turtle_lay_egg', 'Turtle lays egg', 'neutral'], ['turtle_egg_crack', 'Turtle egg cracks', 'block'], ['turtle_egg_hatch', 'Turtle egg hatches', 'block'], ['turtle_egg_break', 'Turtle egg breaks', 'block'],
+  ['frog_lay_spawn', 'Frog lays spawn', 'neutral'], ['frogspawn_hatch', 'Frogspawn hatches', 'block'], ['tadpole_grow_up', 'Tadpole grows up', 'neutral'], ['frog_tongue', 'Frog eats', 'neutral'],
+  ['fox_ambient', 'Fox squeaks', 'neutral'], ['fox_screech', 'Fox screeches', 'neutral'], ['fox_sleep', 'Fox snores', 'neutral'], ['fox_bite', 'Fox bites', 'neutral'], ['fox_spit', 'Fox spits', 'neutral'],
+  ['fox_eat', 'Fox eats', 'neutral'], ['fox_sniff', 'Fox sniffs', 'neutral'], ['fox_aggro', 'Fox angers', 'neutral'], ['fox_hurt', 'Fox hurts', 'neutral'], ['fox_death', 'Fox dies', 'neutral']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+const _audioPlayWL = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^(turtle_lay_egg|turtle_egg_crack|turtle_egg_hatch|turtle_egg_break|frog_lay_spawn|frogspawn_hatch|tadpole_grow_up|frog_tongue|fox_[a-z]+)$/.test(name)) return _audioPlayWL.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'turtle_lay_egg': this.noiseHit(dst, 'lowpass', 500, 0.7, 0.25, 0.3); break;
+    case 'turtle_egg_crack': this.noiseHit(dst, 'bandpass', 2400, 3, 0.05, 0.3); this.noiseHit(dst, 'bandpass', 1800, 3, 0.04, 0.2); break;
+    case 'turtle_egg_hatch': [600, 900, 1200].forEach((f, i) => this.tone(dst, 'triangle', f, f * 1.1, 0.06, 0.08, t0 + i * 0.07)); this.noiseHit(dst, 'bandpass', 2000, 2, 0.08, 0.25); break;
+    case 'turtle_egg_break': this.noiseHit(dst, 'bandpass', 1500, 1.5, 0.1, 0.35); break;
+    case 'frog_lay_spawn': this.noiseHit(dst, 'lowpass', 700, 1, 0.2, 0.25); this.tone(dst, 'sine', 300, 200, 0.15, 0.06); break;
+    case 'frogspawn_hatch': [700, 900].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.2, 0.08, 0.06, t0 + i * 0.08)); break;
+    case 'tadpole_grow_up': this.tone(dst, 'sine', 500, 900, 0.2, 0.06); break;
+    case 'frog_tongue': this.tone(dst, 'square', 260 * v, 520 * v, 0.08, 0.05); this.noiseHit(dst, 'bandpass', 900, 2, 0.06, 0.2); break;
+    case 'fox_ambient': this.tone(dst, 'square', 900 * v, 1400 * v, 0.07, 0.05); this.tone(dst, 'square', 1300 * v, 800 * v, 0.06, 0.04, t0 + 0.08); break;
+    case 'fox_screech': this.tone(dst, 'sawtooth', 1400 * v, 900 * v, 0.6, 0.06); this.tone(dst, 'sawtooth', 1500 * v, 1000 * v, 0.55, 0.04, t0 + 0.02); break;
+    case 'fox_sleep': this.noiseHit(dst, 'lowpass', 300, 0.6, 0.5, 0.15); break;
+    case 'fox_bite': this.noiseHit(dst, 'bandpass', 1600, 2, 0.05, 0.35); this.tone(dst, 'square', 500, 300, 0.05, 0.05); break;
+    case 'fox_spit': this.noiseHit(dst, 'highpass', 2000, 1, 0.08, 0.25); break;
+    case 'fox_eat': this.noiseHit(dst, 'bandpass', 1200, 2, 0.06, 0.25); this.noiseHit(dst, 'bandpass', 1000, 2, 0.05, 0.2); break;
+    case 'fox_sniff': [0, 0.08, 0.16].forEach(dt => this.noiseHit(dst, 'highpass', 3000, 1, 0.04, 0.15)); break;
+    case 'fox_aggro': this.tone(dst, 'sawtooth', 300 * v, 200 * v, 0.3, 0.07); break;
+    case 'fox_hurt': this.tone(dst, 'square', 1200 * v, 700 * v, 0.12, 0.07); break;
+    case 'fox_death': this.tone(dst, 'square', 1100 * v, 400 * v, 0.35, 0.07); break;
+  }
+};
+
+/* ---------------- a shulker box broken by anything keeps its contents (ShulkerBoxBlock loot copies the container) ---------------- */
+const _breakBlockSB = Game.prototype.breakBlock;
+Game.prototype.breakBlock = function (x, y, z, byPlayer, natural) {
+  const w = this.world, id = w.getBlock(x, y, z), be = id && BLK[id].shulker ? w.getBE(x, y, z) : null, n0 = this.entities.length;
+  const r = _breakBlockSB.call(this, x, y, z, byPlayer, natural);
+  if (be && be.items && be.items.some(s => s)) for (const e of this.entities.slice(n0)) if (e instanceof ItemEntity && e.stack.id === id) { e.stack.tag = Object.assign({}, e.stack.tag, { items: be.items.map(saveStack) }); break; }
+  return r;
+};
+
 </script>
 </body>
 </html>
