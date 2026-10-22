@@ -586,6 +586,25 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   shade by day and wake when anything comes near, stalk chickens and rabbits, crouch and pounce
   (landing nose first in snow), and run from players, wolves and polar bears. A fox bred by you
   trusts you and attacks whatever hurts you. Foxes have their own sounds now.
+- **Villagers** carry up to 8 stacks of food and seeds, which they pick up off the ground or walk
+  over to fetch. Bread counts as 4 food, carrots, potatoes and beetroots as 1. Two villagers with
+  12 food each court when they have nothing else to do, eat 12 each, and have a baby if a bed is
+  free within 48 blocks (the baby takes that bed); then they wait 5 minutes. Idle villagers walk
+  up to each other and pass on what they have heard, and one with plenty of food throws some to a
+  farmer or to one that is short of it, so villager breeders with a farmer work as in Java.
+- **Farmers** walk their farmland, harvest ripe crops and replant them from what they carry, use
+  bone meal (you see it in their arms), and at their composter bake bread out of wheat and
+  compost the seeds they don't need.
+- **Gossip**: villagers remember who traded with them, hurt them, killed one of them where they
+  could see it, or cured them, and tell each other (a cure stays with the villager cured). It
+  fades day by day. Prices follow it, and also rise for trades that sold out and fall back when
+  they go unused; villagers restock at their job site up to twice a day. An iron golem turns on a
+  player that the villagers near it think very badly of.
+- Hold an emerald (or anything a villager's trades cost) near a villager and it shows you what it
+  would give for it. A full composter takes a second before its bone meal is ready. Witches drink
+  water breathing, fire resistance, healing and swiftness when they need them, holding the bottle
+  at the nose. The wandering trader drinks invisibility at dusk and milk in the morning, and you
+  can see the bottle while it is invisible.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

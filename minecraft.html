@@ -20696,7 +20696,7 @@ Object.assign(Game.prototype, {
       const lv = m & 15;
       if (lv >= 8) { w.setMeta(x, y, z, 0); this.dropItem(x + 0.5, y + 1.1, z + 0.5, { id: I.BONE_MEAL, count: 1 }); this.sound('pop', x + 0.5, y + 1, z + 0.5); return done(); }
       if (it && COMPOST[held.id] !== undefined && lv < 7) {
-        if (Math.random() < COMPOST[held.id] || lv === 0) w.setMeta(x, y, z, lv + 1 >= 7 ? 8 : lv + 1);
+        if (Math.random() < COMPOST[held.id] || lv === 0) { w.setMeta(x, y, z, lv + 1); if (lv + 1 === 7) w.schedule(x, y, z, 20, 'composter'); }
         p.consumeHeld(1); this.particles.poof(x + 0.5, y + 0.9, z + 0.5, [0.5, 0.8, 0.3], 4); this.sound('step_grass', x + 0.5, y + 1, z + 0.5);
         return done();
       }
@@ -22353,29 +22353,24 @@ Object.assign(GOALS, {
     if (d.sleeping) { d.sleeping = false; m.y += 0.5; }
     // work during the day, meet at the bell in the afternoon
     if (d.job && t >= 2000 && t < 9000) {
+      if (d.prof === 'farmer' && typeof vFarmerWork === 'function' && vFarmerWork(m)) return true;
       const [x, y, z] = d.job, dist = Math.hypot(x + 0.5 - m.x, z + 0.5 - m.z);
       if (dist > 2) { m.goTo(x, y, z, m.T.walk, 1.5); return true; }
       m.lookAt(x + 0.5, y + 0.8, z + 0.5);
       // restock at work twice a day
-      if ((t === 2400 || t === 6000 || (m.age + m.id) % 6000 === 0) && d.trades) for (const o of d.trades) o.uses = 0;
-      if (d.prof === 'farmer' && Math.random() < 0.02 && m.game.rule('mobGriefing')) farmerWork(m);
+      if (typeof vWorkAtSite === 'function') vWorkAtSite(m);
+      else { if ((t === 2400 || t === 6000 || (m.age + m.id) % 6000 === 0) && d.trades) for (const o of d.trades) o.uses = 0; if (d.prof === 'farmer' && Math.random() < 0.02 && m.game.rule('mobGriefing')) farmerWork(m); }
       return Math.random() < 0.97;
     }
     if (d.meet && t >= 9000 && t < 11000 && Math.hypot(d.meet[0] - m.x, d.meet[2] - m.z) > 6) { m.goTo(d.meet[0], d.meet[1], d.meet[2], m.T.walk, 4); return true; }
     if (m.baby && Math.random() < 0.01) { const s = m.randomSpot(8, 2); if (s) m.goTo(s[0], s[1], s[2], m.T.run); }
     if (m.home && Math.hypot(m.home[0] - m.x, m.home[2] - m.z) > 32) { m.goTo(m.home[0], m.home[1], m.home[2], m.T.walk, 6); return true; }
-    // breed when there are free beds
-    if (!m.baby && (m.age + m.id) % 2400 === 0 && Math.random() < 0.3 && d.bed) {
-      const pop = g.entities.filter(e => e.type === 'villager' && !e.dead && m.distTo(e) < 32).length;
-      const beds = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 16, 4, (id, x, y, z) => BLK[id].bed && (w.getMeta(x, y, z) & 4)).length;
-      if (beds > pop) { const b = createMob(g, 'villager', m.x, m.y, m.z, { vtype: d.vtype }); b.growth = -24000; g.entities.push(b); for (let k = 0; k < 5; k++) g.particles.heart(m.x, m.y + 2, m.z); }
-    }
     // GolemSensor: a golem within 16 blocks keeps them from calling another for 30 seconds
     if ((m.age + m.id) % 200 === 0 && g.entities.some(e => e.type === 'iron_golem' && !e.dead && Math.abs(e.x - m.x) < 16.7 && Math.abs(e.y - m.y) < 17 && Math.abs(e.z - m.z) < 16.7)) d.golemSeen = w.tick;
     // gossip: two villagers meeting share news once a minute, and five who want a golem call one
     if ((m.age + m.id) % 20 === 0 && !(d.gossipT > w.tick - 1200)) {
       const o = g.entities.find(e => e !== m && e.type === 'villager' && !e.dead && !e.baby && m.distTo(e) < 2.5 && !(e.data.gossipT > w.tick - 1200));
-      if (o) { d.gossipT = o.data.gossipT = w.tick; villagerGolem(m, 5); }
+      if (o) { d.gossipT = o.data.gossipT = w.tick; if (typeof vTellGossip === 'function') vTellGossip(o, m); villagerGolem(m, 5); }
     }
     return false;
   },
@@ -22441,7 +22436,7 @@ class Villager extends Mob {
     if (attacker instanceof Mob && ['zombie', 'zombie_villager', 'husk', 'drowned'].includes(attacker.type) && Math.random() < [0, 0, 0.5, 1][OPTIONS.difficulty]) {
       this.noDrops = true; this.dead = true;
       const z = createMob(g, 'zombie_villager', this.x, this.y, this.z, { vtype: this.data.vtype, prof: this.data.prof });
-      z.data.trades = this.data.trades; z.data.level = this.data.level; z.data.xp = this.data.xp; z.persistent = true; if (this.baby) z.growth = this.growth;
+      z.data.trades = this.data.trades; z.data.level = this.data.level; z.data.xp = this.data.xp; z.persistent = true; if (this.data.gossip) z.data.gossip = JSON.parse(JSON.stringify(this.data.gossip)); if (this.baby) z.growth = this.growth;
       g.entities.push(z); g.sound('zhurt', this.x, this.y, this.z);
     }
   }
@@ -22474,12 +22469,21 @@ class ZombieVillager extends Mob {
     super.tick();
     if (this.data.curing > 0 && !this.dead) {
       if (this.age % 10 === 0) this.game.particles.poof(this.x, this.y + 1.5, this.z, [0.9, 0.3, 0.3], 2);
+      let step = 1;
+      if (Math.random() < 0.01) {
+        const w = this.game.world, bx = Math.floor(this.x), by = Math.floor(this.y), bz = Math.floor(this.z);
+        let n = 0;
+        for (let x = bx - 4; x < bx + 4 && n < 14; x++) for (let y = by - 4; y < by + 4 && n < 14; y++) for (let z = bz - 4; z < bz + 4 && n < 14; z++) { const id = w.getBlock(x, y, z); if (id === B.IRON_BARS || BLK[id].bed) { if (Math.random() < 0.3) step++; n++; } }
+      }
+      this.data.curing -= step - 1;
       if (--this.data.curing <= 0) {
         this.dead = true; this.noDrops = true;
         const v = createMob(this.game, 'villager', this.x, this.y, this.z, { vtype: this.data.vtype, prof: this.data.prof && this.data.prof !== 'none' ? this.data.prof : undefined });
         if (this.data.trades && this.data.trades.length) { v.data.trades = this.data.trades; v.data.level = this.data.level || 1; v.data.xp = this.data.xp || 0; }
-        // cured villagers give big discounts to the player who cured them
-        for (const o of v.data.trades) o.discount = Math.max(1, Math.floor(o.buy[1] * 0.7));
+        // the cure is remembered (ReputationEventType.ZOMBIE_VILLAGER_CURED), which brings prices right down
+        if (this.data.gossip) v.data.gossip = JSON.parse(JSON.stringify(this.data.gossip));
+        if (this.data.curedBy === 'player' && typeof vGossipAdd === 'function') { vGossipAdd(v, 'majp', 20); vGossipAdd(v, 'minp', 25); }
+        else if (this.data.curedBy === 'player') for (const o of v.data.trades) o.discount = Math.max(1, Math.floor(o.buy[1] * 0.7));
         v.addEffect('nausea', 200, 0); this.game.entities.push(v); this.game.sound('villager_yes', this.x, this.y, this.z);
       }
     }
@@ -22495,9 +22499,14 @@ class WanderingTrader extends Mob {
     if (--this.data.despawn <= 0 && !this.customName) { this.dead = true; for (const e of this.game.entities) if (e.type === 'trader_llama' && this.distTo(e) < 20) e.dead = true; }
     // drinks invisibility at night
     const t = this.game.world.time % 24000;
-    if (t > 13000 && t < 23000 && !this.effectLevel('invisibility') && Math.random() < 0.002) this.addEffect('invisibility', 9600, 0);
+    if (typeof traderDrinks === 'function') traderDrinks(this);
+    else if (t > 13000 && t < 23000 && !this.effectLevel('invisibility') && Math.random() < 0.002) this.addEffect('invisibility', 9600, 0);
   }
-  render(r, a) { if (this.effectLevel('invisibility')) return; super.render(r, a); }
+  render(r, a) {
+    if (!this.effectLevel('invisibility')) return super.render(r, a);
+    // invisible, it still shows what it holds
+    if (this._hold && typeof NO_DRAW !== 'undefined') { this._ghostR = r; super.render(NO_DRAW, a); this._ghostR = null; }
+  }
 }
 Object.assign(MOB_CLASSES, { villager: Villager, zombie_villager: ZombieVillager, wandering_trader: WanderingTrader });
 MOB_TYPES.zombie_villager.ai = MONSTER_AI;
@@ -23754,7 +23763,7 @@ Game.prototype.insertItem = function (be, st, slots) {
 Game.prototype.compost = function (x, y, z, st) {
   const w = this.world, lv = w.getMeta(x, y, z) & 15;
   if (COMPOST[st.id] === undefined || lv >= 7) return false;
-  if (Math.random() < COMPOST[st.id] || lv === 0) w.setMeta(x, y, z, lv + 1 >= 7 ? 8 : lv + 1);
+  if (Math.random() < COMPOST[st.id] || lv === 0) { w.setMeta(x, y, z, lv + 1); if (lv + 1 === 7) w.schedule(x, y, z, 20, 'composter'); }
   return true;
 };
 
@@ -41997,31 +42006,41 @@ MOB_MODELS.fox.anim = function (P, st) {
 };
 const _animFX = MOB_ANIM.fox;
 MOB_ANIM.fox = (m, st) => { if (_animFX) _animFX(m, st); st.sleep = !!m.data.sleeping; st.crouch = !!m.data.crouch; st.crouchAmt = m._crouchAmt || 0; st.faceplant = m.data.faceplant > 0; st.pounce = !!m.data.pounce; };
-// FoxHeldItemLayer: the item lies across its mouth
-function drawFoxMouthItem(r, g, st, at, hx, light) {
-  if (!ITEMS[st.id]) return;
+// a rotation about one axis as PoseStack's Axis.XP/YP/ZP.rotationDegrees makes it, and products of such 3x3 matrices
+const axisRot = (ax, deg) => { const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); return ax === 'x' ? [1, 0, 0, 0, c, -s, 0, s, c] : ax === 'y' ? [c, 0, s, 0, 1, 0, -s, 0, c] : [c, -s, 0, s, c, 0, 0, 0, 1]; };
+const mat3Mul = (...Ms) => Ms.reduce((A, B) => [0, 1, 2].flatMap(i => [0, 1, 2].map(j => A[i * 3] * B[j] + A[i * 3 + 1] * B[3 + j] + A[i * 3 + 2] * B[6 + j])));
+const mat3Apply = (M, p) => [M[0] * p[0] + M[1] * p[1] + M[2] * p[2], M[3] * p[0] + M[4] * p[1] + M[5] * p[2], M[6] * p[0] + M[7] * p[1] + M[8] * p[2]];
+// an item drawn as ItemRenderer draws it on the ground (a flat item at half size, 2 pixels up; a block at a quarter, 3 up), then turned
+// by M and moved by off, in pixels, in the space of a model part (null: the whole model)
+function drawPosedItem(r, g, st, at, part, M, off, light) {
+  if (!st || !ITEMS[st.id]) return;
+  const put = q => { const p = mat3Apply(M, q); return at(part, [off[0] + p[0], off[1] + p[1], off[2] + p[2]]); };
   if (itemStyle(st.id) !== 'sprite') {
-    const s = 4;
     for (let f = 0; f < 6; f++) for (let q = 0; q < 4; q++) {
-      const v = FV[f][q], w = at('head', [hx[0] + (v[0] - 0.5) * s, hx[1] - (v[1] - 0.5) * s, hx[2] + (0.5 - v[2]) * s]);
+      const v = FV[f][q], w = put([(v[0] - 0.5) * 4, (v[1] - 0.5) * 4 + 3, (v[2] - 0.5) * 4]);
       if (!w) return;
       const fs = FSHADE[f];
       r.dv(w[0], w[1], w[2], v[3] / 16, v[4] / 16, faceLayer(st.id, 0, f), fs, fs, fs, 1, light[0], light[1]);
     }
     return;
   }
-  const mdl = g.itemModel(st.id), tint = stackTint(st), k = 8;
+  const mdl = g.itemModel(st.id), tint = stackTint(st);
   for (const quad of mdl.q) for (const v of quad) {
-    const w = at('head', [hx[0] + v[0] * k, hx[1] - v[2] * k, hx[2] - v[1] * k]);
+    const w = put([v[0] * 8, v[1] * 8 + 2, v[2] * 8]);
     if (!w) return;
     const t = tint ? [tint[0] / 255 * v[5], tint[1] / 255 * v[5], tint[2] / 255 * v[5]] : [v[5], v[5], v[5]];
     r.dv(w[0], w[1], w[2], v[3], v[4], mdl.layer, t[0], t[1], t[2], 1, light[0], light[1]);
   }
 }
+// FoxHeldItemLayer: the item lies across its mouth, turned by the head's look alone; asleep the head part is turned 120 degrees away,
+// which the layer does not follow, so that is undone here
+const FOX_ITEM_AWAKE = axisRot('x', 90), FOX_ITEM_ASLEEP = mat3Mul(axisRot('y', 120), axisRot('x', 90), axisRot('z', 90));
 const _renderExtraFX = Mob.prototype.renderExtra;
 Mob.prototype.renderExtra = function (r, a, p, yaw, st, light, at) {
   if (_renderExtraFX) _renderExtraFX.call(this, r, a, p, yaw, st, light, at);
-  if (this.type === 'fox' && this.data.hand && at) drawFoxMouthItem(r, this.game, this.data.hand, at, this.data.sleeping ? [7.36, 4.16, 3.52] : [0.96, 4.32, -8], light);
+  if (this.type !== 'fox' || !this.data.hand || !at) return;
+  if (this.data.sleeping) drawPosedItem(r, this.game, this.data.hand, at, 'head', FOX_ITEM_ASLEEP, mat3Apply(axisRot('y', 120), this.baby ? [6.4, 4.16, 2.4] : [7.36, 4.16, 3.52]), light);
+  else drawPosedItem(r, this.game, this.data.hand, at, 'head', FOX_ITEM_AWAKE, this.baby ? [0.96, 4.16, -8] : [0.96, 4.32, -8], light);
 };
 
 /* ---------------- sounds ---------------- */
@@ -42065,6 +42084,651 @@ Game.prototype.breakBlock = function (x, y, z, byPlayer, natural) {
   const r = _breakBlockSB.call(this, x, y, z, byPlayer, natural);
   if (be && be.items && be.items.some(s => s)) for (const e of this.entities.slice(n0)) if (e instanceof ItemEntity && e.stack.id === id) { e.stack.tag = Object.assign({}, e.stack.tag, { items: be.items.map(saveStack) }); break; }
   return r;
+};
+
+/* @file 144_villagers.js */
+/* ===================================================================
+   PART 33: villagers like Java's
+   - they carry 8 stacks: bread, carrots, potatoes, beetroots, wheat and
+     the seeds they can plant (a farmer also bone meal), picked up from
+     the ground (with mobGriefing) or fetched from 4 blocks away
+   - bread is worth 4 food, a carrot, potato or beetroot 1. Now and then
+     while idle a villager with 12 food courts the nearest other one
+     that has 12 too; about 15 seconds later both eat 12, and if a bed
+     is free within 48 blocks a baby is born and takes it (else they
+     look cross). Then 5 minutes before they can again
+   - idle villagers walk up to each other to talk: they pass gossip on,
+     and one with 24 food or more throws half a stack to a farmer or to
+     one that is short of food; farmers are also thrown spare wheat and
+     seeds (villager breeders with a farmer work)
+   - farmers stroll over their farmland, harvest ripe crops and replant
+     from what they carry, use bone meal (held in their arms), and at
+     the composter bake bread from wheat and compost spare seeds
+   - gossip: villagers remember trades, hurts and killings, and cures;
+     it fades day by day, and prices follow it. Each trade's price also
+     rises with demand and falls back as it goes unused; they restock at
+     work at most twice a day and make up missed restocks the next day.
+     Iron golems turn on a player that villagers near them think very
+     badly of
+   - a player close by holding what a trade costs is shown what the
+     villager would give for it
+   - also: a full composter takes a second to be ready; witches drink
+     like Java's, the bottle at the nose; the wandering trader drinks
+     invisibility at dusk and milk in the morning
+   =================================================================== */
+
+/* ---------------- the inventory ---------------- */
+const vItem = n => ITEM_BY_NAME[n] ? ITEM_BY_NAME[n].id : -1;
+const V_FOOD_PTS = new Map([[vItem('bread'), 4], [vItem('potato'), 1], [vItem('carrot'), 1], [vItem('beetroot'), 1]]);
+const V_WANTED = new Set(['bread', 'potato', 'carrot', 'wheat', 'wheat_seeds', 'beetroot', 'beetroot_seeds', 'torchflower_seeds', 'pitcher_pod'].map(vItem));
+const V_FARMER_WANTED = new Set(['wheat', 'wheat_seeds', 'beetroot_seeds', 'bone_meal'].map(vItem));
+// ItemTags.VILLAGER_PLANTABLE_SEEDS, and what each grows into
+const V_PLANTS = new Map([['wheat_seeds', 'wheat'], ['potato', 'potatoes'], ['carrot', 'carrots'], ['beetroot_seeds', 'beetroots'], ['torchflower_seeds', 'torchflower_crop'], ['pitcher_pod', 'pitcher_crop']].map(([i, b]) => [vItem(i), B[b.toUpperCase()]]).filter(([i, b]) => i >= 0 && b !== undefined));
+const vInv = m => { const d = m.data; if (!Array.isArray(d.inv) || d.inv.length !== 8) d.inv = new Array(8).fill(null); return d.inv; };
+const vCount = (inv, id) => inv.reduce((n, s) => n + (s && s.id === id ? s.count : 0), 0);
+const vFoodPoints = m => vInv(m).reduce((n, s) => n + (s && V_FOOD_PTS.has(s.id) ? s.count * V_FOOD_PTS.get(s.id) : 0), 0);
+// SimpleContainer.canAddItem and addItem
+const vCanAdd = (inv, st) => inv.some(s => !s || (s.id === st.id && !s.tag && s.count < maxStack(s.id)));
+function vAdd(inv, st) {
+  let left = st.count;
+  const max = maxStack(st.id);
+  for (const s of inv) if (left && s && s.id === st.id && !s.tag && s.count < max) { const k = Math.min(left, max - s.count); s.count += k; left -= k; }
+  for (let i = 0; i < inv.length && left; i++) if (!inv[i]) { const k = Math.min(left, max); inv[i] = { id: st.id, count: k }; left -= k; }
+  return left;
+}
+function vRemove(inv, id, n) {
+  for (let i = inv.length - 1; i >= 0 && n > 0; i--) { const s = inv[i]; if (s && s.id === id) { const k = Math.min(n, s.count); s.count -= k; n -= k; if (!s.count) inv[i] = null; } }
+}
+// Villager.wantsToPickUp
+const vWants = (m, st) => (V_WANTED.has(st.id) || (m.data.prof === 'farmer' && V_FARMER_WANTED.has(st.id))) && vCanAdd(vInv(m), st);
+// BehaviorUtils.throwItem: from just below the eyes, at 0.3 toward the spot
+function vThrow(m, st, tx, ty, tz) {
+  const g = m.game, e = g.dropItem(m.x, m.y + 1.62 - 0.3, m.z, st);
+  if (!e) return;
+  const dx = tx - m.x, dy = ty - m.y, dz = tz - m.z, l = Math.hypot(dx, dy, dz) || 1;
+  e.vx = dx / l * 0.3; e.vy = dy / l * 0.3; e.vz = dz / l * 0.3; e.pickupDelay = 10;
+}
+// what lies within reach goes in (Mob.aiStep with mobGriefing, InventoryCarrier.pickUpItem)
+function vPickUp(m) {
+  const g = m.game;
+  if (g.rule('mobGriefing') === false) return;
+  for (const e of g.entities) {
+    if (!(e instanceof ItemEntity) || e.dead || e.pickupDelay > 0) continue;
+    if (Math.abs(e.x - m.x) >= m.w / 2 + 1.125 || Math.abs(e.z - m.z) >= m.w / 2 + 1.125 || e.y + 0.25 <= m.y || e.y >= m.y + m.h) continue;
+    if (!vWants(m, e.stack)) continue;
+    const left = vAdd(vInv(m), e.stack);
+    if (left <= 0) e.dead = true; else e.stack.count = left;
+  }
+}
+// what it carries drops when it dies
+const _dropLootVL = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  const r = _dropLootVL.call(this);
+  if (this.type === 'villager' && !this.noDrops && Array.isArray(this.data.inv)) { for (const s of this.data.inv) if (s) this.game.dropItem(this.x, this.y + 0.5, this.z, s); this.data.inv = null; }
+  return r;
+};
+
+/* ---------------- the day ---------------- */
+// Schedule.VILLAGER_DEFAULT and what each activity needs: work a job site, meeting a bell; anything else is idle (babies play)
+function vActivity(m) {
+  const t = m.game.world.time % 24000, d = m.data;
+  if (t >= 12000 || t < 10) return 'rest';
+  if (m.baby) return 'idle';
+  if (t >= 2000 && t < 9000 && d.job) return 'work';
+  if (t >= 9000 && t < 11000 && d.meet) return 'meet';
+  return 'idle';
+}
+// the nearest villager in sight within 8 blocks that passes a test
+function vNearestVillager(m, ok) {
+  let best = null, bd = 8;
+  for (const e of m.game.entities) if (e !== m && e.type === 'villager' && !e.dead && !(e.deathTime > 0) && ok(e)) { const k = m.distTo(e); if (k < bd && m.canSee(e)) { bd = k; best = e; } }
+  return best;
+}
+const vDist2 = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2;
+// BehaviorUtils.lockGazeAndWalkToEachOther, from one side: look at it and walk to within 2 blocks (a villager's walk is Java's speed 0.5)
+function vWalkTo(m, o) {
+  m.lookAt(o.x, o.y + 1.6, o.z);
+  if (vDist2(m, o) > 4) { if (!m.nav || m.navDone() || m.age % 20 === 0) m.goTo(o.x, o.y, o.z, m.T.walk, 2); else m.followPath(); }
+  else m.nav = null;
+}
+
+/* ---------------- food and babies ---------------- */
+const vCanBreed = m => !m.baby && !(m.breedCd > 0) && !m.data.sleeping && (m.data.food || 0) + vFoodPoints(m) >= 12;
+// Villager.eatAndDigestFood: eats up to 12, then uses 12
+function vEatAndDigest(m) {
+  const d = m.data, inv = vInv(m);
+  d.food = d.food || 0;
+  for (let i = 0; i < inv.length && d.food < 12; i++) {
+    const s = inv[i], pts = s && V_FOOD_PTS.get(s.id);
+    if (!pts) continue;
+    while (s.count > 0 && d.food < 12) { d.food += pts; s.count--; }
+    if (!s.count) inv[i] = null;
+  }
+  d.food -= 12;
+}
+// VillagerMakeLove.takeVacantBed: the nearest unclaimed bed within 48 blocks
+function vFreeBed(m) {
+  const g = m.game, w = g.world;
+  const beds = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 48, 8, (id, x, y, z) => BLK[id].bed && (w.getMeta(x, y, z) & 4) && poiFree(g, 'bed', [x, y, z], m)
+    && !g.entities.some(e => e.type === 'villager' && !e.dead && e.data.bed && e.data.bed[0] === x && e.data.bed[1] === y && e.data.bed[2] === z));
+  if (!beds.length) return null;
+  beds.sort((a, b) => Math.hypot(a[0] - m.x, a[1] - m.y, a[2] - m.z) - Math.hypot(b[0] - m.x, b[1] - m.y, b[2] - m.z));
+  return beds[0];
+}
+function vGiveBirth(a, b) {
+  const g = a.game;
+  const bed = vFreeBed(a);
+  if (!bed) { for (const v of [a, b]) g.particles.icon(v.x, v.y + 2.1, v.z, 'angry', 1); return null; }
+  // Villager.getBreedOffspring: the biome's kind half the time, else a parent's
+  const r = Math.random(), vtype = r < 0.5 ? villagerTypeFor(biomeAt(g, a.x, a.z)) : r < 0.75 ? a.data.vtype : b.data.vtype;
+  const baby = createMob(g, 'villager', a.x, a.y, a.z, { vtype });
+  if (!baby) return null;
+  baby.growth = -24000; baby.data.bed = [bed[0], bed[1], bed[2]]; claimPOI(g, 'bed', baby.data.bed, baby);
+  a.breedCd = b.breedCd = 6000;
+  baby.savePrev(); g.entities.push(baby);
+  for (let k = 0; k < 5; k++) g.particles.heart(baby.x + (Math.random() - 0.5), baby.y + 1, baby.z + (Math.random() - 0.5));
+  return baby;
+}
+function vEndLove(m) { const L = m._love; if (!L) return; if (L.a._love === L) L.a._love = null; if (L.b._love === L) L.b._love = null; }
+Object.assign(GOALS, {
+  // GoToWantedItem: something it wants within 4 blocks
+  villagerFetch(m) {
+    const d = m.data, g = m.game;
+    if (d.sleeping || d.trading || g.rule('mobGriefing') === false) { m._fetch = null; return false; }
+    let t = m._fetch;
+    if (t && (t.dead || t.pickupDelay > 0 || !vWants(m, t.stack) || m.distTo(t) > 4.5)) t = m._fetch = null;
+    if (!t) {
+      if ((m.age + m.id) % 10) return false;
+      let bd = 4;
+      for (const e of g.entities) if (e instanceof ItemEntity && !e.dead && e.pickupDelay <= 0 && vWants(m, e.stack)) { const k = m.distTo(e); if (k < bd && m.canSee(e)) { bd = k; t = e; } }
+      if (!(m._fetch = t)) return false;
+    }
+    if (!m.nav || m.navDone() || m.age % 20 === 0) m.goTo(t.x, t.y, t.z, m.T.walk, 0); else m.followPath();
+    return true;
+  },
+  // InteractWith (BREED_TARGET) and VillagerMakeLove: now and then while idle, the nearest willing villager in sight within 8 blocks;
+  // 275 to 325 ticks later, if the two are together, both eat 12 and a baby is born when a bed is free
+  villagerLove(m) {
+    const d = m.data, g = m.game, w = g.world;
+    let L = m._love;
+    if (L && L.b === m) {
+      // the other one only walks over and looks
+      if (L.a._love !== L || L.a.dead) { m._love = null; return false; }
+      if (d.trading || d.sleeping || m.panic > 0) return false;
+      vWalkTo(m, L.a);
+      return true;
+    }
+    if (vActivity(m) !== 'idle' || d.trading || m.panic > 0 || !vCanBreed(m)) { if (L) vEndLove(m); return false; }
+    if (L && (L.b.dead || !vCanBreed(L.b) || w.tick > L.at)) { vEndLove(m); L = null; }
+    if (!L) {
+      if ((m.age + m.id) % 20 || Math.random() >= 1 / 12) return false;
+      const p = vNearestVillager(m, e => !e._love && vCanBreed(e));
+      if (!p) return false;
+      L = m._love = p._love = { a: m, b: p, at: w.tick + 275 + Math.floor(Math.random() * 50) };
+    }
+    const p = L.b;
+    vWalkTo(m, p);
+    if (vDist2(m, p) > 5) return true;
+    if (w.tick >= L.at) { vEatAndDigest(m); vEatAndDigest(p); vGiveBirth(m, p); vEndLove(m); }
+    else if (Math.random() < 1 / 35) for (const v of [m, p]) for (let k = 0; k < 5; k++) g.particles.heart(v.x + (Math.random() - 0.5) * 1.2, v.y + 1 + Math.random(), v.z + (Math.random() - 0.5) * 1.2);
+    return true;
+  },
+  // InteractWith (INTERACTION_TARGET), and SocializeAtBell while meeting: now and then the nearest villager in sight within 8 blocks,
+  // walked up to; right beside it (TradeWithVillager) food and seeds change hands
+  villagerChat(m) {
+    const d = m.data, act = vActivity(m);
+    let C = m._chat;
+    if ((act !== 'idle' && act !== 'meet') || d.trading || d.sleeping || m.panic > 0) { m._chat = null; return false; }
+    if (C && (C.with.dead || C.with.deathTime > 0 || --C.left <= 0 || m.distTo(C.with) > 8)) C = m._chat = null;
+    if (!C) {
+      if ((m.age + m.id) % 20 || Math.random() >= 1 / 6) return false;
+      const o = vNearestVillager(m, () => true);
+      if (!o) return false;
+      C = m._chat = { with: o, left: 100 };
+    }
+    vWalkTo(m, C.with);
+    if ((m.age + m.id) % 10 === 0 && vDist2(m, C.with) <= 5) vShare(m, C.with);
+    return true;
+  },
+});
+// TradeWithVillager: with 24 food or more, half a stack of food for a farmer or for one short of food (under 12, a farmer under 60);
+// to a farmer also wheat beyond 32, and from anyone else the seeds and bone meal farmers want (throwHalfStack: the first stack over
+// half full gives half, or one over 24 what is over)
+function vShare(m, o) {
+  const inv = vInv(m), d = m.data;
+  const half = ids => {
+    for (let i = 0; i < inv.length; i++) {
+      const s = inv[i];
+      if (!s || !ids.has(s.id)) continue;
+      const n = s.count > maxStack(s.id) / 2 ? Math.floor(s.count / 2) : s.count > 24 ? s.count - 24 : 0;
+      if (!n) continue;
+      s.count -= n; if (!s.count) inv[i] = null;
+      vThrow(m, { id: s.id, count: n }, o.x, o.y, o.z);
+      return;
+    }
+  };
+  const farmer = o.data.prof === 'farmer';
+  if (vFoodPoints(m) >= 24 && (d.prof === 'farmer' || vFoodPoints(o) < (farmer ? 60 : 12))) half(V_FOOD_PTS);
+  if (farmer && vCount(inv, vItem('wheat')) > 32) half(new Set([vItem('wheat')]));
+  if (farmer && d.prof !== 'farmer') half(V_FARMER_WANTED);
+}
+
+/* ---------------- farmers ---------------- */
+// CropBlock: wheat, carrots, potatoes, beetroots and torchflowers (not stems, nether wart or the pitcher plant)
+const vIsCrop = id => { const d = BLK[id]; return !!(d && d.crop && !d.stem && id !== B.NETHER_WART && id !== B.PITCHER_CROP); };
+const vCropRipe = (id, meta) => vIsCrop(id) && id !== B.TORCHFLOWER_CROP && (meta & 7) >= (BLK[id].maxAge !== undefined ? BLK[id].maxAge : 7);
+// HarvestFarmland.validPos: a ripe crop, or air over farmland
+const vFarmSpot = (w, x, y, z) => vCropRipe(w.getBlock(x, y, z), w.getMeta(x, y, z)) || (w.getBlock(x, y, z) === 0 && w.getBlock(x, y - 1, z) === B.FARMLAND);
+const vBonemealable = (w, x, y, z) => { const id = w.getBlock(x, y, z); return vIsCrop(id) && !vCropRipe(id, w.getMeta(x, y, z)); };
+// the spots in the 3x3x3 around its feet that pass a test
+function vAround(m, ok) {
+  const w = m.game.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z), out = [];
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) if (ok(w, bx + i, by + j, bz + k)) out.push([bx + i, by + j, bz + k]);
+  return out;
+}
+const vPick = list => list.length ? list[Math.floor(Math.random() * list.length)] : null;
+// BlockPos.closerToCenterThan
+const vAtBlock = (m, p, r) => Math.hypot(p[0] + 0.5 - m.x, p[1] + 0.5 - m.y, p[2] + 0.5 - m.z) < r;
+// WorkAtComposter.makeBread: 3 wheat a loaf, up to 3 loaves, while it has 36 bread or fewer
+function vMakeBread(m) {
+  const inv = vInv(m), wheat = vItem('wheat'), bread = vItem('bread');
+  if (vCount(inv, bread) > 36) return;
+  const n = Math.min(3, Math.floor(vCount(inv, wheat) / 3));
+  if (!n) return;
+  vRemove(inv, wheat, n * 3);
+  const left = vAdd(inv, { id: bread, count: n });
+  if (left) m.game.dropItem(m.x, m.y + 0.5, m.z, { id: bread, count: left });
+}
+// WorkAtComposter.compostItems: takes the bone meal out of a ready one, then from the last slot back keeps 10 of each kind of seed and
+// puts in the rest, 20 at most, until it is full
+function vCompost(m, x, y, z) {
+  const g = m.game, w = g.world, inv = vInv(m), seeds = [vItem('wheat_seeds'), vItem('beetroot_seeds')], seen = [0, 0];
+  if ((w.getMeta(x, y, z) & 15) === 8) {
+    w.setMeta(x, y, z, 0);
+    const e = g.dropItem(x + 0.5 + (Math.random() - 0.5) * 0.7, y + 1.01, z + 0.5 + (Math.random() - 0.5) * 0.7, { id: I.BONE_MEAL, count: 1 });
+    if (e) { e.vx = e.vy = e.vz = 0; e.pickupDelay = 10; }
+    g.sound('pop', x + 0.5, y + 1, z + 0.5);
+  }
+  let budget = 20;
+  for (let l = inv.length - 1; l >= 0 && budget > 0; l--) {
+    const s = inv[l], k = s ? seeds.indexOf(s.id) : -1;
+    if (k < 0) continue;
+    seen[k] += s.count;
+    const n = Math.min(seen[k] - 10, budget, s.count);
+    if (n <= 0) continue;
+    budget -= n;
+    for (let i = 0; i < n && (w.getMeta(x, y, z) & 15) < 7; i++) { g.compost(x, y, z, s); s.count--; }
+    if (!s.count) inv[l] = null;
+    if ((w.getMeta(x, y, z) & 15) >= 7) break;
+  }
+}
+// the farmer's work (VillagerGoalPackages.getWorkPackage): RunOne goes through, in an order shuffled by weight, working at the composter,
+// strolling around it and walking back to it (7 + 2 + 5), a walk to the farmland (5), harvesting (2) and bone meal (4), and starts the
+// first that can
+const V_FARM_WEIGHTS = [['composter', 14], ['field', 5], ['harvest', 2], ['bonemeal', 4]];
+function vFarmerStart(m, kind) {
+  const d = m.data, g = m.game, w = g.world;
+  if (kind === 'composter') return { kind, t: 0, dur: 60 + Math.floor(Math.random() * 60) };
+  if (kind === 'field') {
+    // StrollToPoiList: one of the farmland blocks within 4 across and 2 up or down (SecondaryPoiSensor), while within 6 of the composter
+    if (!vAtBlock(m, d.job, 6)) return null;
+    const to = vPick(scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 4, 2, id => id === B.FARMLAND));
+    return to ? { kind, t: 0, to } : null;
+  }
+  if (kind === 'harvest') {
+    // HarvestFarmland: with mobGriefing, a ripe crop or bare farmland right around it; it does nothing until 40 ticks after the last time
+    if (g.rule('mobGriefing') === false) return null;
+    const spots = vAround(m, vFarmSpot);
+    return spots.length ? { kind, t: 0, spots, at: vPick(spots), ok: m._harvestOk || 0 } : null;
+  }
+  if (kind === 'bonemeal') {
+    // UseBonemeal: on a tick that is a multiple of 10, 160 ticks after the last time, with bone meal and a crop still growing around it
+    if (m.age % 10 || (m._bmLast !== undefined && m._bmLast + 160 > m.age) || !vCount(vInv(m), I.BONE_MEAL)) return null;
+    const at = vPick(vAround(m, vBonemealable));
+    return at ? { kind, t: 0, at, next: w.tick, worked: 0 } : null;
+  }
+  return null;
+}
+function vFarmerPick(m) {
+  const opts = V_FARM_WEIGHTS.slice();
+  while (opts.length) {
+    let r = Math.random() * opts.reduce((n, o) => n + o[1], 0), i = 0;
+    while (i < opts.length - 1 && r >= opts[i][1]) r -= opts[i++][1];
+    const F = vFarmerStart(m, opts.splice(i, 1)[0][0]);
+    if (F) return F;
+  }
+  return null;
+}
+// a behaviour lasts 60 ticks unless it says otherwise (Behavior's default duration)
+function vFarmerStop(m) {
+  const F = m._farm, w = m.game.world;
+  if (F && F.kind === 'harvest') m._harvestOk = w.tick + 40;
+  if (F && F.kind === 'bonemeal') { m._bmLast = m.age; m._hold = null; }
+  m._farm = null;
+}
+// true while it is busy, false to go back to the composter
+function vFarmerWork(m) {
+  const d = m.data, g = m.game, w = g.world;
+  if (!d.job) return false;
+  const F = m._farm || (m._farm = vFarmerPick(m));
+  if (!F) return false;
+  F.t++;
+  if (F.kind === 'composter') { if (F.t > F.dur) vFarmerStop(m); return false; }
+  if (F.kind === 'field') {
+    if (F.t > 200 || vAtBlock(m, [F.to[0], F.to[1] + 1, F.to[2]], 1.5)) { vFarmerStop(m); return true; }
+    if (!m.nav || m.navDone() || m.age % 20 === 0) m.goTo(F.to[0] + 0.5, F.to[1] + 1, F.to[2] + 0.5, m.T.walk, 1); else m.followPath();
+    return true;
+  }
+  if (F.kind === 'harvest') {
+    if (F.t > 60 || g.rule('mobGriefing') === false) { vFarmerStop(m); return false; }
+    if (!F.at || w.tick <= F.ok) { m.nav = null; return true; }
+    const [x, y, z] = F.at;
+    m.lookAt(x + 0.5, y + 0.5, z + 0.5);
+    if (!vAtBlock(m, F.at, 1)) { if (!m.nav || m.navDone() || m.age % 20 === 0) m.goTo(x + 0.5, y, z + 0.5, m.T.walk, 0.3); else m.followPath(); return true; }
+    m.nav = null;
+    // HarvestFarmland.tick goes by the block as it was: a ripe crop is broken, bare farmland planted the tick after, and once a young
+    // crop stands there it moves on to another spot a second later
+    const id = w.getBlock(x, y, z), meta = w.getMeta(x, y, z), soil = w.getBlock(x, y - 1, z);
+    if (vCropRipe(id, meta)) g.breakBlock(x, y, z, null, true);
+    if (id === 0 && soil === B.FARMLAND) {
+      const inv = vInv(m);
+      for (let i = 0; i < inv.length; i++) {
+        const s = inv[i], crop = s ? V_PLANTS.get(s.id) : undefined;
+        if (crop === undefined) continue;
+        w.setBlock(x, y, z, crop, 0); g.sound('place_grass', x + 0.5, y + 0.5, z + 0.5); g.remeshNear(x, z);
+        s.count--; if (!s.count) inv[i] = null;
+        break;
+      }
+    }
+    if (vIsCrop(id) && !vCropRipe(id, meta)) {
+      F.spots = F.spots.filter(p => p !== F.at);
+      F.at = vPick(F.spots);
+      F.ok = w.tick + 20;
+    }
+    return true;
+  }
+  if (F.kind === 'bonemeal') {
+    if (F.t > 60 || F.worked >= 80 || !F.at) { vFarmerStop(m); return false; }
+    m._hold = { id: I.BONE_MEAL, count: 1 };
+    const [x, y, z] = F.at;
+    m.lookAt(x + 0.5, y + 0.5, z + 0.5);
+    if (!vAtBlock(m, F.at, 1)) { if (!m.nav || m.navDone() || m.age % 20 === 0) m.goTo(x + 0.5, y, z + 0.5, m.T.walk, 0.3); else m.followPath(); return true; }
+    m.nav = null;
+    if (w.tick >= F.next) {
+      const inv = vInv(m);
+      if (vCount(inv, I.BONE_MEAL) && vBonemealable(w, x, y, z) && g.boneMeal(x, y, z)) {
+        vRemove(inv, I.BONE_MEAL, 1);
+        g.particles.icon(x + 0.5, y + 0.3, z + 0.5, 'happy', 15);
+        F.at = vPick(vAround(m, vBonemealable)); F.next = w.tick + 40;
+      }
+      F.worked++;
+    }
+    return true;
+  }
+  vFarmerStop(m);
+  return false;
+}
+
+/* ---------------- gossip and prices ---------------- */
+// GossipType: [weight, max, fades a day, lost in the telling]
+const V_GOSSIP = { majn: [-5, 100, 10, 10], minn: [-1, 200, 20, 20], minp: [1, 200, 1, 5], majp: [5, 100, 0, 100], trade: [1, 25, 2, 20] };
+const vGossip = m => m.data.gossip || (m.data.gossip = {});
+function vGossipAdd(m, k, n) { const G = vGossip(m), cur = G[k] || 0, v = cur + n; G[k] = v > V_GOSSIP[k][1] ? Math.max(V_GOSSIP[k][1], cur) : v; }
+function vReputation(m) { const G = m.data && m.data.gossip; if (!G) return 0; let r = 0; for (const k in V_GOSSIP) r += (G[k] || 0) * V_GOSSIP[k][0]; return r; }
+// GossipContainer.transferFrom: ten draws weighted by how much each piece counts; what is heard loses a little and is kept if it is
+// still 2 or more and more than the listener knew (a cure is never passed on)
+function vTellGossip(from, to) {
+  const G = from.data.gossip;
+  if (!G) return;
+  const keys = Object.keys(G).filter(k => V_GOSSIP[k] && G[k]), cum = [];
+  let tot = 0;
+  for (const k of keys) { tot += Math.abs(G[k] * V_GOSSIP[k][0]); cum.push(tot); }
+  if (!tot) return;
+  const heard = new Set();
+  for (let i = 0; i < 10; i++) { const r = Math.floor(Math.random() * tot); heard.add(keys[cum.findIndex(c => r < c)]); }
+  for (const k of heard) { const v = G[k] - V_GOSSIP[k][3]; if (v >= 2) { const T = vGossip(to); T[k] = Math.max(T[k] || 0, v); } }
+}
+// MerchantOffer.getCostA with the special price of Villager.updateSpecialPrices (reputation, Hero of the Village), in float as in Java
+offerPrice = function (o, p) {
+  const m = game && game.trader, base = o.buy[1], F = Math.fround;
+  if (!m || m.type !== 'villager') return Math.max(1, base);
+  const pm = F(o.pm !== undefined ? o.pm : 0.05);
+  let n = base + Math.max(0, Math.floor(F(F(base * (o.demand || 0)) * pm)));
+  const rep = vReputation(m);
+  if (rep) n -= Math.floor(F(F(rep) * pm));
+  const hero = p && p.effectLevel ? p.effectLevel('hero_of_the_village') : 0;
+  if (hero) n -= Math.max(Math.floor((0.3 + 0.0625 * (hero - 1)) * base), 1);
+  if (o.discount !== undefined && !m.data.gossip) n = Math.min(n, o.discount);
+  return Math.max(1, Math.min(maxStack(o.buy[0]), n));
+};
+// VillagerTrades: armor, tools, weapons, bells, shields, enchanted books and explorer maps follow prices four times as much
+function vPriceMul(o) {
+  const it = o.sell && ITEMS[o.sell.id];
+  if (!it) return 0.05;
+  if (it.armor || it.tool || it.dmg || o.sell.id === B.BELL || o.sell.id === I.SHIELD || o.sell.id === I.ENCHANTED_BOOK || (o.sell.tag && o.sell.tag.map && o.sell.tag.explorer)) return 0.2;
+  return 0.05;
+}
+const _makeOfferVL = makeOffer;
+makeOffer = function (tp, R) { const o = _makeOfferVL(tp, R); if (o) { o.pm = vPriceMul(o); o.demand = 0; } return o; };
+// MerchantOffer.updateDemand
+const vUpdateDemand = d => { for (const o of d.trades) { if (o.pm === undefined) o.pm = vPriceMul(o); o.demand = (o.demand || 0) + o.uses - (o.max - o.uses); } };
+// Villager.shouldRestock and restock: at work, at most twice a day and 2400 ticks apart. On a new day (or 12000 ticks after the last
+// restock) the ones it missed are made up (catchUpDemand: the stock back, and the demand worked out once for each)
+function vMaybeRestock(m) {
+  const d = m.data, w = m.game.world, now = w.tick, day = Math.floor(w.time / 24000);
+  if (!d.trades || !d.trades.length) return;
+  const reset = now > (d.restockAt || 0) + 12000 || (d.restockDay !== undefined && day > d.restockDay);
+  d.restockDay = day;
+  if (reset) {
+    d.restockAt = now;
+    const miss = 2 - (d.restocks || 0);
+    if (miss > 0) for (const o of d.trades) o.uses = 0;
+    for (let k = 0; k < miss; k++) vUpdateDemand(d);
+    d.restocks = 0;
+  }
+  const allowed = !d.restocks || (d.restocks < 2 && now > (d.restockAt || 0) + 2400);
+  if (!allowed || !d.trades.some(o => o.uses > 0)) return;
+  vUpdateDemand(d);
+  for (const o of d.trades) o.uses = 0;
+  d.restockAt = now; d.restocks = (d.restocks || 0) + 1;
+  m.game.sound('villager_yes', m.x, m.y, m.z);
+}
+// WorkAtPoi: at the job site every 15 seconds or so (half the time): restock, and a farmer's bread and compost
+function vWorkAtSite(m) {
+  const d = m.data, w = m.game.world;
+  if (w.tick - (d.workedAt || -1e9) < 300 || Math.random() < 0.5) return;
+  d.workedAt = w.tick;
+  if (d.prof === 'farmer' && d.job && w.getBlock(d.job[0], d.job[1], d.job[2]) === B.COMPOSTER) { vMakeBread(m); vCompost(m, d.job[0], d.job[1], d.job[2]); }
+  vMaybeRestock(m);
+}
+// a trade is remembered (once a tick, however many are taken at once), and so is any hurt from a player, with an angry look; a killing
+// by the villagers that saw it
+const _takeVL = SCREEN_LOGIC.merchant.take;
+SCREEN_LOGIC.merchant.take = function (ui) {
+  const m = ui.inv.data, r = _takeVL.call(this, ui);
+  if (m && m.type === 'villager' && m._traded !== m.game.world.tick) { m._traded = m.game.world.tick; vGossipAdd(m, 'trade', 2); }
+  return r;
+};
+const _onHurtByVL = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  if (this.type === 'villager' && a instanceof Player) { vGossipAdd(this, 'minn', 25); if (this.health > 0) this.game.particles.icon(this.x, this.y + 2.1, this.z, 'angry', 1); }
+  return _onHurtByVL.call(this, a, source);
+};
+const _dieVL = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  if (this.type === 'villager' && attacker instanceof Player && !(this.deathTime > 0)) for (const e of this.game.entities) if (e !== this && e.type === 'villager' && !e.dead && e.distTo(this) < 16 && e.canSee(this)) vGossipAdd(e, 'majn', 25);
+  return _dieVL.call(this, source, attacker);
+};
+// IronGolem's DefendVillageTargetGoal: a player that a villager around it (10 blocks across, 8 up and down, both in sight) thinks -100
+// or worse of. As in Java the golem goes on remembering that player, and turns on them whenever it has nothing else to fight and they
+// are within its follow range. A golem a player built never attacks players
+GOALS.golemDefend = function (m) {
+  const g = m.game, p = g.player;
+  if (m.data.playerMade || m.target || !p || p.dead || !p.survival) return false;
+  if (!m._defend) {
+    if ((m.age + m.id) % 10) return false;
+    const inBox = e => Math.abs(e.x - m.x) < 10 + (m.w + e.w) / 2 && Math.abs(e.z - m.z) < 10 + (m.w + e.w) / 2 && e.y < m.y + m.h + 8 && e.y + e.h > m.y - 8;
+    if (!inBox(p) || !m.canSee(p)) return false;
+    if (!g.entities.some(e => e.type === 'villager' && !e.dead && inBox(e) && vReputation(e) <= -100 && m.canSee(e))) return false;
+    m._defend = true;
+  }
+  if (m.distTo(p) < 16) { m.target = p; m.anger = 600; }
+  return false;
+};
+if (MOB_TYPES.iron_golem && !MOB_TYPES.iron_golem.ai.includes('golemDefend')) MOB_TYPES.iron_golem.ai.unshift('golemDefend');
+
+/* ---------------- showing trades ---------------- */
+// ShowTradesToPlayer: a player within about 4 blocks and in sight, holding what one of its trades costs (with stock left), is shown
+// what it would give for it, two seconds each in turn
+function vShowTrades(m) {
+  const g = m.game, p = g.player, d = m.data;
+  let S = m._show;
+  if (!S && (m.age + m.id) % 5) return;
+  const held = p && p.inv ? p.inv[p.sel] : null;
+  const ok = !!held && !p.dead && p.mode !== 3 && !m.baby && !d.sleeping && !d.trading && !(m.panic > 0) && vActivity(m) !== 'rest' && !!d.trades && d.trades.length > 0 && vDist2(m, p) <= 17;
+  if (S && (!ok || S.id !== held.id)) { if (m._hold === S.cur) m._hold = null; S = m._show = null; }
+  if (!ok) return;
+  if (!S) {
+    if (!m.canSee(p)) return;
+    const items = d.trades.filter(o => o.uses < o.max && (o.buy[0] === held.id || (o.buy2 && o.buy2[0] === held.id))).map(o => copyStack(o.sell));
+    if (!items.length) return;
+    S = m._show = { id: held.id, items, i: 0, c: 0, cur: items[0] };
+  }
+  if (S.items.length >= 2 && ++S.c >= 40) { S.i = (S.i + 1) % S.items.length; S.c = 0; S.cur = S.items[S.i]; }
+  if (!m._farm || m._farm.kind !== 'bonemeal') m._hold = S.cur;
+  m.lookAt(p.x, p.y + 1.62, p.z);
+}
+
+/* ---------------- items held by villager-shaped mobs ---------------- */
+// CrossedArmsItemLayer: what a villager or a wandering trader holds stands in its folded arms; WitchItemLayer: a potion goes to the nose
+const ARMS_ITEM_M = axisRot('x', 180), WITCH_POTION_M = mat3Mul(axisRot('z', 180), axisRot('x', 140), axisRot('z', 10), axisRot('x', 180));
+const _renderExtraVL = Mob.prototype.renderExtra;
+Mob.prototype.renderExtra = function (r, a, p, yaw, st, light, at) {
+  if (_renderExtraVL) _renderExtraVL.call(this, r, a, p, yaw, st, light, at);
+  if (!at) return;
+  const out = this._ghostR || r;
+  if (this.type === 'witch' && this.data.hand) {
+    if (this.data.hand.id === I.POTION) drawPosedItem(out, this.game, this.data.hand, at, 'nose', WITCH_POTION_M, [1, 4, 0], light);
+    else drawPosedItem(out, this.game, this.data.hand, at, null, ARMS_ITEM_M, [0, 6.4, -6.4], light);
+  } else if ((this.type === 'villager' || this.type === 'wandering_trader') && this._hold) drawPosedItem(out, this.game, this._hold, at, null, ARMS_ITEM_M, [0, 6.4, -6.4], light);
+};
+// WitchModel: the nose wobbles a little, and comes down to the bottle while it holds one
+const _animWitchVL = MOB_MODELS.witch.anim;
+MOB_MODELS.witch.anim = function (P, st) {
+  _animWitchVL.call(this, P, st);
+  const f = 0.01 * (st.wid || 0), k = Math.PI / 180;
+  P.nose = [Math.sin(st.age * f) * 4.5 * k, 0, Math.cos(st.age * f) * 2.5 * k];
+  P['nose#p'] = [0, -2, 0];
+  if (st.drink) { P.nose = [-0.9, 0, P.nose[2]]; P['nose#p'] = [0, 1, -1.5]; }
+};
+const _mobAnimWitchVL = MOB_ANIM.witch;
+MOB_ANIM.witch = (m, st) => { if (_mobAnimWitchVL) _mobAnimWitchVL(m, st); st.drink = !!m.data.hand; st.wid = m.id % 10; };
+
+/* ---------------- witches drink like Java's ---------------- */
+// Witch.aiStep: while not drinking, each tick a chance at a potion for what troubles it: water breathing with its head under water,
+// fire resistance when burning, healing when hurt, swiftness for a target more than 11 blocks off; it stands still while it drinks
+// (32 ticks). performRangedAttack: slowness at a target 8 blocks off, poison at one with 8 health or more, now and then weakness up
+// close, else harming, thrown at 0.75 with a spread of 8
+GOALS.witch = function (m) {
+  const t = m.target, d = m.data, g = m.game, R = Math.random;
+  if (d.drinking > 0) {
+    m.nav = null;
+    if (--d.drinking <= 0) {
+      const st = d.hand, key = st && st.tag && st.tag.potion;
+      d.hand = null; d.potion = null;
+      if (key) for (const [e, ti, a] of (POTION_BY_KEY[key] || { effects: [] }).effects) EFFECTS[e][3] ? m.instantEffect(e, a) : m.addEffect(e, ti, a);
+    }
+    return true;
+  }
+  let pot = null;
+  if (R() < 0.15 && m.headInWater && !m.effectLevel('water_breathing')) pot = 'water_breathing';
+  else if (R() < 0.15 && (m.fireTicks > 0 || m.inLava) && !m.effectLevel('fire_resistance')) pot = 'fire_resistance';
+  else if (R() < 0.05 && m.health < m.maxHealth) pot = 'healing';
+  else if (R() < 0.5 && t && !m.effectLevel('speed') && vDist2(m, t) > 121) pot = 'swiftness';
+  if (pot) { d.drinking = 32; d.potion = pot; d.hand = { id: I.POTION, count: 1, tag: { potion: pot } }; g.sound('drink', m.x, m.y + 1, m.z); m.nav = null; return true; }
+  if (!t) return false;
+  const dist = m.distTo(t), seen = m.canSee(t);
+  m.lookAt(t.x, t.y + 1.5, t.z);
+  if (dist > 10 || !seen) { if (m.age % 10 === 0 || !m.nav || m.navDone()) m.goTo(t.x, t.y, t.z, m.T.walk, 3); else m.followPath(); }
+  else m.nav = null;
+  if ((m.shootCd = (m.shootCd || 60) - 1) <= 0 && dist < 10 && seen) {
+    m.shootCd = 60;
+    const dx = t.x + t.vx - m.x, dz = t.z + t.vz - m.z, hd = Math.hypot(dx, dz), dy = t.y + (t instanceof Player ? 1.62 : t.h * 0.85) - 1.1 - m.y;
+    const kind = hd >= 8 && !t.effectLevel('slowness') ? 'slowness' : t.health >= 8 && !t.effectLevel('poison') ? 'poison' : hd <= 3 && !t.effectLevel('weakness') && R() < 0.25 ? 'weakness' : 'harming';
+    const vy = dy + hd * 0.2, l = Math.hypot(dx, vy, dz) || 1, sp = () => 0.0172275 * 8 * (R() - R());
+    const pr = g.spawnProjectile('potion', m.x, m.y + 1.52, m.z, (dx / l + sp()) * 0.75, (vy / l + sp()) * 0.75, (dz / l + sp()) * 0.75, m);
+    pr.stack = { id: I.SPLASH_POTION, count: 1, tag: { potion: kind } };
+    g.sound('throw', m.x, m.y + 1, m.z);
+  }
+  return true;
+};
+
+/* ---------------- the wandering trader's potions ---------------- */
+// WanderingTrader's UseItemGoals: at night, if it is not invisible, it drinks a potion of invisibility (3 minutes); by day, if it is,
+// a bucket of milk. What it drinks shows in its arms for the 32 ticks, even while it is invisible
+function traderDrinks(m) {
+  const g = m.game;
+  if (m._drink) {
+    if (m._drink.t % 4 === 0) g.sound('drink', m.x, m.y + 1, m.z);
+    if (--m._drink.t > 0) return;
+    const k = m._drink.kind;
+    m._drink = null; m._hold = null;
+    if (k === 'invisibility') m.addEffect('invisibility', 3600, 0); else m.clearEffects();
+    g.sound(k === 'invisibility' ? 'trader_disappear' : 'trader_reappear', m.x, m.y + 1, m.z);
+    return;
+  }
+  const night = g.world.dim === 'overworld' && g.skyDarken() >= 4, hidden = m.effectLevel('invisibility') > 0;
+  if (night && !hidden) { m._drink = { kind: 'invisibility', t: 32 }; m._hold = { id: I.POTION, count: 1, tag: { potion: 'invisibility' } }; }
+  else if (!night && hidden) { m._drink = { kind: 'milk', t: 32 }; m._hold = { id: I.MILK_BUCKET, count: 1 }; }
+}
+// a renderer that draws nothing (an invisible mob still shows what it holds)
+const NO_DRAW = new Proxy({}, { get: () => () => {} });
+
+/* ---------------- composters take a second to be ready ---------------- */
+// ComposterBlock: the seventh layer fills it, and 20 ticks later it is ready to give its bone meal
+const _onScheduledVL = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind !== 'composter') return _onScheduledVL ? _onScheduledVL.call(this, kind, x, y, z) : undefined;
+  const w = this.world;
+  if (w.getBlock(x, y, z) === B.COMPOSTER && (w.getMeta(x, y, z) & 15) === 7) { w.setMeta(x, y, z, 8); this.sound('composter_ready', x + 0.5, y + 0.5, z + 0.5); if (this.redstoneChanged) this.redstoneChanged(x, y, z); }
+};
+
+/* ---------------- the villager's day ---------------- */
+if (MOB_TYPES.villager) {
+  const ai = MOB_TYPES.villager.ai.slice(), at = ai.indexOf('villagerLife');
+  ai.splice(at < 0 ? 0 : at, 0, 'villagerFetch', 'villagerLove');
+  ai.splice(ai.indexOf('villagerLife') + 1, 0, 'villagerChat');
+  MOB_TYPES.villager.ai = ai;
+}
+const _tickVL = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const r = _tickVL.call(this);
+  if (this.type !== 'villager' || this.dead || this.deathTime > 0) return r;
+  const d = this.data, w = this.game.world;
+  vPickUp(this);
+  vShowTrades(this);
+  // Villager.maybeDecayGossip: once a day, counted from its first tick; what falls under 2 is forgotten
+  if (d.gossipDecay === undefined) d.gossipDecay = w.tick;
+  else if (w.tick >= d.gossipDecay + 24000) {
+    d.gossipDecay = w.tick;
+    if (d.gossip) for (const k in d.gossip) { const v = (d.gossip[k] || 0) - (V_GOSSIP[k] ? V_GOSSIP[k][2] : 0); if (v < 2) delete d.gossip[k]; else d.gossip[k] = v; }
+  }
+  if (this._farm && vActivity(this) !== 'work') vFarmerStop(this);
+  return r;
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t, c] of [['composter_ready', 'Composter is ready', 'block'], ['trader_disappear', 'Wandering Trader disappears', 'neutral'], ['trader_reappear', 'Wandering Trader reappears', 'neutral']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+const _audioPlayVL = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'composter_ready' && name !== 'trader_disappear' && name !== 'trader_reappear') return _audioPlayVL.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime;
+  if (name === 'composter_ready') { this.noiseHit(dst, 'lowpass', 900, 1, 0.25, 0.3); this.tone(dst, 'sine', 520, 700, 0.12, 0.05, t0 + 0.12); }
+  else if (name === 'trader_disappear') [900, 700, 500].forEach((f, i) => this.tone(dst, 'sine', f, f * 0.9, 0.12, 0.05, t0 + i * 0.08));
+  else [500, 700, 900].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.1, 0.12, 0.05, t0 + i * 0.08));
 };
 
 </script>
