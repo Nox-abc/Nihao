@@ -14037,7 +14037,7 @@ class Mob extends Entity {
     if (T.cat === 'monster' || T.neutral || T.ai.includes('target')) {
       if (!(a instanceof Mob && a.type === this.type && !this.T.attacksAll)) { this.target = a; this.anger = 400 + Math.random() * 400; }
       // pack anger: wolves, bees, zombified piglins, polar bears call their friends
-      if (['zombified_piglin', 'wolf', 'bee', 'polar_bear', 'llama', 'trader_llama', 'piglin'].includes(this.type) && !this.data.tame)
+      if (['zombified_piglin', 'wolf', 'polar_bear', 'llama', 'trader_llama', 'piglin'].includes(this.type) && !this.data.tame)
         for (const e of this.game.entities) if (e instanceof Mob && e.type === this.type && e !== this && !e.data.tame && Math.hypot(e.x - this.x, e.z - this.z) < (this.type === 'zombified_piglin' ? 40 : 16)) { e.target = a; e.anger = 400 + Math.random() * 400; }
     }
     if (this.data.tame && a === this.ownerEntity()) { this.target = null; }
@@ -22073,7 +22073,6 @@ Mob.prototype.think = function () { _mobThink.call(this); const f = MOB_TICK[thi
 const _mobAttack = Mob.prototype.attackEntity;
 Mob.prototype.attackEntity = function (t) {
   const r = _mobAttack.call(this, t);
-  if (r && this.type === 'bee') { this.data.stung = true; this.target = null; this.anger = 0; setTimeout(() => { if (!this.dead) this.hurt(100, 'starve'); }, 4000 + Math.random() * 2000); }
   if (r && this.type === 'enderman' && Math.random() < 0.1) this.teleportAway(t);
   if (this.game.player === t) this.game.player.lastAttacker = this;
   return r;
@@ -23705,7 +23704,7 @@ Game.prototype.dispense = function (x, y, z) {
   const slots = be && be.items ? be.items.map((s, i) => s ? i : -1).filter(i => i >= 0) : [];
   if (!slots.length) { this.sound('click', x + 0.5, y + 0.5, z + 0.5); return; }
   const i = slots[Math.floor(Math.random() * slots.length)], st = be.items[i], it = ITEMS[st.id];
-  const fx = x + DX[d], fy = y + DY[d], fz = z + DZ[d], px = x + 0.5 + DX[d] * 0.7, py = y + 0.5 + DY[d] * 0.7 - (DY[d] ? 0 : 0.15), pz = z + 0.5 + DZ[d] * 0.7;
+  const fx = x + DX[d], fy = y + DY[d], fz = z + DZ[d], px = x + 0.5 + DX[d] * 0.7, py = y + 0.5 + DY[d] * 0.7 - (DY[d] ? 0.125 : 0.15625), pz = z + 0.5 + DZ[d] * 0.7;
   const take = () => { st.count--; if (st.count <= 0) be.items[i] = null; w.setBE(x, y, z, be); };
   const front = w.getBlock(fx, fy, fz);
   const giveBack = (nid) => { if (st.count === 1) be.items[i] = { id: nid, count: 1 }; else { take(); const left = this.insertItem(be, { id: nid, count: 1 }); if (left) this.dropItem(px, py, pz, left); } w.setBE(x, y, z, be); };
@@ -23713,6 +23712,9 @@ Game.prototype.dispense = function (x, y, z) {
     const target = w.getBE(fx, fy, fz);
     if (target && target.items) { if (!this.insertItem(target, { id: st.id, count: 1, tag: st.tag })) { take(); w.setBE(fx, fy, fz, target); } return; }
   } else {
+    const ex = typeof dispenseExtra === 'function' ? dispenseExtra(this, { x, y, z, d, fx, fy, fz, px, py, pz, st, it, i, be, take, giveBack }) : false;
+    if (ex === true) return;
+    if (ex !== 'drop') {
     const shoot = (kind, sp) => { const pr = this.spawnProjectile(kind, px, py, pz, DX[d] * sp, DY[d] * sp + 0.1, DZ[d] * sp, null); return pr; };
     if (st.id === I.ARROW || st.id === I.SPECTRAL_ARROW || st.id === I.TIPPED_ARROW) { const pr = shoot('arrow', 1.1); if (pr) { pr.arrowStack = { id: st.id, count: 1, tag: st.tag }; pr.pickup = true; } take(); this.sound('shoot', px, py, pz); return; }
     if (st.id === I.SNOWBALL) { shoot('snow', 1.1); take(); return; }
@@ -23729,12 +23731,13 @@ Game.prototype.dispense = function (x, y, z) {
     if (st.id === I.FLINT_AND_STEEL) { if (!front) { w.setBlock(fx, fy, fz, B.FIRE, 0); this.sound('click', px, py, pz); } else if (front === B.TNT) this.primeTNT(fx, fy, fz, 80); return; }
     if (st.id === I.BONE_MEAL && this.boneMeal) { if (this.boneMeal(fx, fy, fz)) take(); return; }
     if (it.armor) { const p = this.player, slot = it.armor.slot; if (p && Math.floor(p.x) === fx && Math.floor(p.z) === fz && Math.abs(p.y - fy) < 2 && !p.armor[slot]) { p.armor[slot] = { id: st.id, count: 1, tag: st.tag, dmg: st.dmg }; take(); return; } }
+    }
   }
   // anything else just drops out
   const one = { id: st.id, count: 1 }; if (st.tag) one.tag = st.tag; if (st.dmg) one.dmg = st.dmg;
   take();
   const e = this.dropItem(px, py, pz, one);
-  if (e) { e.vx = DX[d] * 0.25 + (Math.random() - 0.5) * 0.05; e.vy = DY[d] * 0.25 + 0.1; e.vz = DZ[d] * 0.25 + (Math.random() - 0.5) * 0.05; }
+  if (e) { const s = Math.random() * 0.1 + 0.2, tri = v => v + 0.103365 * (Math.random() - Math.random()); e.vx = tri(DX[d] * s); e.vy = tri(0.2); e.vz = tri(DZ[d] * s); }
   this.sound('click', px, py, pz);
 };
 // put a stack into a container; returns what didn't fit
@@ -31412,10 +31415,14 @@ Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
     // TntBlock.wasExploded: a shorter fuse
     if (id === B.TNT) { w.setBlock(bx, by, bz, 0, 0); this.entities.push(new PrimedTNT(this, bx, by, bz, 10 + Math.floor(R() * 20))); changed.push([bx, by, bz]); continue; }
     const be = w.getBE(bx, by, bz), meta = w.getMeta(bx, by, bz);
-    if (!decay || R() < 1 / power) for (const st of this.dropsFor(id, meta)) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
+    if (!decay || R() < 1 / power) for (const st of this.dropsFor(id, meta)) {
+      if (BLK[id].shulker && st.id === id && be && be.items && be.items.some(s => s)) st.tag = Object.assign({}, st.tag, { items: be.items.map(saveStack) });
+      this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
+    }
     if (be && be.items && !BLK[id].shulker) for (const st of be.items) if (st) this.dropItem(bx + 0.5, by + 0.5, bz + 0.5, st);
     if (be) { if (this.furnaces) this.furnaces.delete(this.beKey(bx, by, bz)); if (this.brewers) this.brewers.delete(this.beKey(bx, by, bz)); }
     w.setBlock(bx, by, bz, 0, 0, false);
+    if (be && this.onBlockBlown) this.onBlockBlown(bx, by, bz, id, meta, be);
     changed.push([bx, by, bz]);
   }
   for (const [bx, by, bz] of changed) w.notify(bx, by, bz);
@@ -40425,6 +40432,908 @@ AUDIO.play = function (name, x, y, z, ...rest) {
   if (!this.ctx) return;
   const dst = this.out(x, y, z, 1);
   if (dst) this.noiseHit(dst, 'highpass', 2500, 0.8, 0.45, 0.5);
+};
+
+/* @file 142_bees.js */
+/* ===================================================================
+   PART 31: bees and hives like Java's, dispensers like Java's, gold
+   farm portals, and mobs that change in water and powder snow
+   - bees live in nests and hives, three at most. They stay in at night
+     and in the rain, and come home once they carry nectar or have
+     looked for flowers for 3 minutes; a bee stays in 30 seconds (2
+     minutes with nectar, which then adds a level of honey)
+   - a bee works a flower within 5 blocks for 20 seconds to get nectar
+     and remembers it; on the way home it grows up to 10 crops it flies
+     over. One that stings (poison on normal and hard) dies within a
+     minute or so; hit a bee and every bee near it that saw you comes
+   - a full hive (honey level 5) gives a honey bottle or 3 honeycomb;
+     unless a lit campfire smokes it from below, the bees come out
+     angry. Breaking a hive without Silk Touch lets them out angry too;
+     with Silk Touch the hive keeps its bees and honey. Comparators read
+     the honey level; nests made with the world hold 2 or 3 bees
+   =================================================================== */
+
+/* ---------------- hives ---------------- */
+const HIVE_IDS = new Set([B.BEEHIVE, B.BEE_NEST]);
+const hiveHoney = m => (m >> 2) & 7;
+const beeNight = g => g.world.dim === 'overworld' && g.skyDarken() >= 4;   // Level.isNight: the sky, not the clock
+const beeRain = g => (g.world.rainStrength || 0) > 0.2;                     // Level.isRaining
+// the block entity of a hive (made when asked for)
+function hiveBE(w, x, y, z, make) {
+  let be = w.getBE(x, y, z);
+  if ((!be || be.type !== 'beehive') && make && HIVE_IDS.has(w.getBlock(x, y, z))) { be = { type: 'beehive', bees: [], flower: null }; w.setBE(x, y, z, be); }
+  if (!be || be.type !== 'beehive') return null;
+  if (!Array.isArray(be.bees)) be.bees = [];
+  return be;
+}
+// a block whose collision shape is not empty (a hive can't let bees out into it)
+function blockCollides(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (!id) return false;
+  const d = BLK[id];
+  if (d.liquid || d.noCollide) return false;
+  if (SOLID[id] === 1) return true;
+  const bx = shapeBoxes(id, w.getMeta(x, y, z), w.conn(x, y, z, id), true);
+  return !!(bx && bx.length);
+}
+const litCampfire = (w, x, y, z) => { const d = BLK[w.getBlock(x, y, z)]; return !!(d && d.campfire) && !(w.getMeta(x, y, z) & 4); };
+// CampfireBlock.isSmokeyPos: a lit campfire up to 5 below; a block covering the middle post stops the smoke unless the campfire is right under it
+function hiveSmoky(w, x, y, z) {
+  for (let i = 1; i <= 5; i++) {
+    if (litCampfire(w, x, y - i, z)) return true;
+    const id = w.getBlock(x, y - i, z);
+    if (!id || BLK[id].liquid || BLK[id].noCollide) continue;
+    const bx = SOLID[id] === 1 ? [[0, 0, 0, 16, 16, 16]] : shapeBoxes(id, w.getMeta(x, y - i, z), w.conn(x, y - i, z, id), true) || [];
+    if (bx.some(b => b[0] < 10 && b[3] > 6 && b[2] < 10 && b[5] > 6 && b[4] > 0 && b[1] < 16)) return litCampfire(w, x, y - i - 1, z);
+  }
+  return false;
+}
+// BeehiveBlockEntity.isFireNearby: fire in the 3x3x3 around it
+function hiveFireNear(w, x, y, z) {
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) if (w.getBlock(x + dx, y + dy, z + dz) === B.FIRE) return true;
+  return false;
+}
+// what a stored bee forgets (BeehiveBlockEntity.IGNORED_BEE_TAGS)
+const BEE_FORGETS = ['noNectarT', 'crops', 'stayOut', 'hive', 'poll', 'homeT', 'flowerT', 'wander', 'hiveCd', 'water', 'blist', 'lx', 'lz', 'stuckT'];
+Game.prototype.setHoney = function (x, y, z, lv) {
+  const w = this.world, m = w.getMeta(x, y, z);
+  if (hiveHoney(m) === lv) return;
+  w.setMeta(x, y, z, (m & ~28) | (lv << 2));
+  if (this.redstoneChanged) this.redstoneChanged(x, y, z);
+};
+// BeehiveBlockEntity.releaseOccupant: not at night or in the rain, and not into a block, unless it's an emergency
+Game.prototype.releaseBee = function (x, y, z, o, status, flower, meta) {
+  const w = this.world;
+  if ((beeNight(this) || beeRain(this)) && status !== 'emergency') return null;
+  const m = meta !== undefined ? meta : w.getMeta(x, y, z), f = FRONT4[m & 3], fx = x + DX[f], fz = z + DZ[f];
+  const blocked = blockCollides(w, fx, y, fz);
+  if (blocked && status !== 'emergency') return null;
+  const b = o && o.m ? Mob.load(this, Object.assign({}, o.m, { x: x + 0.5, y, z: z + 0.5 })) : createMob(this, 'bee', x + 0.5, y, z + 0.5);
+  if (!b) return null;
+  const d = b.data;
+  for (const k of BEE_FORGETS) delete d[k];
+  d.hive = [x, y, z];
+  if (flower && !d.flower && Math.random() < 0.9) d.flower = flower.slice();
+  if (status === 'honey') {
+    // Bee.dropOffNectar, and a level of honey (one time in a hundred two)
+    d.nectar = false;
+    const lv = hiveHoney(m);
+    if (lv < 5 && HIVE_IDS.has(w.getBlock(x, y, z))) { let j = Math.random() < 0.01 ? 2 : 1; if (lv + j > 5) j--; this.setHoney(x, y, z, lv + j); }
+  }
+  // setBeeReleaseData: time inside counts toward growing up
+  const t = o ? o.t || 0 : 0;
+  if (b.growth < 0) b.growth = Math.min(0, b.growth + t); else if (b.growth > 0) b.growth = Math.max(0, b.growth - t);
+  const off = blocked ? 0 : 0.55 + b.w / 2;
+  b.x = x + 0.5 + off * DX[f]; b.y = y + 0.5 - b.h / 2; b.z = z + 0.5 + off * DZ[f]; b.vx = b.vy = b.vz = 0;
+  b.yaw = b.bodyYaw = Math.atan2(DX[f], DZ[f]); b.savePrev();
+  this.entities.push(b);
+  this.sound('beehive_exit', x + 0.5, y + 0.5, z + 0.5);
+  return b;
+};
+// BeehiveBlockEntity.emptyAllLivingFromHive: bees let out near the player go for them, unless smoke calms them
+Game.prototype.emptyHive = function (x, y, z, be, player, status, meta) {
+  const out = [];
+  for (let k = 0; k < be.bees.length; k++) { const b = this.releaseBee(x, y, z, be.bees[k], status, be.flower, meta); if (b) { out.push(b); be.bees.splice(k--, 1); } }
+  if (HIVE_IDS.has(this.world.getBlock(x, y, z))) this.world.setBE(x, y, z, be);
+  if (player) {
+    const smoky = hiveSmoky(this.world, x, y, z);
+    for (const b of out) if ((player.x - b.x) ** 2 + (player.y - b.y) ** 2 + (player.z - b.z) ** 2 <= 16) { if (!smoky) beeAnger(b, player); else b.data.stayOut = 400; }
+  }
+  return out;
+};
+Game.prototype.releaseBeesAndResetHoney = function (x, y, z, player, status) {
+  this.setHoney(x, y, z, 0);
+  const be = hiveBE(this.world, x, y, z, false);
+  if (be && be.bees.length) this.emptyHive(x, y, z, be, player, status);
+};
+// BeehiveBlock.angerNearbyBees: bees in 8 blocks across, 6 up and down go for a player in the same box
+Game.prototype.angerNearbyBees = function (x, y, z) {
+  const p = this.player, inBox = e => e.x >= x - 8 && e.x <= x + 9 && e.y >= y - 6 && e.y <= y + 7 && e.z >= z - 8 && e.z <= z + 9;
+  if (!p || p.dead || !inBox(p)) return;
+  for (const e of this.entities) if (e instanceof Mob && e.type === 'bee' && !e.dead && !e.target && inBox(e)) beeAnger(e, p);
+};
+function beeAnger(b, who) { b.target = who; b.anger = 400 + Math.floor(Math.random() * 381); if (b.data.poll) beeStopPollinating(b); }
+// a bee goes in (BeehiveBlockEntity.addOccupant): it is stored without where it was going or how long it looked
+Game.prototype.addBeeToHive = function (m, h, be) {
+  const o = JSON.parse(JSON.stringify(m.save()));
+  for (const k of BEE_FORGETS) delete o.d[k];
+  be.bees.push({ m: o, t: 0, min: m.data.nectar ? 2400 : 600 });
+  if (m.data.flower && (!be.flower || Math.random() < 0.5)) be.flower = m.data.flower.slice();
+  this.world.setBE(h[0], h[1], h[2], be);
+  this.sound('beehive_enter', h[0] + 0.5, h[1] + 0.5, h[2] + 0.5);
+  m.dead = true; m.removed = true;
+};
+
+/* ---------------- hives that tick ---------------- */
+// hive block entities per chunk, so only those are looked at each tick
+const hiveSet = c => c._hbe || (c._hbe = new Set());
+const _setBEBH = World.prototype.setBE;
+World.prototype.setBE = function (x, y, z, be) {
+  _setBEBH.call(this, x, y, z, be);
+  if (be && be.type === 'beehive') { const c = this.getChunk(x >> 4, z >> 4); if (c) hiveSet(c).add((y << 8) | ((z & 15) << 4) | (x & 15)); }
+};
+const _onChunkDataBH = Game.prototype.onChunkData;
+Game.prototype.onChunkData = function (cx, cz, ...rest) {
+  _onChunkDataBH.call(this, cx, cz, ...rest);
+  const w = this.world, c = w && w.chunks.get(w.key(cx, cz));
+  if (c && c.be) for (const [i, v] of c.be) if (v && v.type === 'beehive') hiveSet(c).add(i);
+};
+// where the hives are, for bees looking for one (the POI index), listed per chunk the first time it is needed
+function chunkHives(c) {
+  if (c._hv) return c._hv;
+  const out = [], bl = c.blocks;
+  for (let i = 0; i < CH_VOL; i++) { const b = bl[i]; if (b === B.BEEHIVE || b === B.BEE_NEST) out.push(i); }
+  return c._hv = out;
+}
+const _setBlockBH = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  const c = this.getChunk(x >> 4, z >> 4), i = (y << 8) | ((z & 15) << 4) | (x & 15), old = c && c.blocks && y >= 0 && y <= CH_TOP ? c.blocks[i] : 0;
+  const r = _setBlockBH.call(this, x, y, z, id, meta, notify);
+  if (r && c && c._hv && old !== id) {
+    if (HIVE_IDS.has(id)) { if (!c._hv.includes(i)) c._hv.push(i); }
+    else if (HIVE_IDS.has(old)) { const k = c._hv.indexOf(i); if (k >= 0) c._hv.splice(k, 1); }
+  }
+  return r;
+};
+const _tickFurnacesBH = Game.prototype.tickFurnaces;
+Game.prototype.tickFurnaces = function () { _tickFurnacesBH.call(this); this.tickHives(); };
+Game.prototype.tickHives = function () {
+  const w = this.world, p = this.player;
+  if (!p) return;
+  const R = this.simDistance(), pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+  for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || !c._hbe || !c._hbe.size || c.state < 2) continue;
+    for (const i of c._hbe) {
+      const be = c.be.get(i);
+      if (!be || be.type !== 'beehive' || !HIVE_IDS.has(c.blocks[i])) { c._hbe.delete(i); continue; }
+      this.tickHive(c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), be, c.meta[i]);
+    }
+  }
+};
+Game.prototype.tickHive = function (x, y, z, be, meta) {
+  const w = this.world, p = this.player;
+  if (be.bees.length) {
+    // BeehiveBlock.updateShape: fire right beside it lets everyone out
+    for (let f = 0; f < 6; f++) if (w.getBlock(x + DX[f], y + DY[f], z + DZ[f]) === B.FIRE) { this.emptyHive(x, y, z, be, null, 'emergency'); return; }
+    let changed = false;
+    for (let k = 0; k < be.bees.length; k++) {
+      const o = be.bees[k];
+      if (o.t++ > o.min && this.releaseBee(x, y, z, o, o.m && o.m.d && o.m.d.nectar ? 'honey' : 'released', be.flower)) { be.bees.splice(k--, 1); changed = true; }
+    }
+    if (be.bees.length && Math.random() < 0.005) this.sound('beehive_work', x + 0.5, y, z + 0.5);
+    if (changed) w.setBE(x, y, z, be);
+  }
+  // BeehiveBlock.animateTick: honey drips from under a full hive near the player
+  if (hiveHoney(meta) >= 5 && p && Math.abs(p.x - x) < 16 && Math.abs(p.z - z) < 16 && Math.random() < 0.05 && !blockCollides(w, x, y - 1, z))
+    this.particles.add({ x: x + 0.2 + Math.random() * 0.6, y: y - 0.05, z: z + 0.2 + Math.random() * 0.6, vx: 0, vy: 0, vz: 0, life: 40, layer: texL('particle_drip'), u: 0, v: 0, us: 1, size: 0.06, g: 0.01, col: [0.98, 0.7, 0.12], coll: true });
+};
+// nests made with the world hold their 2 or 3 bees (BeehiveDecorator), 1 to 30 seconds from coming out
+const _initialSpawnBH = Game.prototype.initialSpawn;
+Game.prototype.initialSpawn = function (c) {
+  if (c.genMobs) {
+    const w = this.world;
+    c.genMobs = c.genMobs.filter(([type, x, y, z, o]) => {
+      if (type !== 'bee' || !o || !Array.isArray(o.hive)) return true;
+      const [hx, hy, hz] = o.hive, be = hiveBE(w, hx, hy, hz, true);
+      if (!be || be.bees.length >= 3) return true;
+      be.bees.push({ m: null, t: Math.floor(Math.random() * 599), min: 600 });
+      w.setBE(hx, hy, hz, be);
+      return false;
+    });
+  }
+  return _initialSpawnBH.call(this, c);
+};
+
+/* ---------------- what bees do ---------------- */
+const BEE_FLOWER_NAMES = [...FLOWERS, 'sunflower', 'lilac', 'rose_bush', 'peony', 'pitcher_plant', 'flowering_azalea_leaves', 'flowering_azalea', 'mangrove_propagule', 'cherry_leaves', 'pink_petals', 'chorus_flower', 'spore_blossom'];
+const BEE_FLOWERS = new Set(BEE_FLOWER_NAMES.map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+// BeePollinateGoal.VALID_POLLINATION_BLOCKS: the flowers tag, a sunflower only by its top half
+const beeFlowerAt = (w, x, y, z) => { const id = w.getBlock(x, y, z); return BEE_FLOWERS.has(id) && (id !== B.SUNFLOWER || (w.getMeta(x, y, z) & 1) === 1); };
+const beeFlowerValid = (w, f) => BEE_FLOWERS.has(w.getBlock(f[0], f[1], f[2]));
+const beeBlockDist = (m, p) => Math.hypot(Math.floor(m.x) - p[0], Math.floor(m.y) - p[1], Math.floor(m.z) - p[2]);
+const beeHiveValid = m => { const h = m.data.hive; return !!h && beeBlockDist(m, h) < 32 && HIVE_IDS.has(m.game.world.getBlock(h[0], h[1], h[2])); };
+// BeePollinateGoal.findNearestBlock: rings outward from the bee, a block below first
+function beeFindFlower(m, dist) {
+  const w = m.game.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z), d2 = dist * dist;
+  for (let i = 0; i <= dist; i = i > 0 ? -i : 1 - i)
+    for (let j = 0; j < dist; j++)
+      for (let k = 0; k <= j; k = k > 0 ? -k : 1 - k)
+        for (let l = k < j && k > -j ? j : 0; l <= j; l = l > 0 ? -l : 1 - l)
+          if (k * k + (i - 1) * (i - 1) + l * l < d2 && beeFlowerAt(w, bx + k, by + i - 1, bz + l)) return [bx + k, by + i - 1, bz + l];
+  return null;
+}
+// Bee.wantsToEnterHive
+function beeWantsHome(m) {
+  const d = m.data, g = m.game;
+  if (d.stayOut > 0 || d.poll || d.stung || m.target) return false;
+  if (!(d.noNectarT > 3600 || beeRain(g) || beeNight(g) || d.nectar)) return false;
+  return !(d.hive && hiveFireNear(g.world, d.hive[0], d.hive[1], d.hive[2]));
+}
+// flying toward a point; something in the way is flown over
+function beeFly(m, x, y, z, mod) {
+  const dx = x - m.x, dy = y - m.y, dz = z - m.z, l = Math.hypot(dx, dy, dz);
+  if (l < 1e-3) return 0;
+  const hl = Math.hypot(dx, dz), w = m.game.world;
+  let my = dy / l;
+  if (hl > 0.3 && blockCollides(w, Math.floor(m.x + dx / hl * 0.7), Math.floor(m.y + 0.3), Math.floor(m.z + dz / hl * 0.7))) my = Math.max(my, 0.9);
+  m.move = [dx / l, dz / l, m.T.walk * 0.6 * mod * Math.min(1, l * 2), false, my];
+  return l;
+}
+function beeStopPollinating(m) {
+  const d = m.data, P = d.poll;
+  if (!P) return;
+  // BeePollinateGoal.stop: 400 good ticks give nectar; 10 seconds before looking again
+  if (P.ok > 400) d.nectar = true;
+  d.poll = null; d.flowerCd = 200;
+}
+// BeeHiveLocateGoal: the nearest hive with room within 20 blocks, skipping up to 3 it gave up on
+function beeLocateHive(m) {
+  const d = m.data, g = m.game, w = g.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z), list = [];
+  d.hiveCd = 200;
+  for (let cx = (bx - 20) >> 4; cx <= (bx + 20) >> 4; cx++) for (let cz = (bz - 20) >> 4; cz <= (bz + 20) >> 4; cz++) {
+    const c = w.getChunk(cx, cz);
+    if (!c || !c.blocks || c.state < 1) continue;
+    for (const i of chunkHives(c)) {
+      const x = cx * 16 + (i & 15), y = i >> 8, z = cz * 16 + ((i >> 4) & 15), d2 = (x - bx) ** 2 + (y - by) ** 2 + (z - bz) ** 2;
+      if (d2 > 400) continue;
+      const be = hiveBE(w, x, y, z, false);
+      if (!be || be.bees.length < 3) list.push([x, y, z, d2]);
+    }
+  }
+  if (!list.length) return;
+  list.sort((a, b) => a[3] - b[3]);
+  const bl = d.blist || [];
+  for (const h of list) if (!bl.some(b => b[0] === h[0] && b[1] === h[1] && b[2] === h[2])) { d.hive = [h[0], h[1], h[2]]; return; }
+  d.blist = []; d.hive = [list[0][0], list[0][1], list[0][2]];
+}
+function beeDropHive(d, blacklist) {
+  if (blacklist && d.hive) { (d.blist || (d.blist = [])).push(d.hive); while (d.blist.length > 3) d.blist.shift(); }
+  d.hive = null; d.hiveCd = 200; d.homeT = 0;
+}
+// BeeGrowCropGoal: crops 1 or 2 blocks below grow a stage
+function beeGrowCrop(m) {
+  const g = m.game, w = g.world, x = Math.floor(m.x), z = Math.floor(m.z), by = Math.floor(m.y);
+  for (let i = 1; i <= 2; i++) {
+    const y = by - i, id = w.getBlock(x, y, z), d = BLK[id], meta = w.getMeta(x, y, z);
+    let nid = -1, nm = 0;
+    if (d.crop && !d.stem && id !== B.NETHER_WART && id !== B.PITCHER_CROP) {
+      const max = d.maxAge !== undefined ? d.maxAge : 7, a = meta & 7;
+      if (a < max) { if (id === B.TORCHFLOWER_CROP && a + 1 >= max) nid = B.TORCHFLOWER; else { nid = id; nm = a + 1; } }
+    } else if (d.stem) { if ((meta & 7) < 7) { nid = id; nm = meta + 1; } }
+    else if (id === B.SWEET_BERRY_BUSH) { if ((meta & 3) < 3) { nid = id; nm = meta + 1; } }
+    else if (id === B.CAVE_VINES && !(meta & 1)) w.setMeta(x, y, z, meta | 1);
+    if (nid >= 0) {
+      w.setBlock(x, y, z, nid, nm);
+      g.particles.poof(x + 0.5, y + 0.5, z + 0.5, [0.5, 1, 0.4], 6);
+      m.data.crops = (m.data.crops || 0) + 1;
+    }
+  }
+}
+Object.assign(GOALS, {
+  // BeeAttackGoal: only while angry, and only once
+  beeAttack(m) {
+    if (!m.target) return false;
+    if (m.data.stung) { m.target = null; return false; }
+    return GOALS.melee(m);
+  },
+  // BeeEnterHiveGoal: within 2 blocks of the middle of its hive, wanting in, and the hive has room
+  beeEnterHive(m) {
+    const d = m.data, h = d.hive;
+    if (!h || !beeWantsHome(m) || Math.hypot(h[0] + 0.5 - m.x, h[1] + 0.5 - m.y, h[2] + 0.5 - m.z) >= 2) return false;
+    const g = m.game, be = hiveBE(g.world, h[0], h[1], h[2], true);
+    if (!be || be.bees.length >= 3) { d.hive = null; return false; }
+    g.addBeeToHive(m, h, be);
+    return true;
+  },
+  // BeePollinateGoal: a flower within 5 blocks, 400 ticks hovering at it (gives up after 600)
+  beePollinate(m) {
+    const d = m.data, g = m.game, w = g.world, even = (m.age + m.id) % 2 === 0;
+    const P = d.poll;
+    if (P) {
+      if (even) {
+        let go = true;
+        if (!d.flower || beeRain(g)) go = false;
+        else if (P.ok > 400) go = Math.random() < 0.2;
+        else if (m.age % 20 === 0 && !beeFlowerValid(w, d.flower)) { d.flower = null; go = false; }
+        if (!go) { beeStopPollinating(m); return false; }
+      }
+      if (++P.t > 600) { d.flower = null; return true; }
+      const f = d.flower, fx = f[0] + 0.5, fy = f[1] + 0.6, fz = f[2] + 0.5;
+      if (Math.hypot(fx - m.x, fy - m.y, fz - m.z) > 1) { P.hover = [fx, fy, fz]; beeFly(m, fx, fy, fz, 0.35); return true; }
+      if (!P.hover) P.hover = [fx, fy, fz];
+      const at = Math.hypot(P.hover[0] - m.x, P.hover[1] - m.y, P.hover[2] - m.z) <= 0.1;
+      let move = true;
+      if (at) {
+        if (Math.floor(Math.random() * 25) === 0) { const o = () => (Math.random() * 2 - 1) / 3; P.hover = [fx + o(), fy, fz + o()]; } else move = false;
+        m.lookAt(fx, fy, fz);
+      }
+      if (move) beeFly(m, P.hover[0], P.hover[1], P.hover[2], 0.35);
+      P.ok++;
+      if (Math.random() < 0.05 && P.ok > P.snd + 60) { P.snd = P.ok; g.sound('bee_pollinate', m.x, m.y, m.z); }
+      return true;
+    }
+    if (!even || d.flowerCd > 0 || d.nectar || beeRain(g)) return false;
+    const f = beeFindFlower(m, 5);
+    if (!f) { d.flowerCd = 20 + Math.floor(Math.random() * 41); return false; }
+    d.flower = f; d.poll = { t: 0, ok: 0, snd: 0, hover: null }; d.noNectarT = 0;
+    beeFly(m, f[0] + 0.5, f[1] + 0.5, f[2] + 0.5, 1.2);
+    return true;
+  },
+  // BeeGoToHiveGoal: 30 seconds to get there, and a hive that can't be reached is skipped
+  beeGoHome(m) {
+    const d = m.data, w = m.game.world, h = d.hive;
+    if (!h || !beeWantsHome(m) || !HIVE_IDS.has(w.getBlock(h[0], h[1], h[2]))) { d.homeT = 0; return false; }
+    if (beeBlockDist(m, h) >= 32) { beeDropHive(d, false); return false; }
+    if (Math.hypot(h[0] + 0.5 - m.x, h[1] + 0.5 - m.y, h[2] + 0.5 - m.z) < 2) { d.homeT = 0; return false; }
+    if (++d.homeT > 600) { beeDropHive(d, true); return false; }
+    // stuck for 3 seconds: try another hive
+    if (m.age % 20 === 0) { const moved = Math.hypot(m.x - (d.lx === undefined ? m.x + 1 : d.lx), m.z - (d.lz === undefined ? m.z + 1 : d.lz)); d.lx = m.x; d.lz = m.z; d.stuckT = moved < 0.3 ? (d.stuckT || 0) + 20 : 0; if (d.stuckT > 60) { d.stuckT = 0; beeDropHive(d, false); return false; } }
+    beeFly(m, h[0] + 0.5, h[1] + 0.2, h[2] + 0.5, 1);
+    return true;
+  },
+  // BeeGoToKnownFlowerGoal: after 2 minutes without nectar, back to the flower it remembers
+  beeGoToFlower(m) {
+    const d = m.data, w = m.game.world, f = d.flower;
+    if (!f || !(d.noNectarT > 2400) || !beeFlowerValid(w, f) || beeBlockDist(m, f) < 2) { d.flowerT = 0; return false; }
+    if (++d.flowerT > 600 || beeBlockDist(m, f) >= 32) { d.flower = null; d.flowerT = 0; return false; }
+    beeFly(m, f[0] + 0.5, f[1] + 0.6, f[2] + 0.5, 1);
+    return true;
+  },
+  // BeeWanderGoal: 1 in 10 a chance to fly up to 8 blocks on, toward the hive when more than 22 blocks from it
+  beeWander(m) {
+    const d = m.data;
+    if (d.wander) {
+      const t = d.wander;
+      if (++t[3] > 100 || beeFly(m, t[0], t[1], t[2], 1) < 0.7) d.wander = null;
+      return true;
+    }
+    if ((m.age + m.id) % 2 || Math.random() >= 0.1) return false;
+    const w = m.game.world, h = d.hive;
+    const ang = h && beeHiveValid(m) && beeBlockDist(m, h) >= 22 ? Math.atan2(h[0] + 0.5 - m.x, h[2] + 0.5 - m.z) : m.yaw;
+    for (let k = 0; k < 10; k++) {
+      const a = ang + (Math.random() * 2 - 1) * Math.PI / 2, r = Math.sqrt(Math.random()) * Math.SQRT2 * 8;
+      const x = Math.floor(m.x + Math.sin(a) * r), z = Math.floor(m.z + Math.cos(a) * r);
+      let y = Math.floor(m.y) + Math.floor(Math.random() * 15) - 7;
+      // RandomPos.moveUpToAboveSolid: out of the ground, then 1 to 3 above it
+      if (blockCollides(w, x, y, z)) { while (y < CH_TOP && blockCollides(w, x, y, z)) y++; y += Math.floor(Math.random() * 3); }
+      if (blockCollides(w, x, y, z) || BLK[w.getBlock(x, y, z)].liquid) continue;
+      d.wander = [x + 0.5, y, z + 0.5, 0];
+      return true;
+    }
+    return false;
+  },
+});
+if (MOB_TYPES.bee) {
+  const T = MOB_TYPES.bee, food = BEE_FLOWER_NAMES.filter(n => ITEM_BY_NAME[n]);
+  T.ai = ['target', 'beeAttack', 'beeEnterHive', 'breed', 'tempt', 'beePollinate', 'followParent', 'beeGoHome', 'beeGoToFlower', 'beeWander', 'look'];
+  T.breed = food; T.tempt = food; T.follow = 48;
+}
+// it hovers where it is when it has nothing to do
+MOB_TICK.bee = () => { };
+// Bee.aiStep and customServerAiStep
+const _tickBEE = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'bee' && !this.dead && !(this.deathTime > 0)) {
+    const m = this, d = m.data, g = m.game, w = g.world;
+    if (d.stayOut > 0) d.stayOut--;
+    if (d.hiveCd > 0) d.hiveCd--;
+    if (d.flowerCd > 0) d.flowerCd--;
+    if (!d.nectar) d.noNectarT = (d.noNectarT || 0) + 1;
+    if (m.age % 20 === 0) {
+      if (d.hive && !beeHiveValid(m)) d.hive = null;
+      if (d.flower && w.chunkReady(d.flower[0] >> 4, d.flower[2] >> 4) && !beeFlowerValid(w, d.flower)) d.flower = null;
+    }
+    if (!d.hive && !(d.hiveCd > 0) && beeWantsHome(m)) beeLocateHive(m);
+    if (d.nectar && (d.crops || 0) < 10 && (m.age + m.id) % 2 === 0 && Math.random() >= 0.3 && Math.random() < 1 / 15 && beeHiveValid(m)) beeGrowCrop(m);
+    // more than a second under water drowns it
+    d.water = m.inWater ? (d.water || 0) + 1 : 0;
+    if (d.water > 20) m.hurt(1, 'drown');
+    // a bee that stung dies, sooner the longer since
+    if (d.stung && !(m.deathTime > 0)) { d.stingT = (d.stingT || 0) + 1; if (d.stingT % 5 === 0 && Math.floor(Math.random() * Math.max(1, Math.min(1200, 1200 - d.stingT))) === 0) m.hurt(m.health, 'generic'); }
+    // nectar drips off it
+    if (d.nectar && (d.crops || 0) < 10 && Math.random() < 0.05) g.particles.add({ x: m.x + (Math.random() - 0.5) * 0.3, y: m.y + 0.2, z: m.z + (Math.random() - 0.5) * 0.3, vx: 0, vy: 0, vz: 0, life: 30, layer: texL('particle_drip'), u: 0, v: 0, us: 1, size: 0.05, g: 0.01, col: [1, 0.85, 0.3], coll: true });
+  }
+  return _tickBEE.call(this);
+};
+// a hit stops the pollinating; every bee near that saw the hit comes too (BeeHurtByOtherGoal: 48 across, 10 up and down)
+const _hurtBEE = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'bee' && this.data.poll) beeStopPollinating(this);
+  return _hurtBEE.call(this, amount, source, attacker);
+};
+const _onHurtByBEE = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  _onHurtByBEE.call(this, a, source);
+  if (this.type !== 'bee' || !a || this.target !== a || (a instanceof Player && a.mode === 1)) return;
+  this.anger = 400 + Math.floor(Math.random() * 381);
+  if (!this.canSee(a)) return;
+  for (const e of this.game.entities)
+    if (e instanceof Mob && e.type === 'bee' && e !== this && !e.dead && !e.target && Math.abs(e.x - this.x) <= 48.5 && Math.abs(e.z - this.z) <= 48.5 && Math.abs(e.y - this.y) <= 10.5) beeAnger(e, a);
+};
+// Bee.doHurtTarget: the sting poisons (10 seconds on normal, 18 on hard), then the bee calms down and soon dies
+const _attackBEE = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) {
+  const r = _attackBEE.call(this, t);
+  if (r && this.type === 'bee') {
+    const s = [0, 0, 10, 18][OPTIONS.difficulty] || 0;
+    if (s && t.addEffect) t.addEffect('poison', s * 20, 0);
+    this.data.stung = true; this.data.stingT = 0; this.target = null; this.anger = 0;
+    this.game.sound('bee_sting', this.x, this.y, this.z);
+  }
+  return r;
+};
+
+/* ---------------- taking honey, breaking and placing hives ---------------- */
+// BeehiveBlock.useItemOn: shears or a glass bottle on a full hive
+const _useBlockBH = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const w = this.world;
+  if (hit && HIVE_IDS.has(hit.id) && held && (held.id === I.SHEARS || held.id === I.GLASS_BOTTLE) && hiveHoney(w.getMeta(hit.x, hit.y, hit.z)) >= 5) {
+    const { x, y, z } = hit;
+    if (held.id === I.SHEARS) {
+      this.sound('beehive_shear', p.x, p.y, p.z);
+      this.dropItem(x + 0.5, y + 0.5, z + 0.5, { id: I.HONEYCOMB, count: 3 });
+      p.damageHeld(1);
+    } else {
+      this.sound('bottle_fill', p.x, p.y, p.z);
+      if (p.mode === 1) this.giveOrDrop(p, { id: I.HONEY_BOTTLE, count: 1 });
+      else if (held.count <= 1) p.inv[p.sel] = { id: I.HONEY_BOTTLE, count: 1 };
+      else { held.count--; this.giveOrDrop(p, { id: I.HONEY_BOTTLE, count: 1 }); }
+    }
+    if (!hiveSmoky(w, x, y, z)) {
+      const be = hiveBE(w, x, y, z, false);
+      if (be && be.bees.length) this.angerNearbyBees(x, y, z);
+      this.releaseBeesAndResetHoney(x, y, z, p, 'emergency');
+    } else {
+      this.setHoney(x, y, z, 0);
+      if (held.id === I.GLASS_BOTTLE && this.adv) this.adv('ev', 'safe_honey');
+    }
+    this.ui.refreshHotbar();
+    return true;
+  }
+  return _useBlockBH.call(this, p, hit, held);
+};
+// breaking: in survival without Silk Touch the bees come out angry; with it, or in creative, the hive keeps them and its honey
+const _playerBreakBH = Game.prototype.playerBreak;
+Game.prototype.playerBreak = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  if (!HIVE_IDS.has(id)) return _playerBreakBH.call(this, x, y, z);
+  const p = this.player, meta = w.getMeta(x, y, z), lv = hiveHoney(meta), be = hiveBE(w, x, y, z, false);
+  const bees = be ? be.bees.slice() : [], silk = !!(p && p.toolInfo && p.toolInfo().silk), n0 = this.entities.length;
+  const r = _playerBreakBH.call(this, x, y, z);
+  if (w.getBlock(x, y, z) === id) return r;
+  const tag = {};
+  if (bees.length) tag.bees = bees;
+  if (lv) tag.honey = lv;
+  if (p && p.mode === 1) {
+    if ((bees.length || lv) && this.rule('doTileDrops') !== false) { const e = this.dropItem(x + 0.5, y + 0.5, z + 0.5, { id, count: 1, tag }); if (e) e.pickupDelay = 10; }
+    return r;
+  }
+  if (silk) {
+    if (bees.length || lv) for (const e of this.entities.slice(n0)) if (e instanceof ItemEntity && e.stack.id === id) { e.stack.tag = Object.assign({}, e.stack.tag, tag); break; }
+  } else if (bees.length) {
+    this.emptyHive(x, y, z, { type: 'beehive', bees, flower: be.flower }, p, 'emergency', meta);
+    this.angerNearbyBees(x, y, z);
+  }
+  return r;
+};
+// a hive blown up lets its bees out (BeehiveBlock.getDrops)
+Game.prototype.onBlockBlown = function (x, y, z, id, meta, be) {
+  if (be && be.type === 'beehive' && Array.isArray(be.bees) && be.bees.length) this.emptyHive(x, y, z, be, null, 'emergency', meta);
+};
+// placing a hive item puts back its bees and honey
+const _afterPlaceBH = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const w = this.world, held = p && p.inv[p.sel], tag = held && held.id === id ? held.tag : null;
+  if (HIVE_IDS.has(id) && w.getBlock(x, y, z) === id) {
+    const be = hiveBE(w, x, y, z, true);
+    if (be && tag && Array.isArray(tag.bees)) { be.bees = tag.bees.slice(0, 3).map(o => JSON.parse(JSON.stringify(o))); w.setBE(x, y, z, be); }
+    if (tag && tag.honey) w.setMeta(x, y, z, (w.getMeta(x, y, z) & ~28) | (Math.min(5, tag.honey) << 2));
+  }
+  return _afterPlaceBH.call(this, p, x, y, z, id);
+};
+// the item says what it holds
+const _tooltipLinesBH = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesBH(st);
+  if (st && HIVE_IDS.has(st.id) && st.tag) {
+    const n = Array.isArray(st.tag.bees) ? st.tag.bees.length : 0;
+    out.splice(1, 0, ['Bees: ' + n + ' / 3', TT_GRAY], ['Honey: ' + (st.tag.honey || 0) + ' / 5', TT_GRAY]);
+  }
+  return out;
+};
+// comparators read the honey level
+const _containerSignalBH = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  if (HIVE_IDS.has(w.getBlock(x, y, z))) return Math.min(5, hiveHoney(w.getMeta(x, y, z)));
+  return _containerSignalBH.call(this, w, x, y, z);
+};
+// the front of a full hive drips with honey
+TEXGEN.push(function texHoney() {
+  T('bee_nest_front_honey', (d) => { d.set(copyOf('bee_nest_front')); for (let x = 5; x <= 10; x++) sp(d, x, 11, [250, 180, 40]); sp(d, 6, 12, [250, 180, 40]); sp(d, 9, 12, [236, 160, 30]); sp(d, 9, 13, [236, 160, 30]); });
+});
+const _resolveFaceTexturesBH = resolveFaceTextures;
+resolveFaceTextures = function () {
+  _resolveFaceTexturesBH();
+  for (const [id, honey] of [[B.BEEHIVE, 'beehive_front_honey'], [B.BEE_NEST, 'bee_nest_front_honey']]) {
+    const o = id * 6, plain = Int16Array.from(FACETEX.subarray(o, o + 6)), full = Int16Array.from(plain);
+    full[4] = texLayer(honey, plain[4]);
+    VARTEX[id] = m => ((m >> 2) & 7) >= 5 ? full : plain;
+  }
+};
+
+/* ===================================================================
+   dispensers like Java's (DispenseItemBehavior.bootStrap)
+   - shears and glass bottles harvest full hives; shears shear sheep,
+     mooshrooms, snow golems and bogged; bottles fill from water
+   - honeycomb waxes copper, water bottles make mud, glowstone charges
+     respawn anchors, brushes brush armadillos
+   - spawn eggs, armor stands, boats, minecarts and shulker boxes are
+     placed; saddles, horse armor, carpets and chests go on animals,
+     armor on players and armor stands; carved pumpkins and wither
+     skeleton skulls finish golems and withers
+   - bottles o' enchanting are thrown; flint and steel lights fire,
+     portals, campfires and candles and sets off TNT; buckets empty
+     (fish come out) or fill, and drop out when they can't
+   =================================================================== */
+const inCell = (e, x, y, z) => e.x + e.w / 2 > x && e.x - e.w / 2 < x + 1 && e.y + e.h > y && e.y < y + 1 && e.z + e.w / 2 > z && e.z - e.w / 2 < z + 1;
+// consumeWithRemainder: the last one turns into the remainder, else it goes into the dispenser or out of the front
+function dispRemainder(g, c, stack) {
+  const be = c.be, st = c.st;
+  if (st.count <= 1) be.items[c.i] = stack;
+  else { st.count--; const left = g.insertItem(be, stack); if (left) g.dropItem(c.px, c.py, c.pz, left); }
+  g.world.setBE(c.x, c.y, c.z, be);
+}
+// a tool wears like in a hand (Unbreaking counts), and breaks
+function dispWear(g, c, n) {
+  const st = c.st, it = ITEMS[st.id];
+  if (!it.dur || (st.tag && st.tag.unbreakable)) return;
+  const ub = enchLevel(st, 'unbreaking');
+  for (let k = 0; k < n; k++) if (!ub || Math.random() < 1 / (ub + 1)) st.dmg = (st.dmg || 0) + 1;
+  if (st.dmg >= it.dur) { c.be.items[c.i] = null; g.sound('break_tool', c.px, c.py, c.pz); }
+  g.world.setBE(c.x, c.y, c.z, c.be);
+}
+// Projectile.shoot from a dispenser: a little up, spread by the uncertainty
+function dispShoot(g, c, kind, power, unc) {
+  const tri = () => 0.0172275 * unc * (Math.random() - Math.random());
+  let vx = DX[c.d], vy = DY[c.d] + 0.1, vz = DZ[c.d];
+  const l = Math.hypot(vx, vy, vz);
+  vx = (vx / l + tri()) * power; vy = (vy / l + tri()) * power; vz = (vz / l + tri()) * power;
+  return g.spawnProjectile(kind, c.px, c.py, c.pz, vx, vy, vz, null);
+}
+// Shearable.shear
+function dispShear(g, m) {
+  const d = m.data, t = m.type;
+  if (t === 'sheep') {
+    if (d.sheared || m.baby) return false;
+    d.sheared = true;
+    for (let k = 1 + Math.floor(Math.random() * 3); k > 0; k--) {
+      const e = g.dropItem(m.x, m.y + 1, m.z, { id: B[(d.color || 'white').toUpperCase() + '_WOOL'], count: 1 });
+      if (e) { e.vx += (Math.random() - Math.random()) * 0.1; e.vy += Math.random() * 0.05; e.vz += (Math.random() - Math.random()) * 0.1; }
+    }
+    g.sound('scrape', m.x, m.y, m.z);
+    return true;
+  }
+  if (t === 'mooshroom') {
+    if (m.baby) return false;
+    const cow = createMob(g, 'cow', m.x, m.y, m.z);
+    if (!cow) return false;
+    cow.yaw = cow.bodyYaw = m.yaw; cow.health = m.health; cow.persistent = m.persistent; if (m.customName) cow.customName = m.customName;
+    cow.savePrev(); g.entities.push(cow); m.dead = true; m.removed = true;
+    for (let k = 0; k < 5; k++) g.dropItem(m.x, m.y + m.h, m.z, { id: d.variant === 'brown' ? B.BROWN_MUSHROOM : B.RED_MUSHROOM, count: 1 });
+    g.particles.explosion(m.x, m.y + m.h / 2, m.z); g.sound('scrape', m.x, m.y, m.z);
+    return true;
+  }
+  if (t === 'snow_golem' || t === 'bogged') {
+    if (d.sheared) return false;
+    d.sheared = true;
+    if (t === 'snow_golem') g.dropItem(m.x, m.y + 1.7, m.z, { id: itemOf('carved_pumpkin'), count: 1 });
+    else for (let k = 0; k < 2; k++) g.dropItem(m.x, m.y + 1.6, m.z, { id: itemOf(Math.random() < 0.5 ? 'red_mushroom' : 'brown_mushroom'), count: 1 });
+    g.sound('scrape', m.x, m.y + 1, m.z);
+    return true;
+  }
+  return false;
+}
+// ArmorItem.dispenseArmor: onto a player or armor stand in front with that slot free
+function dispEquip(g, c, slot) {
+  const p = g.player, st = c.st;
+  if (p && !p.dead && p.mode !== 3 && inCell(p, c.fx, c.fy, c.fz)) {
+    if (slot === 'off') { if (!p.offhand[0]) { p.offhand[0] = copyStack(st, 1); c.take(); g.ui.refreshHotbar(); return true; } }
+    else if (!p.armor[slot]) { p.armor[slot] = copyStack(st, 1); c.take(); g.sound('equip', p.x, p.y + 1, p.z); g.ui.refreshHotbar(); return true; }
+  }
+  if (slot !== 'off') for (const e of g.entities) if (e instanceof Mob && e.type === 'armor_stand' && !e.dead && inCell(e, c.fx, c.fy, c.fz)) {
+    const A = e.data.armor || (e.data.armor = [null, null, null, null]);
+    if (!A[slot]) { A[slot] = copyStack(st, 1); c.take(); g.sound('equip', e.x, e.y + 1, e.z); return true; }
+  }
+  return false;
+}
+const soulBlock = id => id === B.SOUL_SAND || id === B.SOUL_SOIL;
+// WitherSkullBlock.canSpawnMob: the spot is in the skull row over a T of soul sand or soil
+function witherBaseAt(w, x, y, z) {
+  for (const [ax, az] of [[1, 0], [0, 1]]) for (let o = -1; o <= 1; o++) {
+    const cx = x - ax * o, cz = z - az * o;
+    if (soulBlock(w.getBlock(cx - ax, y - 1, cz - az)) && soulBlock(w.getBlock(cx, y - 1, cz)) && soulBlock(w.getBlock(cx + ax, y - 1, cz + az)) && soulBlock(w.getBlock(cx, y - 2, cz))
+      && w.getBlock(cx - ax, y - 2, cz - az) === 0 && w.getBlock(cx + ax, y - 2, cz + az) === 0) return true;
+  }
+  return false;
+}
+function shulkerBEFrom(items) {
+  const arr = new Array(27).fill(null);
+  items.slice(0, 27).forEach((s, k) => { arr[k] = s && s.n !== undefined ? loadStack(s) : s ? copyStack(s, s.count) : null; });
+  return { type: 'shulker', kind: 'shulker', items: arr };
+}
+// true: done (or failed without dropping); 'drop': it falls out like any item; false: the older handling
+function dispenseExtra(g, c) {
+  const w = g.world, st = c.st, it = c.it, id = st.id, fx = c.fx, fy = c.fy, fz = c.fz;
+  const front = w.getBlock(fx, fy, fz), fm = w.getMeta(fx, fy, fz);
+  const mobsHere = pred => g.entities.filter(e => e instanceof Mob && !e.dead && !(e.deathTime > 0) && inCell(e, fx, fy, fz) && pred(e));
+  const fail = () => { g.sound('dispense_fail', c.px, c.py, c.pz); return true; };
+  const done = () => { g.sound('click', c.px, c.py, c.pz); return true; };
+  const isWater = b => b === B.WATER || WATERY[b] === 1;
+  if (id === I.SHEARS) {
+    let ok = false;
+    if (HIVE_IDS.has(front) && hiveHoney(fm) >= 5) {
+      g.sound('beehive_shear', fx + 0.5, fy + 0.5, fz + 0.5);
+      g.dropItem(fx + 0.5, fy + 0.5, fz + 0.5, { id: I.HONEYCOMB, count: 3 });
+      g.releaseBeesAndResetHoney(fx, fy, fz, null, 'released');
+      ok = true;
+    } else for (const m of mobsHere(() => true)) if (dispShear(g, m)) { ok = true; break; }
+    if (!ok) return fail();
+    dispWear(g, c, 1);
+    return done();
+  }
+  if (id === I.GLASS_BOTTLE) {
+    if (HIVE_IDS.has(front) && hiveHoney(fm) >= 5) { g.releaseBeesAndResetHoney(fx, fy, fz, null, 'released'); dispRemainder(g, c, { id: I.HONEY_BOTTLE, count: 1 }); g.sound('bottle_fill', fx + 0.5, fy + 0.5, fz + 0.5); return true; }
+    if (isWater(front)) { dispRemainder(g, c, { id: I.POTION, count: 1, tag: { potion: 'water' } }); g.sound('bottle_fill', fx + 0.5, fy + 0.5, fz + 0.5); return true; }
+    return 'drop';
+  }
+  if (id === I.HONEYCOMB) {
+    if (COPPER_WAX[front] === undefined) return 'drop';
+    w.setBlock(fx, fy, fz, COPPER_WAX[front], fm); c.take();
+    g.particles.poof(fx + 0.5, fy + 0.5, fz + 0.5, [1, 0.75, 0.2], 6); g.sound('scrape', fx + 0.5, fy + 0.5, fz + 0.5);
+    return true;
+  }
+  if (id === I.POTION && st.tag && st.tag.potion === 'water' && (front === B.DIRT || front === B.COARSE_DIRT || front === B.ROOTED_DIRT)) {
+    w.setBlock(fx, fy, fz, B.MUD, 0); dispRemainder(g, c, { id: I.GLASS_BOTTLE, count: 1 });
+    g.particles.splash(fx + 0.5, fy + 1, fz + 0.5); g.sound('splash', c.px, c.py, c.pz);
+    return true;
+  }
+  if (id === B.GLOWSTONE && front === B.RESPAWN_ANCHOR) {
+    if ((fm & 7) >= 4) return fail();
+    w.setMeta(fx, fy, fz, (fm & 7) + 1); c.take(); g.sound('portal_ignite', fx + 0.5, fy + 0.5, fz + 0.5);
+    return true;
+  }
+  if (it.egg) {
+    const m = g.spawnMob(it.egg, fx + 0.5, fy, fz + 0.5);
+    if (m && st.tag && st.tag.name) { m.customName = st.tag.name; m.persistent = true; }
+    c.take();
+    return done();
+  }
+  if (id === I.ARMOR_STAND) {
+    const m = g.spawnMob('armor_stand', fx + 0.5, fy, fz + 0.5, { yaw: DY[c.d] ? 0 : Math.atan2(DX[c.d], DZ[c.d]) });
+    if (m) { if (st.tag && st.tag.name) m.customName = st.tag.name; c.take(); g.sound('place_wood', fx + 0.5, fy, fz + 0.5); }
+    return true;
+  }
+  if (id === I.SADDLE) {
+    const m = mobsHere(e => e.T.rideable && !e.data.saddle && !e.baby && (e.T.tameable !== 'mount' || e.data.tame))[0];
+    if (!m) return 'drop';
+    m.data.saddle = true; c.take(); g.sound('door', m.x, m.y, m.z);
+    return true;
+  }
+  if (HORSE_ARMOR[it.name] || WOOL_CARPET.has(id)) {
+    const m = mobsHere(e => HORSE_KIND[e.type] && e.data.tame && !e.data.body && horseBodyFits(e, st))[0];
+    if (!m) return 'drop';
+    m.data.body = copyStack(st, 1); m.persistent = true; c.take();
+    g.sound(WOOL_CARPET.has(id) ? 'llama_swag' : 'horse_armor', m.x, m.y + 1, m.z);
+    return true;
+  }
+  if (id === B.CHEST) {
+    const m = mobsHere(e => e.T.chestable && HORSE_KIND[e.type] && e.data.tame && !e.data.chest && !e.baby)[0];
+    if (!m) return 'drop';
+    m.data.chest = true; m.data.items = new Array(horseCols(m) * 3).fill(null); c.take();
+    g.sound('chest_equip', m.x, m.y + 1, m.z);
+    return true;
+  }
+  if (id === B.CARVED_PUMPKIN) {
+    if (front === 0) { w.setBlock(fx, fy, fz, id, 0); if (checkGolem(g, fx, fy, fz)) { c.take(); return done(); } w.setBlock(fx, fy, fz, 0, 0); }
+    return dispEquip(g, c, 0) ? done() : fail();
+  }
+  if (id === B.WITHER_SKELETON_SKULL) {
+    if (front === 0 && OPTIONS.difficulty > 0 && witherBaseAt(w, fx, fy, fz)) { w.setBlock(fx, fy, fz, id, 0); c.take(); checkWither(g, fx, fy, fz); g.remeshNear(fx, fz); return done(); }
+    return dispEquip(g, c, 0) ? done() : fail();
+  }
+  const slot = it.armor ? it.armor.slot : it.wearable === 'head' ? 0 : id === I.SHIELD ? 'off' : null;
+  if (slot !== null) return dispEquip(g, c, slot) ? done() : 'drop';
+  if (BLK[id] && BLK[id].shulker) {
+    if (front !== 0 && !REPL[front]) return fail();
+    w.setBlock(fx, fy, fz, id, 0);
+    if (st.tag && Array.isArray(st.tag.items)) w.setBE(fx, fy, fz, shulkerBEFrom(st.tag.items));
+    c.take(); g.sound('place_stone', fx + 0.5, fy + 0.5, fz + 0.5); g.remeshNear(fx, fz);
+    return true;
+  }
+  if (it.boat) {
+    let up;
+    if (isWater(front)) up = 1; else if (front === 0 && isWater(w.getBlock(fx, fy - 1, fz))) up = 0; else return 'drop';
+    const off = 0.5625 + 1.375 / 2, b = createMob(g, it.chest ? 'chest_boat' : 'boat', c.x + 0.5 + DX[c.d] * off, c.y + 0.5 + DY[c.d] * 1.125 + up, c.z + 0.5 + DZ[c.d] * off, { wood: it.boat });
+    if (b) { b.yaw = b.bodyYaw = DY[c.d] ? 0 : Math.atan2(DX[c.d], DZ[c.d]); b.savePrev(); g.entities.push(b); }
+    c.take();
+    return done();
+  }
+  if (it.cart) {
+    let dy;
+    if (isRail(front)) { const s = railShape(front, fm); dy = s >= 2 && s <= 5 ? 0.6 : 0.1; }
+    else {
+      const below = w.getBlock(fx, fy - 1, fz);
+      if (front !== 0 || !isRail(below)) return 'drop';
+      const s = railShape(below, w.getMeta(fx, fy - 1, fz));
+      dy = c.d !== 3 && s >= 2 && s <= 5 ? -0.4 : -0.9;
+    }
+    const kind = { empty: 'minecart', chest: 'chest_minecart', hopper: 'hopper_minecart', furnace: 'furnace_minecart', tnt: 'tnt_minecart' }[it.cart] || 'minecart';
+    const m = createMob(g, 'minecart', c.x + 0.5 + DX[c.d] * 1.125, c.y + DY[c.d] + dy, c.z + 0.5 + DZ[c.d] * 1.125, { kind });
+    if (m) { m.yaw = m.bodyYaw = DX[c.d] ? HPI : 0; m.savePrev(); g.entities.push(m); }
+    c.take();
+    return done();
+  }
+  if (id === I.BRUSH) {
+    const m = mobsHere(e => e.type === 'armadillo' && !e.baby)[0];
+    if (!m) return fail();
+    g.dropItem(m.x, m.y + 0.5, m.z, { id: itemOf('armadillo_scute'), count: 1 }); g.sound('brush_sand', m.x, m.y + 0.5, m.z);
+    dispWear(g, c, 16);
+    return true;
+  }
+  if (id === I.EXPERIENCE_BOTTLE) { dispShoot(g, c, 'xp', 1.375, 3); c.take(); return done(); }
+  if (id === I.FLINT_AND_STEEL) {
+    let ok = true;
+    if (front === 0) {
+      if (!g.lightPortal(fx, fy, fz)) {
+        const below = w.getBlock(fx, fy - 1, fz), fid = below === B.SOUL_SAND || below === B.SOUL_SOIL ? B.SOUL_FIRE : B.FIRE;
+        if (w.canStay(fid, fx, fy, fz, 0)) w.setBlock(fx, fy, fz, fid, 0); else ok = false;
+      }
+    } else if (BLK[front].campfire && (fm & 4)) w.setMeta(fx, fy, fz, fm & ~4);
+    else if (BLK[front].candle && !(fm & 4)) w.setMeta(fx, fy, fz, fm | 4);
+    else if (front === B.TNT) g.primeTNT(fx, fy, fz, 80);
+    else ok = false;
+    if (!ok) return fail();
+    dispWear(g, c, 1); g.sound('portal_ignite', fx + 0.5, fy + 0.5, fz + 0.5);
+    return true;
+  }
+  if (it.bucket && id !== I.BUCKET) {
+    const fluid = it.bucket === 'water' ? B.WATER : it.bucket === 'lava' ? B.LAVA : it.bucket === 'powder_snow' ? B.POWDER_SNOW : 0;
+    if (!fluid) return false;
+    if (front !== 0 && !REPL[front] && !BLK[front].liquid) return 'drop';
+    if (fluid === B.WATER && w.dim === 'nether') { g.sound('fizz', fx + 0.5, fy + 0.5, fz + 0.5); g.particles.smoke(fx + 0.5, fy + 0.5, fz + 0.5, 8); }
+    else w.setBlock(fx, fy, fz, fluid, 0);
+    if (it.fishBucket && fluid === B.WATER && w.dim !== 'nether') g.spawnMob(it.fishBucket, fx + 0.5, fy + 0.2, fz + 0.5);
+    dispRemainder(g, c, { id: I.BUCKET, count: 1 });
+    g.sound('bucket', fx + 0.5, fy + 0.5, fz + 0.5);
+    return true;
+  }
+  if (id === I.BUCKET) {
+    let got = 0;
+    if ((front === B.WATER || front === B.LAVA) && fm === 0) got = front === B.WATER ? I.WATER_BUCKET : I.LAVA_BUCKET;
+    else if (front === B.POWDER_SNOW) got = I.POWDER_SNOW_BUCKET;
+    if (!got) return 'drop';
+    w.setBlock(fx, fy, fz, 0, 0); dispRemainder(g, c, { id: got, count: 1 });
+    g.sound('bucket', fx + 0.5, fy + 0.5, fz + 0.5);
+    return true;
+  }
+  return false;
+}
+
+/* ---------------- shulker boxes keep what they hold ---------------- */
+// placing one puts its contents back (and a blown up one drops them inside it: see the explosion)
+const _afterPlaceSB = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const w = this.world, held = p && p.inv[p.sel];
+  if (BLK[id] && BLK[id].shulker && held && held.id === id && held.tag && Array.isArray(held.tag.items) && w.getBlock(x, y, z) === id) w.setBE(x, y, z, shulkerBEFrom(held.tag.items));
+  return _afterPlaceSB.call(this, p, x, y, z, id);
+};
+
+/* ===================================================================
+   gold farms: NetherPortalBlock.randomTick lets a zombified piglin out
+   of a portal in the overworld, 1 in 2000 a step of difficulty
+   =================================================================== */
+const _randomTickZP = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  if (id !== B.NETHER_PORTAL) return _randomTickZP.call(this, x, y, z, id);
+  const w = this.world;
+  if (w.dim !== 'overworld' || (this.rule && this.rule('doMobSpawning') === false) || Math.floor(Math.random() * 2000) >= OPTIONS.difficulty) return;
+  let yy = y;
+  while (yy > 0 && w.getBlock(x, yy, z) === B.NETHER_PORTAL) yy--;
+  // BlockBehaviour.isValidSpawn: a sturdy top that gives less than 14 light (magma suits a mob that can't burn)
+  const below = w.getBlock(x, yy, z), ok = below === B.MAGMA_BLOCK || (SOLID[below] === 1 && SHAPE[below] === SH.CUBE && emitOf(below, w.getMeta(x, yy, z)) < 14);
+  if (ok) this.spawnMob('zombified_piglin', x + 0.5, yy + 1, z + 0.5);
+};
+
+/* ===================================================================
+   Zombie.tick: 30 seconds with its eyes under water, then 15 seconds
+   shaking, and a zombie is a drowned (a husk a zombie). Skeleton.tick:
+   7 seconds in powder snow, then 15 shaking (still in it), and a
+   skeleton is a stray. They keep what they wear and hold
+   =================================================================== */
+function convertKeeping(m, type) {
+  const g = m.game, n = createMob(g, type, m.x, m.y, m.z, { loading: true });
+  if (!n) return null;
+  n.yaw = n.bodyYaw = m.yaw; n.growth = m.growth; n.persistent = m.persistent; if (m.customName) n.customName = m.customName;
+  for (const k of ['hand', 'hand2', 'armor', 'noAI', 'silent']) if (m.data[k] !== undefined) n.data[k] = m.data[k];
+  if (n.afterLoad) n.afterLoad();
+  n.vx = m.vx; n.vy = m.vy; n.vz = m.vz; n.savePrev();
+  g.entities.push(n); m.dead = true; m.removed = true;
+  return n;
+}
+function inPowderSnow(m) {
+  const w = m.game.world, x = Math.floor(m.x), z = Math.floor(m.z);
+  for (let y = Math.floor(m.y); y <= Math.floor(m.y + m.h - 0.01); y++) if (w.getBlock(x, y, z) === B.POWDER_SNOW) return true;
+  return false;
+}
+const _tickCV = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const t = this.type;
+  if ((t === 'zombie' || t === 'husk' || t === 'skeleton') && !this.dead && !(this.deathTime > 0) && !this.data.noAI) {
+    const d = this.data, g = this.game;
+    if (t === 'skeleton') {
+      if (inPowderSnow(this)) {
+        if (d.freezeT !== undefined) { if (--d.freezeT < 0) { g.sound('stray_convert', this.x, this.y, this.z); convertKeeping(this, 'stray'); return; } }
+        else if ((d.snowT = (d.snowT === undefined ? -1 : d.snowT) + 1) >= 140) d.freezeT = 300;
+      } else { d.snowT = -1; delete d.freezeT; }
+    } else if (d.drownT !== undefined) {
+      if (--d.drownT < 0) { g.sound(t === 'husk' ? 'husk_convert' : 'drowned_convert', this.x, this.y, this.z); convertKeeping(this, t === 'husk' ? 'zombie' : 'drowned'); return; }
+    } else if (this.headInWater) { if ((d.waterT = (d.waterT || 0) + 1) >= 600) d.drownT = 300; }
+    else d.waterT = -1;
+  }
+  return _tickCV.call(this);
+};
+// they shake while they change
+const _animStateCV = Mob.prototype.animState;
+Mob.prototype.animState = function (a) {
+  const st = _animStateCV.call(this, a);
+  if (this.data.drownT !== undefined || this.data.freezeT !== undefined) st.shake = true;
+  return st;
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t, c] of [['beehive_enter', 'Bee enters hive', 'block'], ['beehive_exit', 'Bee leaves hive', 'block'], ['beehive_work', 'Bees work', 'block'], ['beehive_shear', 'Shears scrape', 'block'],
+  ['bottle_fill', 'Bottle fills', 'block'], ['bee_pollinate', 'Bee buzzes happily', 'neutral'], ['bee_sting', 'Bee stings', 'hostile'], ['dispense_fail', 'Dispenser failed', 'block'],
+  ['drowned_convert', 'Zombie converts to Drowned', 'hostile'], ['husk_convert', 'Husk converts to Zombie', 'hostile'], ['stray_convert', 'Skeleton converts to Stray', 'hostile']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+const _audioPlayBH = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^(beehive_enter|beehive_exit|beehive_work|beehive_shear|bottle_fill|bee_pollinate|bee_sting|dispense_fail|drowned_convert|husk_convert|stray_convert)$/.test(name)) return _audioPlayBH.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime;
+  switch (name) {
+    case 'beehive_enter': case 'beehive_exit': this.noiseHit(dst, 'lowpass', 600, 0.8, 0.12, 0.3); this.tone(dst, 'sawtooth', name === 'beehive_enter' ? 240 : 200, name === 'beehive_enter' ? 180 : 260, 0.25, 0.05); break;
+    case 'beehive_work': this.tone(dst, 'sawtooth', 210, 230, 0.6, 0.025); this.tone(dst, 'sawtooth', 300, 290, 0.5, 0.015, t0 + 0.1); break;
+    case 'beehive_shear': this.noiseHit(dst, 'highpass', 3000, 1, 0.12, 0.3); this.noiseHit(dst, 'bandpass', 1800, 2, 0.1, 0.25); break;
+    case 'bottle_fill': [500, 640, 800].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.15, 0.08, 0.12, t0 + i * 0.05)); break;
+    case 'bee_pollinate': this.tone(dst, 'sawtooth', 260, 340, 0.35, 0.04); break;
+    case 'bee_sting': this.noiseHit(dst, 'highpass', 4000, 1, 0.05, 0.3); this.tone(dst, 'square', 900, 400, 0.08, 0.06); break;
+    case 'dispense_fail': this.noiseHit(dst, 'bandpass', 2600, 4, 0.04, 0.35); break;
+    case 'drowned_convert': case 'husk_convert': this.tone(dst, 'sawtooth', 160, 90, 0.5, 0.08); this.noiseHit(dst, 'lowpass', 500, 0.7, 0.4, 0.2); break;
+    case 'stray_convert': this.tone(dst, 'triangle', 700, 300, 0.4, 0.08); this.noiseHit(dst, 'highpass', 2500, 0.8, 0.3, 0.15); break;
+  }
 };
 
 </script>

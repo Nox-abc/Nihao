@@ -546,6 +546,31 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Axolotls** play dead when hurt in water (healing meanwhile, and nothing hunts them), give you
   Regeneration when you finish off what they were fighting, and dry out after 5 minutes out of
   water.
+- **Bees** live in nests and hives (three at most) and work like Java's: out in the day, in at
+  night and in the rain, home once they carry nectar or have searched for 3 minutes. A bee stays
+  in 30 seconds, or 2 minutes when it brings nectar, which adds a level of honey. It works a
+  flower within 5 blocks for 20 seconds to get nectar, remembers it, and grows up to 10 crops it
+  flies over on the way home. A bee stings once (poison on normal and hard) and dies within a
+  minute or so; hit one and the bees around that saw it come after you. Nests made with the
+  world hold 2 or 3 bees.
+- **Honey**: a full hive (honey level 5, shown on its front) gives a honey bottle or 3 honeycomb.
+  Unless a lit campfire smokes it from below, the bees inside come out angry. Breaking a hive
+  without Silk Touch lets them out angry too; with Silk Touch the hive keeps its bees and honey
+  (the tooltip shows them). Comparators read the honey level.
+- **Dispensers** do what Java's do: shears and glass bottles harvest full hives (honey farms
+  work), shears shear sheep, mooshrooms, snow golems and bogged, bottles fill with water,
+  honeycomb waxes copper, water bottles turn dirt into mud, glowstone charges respawn anchors,
+  brushes brush armadillos; spawn eggs, armor stands, boats, minecarts and shulker boxes are
+  placed; saddles, horse armor, carpets and chests go on animals and armor on players and armor
+  stands; carved pumpkins and wither skeleton skulls finish golems and withers; bottles o'
+  enchanting are thrown; flint and steel lights fire, portals, campfires and candles and sets off
+  TNT; buckets empty (fish come out) or fill. Items drop out with Java's speed and spread.
+- **Gold farms**: nether portals in the overworld now and then let out a zombified piglin (more
+  often on harder difficulties).
+- **Drowned and strays**: a zombie under water for 30 seconds shakes for 15 more and becomes a
+  drowned (a husk becomes a zombie first); a skeleton that stays in powder snow for 7 seconds
+  shakes and becomes a stray. They keep what they wear and hold.
+- **Shulker boxes** keep their contents when placed again, and when one blown up drops.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
