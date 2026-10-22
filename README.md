@@ -624,6 +624,20 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   pitcher pod, never in the same place twice, then rest for 8 minutes. Bred, they lay a sniffer
   egg, which cracks twice and hatches after about 20 minutes (10 on a moss block); snifflets
   take 40 minutes to grow up.
+- **Crouching, swimming and crawling** work as in Java: crouching makes you 1.5 blocks tall so you
+  can sneak under low gaps, and you stay crouched where you can't stand up. Sprint under water
+  and you swim, lying flat and heading wherever you look, faster than paddling; where even
+  crouching doesn't fit (under a trapdoor, through a one-block hole) you crawl, slowly. Water
+  slows you down and you sink slowly, the same as in Java, and you can see the swimming strokes
+  in third person.
+- **Mobs ride mobs**: chicken jockeys (baby zombies, husks, drowned, zombie villagers and
+  zombified piglins on chickens), spider jockeys with skeletons, strider jockeys with zombified
+  piglins (or baby striders), and raid ravagers carrying pillagers, vindicators and evokers. The
+  rider steers its mount toward whatever it is after; riders get off when the mount dies or
+  their head goes under water, and a mount and its rider are saved together.
+- **Skeleton trap horses**: lightning in a thunderstorm sometimes leaves a skeleton horse
+  behind. Walk within 10 blocks of it and lightning flashes: four skeleton horsemen with
+  enchanted bows and iron helmets appear.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

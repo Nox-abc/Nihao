@@ -12260,6 +12260,8 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
   const baby = st && st.baby;
   if (baby && def.babyHead) for (const n of def.babyHead) P[n + '#s'] = (P[n + '#s'] || 1) * 1.5;
   const s = (def.scale || 1) * (scale || 1) * (baby ? 0.5 : 1) / 16, cy = Math.cos(yaw), sy = Math.sin(yaw), ct = Math.cos(tilt || 0), stl = Math.sin(tilt || 0);
+  // a swimming or crawling player lies flat (PlayerRenderer.setupRotations): lowered, then turned about the X axis
+  const sw = st && st.swimRot ? [Math.cos(st.swimRot), Math.sin(st.swimRot), st.swimShift || 0, 0.3 * (st.swimShift || 0)] : null;
   const mats = {};
   for (const part of def.parts) mats[part.n] = partMatrix(part, P, mats);
   for (const sk of skins) {
@@ -12278,6 +12280,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
         const X = M[0] * q[0] + M[1] * q[1] + M[2] * q[2] + M[9], Y = M[3] * q[0] + M[4] * q[1] + M[5] * q[2] + M[10], Z = M[6] * q[0] + M[7] * q[1] + M[8] * q[2] + M[11];
         // model space (y down, front -z) -> entity space (y up, front +z)
         let ex = X * s, ey = (24 - Y) * s, ez = -Z * s;
+        if (sw) { ey -= sw[2]; ez -= sw[3]; const ty = ey * sw[0] - ez * sw[1], tz = ey * sw[1] + ez * sw[0]; ey = ty; ez = tz; }
         if (tilt) { const tx = ex * ct - ey * stl, ty = ex * stl + ey * ct; ex = tx; ey = ty; }
         return [pos[0] + ex * cy + ez * sy, pos[1] + ey, pos[2] - ex * sy + ez * cy];
       };
@@ -12291,6 +12294,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
     if (!M) return null;
     const X = M[0] * q[0] + M[1] * q[1] + M[2] * q[2] + M[9], Y = M[3] * q[0] + M[4] * q[1] + M[5] * q[2] + M[10], Z = M[6] * q[0] + M[7] * q[1] + M[8] * q[2] + M[11];
     let ex = X * s, ey = (24 - Y) * s, ez = -Z * s;
+    if (sw) { ey -= sw[2]; ez -= sw[3]; const ty = ey * sw[0] - ez * sw[1], tz = ey * sw[1] + ez * sw[0]; ey = ty; ez = tz; }
     if (tilt) { const tx = ex * ct - ey * stl, ty = ex * stl + ey * ct; ex = tx; ey = ty; }
     return [pos[0] + ex * cy + ez * sy, pos[1] + ey, pos[2] - ex * sy + ez * cy];
   };
@@ -15580,10 +15584,11 @@ class Player extends Entity {
     if (inp.enabled && (inp.key('ControlLeft') || inp.key('ControlRight'))) this.sprintReq = true;
     this.sneaking = sneakKey && !this.flying && !this.gliding;
     const usingSlow = this.using && this.using.kind !== 'spyglass';
-    const canSprint = fwd > 0 && !this.sneaking && (this.food > 6 || creative) && !usingSlow && !this.effectLevel('blindness');
+    const canSprint = fwd > 0 && (!(this.sneaking || this.movingSlowly) || this.headInWater) && (this.food > 6 || creative) && !usingSlow && !this.effectLevel('blindness') && !(this.inWater && !this.headInWater && !this.swimming);
     if (this.sprintReq && canSprint) this.sprinting = true;
     if (!canSprint || (this.sprinting && fwd <= 0)) { this.sprinting = false; this.sprintReq = false; }
     if (fwd <= 0) this.sprintReq = false;
+    if (this.updatePose) { this.updateSwimming(); this.updatePose(sneakKey); }
     // horizontal acceleration
     let speed;
     const slipB = w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.5), Math.floor(this.z));
@@ -15592,11 +15597,11 @@ class Player extends Entity {
     const spd = Math.max(0, 1 + 0.2 * this.effectLevel('speed') - 0.15 * this.effectLevel('slowness'));
     if (this.flying) speed = this.sprinting ? 0.1 : 0.05;
     else if (this.inWater || this.inLava) {
-      speed = 0.02 * (this.sprinting ? 1.4 : 1);
-      if (this.inWater) { const ds = Math.min(3, enchLevel(this.armor[3], 'depth_strider')); if (ds) speed += (0.1 * spd - speed) * ds / 3; if (this.effectLevel('dolphins_grace')) speed *= 2.2; }
+      speed = 0.02;
+      if (this.inWater) { const ds = Math.min(3, enchLevel(this.armor[3], 'depth_strider')) / 3 * (this.onGround ? 1 : 0.5); if (ds) speed += (0.1 * spd * (this.sprinting ? 1.3 : 1) - speed) * ds; }
     } else if (this.onGround) speed = 0.1 * spd * (this.sprinting ? 1.3 : 1) * (0.16277136 / (fric * fric * fric));
     else speed = this.sprinting ? 0.026 : 0.02;
-    if (this.sneaking) speed *= 0.3 + 0.15 * Math.min(3, enchLevel(this.armor[2], 'swift_sneak'));
+    if (this.sneaking || this.movingSlowly) speed *= 0.3 + 0.15 * Math.min(3, enchLevel(this.armor[2], 'swift_sneak'));
     if (usingSlow) speed *= 0.2;
     if (BLK[slipB].slow && this.onGround && !enchLevel(this.armor[3], 'soul_speed')) speed *= 1;
     let len = Math.hypot(fwd, str);
@@ -15612,8 +15617,11 @@ class Player extends Entity {
       const target = jump ? 0.375 : sneakKey ? -0.375 : 0;
       this.vy += (target - this.vy) * 0.6;
     } else if (this.inWater || this.inLava) {
-      this.vy -= 0.02;
+      if (this.inLava) this.vy -= 0.02;
       if (jump) this.vy += 0.04;
+      if (this.inWater && sneakKey) this.vy -= 0.04;
+      // Player.travel: a swimmer heads where it looks
+      if (this.swimming && this.inWater) { const ly = this.look()[1], k = ly < -0.2 ? 0.085 : 0.06; if (ly <= 0 || jump || w.getBlock(Math.floor(this.x), Math.floor(this.y + 0.9), Math.floor(this.z)) === B.WATER) this.vy += (ly - this.vy) * k; }
     } else if (!this.gliding) {
       if (jump && this.onGround && this.jumpT <= 0) {
         this.vy = 0.42 + 0.1 * this.effectLevel('jump_boost'); this.jumpT = 10;
@@ -15652,14 +15660,21 @@ class Player extends Entity {
     const res = this.physicsStep();
     if (web === 3) { this.vx = 0; this.vz = 0; this.vy = 0; }
     if (this.bounce) { this.vy = -prevVy * 0.98; this.bounce = false; this.onGround = false; }
-    if ((res.hx || res.hz) && this.sprinting && !this.flying) { this.sprinting = false; this.sprintReq = false; }
+    if ((res.hx || res.hz) && this.sprinting && !this.flying && !this.swimming) { this.sprinting = false; this.sprintReq = false; }
     // flying into a wall with an elytra hurts
     if (this.gliding && (res.hx || res.hz)) { const loss = prevH - Math.hypot(this.vx, this.vz), d = loss * 10 - 3; if (d > 0) this.hurt(d, 'fly_into_wall'); }
     if (this.flying && this.onGround && !jump) this.flying = false;
     // drag
     if (this.gliding) { /* handled in glideStep */ }
     else if (this.flying) { this.vx *= 0.91; this.vz *= 0.91; }
-    else if (this.inWater) { this.vx *= 0.8; this.vz *= 0.8; this.vy *= 0.8; }
+    else if (this.inWater) {
+      let f4 = this.sprinting ? 0.9 : 0.8;
+      const ds = Math.min(3, enchLevel(this.armor[3], 'depth_strider')) / 3 * (this.onGround ? 1 : 0.5);
+      if (ds) f4 += (0.54600006 - f4) * ds;
+      if (this.effectLevel('dolphins_grace')) f4 = 0.96;
+      this.vx *= f4; this.vz *= f4; this.vy *= 0.8;
+      if (!this.sprinting) this.vy -= 0.005;
+    }
     else if (this.inLava) { this.vx *= 0.5; this.vz *= 0.5; this.vy *= 0.5; }
     else {
       const f = this.onGround ? fric : 0.91; this.vx *= f; this.vz *= f;
@@ -15677,7 +15692,7 @@ class Player extends Entity {
     const moved = Math.hypot(this.x - ox, this.z - oz);
     if (this.onGround && !this.flying) { this.walkDist += moved * 0.6; this.bob += (Math.min(0.1, moved) - this.bob) * 0.4; }
     else this.bob *= 0.6;
-    if (this.sprinting) this.exh += moved * 0.1;
+    if (this.sprinting && this.onGround && !this.inWater) this.exh += moved * 0.1;
     if (this.inWater) this.exh += moved * 0.01;
     // footsteps
     if (this.onGround && !this.sneaking && Math.floor(this.walkDist * 1.4) !== Math.floor(this.pwalkDist * 1.4)) {
@@ -15687,8 +15702,9 @@ class Player extends Entity {
     if (this.inWater && !this.wasInWater && prevVy < -0.3) { g.sound('splash', this.x, this.y, this.z); g.particles.splash(this.x, this.y + 0.5, this.z); }
     this.wasInWater = this.inWater;
     // eye height smoothing (lower while gliding or sneaking)
-    const targetEye = this.gliding ? 0.4 : this.sneaking ? 1.27 : 1.62;
-    this.h = this.gliding ? 0.6 : 1.8;
+    const dims = typeof POSE_DIMS !== 'undefined' && this.pose ? POSE_DIMS[this.pose] : null;
+    const targetEye = dims ? dims[1] : this.gliding ? 0.4 : this.sneaking ? 1.27 : 1.62;
+    this.h = dims ? dims[0] : this.gliding ? 0.6 : 1.8;
     this.eyeCur += (targetEye - this.eyeCur) * 0.5;
     // survival mechanics
     if (!creative) this.survivalTick();
@@ -20224,7 +20240,8 @@ class Game {
     // the arm holding a raised shield (the main hand's arm is the left one for a left-handed player; p.held is already swapped then)
     const leftMain = OPTIONS.mainHand === 1 && p === this.player, u = p.using && p.using.kind === 'shield' ? p.using.hand : null;
     const block = !u ? null : (u === 'main') !== leftMain ? 'R' : 'L';
-    const st = { swing: riding ? 0 : p.walkDist * 3.3, amt: riding ? 0 : Math.min(1, p.bob * 12), age: p.age + alpha, hy: 0, hp: -p.pitch, attack: p.swing ? Math.sin(p.swing * Math.PI) : 0, sneak: p.sneaking, sit: !!riding, holdR: !!p.held, holdL: !!p.offhand[0], block };
+    const st = { swing: riding ? 0 : p.walkDist * 3.3, amt: riding ? 0 : Math.min(1, p.bob * 12), age: p.age + alpha, hy: 0, hp: -p.pitch, attack: p.swing ? Math.sin(p.swing * Math.PI) : 0, sneak: p.pose ? p.pose === 'crouching' : p.sneaking, sit: !!riding, holdR: !!p.held, holdL: !!p.offhand[0], block };
+    if (p.poseAnim) Object.assign(st, p.poseAnim(alpha) || {});
     const L = p.lightAt(), skins = [{ key: 'entity/player/wide/steve' }, ...armorPasses(p.armor, MOB_MODELS.player)];
     const at = drawMob(r, MOB_MODELS.player, skins, [pp[0], pp[1], pp[2]], p.yaw + Math.PI, st, p.hurtTime > 0 ? [1, 0.5, 0.5, 1] : [1, 1, 1, 1], L, 0.9375);
     if (p.held) drawMobItem(r, this, p.held, at, 'right_arm', [-1, 10, 0], L, undefined, { blocking: block === 'R' });
@@ -22003,9 +22020,9 @@ Object.assign(Game.prototype, {
 // living things push each other apart (bucketed in 2x2 cells)
 Game.prototype.pushEntities = function () {
   const list = this.livingList(), grid = new Map();
-  for (const e of list) { if (e.dead || e.deathTime > 0 || e.T && (e.T.noPush || e.T.cat === 'misc') || e.riding || e.rider) continue; const k = (Math.floor(e.x / 2) & 0xffff) << 16 | (Math.floor(e.z / 2) & 0xffff); let b = grid.get(k); if (!b) grid.set(k, b = []); b.push(e); }
+  for (const e of list) { if (e.dead || e.deathTime > 0 || e.T && (e.T.noPush || e.T.cat === 'misc') || e.riding || e.rider || e.vehicle) continue; const k = (Math.floor(e.x / 2) & 0xffff) << 16 | (Math.floor(e.z / 2) & 0xffff); let b = grid.get(k); if (!b) grid.set(k, b = []); b.push(e); }
   for (const e of list) {
-    if (e.dead || e.deathTime > 0 || e.T && (e.T.noPush || e.T.cat === 'misc') || e.riding || e.rider) continue;
+    if (e.dead || e.deathTime > 0 || e.T && (e.T.noPush || e.T.cat === 'misc') || e.riding || e.rider || e.vehicle) continue;
     const gx = Math.floor(e.x / 2), gz = Math.floor(e.z / 2);
     for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
       const b = grid.get(((gx + ox) & 0xffff) << 16 | ((gz + oz) & 0xffff));
@@ -29586,7 +29603,7 @@ Object.assign(Game.prototype, {
       const cat = vMobCat(e.type);
       // idle time (noActionTime): back to 0 when hurt, when kept, and within 32 blocks of the player
       e.noAct = e.hurtTime > 0 ? 0 : (e.noAct || 0) + 1;
-      if (e.persistent || e.customName || (e.data && (e.data.tame || e.data.fromBucket)) || e.rider || e.riding || e.leashed) { e.noAct = 0; continue; }
+      if (e.persistent || e.customName || (e.data && (e.data.tame || e.data.fromBucket)) || e.rider || e.riding || e.leashed || e.vehicle) { e.noAct = 0; continue; }
       if (p.mode === 3) continue;
       const d2 = (e.x - p.x) ** 2 + (e.y - p.y) ** 2 + (e.z - p.z) ** 2, far = V_MOBCAT[cat] ? V_MOBCAT[cat][1] : 128;
       // animals never despawn, and patrols only far away
@@ -29906,7 +29923,7 @@ Object.assign(Game.prototype, {
         if (type === 'ravager') {
           const rider = wave === RAID_GROUPS[2] ? 'pillager' : wave >= RAID_GROUPS[3] ? (ravagers === 0 ? 'evoker' : 'vindicator') : null;
           ravagers++;
-          if (rider) { const rd = this.raidJoin(r, wave, rider, at); if (rd) rd.data.mount = m.id; }
+          if (rider) { const rd = this.raidJoin(r, wave, rider, at); if (rd) { if (typeof mobMount === 'function') mobMount(rd, m); else rd.data.mount = m.id; } }
         }
       }
     }
@@ -33463,10 +33480,11 @@ Player.prototype.tick = function (inp) {
     const k = rid.type === 'minecart' ? 'minecart_one_cm' : rid.type === 'boat' || rid.type === 'chest_boat' ? 'boat_one_cm' : rid.type === 'pig' ? 'pig_one_cm' : rid.type === 'strider' ? 'strider_one_cm' : 'horse_one_cm';
     const d = Math.round(Math.hypot(this.x - ox, dy, this.z - oz) * 100); if (d > 0) this.stat(k, d);
   } else if (this.gliding) { const d = Math.round(Math.hypot(this.x - ox, dy, this.z - oz) * 100); if (d > 0) this.stat('aviate_one_cm', d); }
-  else if (this.headInWater && this.inWater) { if (dh > 0) this.stat(this.onGround ? 'walk_under_water_one_cm' : 'swim_one_cm', dh); }
+  else if (this.swimming) { const d = Math.round(Math.hypot(this.x - ox, dy, this.z - oz) * 100); if (d > 0) this.stat('swim_one_cm', d); }
+  else if (this.headInWater && this.inWater) { if (dh > 0) this.stat('walk_under_water_one_cm', dh); }
   else if (this.inWater) { if (dh > 0) this.stat('walk_on_water_one_cm', dh); }
   else if (this.flying || this.mode === 3) { if (dh > 0) this.stat('fly_one_cm', dh); }
-  else if (this.onGround) { if (dh > 0) this.stat(this.sneaking ? 'crouch_one_cm' : this.sprinting ? 'sprint_one_cm' : 'walk_one_cm', dh); }
+  else if (this.onGround) { if (dh > 0) this.stat(this.pose === 'crouching' || (!this.pose && this.sneaking) ? 'crouch_one_cm' : this.sprinting ? 'sprint_one_cm' : 'walk_one_cm', dh); }
   else if (dy > 0 && Math.abs(this.vx) < 0.2 && BLK[g.world.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z))].climb) this.stat('climb_one_cm', Math.round(dy * 100));
   else if (dy < 0) this.stat('fall_one_cm', Math.round(-dy * 100));
   if (wasGround && !this.onGround && this.vy > 0.3 && !this.flying && !rid) this.stat('jump');
@@ -43547,6 +43565,350 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     else if (k === 'sniffing' || k === 'searching' || k === 'scenting') [0, 0.1, 0.2].forEach(dt => this.noiseHit(dst, 'highpass', 1800, 1, 0.05, 0.12));
     else { const f = (k === 'happy' ? 260 : k === 'death' ? 120 : k === 'hurt' ? 200 : 150) * v; this.tone(dst, 'sawtooth', f, f * 0.8, 0.35, 0.05); }
   }
+};
+
+/* @file 146_poses.js */
+/* ===================================================================
+   PART 35: the player's poses like Java's
+   - crouching makes you 1.5 blocks tall, so you can sneak under gaps
+     that high; where you can't stand up you stay crouched, and where
+     even that doesn't fit you crawl (0.6 tall), as slowly as sneaking
+   - sprinting under water starts swimming: you lie flat (0.6 tall),
+     head where you look and keep going while you sprint; water slows
+     you the way it does in Java (less while sprinting, far less with
+     Dolphin's Grace), and you sink slowly
+   - in third person the body swims or crawls with Java's strokes, and
+     your eyes are 0.4 above your feet
+   =================================================================== */
+// EntityDimensions of each Pose (height, eyes)
+const POSE_DIMS = { standing: [1.8, 1.62], crouching: [1.5, 1.27], swimming: [0.6, 0.4], gliding: [0.6, 0.4] };
+// Level.noCollision for the box the player would have in a pose (made a hair smaller)
+function poseFits(p, h) {
+  const w = p.game.world, hw = p.w / 2, E = 1e-7;
+  const x0 = p.x - hw + E, x1 = p.x + hw - E, y0 = p.y + E, y1 = p.y + h - E, z0 = p.z - hw + E, z1 = p.z + hw - E;
+  for (const b of collectBoxes(w, x0, y0, z0, x1, y1, z1)) if (b[0] < x1 && b[3] > x0 && b[1] < y1 && b[4] > y0 && b[2] < z1 && b[5] > z0) return false;
+  return true;
+}
+// Player.updatePlayerPose: what it wants to be, if that fits; else crouching, if that fits; else swimming (crawling)
+Player.prototype.updatePose = function (sneakKey) {
+  if (!this.pose) this.pose = 'standing';
+  if (!poseFits(this, POSE_DIMS.swimming[0])) return;
+  const want = this.gliding ? 'gliding' : this.swimming ? 'swimming' : sneakKey && !this.flying ? 'crouching' : 'standing';
+  this.pose = this.mode === 3 || this.riding || poseFits(this, POSE_DIMS[want][0]) ? want : poseFits(this, POSE_DIMS.crouching[0]) ? 'crouching' : 'swimming';
+  // the new size at once (Entity.refreshDimensions); the camera follows the eyes over a few ticks
+  this.h = POSE_DIMS[this.pose][0]; this.eyeH = POSE_DIMS[this.pose][1];
+};
+// Entity.updateSwimming (not while flying): it starts sprinting with the eyes under water and the feet in a water block, and goes on
+// while sprinting in water
+Player.prototype.updateSwimming = function () {
+  if (this.flying || this.mode === 3 || this.riding) { this.swimming = false; return; }
+  const w = this.game.world;
+  if (this.swimming) this.swimming = !!this.sprinting && this.inWater;
+  else this.swimming = !!this.sprinting && this.headInWater && w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.WATER;
+};
+// Player.isVisuallyCrawling and isMovingSlowly
+Object.defineProperty(Player.prototype, 'crawling', { get() { return this.pose === 'swimming' && !this.inWater; } });
+Object.defineProperty(Player.prototype, 'movingSlowly', { get() { return this.pose === 'crouching' || this.crawling; } });
+// LivingEntity.getSwimAmount: eases to 1 and back over about 11 ticks
+const _tickPS = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const ox = this.x, oy = this.y, oz = this.z;
+  this.pswimAmt = this.swimAmt || 0;
+  const r = _tickPS.call(this, inp);
+  const vis = this.pose === 'swimming';
+  this.swimAmt = vis ? Math.min(1, (this.swimAmt || 0) + 0.09) : Math.max(0, (this.swimAmt || 0) - 0.09);
+  // the stroke keeps time with how fast it goes (WalkAnimationState)
+  const sp = Math.min(1, Math.hypot(this.x - ox, this.z - oz) * 4);
+  this.limbSpeed = (this.limbSpeed || 0) + (sp - (this.limbSpeed || 0)) * 0.4;
+  this.plimb = this.limb || 0; this.limb = (this.limb || 0) + this.limbSpeed;
+  return r;
+};
+// PlayerRenderer.setupRotations: the body turns flat (along where you look in water), lowered a block while in the pose; and
+// HumanoidModel.setupAnim's swimming strokes and kicking legs, the head held up
+const _renderPlayerModelPS = Game.prototype.renderPlayerModel;
+Game.prototype.renderPlayerModel = function (r, p, alpha) {
+  p._renderAlpha = alpha;
+  return _renderPlayerModelPS.call(this, r, p, alpha);
+};
+const quadArm = s => -65 * s + s * s;
+const rotlerp = (t, a, b) => { let d = (b - a) % (Math.PI * 2); if (d < -Math.PI) d += Math.PI * 2; if (d >= Math.PI) d -= Math.PI * 2; return a + t * d; };
+const _playerAnimPS = MOB_MODELS.player.anim;
+MOB_MODELS.player.anim = function (P, st) {
+  _playerAnimPS.call(this, P, st);
+  const f = st.swimAmt || 0;
+  if (!(f > 0)) return;
+  P.head = [st.visSwim ? rotlerp(f, P.head ? P.head[0] : 0, -Math.PI / 4) : (P.head ? P.head[0] : 0), P.head ? P.head[1] : 0, 0];
+  const s = (st.limb || 0) % 26, fr = st.attack > 0 ? 0 : f, fl = f;
+  const L = P.left_arm || [0, 0, 0], R = P.right_arm || [0, 0, 0];
+  let lx, rx, lz, rz;
+  if (s < 14) { lx = 0; rx = 0; lz = Math.PI + 1.8707964 * quadArm(s) / quadArm(14); rz = Math.PI - 1.8707964 * quadArm(s) / quadArm(14); }
+  else if (s < 22) { const k = (s - 14) / 8; lx = Math.PI / 2 * k; rx = Math.PI / 2 * k; lz = 5.012389 - 1.8707964 * k; rz = 1.2707963 + 1.8707964 * k; }
+  else { const k = (s - 22) / 4; lx = Math.PI / 2 - Math.PI / 2 * k; rx = lx; lz = Math.PI; rz = Math.PI; }
+  if (!st.using) {
+    P.left_arm = [rotlerp(fl, L[0], lx), rotlerp(fl, L[1], Math.PI), rotlerp(fl, L[2], lz)];
+    P.right_arm = [R[0] + (rx - R[0]) * fr, R[1] + (Math.PI - R[1]) * fr, R[2] + (rz - R[2]) * fr];
+  }
+  const ll = P.left_leg || [0, 0, 0], rl = P.right_leg || [0, 0, 0];
+  P.left_leg = [ll[0] + (0.3 * Math.cos((st.limb || 0) / 3 + Math.PI) - ll[0]) * f, 0, 0];
+  P.right_leg = [rl[0] + (0.3 * Math.cos((st.limb || 0) / 3) - rl[0]) * f, 0, 0];
+};
+// the state the model needs: how far into the pose, the stroke, where it looks
+const PS_DEG = Math.PI / 180;
+Player.prototype.poseAnim = function (alpha) {
+  const a = alpha || 0, amt = (this.pswimAmt || 0) + ((this.swimAmt || 0) - (this.pswimAmt || 0)) * a;
+  if (!(amt > 0)) return null;
+  const pitchDeg = -this.pitch / PS_DEG;   // Java's xRot: down is positive
+  const f4 = amt * (this.inWater ? -90 - pitchDeg : -90);
+  return { swimAmt: amt, visSwim: this.pose === 'swimming', limb: (this.plimb || 0) + ((this.limb || 0) - (this.plimb || 0)) * a, swimRot: -f4 * PS_DEG, swimShift: this.pose === 'swimming' ? 1 : 0, using: !!this.using };
+};
+
+/* @file 147_riders.js */
+/* ===================================================================
+   PART 36: mobs riding mobs like Java's
+   - a mob can carry another: the rider sits on it and steers it toward
+     what it is after (Mob.getNavigation hands the rider the mount's),
+     and the mount stops wandering on its own; riders get off when the
+     mount dies or their head goes under water. Riders never despawn,
+     and a mount and its rider are saved together
+   - chicken jockeys: a baby zombie (or husk, zombie villager, drowned
+     or zombified piglin) rides a chicken close by one time in twenty,
+     or one more time in twenty brings its own; those chickens lay no
+     eggs, give 10 experience and despawn like monsters
+   - spider jockeys: one spider in a hundred carries a skeleton
+   - strider jockeys: one grown strider in thirty comes saddled with a
+     zombified piglin holding a warped fungus on a stick; one in ten of
+     the others carries a baby strider
+   - skeleton trap horses: lightning in a thunderstorm sometimes leaves
+     a skeleton horse instead of starting fires; a player coming within
+     10 blocks of it sets it off: a flash, and four skeleton horsemen
+     with enchanted bows and iron helmets. It goes away after 15 minutes
+   - raid ravagers carry their pillagers, evokers and vindicators the
+     same way, without being steered by them
+   =================================================================== */
+
+/* ---------------- the link ---------------- */
+// where a rider sits on each mount (EntityType passenger attachments: up, back), and how far below its feet a humanoid rider's seat is
+const RIDE_SEAT = { chicken: [0.7, -0.1], spider: [0.765, 0], cave_spider: [0.45, 0], strider: [1.65, 0], ravager: [2.2625, -0.0625], skeleton_horse: [1.31875, 0], zombie_horse: [1.31875, 0], hoglin: [1.49375, 0] };
+const RIDER_SINK = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'zombified_piglin', 'skeleton', 'stray', 'wither_skeleton', 'bogged', 'piglin', 'piglin_brute', 'pillager', 'vindicator', 'evoker', 'illusioner']);
+// Entity.startRiding and stopRiding: one rider to a mount
+function mobMount(rider, mount) {
+  if (rider.vehicle) mobDismount(rider);
+  if (mount.passenger && mount.passenger !== rider) mobDismount(mount.passenger);
+  rider.vehicle = mount; mount.passenger = rider;
+  rider.nav = null; rider.move = null;
+  ridePlace(rider);
+  rider.savePrev();
+}
+function mobDismount(rider) {
+  const v = rider.vehicle;
+  if (!v) return;
+  if (v.passenger === rider) v.passenger = null;
+  rider.vehicle = null;
+  rider.vx = rider.vy = rider.vz = 0;
+  if (!v.dead) { rider.x = v.x; rider.y = v.y; rider.z = v.z; }
+}
+// Entity.positionRider: the mount's seat less the rider's own (a baby's half as low)
+function ridePlace(r) {
+  const v = r.vehicle, s = RIDE_SEAT[v.type] || [v.h * 0.85, 0], up = s[0] * (v.baby ? 0.5 : 1), back = s[1];
+  const sink = RIDER_SINK.has(r.type) ? 0.7 * (r.baby ? 0.5 : 1) : 0, yaw = v.bodyYaw !== undefined ? v.bodyYaw : v.yaw;
+  r.x = v.x - Math.sin(yaw) * back; r.y = v.y + up - sink; r.z = v.z - Math.cos(yaw) * back;
+  r.vx = r.vy = r.vz = 0; r.fallDist = 0; r.onGround = v.onGround;
+  r.bodyYaw = yaw;
+}
+// the rider steers, unless the mount is a raid ravager carrying a raider (Ravager.updateControlFlags)
+const rideSteers = v => v.passenger instanceof Mob && !v.data.noAI && !(v.type === 'ravager' && typeof RAIDERS !== 'undefined' && RAIDERS.has(v.passenger.type));
+// a rider does not move itself
+for (const k of ['walkPhysics', 'swimPhysics', 'flyPhysics']) {
+  const base = Mob.prototype[k];
+  Mob.prototype[k] = function () { if (this.vehicle) { this.vx = this.vy = this.vz = 0; return; } return base.call(this); };
+}
+// a steered mount runs only its target goal; the rider's wish to move becomes its own (at its own pace)
+const _thinkRD = Mob.prototype.think;
+Mob.prototype.think = function () {
+  if (!this.passenger || !rideSteers(this)) return _thinkRD.call(this);
+  if (this.T.ai.includes('target') && GOALS.target) GOALS.target(this);
+  const mv = this._riderMove;
+  this.move = mv ? [mv[0], mv[1], mv[2] * (this.T.walk / (this.passenger.T.walk || 1)), mv[3], mv[4]] : null;
+  this._riderMove = null;
+  this.goal = 'ridden';
+};
+// riders sit (and humanoids put their legs out)
+const _animStateRD = Mob.prototype.animState;
+Mob.prototype.animState = function (a) { const st = _animStateRD.call(this, a); if (this.vehicle) st.sit = true; return st; };
+
+/* ---------------- each tick ---------------- */
+const _tickRD = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const v = this.vehicle;
+  if (v && (v.dead || v.unloaded || v.passenger !== this || (this.headInWater && !this.T.swims))) mobDismount(this);
+  if (this._jockey && !this.dead) jockeyUp(this);
+  const r = _tickRD.call(this);
+  if (this.vehicle && !this.dead) {
+    ridePlace(this);
+    if (rideSteers(this.vehicle)) this.vehicle._riderMove = this.move ? this.move.slice() : null;
+    this.move = null; this.nav = null;
+    this.noAct = 0;
+  }
+  if (this.passenger && (this.passenger.dead || this.passenger.vehicle !== this)) this.passenger = null;
+  // a jockey's chicken despawns the way monsters do
+  if (this.type === 'chicken' && this.data.jockey && !this.persistent && !this.customName) {
+    const p = this.game.player;
+    if (p && p.mode !== 3) { const d2 = (this.x - p.x) ** 2 + (this.y - p.y) ** 2 + (this.z - p.z) ** 2; if (d2 > 128 * 128 || (d2 > 1024 && (this.noAct = (this.noAct || 0) + 1) > 600 && Math.floor(Math.random() * 800) === 0)) { this.dead = true; this.removed = true; } else if (d2 < 1024) this.noAct = 0; }
+  }
+  // SkeletonTrapGoal: a player within 10 blocks; else gone after 15 minutes
+  if (this.type === 'skeleton_horse' && this.data.trap && !this.dead) {
+    const p = this.game.player;
+    if (p && !p.dead && p.mode !== 3 && Math.hypot(p.x - this.x, p.y - this.y, p.z - this.z) < 10) springTrap(this);
+    else if ((this.data.trapT = (this.data.trapT || 0) + 1) >= 18000) { this.dead = true; this.removed = true; }
+  }
+  return r;
+};
+
+/* ---------------- jockeys ---------------- */
+const CHICKEN_JOCKEY_KIN = ['zombie', 'husk', 'drowned', 'zombie_villager', 'zombified_piglin'];
+// Zombie.finalizeSpawn: a baby one time in twenty takes a chicken close by (5 across, 3 up and down) nobody rides, and one more time in
+// twenty a new one; Spider.finalizeSpawn: a skeleton one time in a hundred; Strider.finalizeSpawn: a saddled zombified piglin with a
+// warped fungus on a stick one in thirty, a baby strider one in ten of the rest
+for (const t of CHICKEN_JOCKEY_KIN) {
+  const base = MOB_INIT[t];
+  MOB_INIT[t] = (m, o) => { if (base) base(m, o); if (!o.loading && (m.growth < 0 || o.baby)) { const r = Math.random(); if (r < 0.05) m._jockey = 'chicken_near'; else if (Math.random() < 0.05) m._jockey = 'chicken_new'; } };
+}
+for (const t of ['spider', 'cave_spider']) {
+  const base = MOB_INIT[t];
+  MOB_INIT[t] = (m, o) => { if (base) base(m, o); if (!o.loading && Math.random() < 0.01) m._jockey = 'skeleton'; };
+}
+{
+  const base = MOB_INIT.strider;
+  MOB_INIT.strider = (m, o) => { if (base) base(m, o); if (!o.loading && !o.baby) { if (Math.random() < 1 / 30) m._jockey = 'piglin'; else if (Math.random() < 0.1) m._jockey = 'baby_strider'; } };
+}
+// made on the first tick in the world
+function jockeyUp(m) {
+  const g = m.game, k = m._jockey;
+  m._jockey = null;
+  if (k === 'chicken_near' || k === 'chicken_new') {
+    let c = k === 'chicken_near' ? g.entities.find(e => e.type === 'chicken' && !e.dead && !e.passenger && !e.rider && Math.abs(e.x - m.x) < 5.2 && Math.abs(e.y - m.y) < 3.7 && Math.abs(e.z - m.z) < 5.2) : null;
+    if (!c && k === 'chicken_new') { c = createMob(g, 'chicken', m.x, m.y, m.z); if (c) g.entities.push(c); }
+    if (!c) return;
+    c.data.jockey = true;
+    mobMount(m, c);
+    return;
+  }
+  if (k === 'skeleton') {
+    const s = createMob(g, 'skeleton', m.x, m.y, m.z);
+    if (s) { g.entities.push(s); mobMount(s, m); }
+    return;
+  }
+  if (k === 'piglin') {
+    const z = createMob(g, 'zombified_piglin', m.x, m.y, m.z);
+    if (z) { z.data.hand = { id: I.WARPED_FUNGUS_ON_A_STICK, count: 1 }; m.data.saddle = true; g.entities.push(z); mobMount(z, m); }
+    return;
+  }
+  if (k === 'baby_strider') {
+    const b = createMob(g, 'strider', m.x, m.y, m.z, { baby: true });
+    if (b) { b.growth = -24000; b._jockey = null; g.entities.push(b); mobMount(b, m); }
+  }
+}
+// Chicken: a jockey's chicken lays no eggs and gives 10 experience
+const _chickenTickRD = MOB_TICK.chicken;
+MOB_TICK.chicken = m => { if (m.data.jockey) return; return _chickenTickRD ? _chickenTickRD(m) : undefined; };
+const _dieJK = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  const jock = this.type === 'chicken' && this.data.jockey && !(this.deathTime > 0);
+  const r = _dieJK.call(this, source, attacker);
+  if (jock && attacker instanceof Player && this.game.rule('doMobLoot') !== false) this.game.spawnXP(this.x, this.y + 0.5, this.z, 10 - (this.T.xp ? 2 : 0));
+  return r;
+};
+const _keepRD = Mob.prototype.keepWhenUnloaded;
+Mob.prototype.keepWhenUnloaded = function () {
+  if (this.type === 'chicken' && this.data.jockey) return !!(this.persistent || this.customName);
+  return _keepRD.call(this);
+};
+
+/* ---------------- skeleton trap horses ---------------- */
+// ServerLevel.tickChunk: a natural strike in a thunderstorm leaves a trap horse (and burns nothing) one time in about a hundred, more
+// on harder difficulties, with mobs spawning, and not on a lightning rod
+const TRAP_CHANCE = [0, 0.01, 0.0225, 0.034];
+const _strikeNearRD = Game.prototype.strikeNear;
+Game.prototype.strikeNear = function (x, y, z) {
+  const trap = this.rule('doMobSpawning') !== false && Math.random() < (TRAP_CHANCE[OPTIONS.difficulty] || 0) && this.world.dim === 'overworld';
+  this._visualBolt = trap; this._lastStrike = null;
+  const r = _strikeNearRD.call(this, x, y, z);
+  this._visualBolt = false;
+  const at = this._lastStrike;
+  if (trap && at && !at.rod) {
+    const h = createMob(this, 'skeleton_horse', at.x, at.y, at.z);
+    if (h) { h.data.trap = true; h.data.trapT = 0; h.growth = 0; h.persistent = true; h.savePrev(); this.entities.push(h); }
+  }
+  return r;
+};
+const _strikeAtRD = Game.prototype.strikeAt;
+Game.prototype.strikeAt = function (x, y, z, rod) {
+  this._lastStrike = { x, y, z, rod: !!rod };
+  if (!this._visualBolt) return _strikeAtRD.call(this, x, y, z, rod);
+  // only the flash and the sound
+  const p = this.player, s = this.thunderState();
+  this.bolts = this.bolts || [];
+  this.bolts.push({ x, y, z, age: 0, seed: Math.floor(Math.random() * 1e9) });
+  s.flash = 2;
+  if (p && Math.hypot(p.x - x, p.z - z) < 40) this.sound('lightning_impact', x, y, z);
+};
+// SkeletonTrapGoal: a flash; the trap horse is tamed, and it and three more skeleton horses carry skeletons with iron helmets and
+// bows, enchanted for the difficulty
+function trapSkeleton(g, horse) {
+  const s = createMob(g, 'skeleton', horse.x, horse.y, horse.z);
+  if (!s) return null;
+  const lvl = 5 + Math.floor(Math.random() * 6) + 3 * Math.max(0, OPTIONS.difficulty - 1);
+  const helm = { id: itemOf('iron_helmet'), count: 1 }, bow = { id: I.BOW, count: 1 };
+  const th = typeof enchantTag === 'function' ? enchantTag(helm.id, lvl, Math.random) : null, tb = typeof enchantTag === 'function' ? enchantTag(bow.id, lvl, Math.random) : null;
+  if (th) helm.tag = th; if (tb) bow.tag = tb;
+  s.data.armor = s.data.armor || [null, null, null, null];
+  s.data.armor[0] = helm; s.data.hand = bow;
+  s.persistent = true; s.invuln = 60;
+  g.entities.push(s);
+  mobMount(s, horse);
+  return s;
+}
+function springTrap(h) {
+  const g = h.game;
+  h.data.trap = false; h.data.tame = true; h.growth = 0;
+  g._visualBolt = true; g.strikeAt(h.x, h.y, h.z, null); g._visualBolt = false;
+  trapSkeleton(g, h);
+  for (let i = 0; i < 3; i++) {
+    const n = createMob(g, 'skeleton_horse', h.x, h.y, h.z);
+    if (!n) continue;
+    n.data.tame = true; n.persistent = true; n.invuln = 60;
+    n.vx = 1.1485 * (Math.random() - Math.random()); n.vz = 1.1485 * (Math.random() - Math.random());
+    n.savePrev(); g.entities.push(n);
+    trapSkeleton(g, n);
+  }
+}
+
+/* ---------------- saving ---------------- */
+// a mount is saved with its rider in it (the Passengers list), and the rider is not saved on its own
+const _saveRD = Mob.prototype.save;
+Mob.prototype.save = function () {
+  const o = _saveRD.call(this);
+  if (this.passenger && !this.passenger.dead && this.passenger.vehicle === this) { const q = this.passenger.save(); delete q._rider; o.pass = q; }
+  if (this.vehicle) o._rider = 1;
+  return o;
+};
+const _chunkEntsRD = Game.prototype.chunkEnts;
+Game.prototype.chunkEnts = function (c) { return _chunkEntsRD.call(this, c).filter(o => !o._rider); };
+const _takeChunkEntsRD = Game.prototype.takeChunkEnts;
+Game.prototype.takeChunkEnts = function (c) {
+  const out = _takeChunkEntsRD.call(this, c).filter(o => !o._rider);
+  // a rider goes with its mount even when it sits over the chunk's edge
+  for (const e of this.entities) if (e.vehicle && e.vehicle.unloaded && !e.dead) { e.dead = true; e.unloaded = true; }
+  return out;
+};
+const _loadRD = Mob.load;
+Mob.load = function (game, o) {
+  const m = _loadRD.call(this, game, o);
+  if (m && o && o.pass) {
+    const r = Mob.load(game, Object.assign({}, o.pass, { x: o.x, y: o.y, z: o.z }));
+    if (r) { game.entities.push(r); mobMount(r, m); }
+  }
+  return m;
 };
 
 </script>
