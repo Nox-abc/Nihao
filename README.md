@@ -77,11 +77,14 @@ Settings**, **Controls**, **Language**, **Chat Settings**, **Resource Packs**, *
 Settings**, **Telemetry Data** and **Credits & Attribution**. Menus blur the world behind them, and
 the settings do what they do in Java:
 
-- **Video**: Graphics Fast / Fancy / Fabulous! (leaves, rain distance, the dark screen edges in dark
-  places; Fabulous! also shows particles and rain behind water and glass), render and simulation
+- **Video**: Graphics Fast / Fancy / Fabulous! (Fast draws leaves as solid blocks with dark gaps, as
+  Java does; rain distance, the dark screen edges in dark places; Fabulous! also shows particles and
+  rain behind water and glass), render and simulation
   distance (mobs move and crops grow only that far), Chunk Builder, Max Framerate, GUI Scale (Auto
   and 1 up to what the window allows), the Attack Indicator under the crosshair or beside the
-  hotbar, Clouds Off / Fast / Fancy, Particles All / Decreased / Minimal, Mipmap Levels, round
+  hotbar, Clouds Off / Fast / Fancy, Particles All / Decreased / Minimal, Mipmap Levels (the smaller
+  texture copies are made the way Java makes them, so far-away leaves get fuller and darker instead of
+  thinning out, and plants, glass, doors, rails and torches always use the full-size texture), round
   **entity shadows**, Distortion and FOV Effects, Entity Distance, the autosave note, enchantment
   Glint Speed and Strength, Menu Background Blur and Biome Blend.
 - **Music & Sounds**: a volume for each category (music, jukeboxes and note blocks, weather,

@@ -9725,7 +9725,7 @@ for (let f = 0; f < 6; f++) {
   }
 }
 class MeshBuf {
-  constructor(cap) { this.n = 0; this.alloc(cap); }
+  constructor(cap) { this.n = 0; this.nm = 0; this.alloc(cap); }
   alloc(cap) {
     const old = this.u8;
     this.cap = cap;
@@ -9738,13 +9738,25 @@ class MeshBuf {
   v(x, y, z, layer, u, v, sky, blk, r, g, b, fl) {
     if (this.n >= this.cap) this.alloc(this.cap * 2);
     const k = this.n++, o = k * 8, o8 = k * 16 + 8, a = this.u8, s = this.i16;
-    s[o] = x * 4; s[o + 1] = y * 4; s[o + 2] = z * 4; s[o + 3] = layer;
+    s[o] = x * 4; s[o + 1] = y * 4; s[o + 2] = z * 4; s[o + 3] = layer + this.nm;
     a[o8] = u * 4; a[o8 + 1] = v * 4; a[o8 + 2] = sky; a[o8 + 3] = blk;
     a[o8 + 4] = r > 255 ? 255 : r; a[o8 + 5] = g > 255 ? 255 : g; a[o8 + 6] = b > 255 ? 255 : b; a[o8 + 7] = fl;
   }
 }
 const MESH_OPQ = new MeshBuf(65536), MESH_TRN = new MeshBuf(16384);
-const FL_WAVE = 1, FL_WATER = 2, FL_LAVA = 4, FL_FLOW = 8, FL_WAVETOP = 16, FL_PORTAL = 32, FL_EPORTAL = 64;
+// ItemBlockRenderTypes: blocks drawn "cutout" in Java (plants, glass, doors, rails, torches...) never use the smaller
+// mipmap copies; leaves, the grass block, iron bars, glass panes, chains, hoppers, tripwire hooks and mangrove roots
+// are "cutout_mipped" and full cubes "solid", which both do. Their layer numbers carry +16384 in the opaque mesh.
+const NOMIP = new Uint8Array(MAXB);
+const NOMIP_SHAPES = new Set([SH.CROSS, SH.TORCH, SH.CROP, SH.LADDER, SH.DOOR, SH.TRAPDOOR, SH.TALL, SH.VINE, SH.RAIL, SH.WIRE, SH.FAN, SH.FIRE, SH.LEVER, SH.CHORUS, SH.BAMBOO, SH.FLAT, SH.POT, SH.LANTERN, SH.CACTUS]);
+function initNoMip() {
+  const mipped = new Set([B.GRASS_BLOCK, B.IRON_BARS, B.GLASS_PANE, B.CHAIN, B.HOPPER, B.TRIPWIRE_HOOK, B.MANGROVE_ROOTS]);
+  for (let id = 1; id < BLOCK_NAMES.length; id++) {
+    const d = BLK[id];
+    NOMIP[id] = (d.cutout || NOMIP_SHAPES.has(d.shape)) && !d.leaves && !d.translucent && !d.liquid && !mipped.has(id) ? 1 : 0;
+  }
+}
+const FL_WAVE = 1, FL_WATER = 2, FL_LAVA = 4, FL_FLOW = 8, FL_WAVETOP = 16, FL_PORTAL = 32, FL_EPORTAL = 64, FL_SOLID = 128;
 const MESH_OPTS = { fancyLeaves: true, smooth: true };
 
 function computeTints(world, c) {
@@ -10231,6 +10243,7 @@ function meshSection(world, c, sy) {
     const shape = SHAPE[id];
     const meta = pMeta[pi];
     const to = ((lz << 4) | lx) * 9;
+    opq.nm = NOMIP[id] ? 16384 : 0;
     const X = lx * 16, Y = (sy * 16 + ly) * 16, Z = lz * 16;
     switch (shape) {
       case SH.CUBE: {
@@ -10240,7 +10253,8 @@ function meshSection(world, c, sy) {
         let tr = 255, tg = 255, tb = 255;
         const tk = TINT[id];
         if (tk) { const t = tintRGB(tk, tint, to, meta); tr = t[0]; tg = t[1]; tb = t[2]; }
-        const fl = isLeaf && fancy ? FL_WAVE : 0;
+        // Fast graphics draw leaves solid like Java (RenderType.solid: the clear pixels show black)
+        const fl = isLeaf ? (fancy ? FL_WAVE : FL_SOLID) : 0;
         for (let f = 0; f < 6; f++) {
           const nid = pBlk[pi + FND[f]];
           if (OPAQUE[nid]) continue;
@@ -10351,6 +10365,7 @@ function meshSection(world, c, sy) {
     // plants and other blocks standing in water
     if (WATERY[id] && id !== B.WATER) meshLiquid(trn, B.WATER, 0, pi, lx, ly, lz, sy, tint, to);
   }
+  opq.nm = 0;
   return { opq: opq.n ? opq.u8.slice(0, opq.n * 16) : null, nOpq: opq.n, trn: trn.n ? trn.u8.slice(0, trn.n * 16) : null, nTrn: trn.n };
 }
 
@@ -10469,7 +10484,7 @@ function meshLiquid(mb, id, meta, pi, lx, ly, lz, sy, tint, to) {
 /* ---------------- texture lookup tables ---------------- */
 let TEX_GRASS_TOP, TEX_DIRT, TEX_GRASS_SNOWY, TEX_GRASS_OVERLAY, TEX_FRAME_EYE;
 function resolveFaceTextures() {
-  MODEL_CACHE.clear(); BUD_CACHE.clear();
+  MODEL_CACHE.clear(); BUD_CACHE.clear(); initNoMip();
   const L = n => texL(n);
   for (let id = 1; id < BLOCK_NAMES.length; id++) {
     const d = BLK[id];
@@ -10860,16 +10875,19 @@ layout(location=0) in vec4 aPos;
 layout(location=1) in vec4 aDat;
 layout(location=2) in vec4 aCol;
 uniform mat4 uVP; uniform vec3 uOff; uniform float uTime; uniform vec3 uCamW; uniform vec4 uAnimRate; uniform float uFogSph;
-out vec3 vUV; out vec3 vCol; out vec2 vLight; out float vDist;
+out vec3 vUV; out vec3 vCol; out vec2 vLight; out float vDist; out float vSolid; out float vNoMip;
 void main(){
   vec3 p = aPos.xyz / 64.0 + uOff;
   int fl = int(aCol.a * 255.0 + 0.5);
+  vSolid = (fl & 128) != 0 ? 1.0 : 0.0;
   if ((fl & 1) != 0) {
     vec3 w = p + uCamW;
     float s = sin(uTime * 1.7 + w.x * 0.55 + w.z * 0.43 + w.y * 0.3) * 0.045 + sin(uTime * 2.9 + w.z * 0.8) * 0.02;
     p.x += s; p.z += s * 0.7;
   }
   float layer = aPos.w;
+  vNoMip = 0.0;
+  if (layer > 16383.5) { layer -= 16384.0; vNoMip = 1.0; }
   vec2 uv = aDat.xy / 64.0;
   if ((fl & 2) != 0) {
     layer += mod(floor(uTime * uAnimRate.x), 16.0);
@@ -10892,8 +10910,7 @@ void main(){
 }`;
 const SH_TEX_FN = `
 uniform sampler2DArray uT0, uT1, uT2, uT3, uT4, uT5, uT6, uT7; uniform float uPer;
-vec4 texArr(vec3 uvl) {
-  vec2 dx = dFdx(uvl.xy), dy = dFdy(uvl.xy);
+vec4 texArrG(vec3 uvl, vec2 dx, vec2 dy) {
   float a = floor((uvl.z + 0.5) / uPer);
   vec3 c = vec3(uvl.xy, uvl.z - a * uPer);
   if (a < 0.5) return textureGrad(uT0, c, dx, dy);
@@ -10904,7 +10921,41 @@ vec4 texArr(vec3 uvl) {
   if (a < 5.5) return textureGrad(uT5, c, dx, dy);
   if (a < 6.5) return textureGrad(uT6, c, dx, dy);
   return textureGrad(uT7, c, dx, dy);
-}`;
+}
+vec4 texArr(vec3 uvl) { return texArrG(uvl, dFdx(uvl.xy), dFdy(uvl.xy)); }`;
+// MipmapGenerator.generateMipLevels: each level halves the one before. A texture with a fully clear pixel blends its
+// colours and alpha in gamma space with the clear pixels counting as black, and alpha under 96 drops to 0 (so leaves
+// get fuller and darker far away instead of fading out); any other texture blends all four channels in gamma space
+const MIP_POW22 = new Float64Array(256), MIP_G = new Uint8Array(4097);
+for (let i = 0; i < 256; i++) MIP_POW22[i] = Math.pow(i / 255, 2.2);
+for (let k = 0, r = 0; k <= 4096; k++) { while (r < 255 && MIP_POW22[r + 1] <= k / 4096) r++; MIP_G[k] = r; }
+// (int)(Math.pow(f, 1 / 2.2) * 255): the largest byte whose (b / 255)^2.2 is at most f
+function mipByte(f) {
+  let r = MIP_G[(f * 4096) | 0];
+  while (r < 255 && MIP_POW22[r + 1] <= f) r++;
+  return r;
+}
+function mipLevels(data, n, R) {
+  const out = [data], P = R * R * 4, clear = new Uint8Array(n);
+  for (let i = 0; i < n; i++) for (let k = i * P + 3; k < (i + 1) * P; k += 4) if (data[k] === 0) { clear[i] = 1; break; }
+  for (let ps = R, s = R >> 1; s >= 1; ps = s, s >>= 1) {
+    const prev = out[out.length - 1], d = new Uint8Array(n * s * s * 4), W = ps * 4, Q = [0, 4, W, W + 4];
+    for (let i = 0; i < n; i++) {
+      const pb = i * ps * ps * 4, ob = i * s * s * 4, tr = clear[i];
+      for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+        const a = pb + (y * 2 * ps + x * 2) * 4, o = ob + (y * s + x) * 4;
+        if (tr) {
+          let fa = 0, fr = 0, fg = 0, fb = 0;
+          for (let t = 0; t < 4; t++) { const j = a + Q[t]; if (prev[j + 3] !== 0) { fa += MIP_POW22[prev[j + 3]]; fr += MIP_POW22[prev[j]]; fg += MIP_POW22[prev[j + 1]]; fb += MIP_POW22[prev[j + 2]]; } }
+          const al = mipByte(fa / 4);
+          d[o] = mipByte(fr / 4); d[o + 1] = mipByte(fg / 4); d[o + 2] = mipByte(fb / 4); d[o + 3] = al < 96 ? 0 : al;
+        } else for (let c = 0; c < 4; c++) d[o + c] = mipByte((MIP_POW22[prev[a + c]] + MIP_POW22[prev[a + 4 + c]] + MIP_POW22[prev[a + W + c]] + MIP_POW22[prev[a + W + 4 + c]]) * 0.25);
+      }
+    }
+    out.push(d);
+  }
+  return out;
+}
 // texture units of the eight layer arrays (1 is the item atlas, 3..5 the sky)
 const TEX_UNITS = [0, 2, 6, 7, 8, 9, 10, 11];
 // Java Edition's lightmap (LightTexture): sky light in the sky's colour plus warm block light, pulled 4% toward
@@ -10930,11 +10981,14 @@ precision highp float; precision highp sampler2DArray;
 ${SH_TEX_FN}
 uniform vec3 uFogCol; uniform vec2 uFog; uniform float uAlphaTest; uniform float uAlphaMul;
 ${SH_LIGHT_FN}
-in vec3 vUV; in vec3 vCol; in vec2 vLight; in float vDist;
+in vec3 vUV; in vec3 vCol; in vec2 vLight; in float vDist; in float vSolid; in float vNoMip;
 out vec4 o;
 void main(){
-  vec4 c = texArr(vUV);
-  if (c.a < uAlphaTest) discard;
+  // "cutout" blocks read only the full-size texture and keep pixels from alpha 0.1, the others take mipmaps and 0.5
+  float m = vNoMip > 0.5 ? 0.0 : 1.0;
+  vec4 c = texArrG(vUV, dFdx(vUV.xy) * m, dFdy(vUV.xy) * m);
+  if (vSolid > 0.5) c.a = 1.0;
+  else if (c.a < (m > 0.5 ? uAlphaTest : min(uAlphaTest, 0.1))) discard;
   vec3 col = c.rgb * vCol * lightCol(vLight);
   float f = clamp((vDist - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);
   o = vec4(mix(col, uFogCol, f), c.a * uAlphaMul);
@@ -11144,29 +11198,16 @@ class Renderer {
     if (n > per * TEX_UNITS.length) throw new Error('Too many texture layers: ' + n);
     this.per = per;
     const data = new Uint8Array(n * P);
-    for (let i = 0; i < n; i++) {
-      const src = TEX.imgs[i], d = new Uint8Array(src.buffer.slice(src.byteOffset, src.byteOffset + P));
-      // bleed colour into transparent texels so mipmaps don't get dark fringes
-      for (let pass = 0; pass < 2; pass++) for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) {
-        const o = (y * R + x) * 4;
-        if (d[o + 3] !== 0) continue;
-        let r = 0, g = 0, b = 0, c = 0;
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const xx = x + dx, yy = y + dy;
-          if (xx < 0 || yy < 0 || xx >= R || yy >= R) continue;
-          const q = (yy * R + xx) * 4;
-          if (d[q + 3] || (d[q] | d[q + 1] | d[q + 2])) { r += d[q]; g += d[q + 1]; b += d[q + 2]; c++; }
-        }
-        if (c) { d[o] = r / c; d[o + 1] = g / c; d[o + 2] = b / c; }
-      }
-      data.set(d, i * P);
-    }
+    for (let i = 0; i < n; i++) { const src = TEX.imgs[i]; data.set(src.length === P ? src : src.subarray(0, P), i * P); }
+    const levels = mipLevels(data, n, R);
     const mkArr = (from, count) => {
       const t = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
-      gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, R, R, Math.max(1, count), 0, gl.RGBA, gl.UNSIGNED_BYTE, count ? data.subarray(from * P, (from + count) * P) : new Uint8Array(P));
+      levels.forEach((d, l) => {
+        const s = R >> l, q = s * s * 4;
+        gl.texImage3D(gl.TEXTURE_2D_ARRAY, l, gl.RGBA8, s, s, Math.max(1, count), 0, gl.RGBA, gl.UNSIGNED_BYTE, count ? d.subarray(from * q, (from + count) * q) : new Uint8Array(q));
+      });
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
       return t;
     };
     if (this.arrs) for (const t of this.arrs) gl.deleteTexture(t);
