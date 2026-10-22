@@ -12231,7 +12231,7 @@ function buildMobAtlas(game, packImg) {
     if (!placed) S *= 2;
   }
   const c = document.createElement('canvas'); c.width = c.height = S;
-  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
   for (const [it, x, y] of placed || []) {
     g.drawImage(it.im, 0, 0, it.im.width, it.im.height, x, y, it.w, it.h);
     VTEX[it.key] = { reg: { x, y, w: it.w, h: it.h }, tw: it.sk.tw, th: it.th, legacy: it.th < it.sk.th * 0.75, pack: it.im !== it.sk.canvas };
@@ -12264,15 +12264,16 @@ function vRot(r) {
 const VFACES = [[[5, 4, 0, 1], 'f5', 'f10', 'f6', 'f11'], [[2, 3, 7, 6], 'f6', 'f11', 'f7', 'f10'], [[0, 4, 7, 3], 'f4', 'f11', 'f5', 'f12'],
   [[1, 0, 3, 2], 'f5', 'f11', 'f6', 'f12'], [[5, 1, 2, 6], 'f6', 'f11', 'f8', 'f12'], [[4, 5, 6, 7], 'f8', 'f11', 'f9', 'f12']];
 // emit one cube; xf maps a point in part space (pixels) to world space
-function emitVCube(r, c, xf, uvx, tint, light) {
+// two: faces also drawn from the inside (bit per VFACES entry)
+function emitVCube(r, c, xf, uvx, tint, light, two) {
   const [u, v, x, y, z, w, h, d] = c, g = c[8] || 0, mir = c[9];
   let x0 = x - g, x1 = x + w + g;
   if (mir) { const t = x0; x0 = x1; x1 = t; }
   const y0 = y - g, y1 = y + h + g, z0 = z - g, z1 = z + d + g;
   const P = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]].map(xf);
   const U = { f4: u, f5: u + d, f6: u + d + w, f7: u + d + w + w, f8: u + d + w + d, f9: u + d + w + d + w, f10: v, f11: v + d, f12: v + d + h };
-  for (const [idx, a, b, cc, dd] of VFACES) {
-    const u1 = U[a], v1 = U[b], u2 = U[cc], v2 = U[dd];
+  for (let fi = 0; fi < 6; fi++) {
+    const [idx, a, b, cc, dd] = VFACES[fi], u1 = U[a], v1 = U[b], u2 = U[cc], v2 = U[dd];
     if (u1 === u2 && v1 === v2) continue;
     let q = [[idx[0], u2, v1], [idx[1], u1, v1], [idx[2], u1, v2], [idx[3], u2, v2]];
     if (mir) q = q.reverse();
@@ -12288,8 +12289,38 @@ function emitVCube(r, c, xf, uvx, tint, light) {
       r.dv(p[0], p[1], p[2], t[0], t[1], -1, tint[0] * sh, tint[1] * sh, tint[2] * sh, tint[3], light[0], light[1]);
     }
     // planes (zero thickness) are seen from both sides
-    if (w === 0 || h === 0 || d === 0) for (let i = 3; i >= 0; i--) { const [k, uu, vv] = q[i], p = P[k], t = uvx(uu, vv); r.dv(p[0], p[1], p[2], t[0], t[1], -1, tint[0] * sh, tint[1] * sh, tint[2] * sh, tint[3], light[0], light[1]); }
+    if (w === 0 || h === 0 || d === 0 || (two >> fi & 1)) for (let i = 3; i >= 0; i--) { const [k, uu, vv] = q[i], p = P[k], t = uvx(uu, vv); r.dv(p[0], p[1], p[2], t[0], t[1], -1, tint[0] * sh, tint[1] * sh, tint[2] * sh, tint[3], light[0], light[1]); }
   }
+}
+// Java draws models from both sides (entityCutoutNoCull): through a cube's see-through pixels the inside of its other faces shows
+// (a chicken's legs are painted on the back of the leg only). Per texture and cube: the faces to draw from the inside too.
+function insideFaces(vt, c) {
+  const m = vt.two || (vt.two = new WeakMap());
+  let f = m.get(c);
+  if (f !== undefined) return f;
+  f = 0;
+  try {
+    const rg = vt.reg, W = rg.w, H = rg.h;
+    if (!vt.alpha) {
+      const px = ATLAS.canvas.getContext('2d').getImageData(rg.x, rg.y, W, H).data, al = new Uint8Array(W * H);
+      for (let i = 0; i < al.length; i++) al[i] = px[i * 4 + 3] >= 26 ? 1 : 0;
+      vt.alpha = al;
+    }
+    const [u, v, , , , w, h, d] = c, ku = W / vt.tw, kv = H / vt.th;
+    const U = { f4: u, f5: u + d, f6: u + d + w, f7: u + d + w + w, f8: u + d + w + d, f9: u + d + w + d + w, f10: v, f11: v + d, f12: v + d + h };
+    let holes = false, solid = 0;
+    VFACES.forEach(([, a, b, cc, dd], i) => {
+      const x0 = Math.max(0, Math.floor(Math.min(U[a], U[cc]) * ku)), x1 = Math.min(W, Math.ceil(Math.max(U[a], U[cc]) * ku));
+      const y0 = Math.max(0, Math.floor(Math.min(U[b], U[dd]) * kv)), y1 = Math.min(H, Math.ceil(Math.max(U[b], U[dd]) * kv));
+      let any = 0, all = 1;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (vt.alpha[y * W + x]) any = 1; else all = 0;
+      if (!all || x1 <= x0 || y1 <= y0) holes = true;
+      if (any) solid |= 1 << i;
+    });
+    if (holes) f = solid;
+  } catch (e) { }
+  m.set(c, f);
+  return f;
 }
 // translucent model passes are drawn after the opaque ones
 const TRANS_Q = [];
@@ -12317,7 +12348,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
     const tn = sk.tint ? [tint[0] * sk.tint[0], tint[1] * sk.tint[1], tint[2] * sk.tint[2], tint[3] * (sk.tint[3] === undefined ? 1 : sk.tint[3])] : tint;
     const li = sk.glow ? [15, 15] : light, grow = sk.grow || (sk.glow ? 0.01 : 0), out = sk.trans ? transRenderer : sk.glint ? glintRenderer : r;
     for (const part of sk.parts || def.parts) {
-      if (P[part.n + '#hide'] || (sk.only && !sk.only.includes(part.n))) continue;
+      if (P[part.n + '#hide'] || (sk.only && !sk.only.includes(part.n)) || (sk.skip && sk.skip.includes(part.n))) continue;
       const M = sk.parts ? (mats[part.n] && part.p === undefined ? mats[part.n] : partMatrix(part, P, mats)) : mats[part.n];
       const cubes = (vt.legacy && def.legacy && def.legacy[part.n]) ? def.legacy[part.n] : part.c;
       if (!cubes || !cubes.length) continue;
@@ -12329,7 +12360,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
         if (tilt) { const tx = ex * ct - ey * stl, ty = ex * stl + ey * ct; ex = tx; ey = ty; }
         return [pos[0] + ex * cy + ez * sy, pos[1] + ey, pos[2] - ex * sy + ez * cy];
       };
-      for (const c of cubes) emitVCube(out, grow ? c.slice(0, 8).concat([(c[8] || 0) + grow, c[9]]) : c, xf, uvx, tn, li);
+      for (const c of cubes) emitVCube(out, grow ? c.slice(0, 8).concat([(c[8] || 0) + grow, c[9]]) : c, xf, uvx, tn, li, out === r ? insideFaces(vt, c) : 0);
     }
   }
   // lets callers attach things (held items, carried blocks) to a part: part space (pixels) -> world
@@ -15180,7 +15211,7 @@ Object.assign(MOB_SKINS, {
   polar_bear: () => [{ key: 'entity/bear/polarbear' }],
   panda: m => [{ key: 'entity/panda/' + (!m.data.variant || m.data.variant === 'normal' ? 'panda' : m.data.variant + '_panda') }],
   llama: m => { const s = [{ key: 'entity/llama/' + (m.data.variant || 'creamy') }]; return s; },
-  trader_llama: m => [{ key: 'entity/llama/' + (m.data.variant || 'creamy') }, { key: 'entity/llama/decor/trader_llama', grow: 0.5, only: ['body'] }],
+  trader_llama: m => [{ key: 'entity/llama/' + (m.data.variant || 'creamy') }, { key: 'entity/llama/decor/trader_llama', grow: 0.5 }],
   horse: m => { const s = [{ key: 'entity/horse/horse_' + (m.data.variant || 'brown') }]; if (m.data.marking && m.data.marking !== 'none') s.push({ key: 'entity/horse/horse_markings_' + m.data.marking, grow: 0.01 }); return s; },
   donkey: () => [{ key: 'entity/horse/donkey' }], mule: () => [{ key: 'entity/horse/mule' }],
   skeleton_horse: () => [{ key: 'entity/horse/horse_skeleton' }], zombie_horse: () => [{ key: 'entity/horse/horse_zombie' }],
@@ -18033,23 +18064,27 @@ const PACK_GUI_STATE = { containers: {} };
 
 /* ---------- building the textures from pack images ---------- */
 async function applyPackRecords(game, recs) {
-  const find = path => { for (const r of recs) if (r.files[path]) return r; return null; };
+  // where a texture comes from: the first pack that has it, under its own name or one a newer version gave it (PACK_ALIASES)
+  const src = path => { for (const r of recs) { if (r.files[path]) return [r, path]; for (const a of PACK_ALIASES[path] || []) if (r.files[a]) return [r, a]; } return null; };
+  const raw = async path => { const s = src(path); if (!s) return null; try { return await createImageBitmap(new Blob([s[0].files[s[1]]], { type: 'image/png' })); } catch (e) { return null; } };
   const images = new Map();
   const load = async path => {
     if (images.has(path)) return images.get(path);
-    const r = find(path);
-    let img = null;
-    if (r) { try { img = await createImageBitmap(new Blob([r.files[path]], { type: 'image/png' })); } catch (e) { img = null; } }
+    const s = src(path);
+    let img = s ? await raw(path) : null;
+    // a changed layout is fitted (or left to the built-in art when it can't be)
+    if (img && PACK_ADAPT[path]) { try { img = await PACK_ADAPT[path](img, s[1], raw); } catch (e) { console.warn('pack texture ' + path, e); img = null; } }
     images.set(path, img);
     return img;
   };
-  const meta = path => { const r = find(path); if (!r || !r.metas[path]) return null; try { return JSON.parse(r.metas[path]).animation || null; } catch (e) { return null; } };
+  const meta = path => { const s = src(path); if (!s || !s[0].metas[s[1]]) return null; try { return JSON.parse(s[0].metas[s[1]]).animation || null; } catch (e) { return null; } };
   // decode everything that might be used, in parallel
   const m = packTexMap(), paths = new Set();
   for (const n in m) for (const p of m[n]) paths.add(p);
   for (const k in PACK_GUI) for (const p of PACK_GUI[k]) paths.add(p);
   for (const k in SKINS) for (const p of [k, ...(SKIN_ALIAS[k] || [])]) paths.add(p);
-  await Promise.all([...paths].filter(find).map(load));
+  for (const p of PACK_EXTRA) paths.add(p);
+  await Promise.all([...paths].filter(src).map(load));
   const img = p => images.get(p) || null;
   const first = list => { for (const p of list) if (img(p)) return p; return null; };
 
@@ -18098,27 +18133,30 @@ async function applyPackRecords(game, recs) {
     const d = out[L('dirt')], ov = out[L('grass_block_side_overlay')], o = out[L('grass_block_side_item')] = d.slice();
     for (let k = 0; k < o.length; k += 4) if (ov[k + 3] > 0) { o[k] = ov[k] * 145 / 255; o[k + 1] = ov[k + 1] * 189 / 255; o[k + 2] = ov[k + 2] * 89 / 255; }
   }
-  // chest faces from the chest entity texture (64x64 layout; faces are stored rotated)
-  const chest = img('entity/chest/normal');
-  if (chest) {
-    const s = chest.width / 64, pc = document.createElement('canvas'); pc.width = pc.height = 14 * s;
-    const q = pc.getContext('2d'); q.imageSmoothingEnabled = false;
-    // draws a region of the chest texture turned by 180 degrees
-    const part = (sx, sy, sw, sh, dx, dy) => {
-      q.save(); q.translate((dx + sw / 2) * s, (dy + sh / 2) * s); q.scale(-1, -1);
-      q.drawImage(chest, sx * s, sy * s, sw * s, sh * s, -sw * s / 2, -sh * s / 2, sw * s, sh * s); q.restore();
-    };
-    const face = (lid, base, lock) => {
+  // chest faces from the chest entity textures (64x64 layout; faces are stored rotated): chests, ender chests, trapped chests
+  for (const [cp, pre, sideTop] of [['entity/chest/normal', 'chest', true], ['entity/chest/ender', 'ender_chest', true], ['entity/chest/trapped', 'trapped_chest', false]]) {
+    const chest = img(cp);
+    if (chest && TEX.idx[pre + '_front'] !== undefined) {
+      const s = chest.width / 64, pc = document.createElement('canvas'); pc.width = pc.height = 14 * s;
+      const q = pc.getContext('2d'); q.imageSmoothingEnabled = false;
+      // draws a region of the chest texture turned by 180 degrees
+      const part = (sx, sy, sw, sh, dx, dy) => {
+        q.save(); q.translate((dx + sw / 2) * s, (dy + sh / 2) * s); q.scale(-1, -1);
+        q.drawImage(chest, sx * s, sy * s, sw * s, sh * s, -sw * s / 2, -sh * s / 2, sw * s, sh * s); q.restore();
+      };
+      const face = (lid, base, lock) => {
+        q.clearRect(0, 0, pc.width, pc.height);
+        part(...base, 14, 10, 0, 4); part(...lid, 14, 5, 0, 0);
+        if (lock) part(4, 1, 2, 4, 6, 3);
+        return grab(pc, 0, 0, pc.width, pc.height);
+      };
+      out[L(pre + '_front')] = face([42, 14], [42, 33], true);
+      if (!sideTop) continue;
+      out[L(pre + '_side')] = face([0, 14], [0, 33], false);
       q.clearRect(0, 0, pc.width, pc.height);
-      part(...base, 14, 10, 0, 4); part(...lid, 14, 5, 0, 0);
-      if (lock) part(4, 1, 2, 4, 6, 3);
-      return grab(pc, 0, 0, pc.width, pc.height);
-    };
-    out[L('chest_front')] = face([42, 14], [42, 33], true);
-    out[L('chest_side')] = face([0, 14], [0, 33], false);
-    q.clearRect(0, 0, pc.width, pc.height);
-    q.save(); q.translate(0, 14 * s); q.scale(1, -1); q.drawImage(chest, 28 * s, 0, 14 * s, 14 * s, 0, 0, 14 * s, 14 * s); q.restore();
-    out[L('chest_top')] = grab(pc, 0, 0, pc.width, pc.height);
+      q.save(); q.translate(0, 14 * s); q.scale(1, -1); q.drawImage(chest, 28 * s, 0, 14 * s, 14 * s, 0, 0, 14 * s, 14 * s); q.restore();
+      out[L(pre + '_top')] = grab(pc, 0, 0, pc.width, pc.height);
+    }
   }
   // bed top and side from the bed entity texture
   const bed = img('entity/bed/red');
@@ -18129,6 +18167,16 @@ async function applyPackRecords(game, recs) {
     const q = bc.getContext('2d'); q.imageSmoothingEnabled = false;
     q.save(); q.translate(0, 16 * s); q.rotate(-Math.PI / 2); q.drawImage(bed, 0, 28 * s, 6 * s, 16 * s, 0, 0, 9 * s, 16 * s); q.restore();
     out[L('bed_side')] = grab(bc, 0, 0, bc.width, bc.height);
+  } else if (img('block/red_bed_head_up')) {
+    // newer packs draw beds as blocks: the head's top, and the mattress band of its side
+    const up = img('block/red_bed_head_up'), sd = img('block/red_bed_head_east');
+    out[L('bed_top')] = grab(up, 0, 0, up.width, up.height);
+    if (sd) {
+      const s = sd.width / 16, bc = document.createElement('canvas'); bc.width = bc.height = 16 * s;
+      const q = bc.getContext('2d'); q.imageSmoothingEnabled = false;
+      q.drawImage(sd, 0, 7 * s, 16 * s, 6 * s, 0, 7 * s, 16 * s, 9 * s);
+      out[L('bed_side')] = grab(bc, 0, 0, bc.width, bc.height);
+    }
   }
   // end portal: crops of the starfield, slightly tinted
   const ep = img('entity/end_portal');
@@ -39815,7 +39863,7 @@ for (const t of ['llama', 'trader_llama']) {
   MOB_SKINS[t] = m => {
     const c = m.data.body && WOOL_CARPET.get(m.data.body.id);
     if (!c) return f(m);
-    return [{ key: 'entity/llama/' + (m.data.variant || 'creamy') }, { key: 'entity/llama/decor/' + c, grow: 0.5, only: ['body'] }];
+    return [{ key: 'entity/llama/' + (m.data.variant || 'creamy') }, { key: 'entity/llama/decor/' + c, grow: 0.5 }];
   };
 }
 
@@ -50598,6 +50646,185 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'wither_shoot': this.noiseHit(dst, 'bandpass', 700 * v, 1.2, 0.35, 0.35); this.tone(dst, 'sawtooth', 190 * v, 85 * v, 0.28, 0.2); break;
     case 'wither_break_block': this.noiseHit(dst, 'lowpass', 600, 0.8, 0.55, 0.5); this.noiseHit(dst, 'bandpass', 1500, 1, 0.3, 0.3, t + 0.05); break;
   }
+};
+
+/* @file 165_newer_packs.js */
+/* ===================================================================
+   Part 54: resource packs from newer versions
+   - Minecraft moved and renamed many textures after 1.21 (1.21.2 put
+     armor, horse armor, llama carpets and wolf armor under
+     entity/equipment; 1.21.5 split cows, pigs and chickens into warm,
+     temperate and cold ones and gave saddles their own textures; later
+     versions renamed cats, rabbits, pandas, llamas, frogs, the sun and
+     moon, chains, beds and more). A pack made for any of them now finds
+     its textures here: each texture this game draws has the other
+     names it goes by, and packs are read for those too
+   - layouts that changed are fitted: the moon's phases come as eight
+     pictures, beds as block faces, the cow's muzzle as its own box (put
+     back on its face); the redrawn rabbit and magma cube can't be
+     fitted, so the game's own are drawn for those
+   - saddles from the newer packs are drawn on horses, donkeys, mules
+     and skeleton and zombie horses; llama carpets cover the neck as
+     well as the body, as Java's do
+   - a pack added before this update shows a note to add it again
+   =================================================================== */
+
+/* ---------------- other names of the game's textures ---------------- */
+const PACK_ALIASES = (() => {
+  const A = {}, set = (k, ...p) => { A[k] = (A[k] || []).concat(p); };
+  const COLORS16 = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'];
+  for (const v of ['all_black', 'black', 'british_shorthair', 'calico', 'jellie', 'persian', 'ragdoll', 'red', 'siamese', 'tabby', 'white']) set('entity/cat/' + v, 'entity/cat/cat_' + v);
+  set('entity/chicken', 'entity/chicken/temperate_chicken', 'entity/chicken/chicken_temperate');
+  set('entity/cow/cow', 'entity/cow/temperate_cow', 'entity/cow/cow_temperate');
+  set('entity/cow/red_mooshroom', 'entity/cow/mooshroom_red'); set('entity/cow/brown_mooshroom', 'entity/cow/mooshroom_brown');
+  set('entity/pig/pig', 'entity/pig/temperate_pig', 'entity/pig/pig_temperate');
+  set('entity/pig/pig_saddle', 'entity/equipment/pig_saddle/saddle');
+  for (const n of ['armadillo', 'bat', 'blaze', 'dolphin', 'endermite', 'guardian', 'phantom', 'silverfish', 'snow_golem', 'witch', 'wandering_trader', 'minecart', 'lead_knot']) set('entity/' + n, 'entity/' + n + '/' + n);
+  set('entity/guardian_elder', 'entity/guardian/guardian_elder'); set('entity/guardian_beam', 'entity/guardian/guardian_beam');
+  set('entity/phantom_eyes', 'entity/phantom/phantom_eyes'); set('entity/spider_eyes', 'entity/spider/spider_eyes');
+  set('entity/fishing_hook', 'entity/fishing/fishing_hook'); set('entity/beacon_beam', 'entity/beacon/beacon_beam');
+  set('entity/experience_orb', 'entity/experience/experience_orb'); set('entity/enchanting_table_book', 'entity/enchantment/enchanting_table_book');
+  set('entity/banner_base', 'entity/banner/banner_base'); set('entity/steve', 'entity/player/wide/steve');
+  set('entity/fox/snow_fox', 'entity/fox/fox_snow'); set('entity/fox/snow_fox_sleep', 'entity/fox/fox_snow_sleep');
+  for (const c of ['cold', 'temperate', 'warm']) set('entity/frog/' + c + '_frog', 'entity/frog/frog_' + c);
+  for (const c of ['brown', 'creamy', 'gray', 'white']) set('entity/llama/' + c, 'entity/llama/llama_' + c);
+  set('entity/llama/spit', 'entity/llama/llama_spit');
+  for (const c of [...COLORS16, 'trader_llama']) set('entity/llama/decor/' + c, 'entity/equipment/llama_body/' + c);
+  for (const k of ['aggressive', 'brown', 'lazy', 'playful', 'weak', 'worried']) set('entity/panda/' + k + '_panda', 'entity/panda/panda_' + k);
+  for (const v of ['black', 'brown', 'caerbannog', 'gold', 'salt', 'toast', 'white', 'white_splotched']) set('entity/rabbit/' + v, 'entity/rabbit/rabbit_' + v);
+  set('entity/sheep/sheep_fur', 'entity/sheep/sheep_wool');
+  set('entity/turtle/big_sea_turtle', 'entity/turtle/turtle');
+  for (const m of ['leather', 'iron', 'gold', 'diamond']) set('entity/horse/armor/horse_armor_' + m, 'entity/equipment/horse_body/' + m);
+  set('entity/wolf/wolf_armor', 'entity/equipment/wolf_body/armadillo_scute'); set('entity/wolf/wolf_armor_overlay', 'entity/equipment/wolf_body/armadillo_scute_overlay');
+  for (const m of ['leather', 'chainmail', 'iron', 'gold', 'diamond', 'netherite']) {
+    set('models/armor/' + m + '_layer_1', 'entity/equipment/humanoid/' + m); set('models/armor/' + m + '_layer_2', 'entity/equipment/humanoid_leggings/' + m);
+  }
+  set('models/armor/turtle_layer_1', 'entity/equipment/humanoid/turtle_scute');
+  set('models/armor/leather_layer_1_overlay', 'entity/equipment/humanoid/leather_overlay'); set('models/armor/leather_layer_2_overlay', 'entity/equipment/humanoid_leggings/leather_overlay');
+  for (const p of ['bolt', 'coast', 'dune', 'eye', 'flow', 'host', 'raiser', 'rib', 'sentry', 'shaper', 'silence', 'snout', 'spire', 'tide', 'vex', 'ward', 'wayfinder', 'wild']) {
+    set('trims/models/armor/' + p, 'trims/entity/humanoid/' + p); set('trims/models/armor/' + p + '_leggings', 'trims/entity/humanoid_leggings/' + p);
+  }
+  set('entity/shield_base', 'entity/shield/shield_base'); set('entity/shield_base_nopattern', 'entity/shield/shield_base_nopattern');
+  set('entity/armorstand/wood', 'entity/armorstand/armorstand'); set('entity/elytra', 'entity/equipment/wings/elytra');
+  set('environment/sun', 'environment/celestial/sun'); set('environment/moon_phases', 'environment/celestial/moon/full_moon');
+  set('block/chain', 'block/iron_chain'); set('item/chain', 'item/iron_chain');
+  set('block/purpur_pillar', 'block/purpur_pillar_side'); set('block/quartz_pillar', 'block/quartz_pillar_side');
+  set('block/smooth_sandstone', 'block/sandstone_top'); set('block/smooth_red_sandstone', 'block/red_sandstone_top'); set('block/smooth_quartz', 'block/quartz_block_bottom');
+  set('block/pitcher_crop_bottom_stage_0', 'block/pitcher_crop_bottom');
+  set('block/pitcher_plant_bottom', 'block/pitcher_crop_bottom_stage_4'); set('block/pitcher_plant_top', 'block/pitcher_crop_top_stage_4');
+  set('block/sniffer_egg', 'block/sniffer_egg_not_cracked_north'); set('block/sniffer_egg_slightly_cracked', 'block/sniffer_egg_slightly_cracked_north');
+  set('block/sniffer_egg_very_cracked', 'block/sniffer_egg_very_cracked_north');
+  set('block/barrier', 'item/barrier'); set('block/structure_void', 'item/structure_void');
+  for (let k = 0; k < 16; k++) set('block/light_' + String(k).padStart(2, '0'), 'item/light_' + String(k).padStart(2, '0'));
+  set('block/bell_body', 'entity/bell/bell_body'); set('block/dragon_fireball', 'entity/enderdragon/dragon_fireball');
+  set('block/forcefield', 'misc/forcefield'); set('block/shadow', 'misc/shadow'); set('block/potion_overlay', 'item/potion_overlay');
+  set('block/crossbow_arrow', 'item/crossbow_arrow');
+  for (let k = 0; k < 3; k++) set('block/crossbow_pulling_' + k, 'item/crossbow_pulling_' + k);
+  set('block/decorated_pot_side', 'entity/decorated_pot/decorated_pot_side');
+  const P = { angry: 'angry', drip: 'drip_hang', effect: 'effect_0', glint: 'glint', happy: 'glint', heart: 'heart', note: 'note', sculk_charge: 'sculk_charge_0',
+    sculk_soul: 'sculk_soul_0', shriek: 'shriek', sonic_boom: 'sonic_boom_0', soul_flame: 'soul_fire_flame', vibration: 'vibration' };
+  for (const k in P) set('block/particle_' + k, 'particle/' + P[k]);
+  for (let k = 0; k < 8; k++) set('block/particle_sweep_' + k, 'particle/sweep_' + k);
+  for (const r of ['activator_rail', 'detector_rail', 'powered_rail', 'rail', 'lever', 'lily_pad', 'tripwire_hook', 'twisting_vines', 'weeping_vines']) set('item/' + r, 'block/' + r);
+  set('item/debug_stick', 'item/stick'); set('item/enchanted_golden_apple', 'item/golden_apple');
+  // the saddles newer packs keep apart from the horses
+  for (const t of ['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse']) set('saddle/' + t, 'entity/equipment/' + t + '_saddle/saddle');
+  return A;
+})();
+// files read from a pack besides the ones named above: the moon's phases and the bed faces
+const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'].map(n => 'environment/celestial/moon/' + n);
+const PACK_EXTRA = [...MOON_PHASES, 'block/red_bed_head_up', 'block/red_bed_head_east', 'entity/chest/ender', 'entity/chest/trapped'];
+const _packWantedNP = packWanted;
+packWanted = function () {
+  const w = _packWantedNP();
+  for (const k in PACK_ALIASES) for (const p of PACK_ALIASES[k]) w.add(p);
+  for (const p of PACK_EXTRA) w.add(p);
+  return w;
+};
+
+/* ---------------- fitting changed layouts ---------------- */
+const packCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const q = c.getContext('2d'); q.imageSmoothingEnabled = false; return [c, q]; };
+// (img, the file it came from, a loader for other files) -> what to draw, or null to keep the game's own
+const PACK_ADAPT = {
+  // eight pictures put back in the 4 x 2 sheet
+  async 'environment/moon_phases'(im, from, raw) {
+    if (from === 'environment/moon_phases') return im;
+    const s = im.width, [c, q] = packCanvas(s * 4, s * 2);
+    for (let k = 0; k < 8; k++) { const p = await raw(MOON_PHASES[k]); if (p) q.drawImage(p, 0, 0, p.width, p.height, (k % 4) * s, Math.floor(k / 4) * s, s, s); }
+    return c;
+  },
+  // the redrawn rabbit and magma cube don't fit the 1.21 models
+  'entity/slime/magmacube': im => im.height * 2 === im.width ? im : null,
+};
+for (const v of ['black', 'brown', 'caerbannog', 'gold', 'salt', 'toast', 'white', 'white_splotched']) PACK_ADAPT['entity/rabbit/' + v] = im => im.height * 2 === im.width ? im : null;
+// the newer cow keeps its muzzle as a box of its own (6 x 3 x 2 from 0, 32): put its front on the face
+const packCowFace = im => {
+  if (im.height !== im.width) return im;
+  const s = im.width / 64, [c, q] = packCanvas(im.width, im.height);
+  q.drawImage(im, 0, 0);
+  q.drawImage(im, 2 * s, 34 * s, 6 * s, 3 * s, 7 * s, 11 * s, 6 * s, 3 * s);
+  return c;
+};
+for (const k of ['entity/cow/cow', 'entity/cow/red_mooshroom', 'entity/cow/brown_mooshroom']) PACK_ADAPT[k] = packCowFace;
+// mob heads as blocks: the face of the mob's own texture (the player's with its hat layer)
+const packFace = (x, y, w, h, hat) => (im, from) => {
+  if (!from.startsWith('entity/')) return im;
+  const s = im.width / 64, [c, q] = packCanvas(w * s, h * s);
+  q.drawImage(im, x * s, y * s, w * s, h * s, 0, 0, w * s, h * s);
+  if (hat) q.drawImage(im, (x + 32) * s, y * s, w * s, h * s, 0, 0, w * s, h * s);
+  return c;
+};
+for (const [k, p, face] of [['zombie_head', 'entity/zombie/zombie', [8, 8, 8, 8]], ['skeleton_skull', 'entity/skeleton/skeleton', [8, 8, 8, 8]],
+  ['wither_skeleton_skull', 'entity/skeleton/wither_skeleton', [8, 8, 8, 8]], ['creeper_head', 'entity/creeper/creeper', [8, 8, 8, 8]],
+  ['player_head', 'entity/player/wide/steve', [8, 8, 8, 8, true]], ['piglin_head', 'entity/piglin/piglin', [8, 8, 10, 8]]]) {
+  PACK_ALIASES['block/' + k] = (PACK_ALIASES['block/' + k] || []).concat([p]);
+  PACK_ADAPT['block/' + k] = packFace(...face);
+}
+
+/* ---------------- the allay ---------------- */
+// it had no skin of its own: blue and see-through, as Java draws it (entityTranslucent)
+defSkin('entity/allay/allay', 32, 32, () => skinParts(32, 32, MM.allay.parts, {
+  head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 1 || x === 3) ? [250, 255, 255] : f === 'front' && y === 3 && (x === 1 || x === 3) ? [40, 140, 220] : nz([110, 230, 250], R),
+  body: (f, x, y, W, H, R, ci) => ci === 1 ? nz([120, 80, 220, 200], R) : nz([80, 200, 245], R),
+  right_arm: (f, x, y, W, H, R) => nz([90, 210, 248], R), left_arm: (f, x, y, W, H, R) => nz([90, 210, 248], R),
+  right_wing: (f, x, y, W, H, R) => nz([200, 245, 255, 150], R), left_wing: (f, x, y, W, H, R) => nz([200, 245, 255, 150], R),
+}, 631));
+MOB_SKINS.allay = () => [{ key: 'entity/allay/allay', trans: true }];
+
+/* ---------------- saddles ---------------- */
+// the newer packs' saddles, over the saddle part (when the pack has them; the older ones paint it on the horse)
+for (const t of ['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse']) {
+  defSkin('saddle/' + t, 64, 64, () => { const [c] = packCanvas(64, 64); return c; });
+  SKINS['saddle/' + t].packOnly = true;
+  const f = MOB_SKINS[t];
+  MOB_SKINS[t] = m => {
+    const s = f(m), sk = VTEX['saddle/' + t];
+    if (!m.data.saddle || !sk || !sk.pack) return s;
+    return s.map(x => Object.assign({}, x, { skip: ['saddle'] })).concat([{ key: 'saddle/' + t, only: ['saddle'] }]);
+  };
+}
+
+/* ---------------- packs added before this ---------------- */
+// a pack read before these names were known lacks its newer textures until it is added again
+const PACK_VERSION = 2;
+const _importFileNP = PACKS.importFile;
+PACKS.importFile = async function (file, progress) {
+  const rec = await _importFileNP.call(this, file, progress);
+  rec.v = PACK_VERSION;
+  try { await DB.putPack(rec); } catch (e) { rec.unsaved = true; }
+  return rec;
+};
+const packNeedsReadd = r => !r.embedded && !(r.v >= PACK_VERSION) && !!r.files['entity/zombie/zombie'] && !r.files['entity/cow/cow'];
+const _renderPS = PackScreen.render;
+PackScreen.render = async function () {
+  await _renderPS.call(this);
+  const recs = PACKS.list || [];
+  const rows = [...document.querySelectorAll('#packlist .world.pack')];
+  recs.forEach((r, i) => {
+    if (!packNeedsReadd(r) || !rows[i]) return;
+    const info = rows[i].querySelector('.pinfo');
+    if (info && !info.querySelector('.preadd')) { const n = el('div', 'pdesc preadd'); n.textContent = 'Some textures are missing. Add this pack again to load all of them.'; n.style.color = '#ffd080'; info.appendChild(n); }
+  });
 };
 
 </script>

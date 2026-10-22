@@ -770,6 +770,12 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   break almost anything. When hurt it smashes the blocks around it. Skulls go through armor the way Java's do,
   wither what they hit and leave wither roses where they kill. Its boss bar darkens the world. One from a spawn
   egg starts fighting straight away.
+- **Packs from newer versions**: resource packs made for versions after 1.21, such as 26.x template packs,
+  work without missing or mixed-up textures. The game knows their new file names and layouts: cow, pig and
+  chicken variants, cats, frogs, llamas, pandas and other renamed mobs, armor, trims, saddles and horse, wolf and
+  llama armor from the equipment folders, the moon's eight separate pictures, and renamed blocks such as the
+  chain and the pillars. Mobs are drawn from both sides like Java's, so thin parts such as a chicken's legs show
+  the way the pack paints them. Allays now have their own look instead of being invisible.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
@@ -830,10 +836,12 @@ Minecraft, so the game can look like the real thing.
      | macOS | `~/Library/Application Support/minecraft/versions/1.21.4/1.21.4.jar` (press Cmd+Shift+G in the file picker to type the path) |
      | Linux | `~/.minecraft/versions/1.21.4/1.21.4.jar` |
 
-     Any version from 1.13 onwards works; newer versions cover more blocks. The pack shows up as
+     Any version from 1.13 onwards works, including the 26.x versions; newer versions cover more blocks. The pack shows up as
      "Minecraft 1.21.4".
    - **Any resource pack** `.zip`, such as Faithful or packs from Modrinth and CurseForge.
      HD packs up to 128×128 are used at full resolution; bigger ones are scaled down to 128×128.
+     Packs made for versions newer than 1.21 work too. With those, rabbits and magma cubes keep
+     Blockcraft's own look, because their newer textures no longer fit the 1.21 models.
 3. Click **Done**. The game switches over straight away, even in the middle of a world.
 
 You can stack several packs. The pack at the top of the list wins, and anything it does not
@@ -841,6 +849,10 @@ include comes from the next pack down, then from Blockcraft's own art. Use ▲ �
 **Use** / **Turn off** to switch one on or off, and **Default Textures** to go back to the built-in
 look. Packs are saved in your browser, so you only add them once. The file is read on your
 computer and is never uploaded anywhere, and none of Mojang's assets are included in this repository.
+This repository doesn't include any resource packs: Mojang's textures and most popular packs may
+not be shared by others, so add them from your own files. If you added a pack before the update
+that taught the game the newer file names, add it again once (the screen tells you when): older
+versions of the game kept only the files they knew about.
 
 What a pack changes:
 
