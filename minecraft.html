@@ -10962,13 +10962,13 @@ const TEX_UNITS = [0, 2, 6, 7, 8, 9, 10, 11];
 // grey, brightened by night vision, darkened by the darkness effect, then the brightness option's curve
 const SH_LIGHT_FN = `
 uniform float uSkyLvl; uniform vec3 uSkyCol; uniform float uBlockLvl; uniform float uDimAmb; uniform float uForceBright;
-uniform float uGamma; uniform float uNightVision; uniform float uDarkness;
+uniform float uGamma; uniform float uNightVision; uniform float uDarkness; uniform float uDarkenWorld;
 float bright(float l){ float f = clamp(l, 0.0, 15.0) / 15.0; return mix(f / (4.0 - 3.0 * f), 1.0, uDimAmb); }
 vec3 lightCol(vec2 L){
   float s = bright(L.x) * uSkyLvl, b = bright(L.y) * uBlockLvl;
   vec3 c = vec3(b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4));
   if (uForceBright > 0.5) c = clamp(mix(c, vec3(0.99, 1.12, 1.0), 0.25), 0.0, 1.0);
-  else c = mix(c + uSkyCol * s, vec3(0.75), 0.04);
+  else { c = mix(c + uSkyCol * s, vec3(0.75), 0.04); c = mix(c, c * vec3(0.7, 0.6, 0.6), uDarkenWorld); }
   if (uNightVision > 0.0) { float m = max(c.r, max(c.g, c.b)); if (m < 1.0) c = mix(c, c / max(m, 1e-4), uNightVision); }
   if (uForceBright < 0.5) c = clamp(c - vec3(uDarkness), 0.0, 1.0);
   c = mix(c, 1.0 - pow(1.0 - c, vec3(4.0)), uGamma);
@@ -11411,6 +11411,7 @@ class Renderer {
     gl.uniform1f(u.uDimAmb, lm.amb); gl.uniform1f(u.uForceBright, lm.force); gl.uniform1f(u.uDarkness, lm.dark || 0);
     gl.uniform1f(u.uGamma, Math.max(0, OPTIONS.brightness - (lm.darkGamma || 0)));
     gl.uniform1f(u.uNightVision, env.nightVision || 0);
+    if (u.uDarkenWorld) gl.uniform1f(u.uDarkenWorld, env.darkenWorld || 0);
     gl.uniform3fv(u.uFogCol, env.fogCol);
     gl.uniform2f(u.uFog, env.fogStart, env.fogEnd);
     if (u.uFogSph) gl.uniform1f(u.uFogSph, env.under ? 1 : 0);
@@ -13769,12 +13770,6 @@ defSkin('entity/breeze/breeze', 32, 32, () => skinParts(32, 32, MM.breeze.parts,
   head: (f, x, y, W, H, R, ci) => ci === 0 ? nz([200, 190, 240], R) : f === 'front' && y === 4 && (x === 2 || x === 5) ? [240, 250, 255] : f === 'front' && y === 4 ? [80, 70, 140] : nz([170, 160, 220], R),
   '*': (f, x, y, W, H, R) => nz([150, 140, 210], R),
 }, 611));
-defSkin('entity/wither/wither', 64, 64, () => skinParts(64, 64, MM.wither.parts, {
-  center_head: (f, x, y, W, H, R) => f === 'front' && y >= 3 && y <= 4 && (x === 1 || x === 2 || x === 5 || x === 6) ? [10, 10, 10] : f === 'front' && y === 6 && x >= 2 && x <= 5 ? (x % 2 ? [50, 50, 50] : [10, 10, 10]) : nz([46, 46, 46], R),
-  right_head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 1 || x === 4) ? [10, 10, 10] : nz([46, 46, 46], R), left_head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 1 || x === 4) ? [10, 10, 10] : nz([46, 46, 46], R),
-  '*': (f, x, y, W, H, R) => nz((x + y) % 4 === 0 ? [30, 30, 30] : [52, 52, 52], R),
-}, 621));
-defSkin('entity/wither/wither_invulnerable', 64, 64, () => skinParts(64, 64, MM.wither.parts, { '*': (f, x, y, W, H, R) => nz([80, 90, 180], R) }, 622));
 defSkin('entity/player/wide/steve', 64, 64, () => skinParts(64, 64, MM.player.parts, Object.assign(humanoidPainters({
   skin: [222, 172, 132], hair: [36, 150, 140], eyes: [40, 140, 90], shirt: [222, 122, 44], sleeve: [210, 112, 38], pants: [52, 58, 82], shoes: [190, 190, 196], mouth: [150, 90, 80],
   fringe: 2, sideHair: 2, backHair: 3, sleeveLen: 9, shirtLen: 12,
@@ -15165,22 +15160,6 @@ Object.assign(MOB_INTERACT, {
 });
 for (const f of ['cod', 'salmon', 'pufferfish', 'tropical_fish', 'axolotl', 'tadpole'])
   MOB_INTERACT[f] = (m, p, held) => { if (held && held.id === I.WATER_BUCKET) { const b = ITEM_BY_NAME[f + '_bucket']; if (!b) return false; p.consumeHeld(1); m.game.giveOrReplace(p, { id: b.id, count: 1 }); m.dead = true; m.game.sound('bucket', m.x, m.y, m.z); return true; } return false; };
-// iron golems from blocks, snow golems from snow
-function checkGolem(g, x, y, z) {
-  const w = g.world, id = w.getBlock(x, y, z);
-  if (id !== B.CARVED_PUMPKIN && id !== B.JACK_O_LANTERN) return false;
-  if (w.getBlock(x, y - 1, z) === B.SNOW_BLOCK && w.getBlock(x, y - 2, z) === B.SNOW_BLOCK) {
-    for (let k = 0; k < 3; k++) w.setBlock(x, y - k, z, 0, 0);
-    const m = createMob(g, 'snow_golem', x + 0.5, y - 2, z + 0.5); m.persistent = true; g.entities.push(m); g.remeshNear(x, z); return true;
-  }
-  if (w.getBlock(x, y - 1, z) === B.IRON_BLOCK && w.getBlock(x, y - 2, z) === B.IRON_BLOCK) {
-    for (const [ax, az] of [[1, 0], [0, 1]]) if (w.getBlock(x + ax, y - 1, z + az) === B.IRON_BLOCK && w.getBlock(x - ax, y - 1, z - az) === B.IRON_BLOCK) {
-      for (const [bx, by, bz] of [[x, y, z], [x, y - 1, z], [x, y - 2, z], [x + ax, y - 1, z + az], [x - ax, y - 1, z - az]]) w.setBlock(bx, by, bz, 0, 0);
-      const m = createMob(g, 'iron_golem', x + 0.5, y - 2, z + 0.5); m.persistent = true; m.data.playerMade = true; g.entities.push(m); g.remeshNear(x, z); return true;
-    }
-  }
-  return false;
-}
 
 /* ---------------- skins ---------------- */
 Object.assign(MOB_SKINS, {
@@ -15241,7 +15220,6 @@ Object.assign(MOB_SKINS, {
   shulker: () => [{ key: 'entity/shulker/shulker' }],
   allay: () => [{ key: 'entity/allay/allay' }],
   breeze: () => [{ key: 'entity/breeze/breeze' }],
-  wither: m => [{ key: m.data.invuln > 0 ? 'entity/wither/wither_invulnerable' : 'entity/wither/wither' }],
 });
 // extra animation state per mob
 const MOB_ANIM = {
@@ -15375,15 +15353,17 @@ function armorEPF(armor, source) {
     if (!s) continue;
     e += enchLevel(s, 'protection');
     if (source === 'fire' || source === 'lava' || source === 'magma' || source === 'fireball') e += 2 * enchLevel(s, 'fire_protection');
-    if (source === 'explosion' || source === 'creeper') e += 2 * enchLevel(s, 'blast_protection');
-    if (source === 'arrow' || source === 'trident' || source === 'fireball') e += 2 * enchLevel(s, 'projectile_protection');
+    if (BLAST_SOURCES.has(source)) e += 2 * enchLevel(s, 'blast_protection');
+    if (source === 'arrow' || source === 'trident' || source === 'fireball' || source === 'wither_skull' || source === 'bullet') e += 2 * enchLevel(s, 'projectile_protection');
     if (source === 'fall' || source === 'pearl') e += 3 * enchLevel(s, 'feather_falling');
   }
   return Math.min(20, e);
 }
+// explosions (DamageTypeTags.IS_EXPLOSION)
+const BLAST_SOURCES = new Set(['explosion', 'creeper', 'wither_blast', 'fireball_blast', 'bed', 'crystal', 'fireworks']);
 // damage that armor does not reduce
 const BYPASS_ARMOR = new Set(['fall', 'drown', 'starve', 'void', 'kill', 'magic', 'poison', 'wither', 'fire', 'freeze', 'sonic_boom', 'suffocate', 'dripstone', 'pearl', 'fly_into_wall']);
-const BLOCKABLE = new Set(['zombie', 'spider', 'skeleton', 'arrow', 'wither_skeleton', 'enderman', 'blaze', 'fireball', 'explosion', 'player', 'creeper', 'husk', 'stray', 'drowned', 'piglin', 'zombified_piglin', 'vindicator', 'pillager', 'witch', 'iron_golem', 'silverfish', 'cave_spider', 'slime', 'magma_cube', 'phantom', 'hoglin', 'warden', 'trident', 'wolf', 'polar_bear', 'bee', 'endermite', 'piglin_brute', 'zoglin', 'ravager', 'evoker', 'vex', 'guardian', 'ghast', 'shulker', 'breeze', 'goat', 'llama', 'dolphin', 'panda', 'fox', 'pufferfish', 'ender_dragon', 'void_orb']);
+const BLOCKABLE = new Set(['zombie', 'spider', 'skeleton', 'arrow', 'wither_skull', 'wither_skeleton', 'enderman', 'blaze', 'fireball', 'explosion', 'player', 'creeper', 'husk', 'stray', 'drowned', 'piglin', 'zombified_piglin', 'vindicator', 'pillager', 'witch', 'iron_golem', 'silverfish', 'cave_spider', 'slime', 'magma_cube', 'phantom', 'hoglin', 'warden', 'trident', 'wolf', 'polar_bear', 'bee', 'endermite', 'piglin_brute', 'zoglin', 'ravager', 'evoker', 'vex', 'guardian', 'ghast', 'shulker', 'breeze', 'goat', 'llama', 'dolphin', 'panda', 'fox', 'pufferfish', 'ender_dragon', 'void_orb']);
 const isUndeadType = t => ['zombie', 'skeleton', 'wither_skeleton', 'husk', 'stray', 'drowned', 'zombified_piglin', 'zombie_villager', 'phantom', 'wither', 'zoglin', 'skeleton_horse', 'zombie_horse', 'bogged'].includes(t);
 const isArthropodType = t => ['spider', 'cave_spider', 'bee', 'silverfish', 'endermite'].includes(t);
 
@@ -15512,7 +15492,7 @@ class Player extends Entity {
         if (sh && amount >= 3) { const w = this.wear(sh, 1 + Math.floor(amount)); if (!w) { if (this.offhand[0] === sh) this.offhand[0] = null; else this.inv[this.sel] = null; this.using = null; } }
         this.game.sound('shield_block', this.x, this.y + 1, this.z);
         if (attacker.blockedByShield) attacker.blockedByShield(this, source);
-        if (attacker.vx !== undefined && attacker !== this && source !== 'arrow' && source !== 'fireball') { attacker.vx += dx / l * 0.5; attacker.vz += dz / l * 0.5; }
+        if (attacker.vx !== undefined && attacker !== this && source !== 'arrow' && source !== 'fireball' && source !== 'wither_skull') { attacker.vx += dx / l * 0.5; attacker.vz += dz / l * 0.5; }
         // Player.blockUsingShield: an axe (or the warden) knocks the shield out for 5 seconds
         if (attacker.canDisableShield && attacker.canDisableShield(source)) { this.shieldCd = 100; this.using = null; this.game.sound('shield_break', this.x, this.y + 1, this.z); }
         this.invuln = 10;
@@ -19303,11 +19283,13 @@ class Game {
   updateBossBar() {
     const p = this.player;
     let s = this.dragon && !this.dragon.dead && this.world.dim === 'end' && Math.hypot(p.x - this.dragon.x, p.z - this.dragon.z) < 240 ? this.dragon : null;
-    if (!s) for (const e of this.entities) if (e.T && e.T.boss && !e.dead && Math.hypot(p.x - e.x, p.z - e.z) < 64) { s = e; break; }
+    // other bosses: the nearest within the range it is seen from (a boss may set its own, its bar's fill, and whether it darkens the world)
+    if (!s) { let bd = Infinity; for (const e of this.entities) if (e.T && e.T.boss && !e.dead) { const d2 = (p.x - e.x) ** 2 + (p.z - e.z) ** 2, r = e.bossRange ? e.bossRange() : 64; if (d2 < r * r && d2 < bd) { bd = d2; s = e; } } }
+    this._darkW = Math.max(0, Math.min(1, (this._darkW || 0) + (s && s.darkens ? 0.05 : -0.0125)));
     const show = !!s, bb = $('bossbar');
     if (bb.classList.contains('hidden') === show) bb.classList.toggle('hidden', !show);
     if (!show) return;
-    $('bossfill').style.width = (s.health / s.maxHealth * 100).toFixed(1) + '%';
+    $('bossfill').style.width = ((s.bossProgress ? s.bossProgress() : s.health / s.maxHealth) * 100).toFixed(1) + '%';
     const name = s === this.dragon ? 'Ender Dragon' : s.customName || mobName(s.type);
     if (this._bossName !== name) { this._bossName = name; const t = bb.querySelector('.bossname'); if (t) t.textContent = name; $('bossfill').style.background = s === this.dragon ? '' : '#b040e0'; }
   }
@@ -23079,67 +23061,7 @@ class EnderDragon extends Mob {
   }
 }
 
-/* ---------------- the wither ---------------- */
-class Wither extends Mob {
-  constructor(game, type, x, y, z, opts) { super(game, type, x, y, z, opts); this.data.invuln = opts && opts.loading ? 0 : 220; this.persistent = true; this.headT = [0, 0]; if (this.data.invuln) this.health = 1; }
-  keepWhenUnloaded() { return true; }
-  immune(source) { if (this.data.invuln > 0) return true; if (this.health < this.maxHealth / 2 && (source === 'arrow' || source === 'trident')) return true; return source === 'wither' || source === 'drown'; }
-  tick() {
-    const g = this.game;
-    if (this.data.invuln > 0) {
-      this.savePrev(); this.age++;
-      this.data.invuln--;
-      this.health = Math.min(this.maxHealth, this.maxHealth * (1 - this.data.invuln / 220));
-      if (this.data.invuln === 0) { g.explode(this.x, this.y + 1.5, this.z, 7, false, 'wither'); g.sound('dragon_death', this.x, this.y, this.z); }
-      return;
-    }
-    super.tick();
-    if (this.dead || this.deathTime > 0) return;
-    if (this.age % 20 === 0) this.health = Math.min(this.maxHealth, this.health + 1);
-  }
-  think() {
-    const g = this.game, p = g.player;
-    if (!this.target || this.target.dead) this.target = p && p.survival && !p.dead && this.distTo(p) < 64 ? p : g.entities.find(e => e instanceof Mob && !e.dead && !e.T.undead && e.T.cat !== 'misc' && this.distTo(e) < 20) || null;
-    const t = this.target;
-    let tx = this.x, ty = this.y, tz = this.z;
-    if (t) { tx = t.x + Math.sin(this.age * 0.02) * 6; tz = t.z + Math.cos(this.age * 0.02) * 6; ty = t.y + 5; this.lookAt(t.x, t.y + t.h, t.z); }
-    const dx = tx - this.x, dy = ty - this.y, dz = tz - this.z, l = Math.hypot(dx, dy, dz) || 1;
-    this.move = l > 1 ? [dx / l, dz / l, this.T.walk, false, dy / l] : null;
-    // three heads fire wither skulls
-    if (t && (this.shootCd = (this.shootCd || 40) - 1) <= 0 && this.canSee(t)) {
-      this.shootCd = this.health < this.maxHealth / 2 ? 20 : 40;
-      const blue = Math.random() < 0.001 * (OPTIONS.difficulty + 1);
-      const ox = [0, -1.3, 1.3][this.age % 3], c = Math.cos(this.yaw), s = Math.sin(this.yaw);
-      const sx = this.x + ox * c, sy = this.y + 3, sz = this.z - ox * s, ddx = t.x - sx, ddy = t.y + t.h * 0.5 - sy, ddz = t.z - sz, ll = Math.hypot(ddx, ddy, ddz);
-      const pr = g.spawnProjectile('skull', sx, sy, sz, ddx / ll * 0.5, ddy / ll * 0.5, ddz / ll * 0.5, this); pr.blue = blue;
-      g.sound('shoot', sx, sy, sz);
-    }
-    // smash through blocks around it after being hurt
-    if (this.age - (this.lastHurtAge || -999) < 20 && this.age % 10 === 0 && g.rule('mobGriefing')) {
-      const w = g.world;
-      for (let ddy = 0; ddy < 4; ddy++) for (let ddz = -1; ddz <= 1; ddz++) for (let ddx = -1; ddx <= 1; ddx++) { const bx = Math.floor(this.x) + ddx, by = Math.floor(this.y) + ddy, bz = Math.floor(this.z) + ddz, id = w.getBlock(bx, by, bz); if (id && BLK[id].hard >= 0 && BLK[id].hard < 30 && !BLK[id].liquid) w.setBlock(bx, by, bz, 0, 0); }
-      g.remeshNear(Math.floor(this.x), Math.floor(this.z));
-    }
-    return;
-  }
-  animState(a) { const st = super.animState(a); return st; }
-  renderScale() { return this.data.invuln > 0 ? 1 + Math.sin(this.age * 0.4) * 0.05 : 1; }
-}
-Object.assign(MOB_CLASSES, { wither: Wither });
-// soul sand in a T with three wither skeleton skulls on top
-function checkWither(g, x, y, z) {
-  const w = g.world, soul = id => id === B.SOUL_SAND || id === B.SOUL_SOIL, skull = id => id === B.WITHER_SKELETON_SKULL;
-  for (const [ax, az] of [[1, 0], [0, 1]]) for (let o = -1; o <= 1; o++) {
-    const cx = x - ax * o, cz = z - az * o;
-    if (!skull(w.getBlock(cx, y, cz)) || !skull(w.getBlock(cx + ax, y, cz + az)) || !skull(w.getBlock(cx - ax, y, cz - az))) continue;
-    if (!soul(w.getBlock(cx, y - 1, cz)) || !soul(w.getBlock(cx + ax, y - 1, cz + az)) || !soul(w.getBlock(cx - ax, y - 1, cz - az)) || !soul(w.getBlock(cx, y - 2, cz))) continue;
-    for (const [bx, by, bz] of [[cx, y, cz], [cx + ax, y, cz + az], [cx - ax, y, cz - az], [cx, y - 1, cz], [cx + ax, y - 1, cz + az], [cx - ax, y - 1, cz - az], [cx, y - 2, cz]]) w.setBlock(bx, by, bz, 0, 0);
-    const m = createMob(g, 'wither', cx + 0.5, y - 2, cz + 0.5); g.entities.push(m); g.remeshNear(cx, cz);
-    g.sound('ender_dragon', cx, y, cz);
-    return true;
-  }
-  return false;
-}
+/* (the Wither is in Part 53) */
 
 /* @file 98_world_gen.js */
 /* ===================================================================
@@ -31384,6 +31306,8 @@ Game.prototype.gameTick = function () {
 /* ---------------- explosions ---------------- */
 // Level.ExplosionInteraction of each kind of explosion
 const EXPLOSION_KIND = { creeper: 'mob', fireball: 'mob', wither: 'mob', wither_blue: 'mob', bed: 'block', crystal: 'block', explosion: 'tnt', tnt: 'tnt' };
+// the damage the blasts do (a Wither's or a ghast's blast is an explosion, not its skull or its fire)
+const EXPLOSION_HURT = { wither: 'wither_blast', wither_blue: 'wither_blast', fireball: 'fireball_blast' };
 const WITHER_IMMUNE = new Set(['barrier', 'bedrock', 'end_portal', 'end_portal_frame', 'end_gateway', 'command_block', 'repeating_command_block', 'chain_command_block', 'structure_block', 'jigsaw', 'moving_piston', 'light', 'reinforced_deepslate'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
 // Level.clip with the blocks' collision boxes: does the line reach the point?
 function clipCollider(w, ax, ay, az, bx, by, bz) {
@@ -31452,7 +31376,7 @@ Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
     }
   }
   // the creatures and things around
-  const f2 = power * 2, p = this.player, scaled = kind === 'mob' || source === 'bed';
+  const f2 = power * 2, p = this.player, hurtAs = EXPLOSION_HURT[source] || source || 'explosion';
   const things = this.entities.filter(e => !e.dead && (e instanceof Mob || e instanceof ItemEntity || e instanceof PrimedTNT || e instanceof FallingBlock));
   if (p && !p.dead && p.mode !== 3) things.push(p);
   for (const e of things) {
@@ -31468,8 +31392,8 @@ Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
       // items have 5 health; nether stars are not hurt by explosions
       if (e.stack.id !== I.NETHER_STAR && (e.ihp = (e.ihp === undefined ? 5 : e.ihp) - dmg) <= 0) { e.dead = true; continue; }
     } else if (e.hurt && !(e instanceof PrimedTNT) && !(e instanceof FallingBlock)) {
-      if (e === p && scaled) { const df = OPTIONS.difficulty; dmg = df === 0 ? 0 : df === 1 ? Math.min(dmg / 2 + 1, dmg) : df === 3 ? dmg * 1.5 : dmg; }
-      if (dmg > 0) e.hurt(dmg, source || 'explosion', null);
+      if (e === p) { const df = OPTIONS.difficulty; dmg = df === 0 ? 0 : df === 1 ? Math.min(dmg / 2 + 1, dmg) : df === 3 ? dmg * 1.5 : dmg; }
+      if (dmg > 0) e.hurt(dmg, hurtAs, null);
     }
     if (e === p && (p.mode === 1 && p.flying)) continue;
     // Blast Protection: 15% less knockback a level (explosion_knockback_resistance)
@@ -41149,16 +41073,6 @@ function dispEquip(g, c, slot) {
   }
   return false;
 }
-const soulBlock = id => id === B.SOUL_SAND || id === B.SOUL_SOIL;
-// WitherSkullBlock.canSpawnMob: the spot is in the skull row over a T of soul sand or soil
-function witherBaseAt(w, x, y, z) {
-  for (const [ax, az] of [[1, 0], [0, 1]]) for (let o = -1; o <= 1; o++) {
-    const cx = x - ax * o, cz = z - az * o;
-    if (soulBlock(w.getBlock(cx - ax, y - 1, cz - az)) && soulBlock(w.getBlock(cx, y - 1, cz)) && soulBlock(w.getBlock(cx + ax, y - 1, cz + az)) && soulBlock(w.getBlock(cx, y - 2, cz))
-      && w.getBlock(cx - ax, y - 2, cz - az) === 0 && w.getBlock(cx + ax, y - 2, cz + az) === 0) return true;
-  }
-  return false;
-}
 function shulkerBEFrom(items) {
   const arr = new Array(27).fill(null);
   items.slice(0, 27).forEach((s, k) => { arr[k] = s && s.n !== undefined ? loadStack(s) : s ? copyStack(s, s.count) : null; });
@@ -47461,7 +47375,7 @@ Projectile.prototype.tick = function () {
   _tickHB.call(this);
   if (!HURTING.has(this.kind) || this.dead) return;
   const g = this.game, w = g.world, l = Math.hypot(this.vx, this.vy, this.vz) || 1;
-  const wet = w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.WATER, k = wet ? 0.8 : 0.95;
+  const wet = w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.WATER, k = wet ? 0.8 : this.inertia || 0.95;
   const vx = this.vx, vy = this.vy, vz = this.vz;
   this.vx = (vx + vx / l * 0.1) * k; this.vy = (vy + vy / l * 0.1) * k; this.vz = (vz + vz / l * 0.1) * k;
   const p = g.player;
@@ -50101,6 +50015,588 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'puffer_blow_up': this.tone(dst, 'sine', 300 * v, 700 * v, 0.25, 0.15); break;
     case 'puffer_blow_out': this.tone(dst, 'sine', 700 * v, 250 * v, 0.3, 0.12); break;
     case 'puffer_sting': this.noiseHit(dst, 'highpass', 2500, 1.5, 0.08, 0.3); this.tone(dst, 'square', 900 * v, 500 * v, 0.08, 0.05); break;
+  }
+};
+
+/* @file 164_wither.js */
+/* ===================================================================
+   Part 53: the Wither like Java
+   - summoned like Java's block patterns: soul sand or soil in a T with
+     its two lower corners empty and three wither skeleton skulls along
+     the top, standing, lying or upside down (any of the 24 ways a
+     pattern can face; iron and snow golems too). Not on Peaceful
+   - one built that way starts with a third of its health and charges
+     for 220 ticks: it can't be hurt, grows to full size, heals 10 every
+     half second, then blows up (power 7) with a cry heard from anywhere.
+     One from a spawn egg or a command skips all that
+   - it keeps 60% of its vertical speed a tick; with a target it climbs
+     to its height (5 blocks over it while above half health) and closes
+     in while more than 3 blocks off; with none it drifts to spots 1 to
+     3 blocks over the ground ahead, and sinks whenever it has nowhere
+     to go
+   - it goes for the nearest living thing that isn't undead within 40
+     blocks (4 up or down) and in sight, or whatever hurt it; the middle
+     head fires every 2 seconds; each side head picks its own target
+     within 20 blocks and fires every 2 to 3 seconds; on Normal and Hard
+     a side head left idle long enough sends a blue skull at a random
+     spot (sooner once it has been hurt), and 1 in 1000 of the middle
+     head's skulls is blue
+   - skulls leave at 0.1 a tick and speed up (blue ones stay slow); they
+     hurt for 8 (scaled by the difficulty for players, cut by armor and
+     Projectile Protection), give Wither II for 10 seconds on Normal and
+     40 on Hard, heal the Wither 5 when they kill and burst (power 1);
+     blue ones blow through nearly anything
+   - hurt, it breaks every block about its body a second later
+     (mobGriefing); it heals 1 a second; it has 4 armor; at half health
+     its armor shows and arrows, tridents and wind charges bounce off;
+     the undead and other Withers can't hurt it; it never despawns but
+     on Peaceful
+   - what it kills leaves a wither rose (or drops one); its nether star
+     lasts 10 minutes on the ground and is not multiplied by Looting
+   - its boss bar shows the charge and darkens the world; its own
+     sounds; skulls drawn from the head in the Wither's texture
+   - also: blast damage now counts as an explosion for armor and Blast
+     Protection (the Wither's and ghasts' blasts went round armor or
+     counted as fire), every explosion scales with the difficulty, a
+     ghast fireball's hit does too, and mobs are immune to the effects
+     Java keeps off them (poison and regeneration for the undead, poison
+     for spiders, wither for wither skeletons)
+   =================================================================== */
+
+/* ---------------- block patterns (BlockPattern.find) ---------------- */
+// Direction.values(): down, up, north, south, west, east
+const JP_DIRS = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
+// the rows of a one-deep pattern (top row first) with its first corner anywhere in the box of its size from the block given,
+// every way it can lie: rows run against the thumb, columns along finger x thumb (BlockPattern.translateAndRotate)
+function jPattern(w, x, y, z, rows, where) {
+  const H = rows.length, W = rows[0].length, n = Math.max(W, H);
+  for (let k = 0; k < n * n * n; k++) {
+    const ox = x + k % n, oy = y + Math.floor(k / n) % n, oz = z + Math.floor(k / (n * n));
+    for (const f of JP_DIRS) for (const t of JP_DIRS) {
+      if (f[0] * t[0] + f[1] * t[1] + f[2] * t[2] !== 0) continue;
+      const pa = [f[1] * t[2] - f[2] * t[1], f[2] * t[0] - f[0] * t[2], f[0] * t[1] - f[1] * t[0]];
+      const at = (i, j) => [ox - t[0] * j + pa[0] * i, oy - t[1] * j + pa[1] * i, oz - t[2] * j + pa[2] * i];
+      let ok = true;
+      for (let i = 0; i < W && ok; i++) for (let j = 0; j < H && ok; j++) { const q = at(i, j); ok = where[rows[j][i]](w.getBlock(q[0], q[1], q[2])); }
+      if (ok) return { at, W, H, finger: f, palm: pa };
+    }
+  }
+  return null;
+}
+// CarvedPumpkinBlock.clearPatternBlocks: the blocks of the shape go, breaking as they do
+function jClear(g, M) {
+  const w = g.world;
+  for (let i = 0; i < M.W; i++) for (let j = 0; j < M.H; j++) {
+    const [bx, by, bz] = M.at(i, j), id = w.getBlock(bx, by, bz);
+    if (!id) continue;
+    w.setBlock(bx, by, bz, 0, 0);
+    g.particles.blockBreak(bx, by, bz, id);
+    g.sound('break_' + BLK[id].sound, bx + 0.5, by + 0.5, bz + 0.5);
+  }
+}
+const jPumpkin = id => id === B.CARVED_PUMPKIN || id === B.JACK_O_LANTERN, jAir = id => id === 0, jSoul = id => id === B.SOUL_SAND || id === B.SOUL_SOIL;
+const JP_SNOW_GOLEM = [['^', '#', '#'], { '^': jPumpkin, '#': id => id === B.SNOW_BLOCK }];
+const JP_IRON_GOLEM = [['~^~', '###', '~#~'], { '^': jPumpkin, '#': id => id === B.IRON_BLOCK, '~': jAir }];
+const JP_WITHER = [['^^^', '###', '~#~'], { '^': id => id === B.WITHER_SKELETON_SKULL, '#': jSoul, '~': jAir }];
+const JP_WITHER_BASE = [['   ', '###', '~#~'], { ' ': () => true, '#': jSoul, '~': jAir }];
+// CarvedPumpkinBlock.trySpawnGolem: a snow golem's column first, then an iron golem's T, either lying any way
+function checkGolem(g, x, y, z) {
+  const w = g.world;
+  if (!jPumpkin(w.getBlock(x, y, z))) return false;
+  for (const [P, type, col] of [[JP_SNOW_GOLEM, 'snow_golem', 0], [JP_IRON_GOLEM, 'iron_golem', 1]]) {
+    const M = jPattern(w, x, y, z, P[0], P[1]);
+    if (!M) continue;
+    jClear(g, M);
+    const [bx, by, bz] = M.at(col, 2), m = createMob(g, type, bx + 0.5, by + 0.05, bz + 0.5);
+    m.yaw = m.bodyYaw = 0; m.persistent = true;
+    if (type === 'iron_golem') m.data.playerMade = true;
+    m.savePrev(); g.entities.push(m); g.remeshNear(bx, bz);
+    return true;
+  }
+  return false;
+}
+// WitherSkullBlock.checkSpawn: a Wither out of the bottom of the T, charging
+function checkWither(g, x, y, z) {
+  const w = g.world;
+  if (w.getBlock(x, y, z) !== B.WITHER_SKELETON_SKULL || OPTIONS.difficulty === 0) return false;
+  const M = jPattern(w, x, y, z, JP_WITHER[0], JP_WITHER[1]);
+  if (!M) return false;
+  jClear(g, M);
+  const [bx, by, bz] = M.at(1, 2), m = createMob(g, 'wither', bx + 0.5, by + 0.55, bz + 0.5);
+  // turned so that its side heads are where the outer skulls were
+  m.yaw = m.bodyYaw = M.palm[0] ? 0 : M.palm[2] ? -Math.PI / 2 : M.finger[0] ? 0 : -Math.PI / 2;
+  m.data.invuln = 220; m.health = m.maxHealth / 3;
+  m.savePrev(); g.entities.push(m); g.remeshNear(bx, bz);
+  return true;
+}
+// WitherSkullBlock.canSpawnMob: a dispenser puts the last skull on a finished base
+function witherBaseAt(w, x, y, z) { return !!jPattern(w, x, y, z, JP_WITHER_BASE[0], JP_WITHER_BASE[1]); }
+
+/* ---------------- the Wither ---------------- */
+const WB_EYE = 3.5 * 0.85, WB_DEG = Math.PI / 180;
+Object.assign(MOB_TYPES.wither, { armor: 4, follow: 40, drops: [], sounds: ['wither_ambient', 'wither_hurt', 'wither_death'] });
+const wbWrap = a => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
+const wbTurn = (a, b, max) => a + Math.max(-max, Math.min(max, wbWrap(b - a)));
+// the heads: the middle one 3 up, the side ones 2.2 up and 1.3 out to its right (1) and left (2)
+function wbHead(m, head) {
+  if (head <= 0) return [m.x, m.y + 3, m.z];
+  const k = head === 1 ? -1.3 : 1.3;
+  return [m.x + Math.cos(m.bodyYaw) * k, m.y + 2.2, m.z - Math.sin(m.bodyYaw) * k];
+}
+// WitherBoss.LIVING_ENTITY_SELECTOR with Mob.canAttack: living and not undead (wither_friends); not creative or spectator players
+function wbFoe(m, e) {
+  if (!e || e === m || e.dead || e.deathTime > 0) return false;
+  if (e instanceof Player) return e.survival && OPTIONS.difficulty > 0;
+  return e instanceof Mob && !e.T.undead && e.T.cat !== 'misc' && e.type !== 'ender_dragon' && !e.data.invulnerable;
+}
+// LivingEntity.getVisibilityPercent for the range it is noticed from
+function wbSeenRange(e, r) {
+  if (e instanceof Player) return emSeenRange(e, r);
+  if (e.effectLevel && e.effectLevel('invisibility')) return Math.max(r * 0.7 * Math.max(0.1, (e.data.armor || []).filter(Boolean).length / 4), 2);
+  return r;
+}
+// level.getNearbyEntities with TargetingConditions.forCombat().range(r): in the box grown by h across and v up and down, within the
+// range it can be noticed from, and in sight
+function wbNear(m, r, v, h) {
+  const out = [], hw = m.w / 2, x0 = m.x - hw - h, x1 = m.x + hw + h, z0 = m.z - hw - h, z1 = m.z + hw + h, y0 = m.y - v, y1 = m.y + m.h + v;
+  for (const e of m.game.livingList()) {
+    if (!wbFoe(m, e)) continue;
+    const ew = (e.w || 0.6) / 2, eh = e.h || 1.8;
+    if (e.x + ew < x0 || e.x - ew > x1 || e.z + ew < z0 || e.z - ew > z1 || e.y + eh < y0 || e.y > y1) continue;
+    const rr = wbSeenRange(e, r);
+    if ((e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2 > rr * rr || !jSees(m, e, WB_EYE)) continue;
+    out.push(e);
+  }
+  return out;
+}
+// the target goals: whatever hurt it (HurtByTargetGoal), else the nearest in 40 blocks and 4 up or down (NearestAttackableTargetGoal);
+// a target is kept while it can still be attacked within 40 blocks
+function wbTargets(m) {
+  let t = m.target;
+  if (t && (!wbFoe(m, t) || (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 > 1600)) t = m.target = null;
+  const a = m._wHurtBy;
+  m._wHurtBy = null;
+  if (a && a !== t && wbFoe(m, a)) { m.target = a; return; }
+  if (t || (m.age + m.id) % 2) return;
+  let best = null, bd = Infinity;
+  const ey = m.y + WB_EYE;
+  for (const e of wbNear(m, 40, 4, 40)) { const d2 = (e.x - m.x) ** 2 + (e.y - ey) ** 2 + (e.z - m.z) ** 2; if (d2 < bd) { bd = d2; best = e; } }
+  m.target = best;
+}
+// WitherBoss.performRangedAttack: a skull from that head at 0.1 a tick
+function wbShoot(m, head, x, y, z, blue) {
+  const g = m.game, [hx, hy, hz] = wbHead(m, head), dx = x - hx, dy = y - hy, dz = z - hz, l = Math.hypot(dx, dy, dz) || 1;
+  if (!m.data.silent) g.sound('wither_shoot', m.x, m.y + 1, m.z);
+  const pr = g.spawnProjectile('skull', hx, hy, hz, dx / l * 0.1, dy / l * 0.1, dz / l * 0.1, m);
+  if (pr) { pr.blue = !!blue; pr.inertia = blue ? 0.73 : 0.95; pr.life = 1200; }
+  return pr;
+}
+// PathNavigation, flying: there once within half its width across and a block up or down; given up when it makes less than 9
+// blocks in 100 ticks
+function wbMoveTo(m, x, y, z, speed) {
+  const n = m._wNav;
+  if (n) { n.x = x; n.y = y; n.z = z; n.speed = speed; return; }
+  m._wNav = { x, y, z, speed, chk: m.age, cx: m.x, cy: m.y, cz: m.z };
+}
+function wbNavTick(m) {
+  const n = m._wNav;
+  if (!n) return;
+  if (Math.abs(m.x - n.x) < 0.45 && Math.abs(m.z - n.z) < 0.45 && Math.abs(m.y - n.y) < 1) { m._wNav = null; return; }
+  if (m.age - n.chk > 100) {
+    if ((m.x - n.cx) ** 2 + (m.y - n.cy) ** 2 + (m.z - n.cz) ** 2 < 81) { m._wNav = null; return; }
+    n.chk = m.age; n.cx = m.x; n.cy = m.y; n.cz = m.z;
+  }
+}
+// RangedAttackGoal(1.0, 40, 40, 20) for the middle head: it closes in until it has seen the target for 5 ticks within 20 blocks,
+// and fires every 40 ticks while it sees it
+function wbRanged(m, t) {
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2, see = jSees(m, t, WB_EYE);
+  m._wSee = see ? m._wSee + 1 : 0;
+  if (d2 <= 400 && m._wSee >= 5) m._wNav = null;
+  else wbMoveTo(m, t.x, t.y, t.z, 1);
+  m.lookAt(t.x, emEyeOf(t), t.z);
+  if (--m._wAtk === 0) {
+    if (!see) return;
+    wbShoot(m, 0, t.x, t.y + (emEyeOf(t) - t.y) * 0.5, t.z, Math.random() < 0.001);
+    m._wAtk = 40;
+  } else if (m._wAtk < 0) m._wAtk = 40;
+}
+// WaterAvoidingRandomFlyingGoal: now and then (1 in 60 looks, a look every other tick) a spot ahead to fly to: HoverRandomPos
+// (within 8 across and 7 up or down, 1 to 3 blocks over the ground there), else AirAndWaterRandomPos
+function wbHoverPos(m) {
+  const w = m.game.world, R = Math.random, top = CH_TOP;
+  const solid = (x, y, z) => { const id = w.getBlock(x, y, z); return !!id && SOLID[id] === 1 && !BLK[id].liquid; };
+  const pick = (yr, y0) => {
+    const a = m.yaw + (2 * R() - 1) * Math.PI / 2, d = Math.sqrt(R()) * Math.SQRT2 * 8, dx = Math.floor(Math.sin(a) * d), dz = Math.floor(Math.cos(a) * d);
+    if (Math.abs(dx) > 8 || Math.abs(dz) > 8) return null;
+    return [Math.floor(m.x + dx), Math.floor(m.y + Math.floor(R() * (2 * yr + 1)) - yr + y0), Math.floor(m.z + dz)];
+  };
+  for (let k = 0; k < 10; k++) {
+    const q = pick(7, 0);
+    // FlyingPathNavigation.isStableDestination: something to stand on; RandomPos.moveUpToAboveSolid: out of it, then 1 to 3 more
+    if (!q || !solid(q[0], q[1], q[2])) continue;
+    let y = q[1] + 1;
+    while (y < top && solid(q[0], y, q[2])) y++;
+    const up = 1 + Math.floor(R() * 3);
+    let y1 = y;
+    while (y1 < top && y1 - y < up && !solid(q[0], y1 + 1, q[2])) y1++;
+    if (w.getBlock(q[0], y1, q[2]) === B.WATER) continue;
+    return [q[0], y1, q[2]];
+  }
+  for (let k = 0; k < 10; k++) {
+    const q = pick(4, -2);
+    if (!q) continue;
+    let y = q[1];
+    while (y < top && solid(q[0], y, q[2])) y++;
+    return [q[0], y, q[2]];
+  }
+  return null;
+}
+function wbStroll(m) {
+  if (m._wNav || (m.age + m.id) % 2 || Math.random() * 60 >= 1) return;
+  const p = wbHoverPos(m);
+  if (p) wbMoveTo(m, p[0] + 0.5, p[1], p[2] + 0.5, 1);
+}
+// WitherBoss.customServerAiStep: each side head looks again every 10 to 19 ticks; a target still in reach (30 blocks) and sight gets
+// a skull and 40 to 59 ticks of rest, else it picks one at random within 20; left idle long enough on Normal and Hard, it sends a
+// blue skull at a spot within 10 across and 5 up or down
+function wbSideHeads(m) {
+  const R = Math.random;
+  for (let i = 1; i < 3; i++) {
+    const H = m._wh[i - 1];
+    if (m.age < H.next) continue;
+    H.next = m.age + 10 + Math.floor(R() * 10);
+    if (OPTIONS.difficulty >= 2 && H.idle++ > 15) {
+      wbShoot(m, i, m.x - 10 + R() * 20, m.y - 5 + R() * 10, m.z - 10 + R() * 20, true);
+      H.idle = 0;
+    }
+    const e = H.t;
+    if (e) {
+      if (wbFoe(m, e) && (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2 <= 900 && jSees(m, e, WB_EYE)) {
+        wbShoot(m, i, e.x, e.y + (emEyeOf(e) - e.y) * 0.5, e.z, false);
+        H.next = m.age + 40 + Math.floor(R() * 20); H.idle = 0;
+      } else H.t = null;
+    } else {
+      const L = wbNear(m, 20, 8, 20);
+      if (L.length) H.t = L[Math.floor(R() * L.length)];
+    }
+  }
+}
+// WitherBoss.aiStep: the side heads turn toward their targets (10 degrees a tick across, 40 up and down), or back with the body
+function wbTurnHeads(m) {
+  for (let i = 0; i < 2; i++) {
+    const H = m._wh[i], e = H.t;
+    H.pyr = H.yr; H.pxr = H.xr;
+    if (e && !e.dead) {
+      const [hx, hy, hz] = wbHead(m, i + 1), dx = e.x - hx, dz = e.z - hz;
+      H.xr = wbTurn(H.xr, -Math.atan2(emEyeOf(e) - hy, Math.hypot(dx, dz)), 40 * WB_DEG);
+      H.yr = wbTurn(H.yr, Math.atan2(dx, dz), 10 * WB_DEG);
+    } else H.yr = wbTurn(H.yr, m.bodyYaw, 10 * WB_DEG);
+  }
+}
+// WitherBoss.canDestroy: everything about its body (a block out from it, up to its height) that isn't wither_immune, with drops
+function wbBreak(m) {
+  const g = m.game, w = g.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z), l = Math.floor(m.w / 2 + 1), hh = Math.floor(m.h);
+  let any = false;
+  for (let y = by; y <= by + hh; y++) for (let dz = -l; dz <= l; dz++) for (let dx = -l; dx <= l; dx++) {
+    const x = bx + dx, z = bz + dz, id = w.getBlock(x, y, z);
+    if (!id || WITHER_IMMUNE.has(id) || BLK[id].liquid) continue;
+    if (BLK[id].shulker) {
+      const be = w.getBE(x, y, z), st = { id, count: 1 };
+      if (be && be.items && be.items.some(s => s)) st.tag = { items: be.items.map(saveStack) };
+      w.setBlock(x, y, z, 0, 0); g.particles.blockBreak(x, y, z, id); g.dropItem(x + 0.5, y + 0.5, z + 0.5, st);
+    } else g.breakBlock(x, y, z, null, true);
+    any = true;
+  }
+  if (any) { g.remeshNear(bx, bz); if (!m.data.silent) g.sound('wither_break_block', m.x, m.y + 1, m.z); }
+}
+// a Wither's blast (its own or a skull's): for the kill credit of what it hurts
+const WB_BLAST = { owner: null };
+function wbExplode(g, m, x, y, z, power, blue) {
+  WB_BLAST.owner = m;
+  try { g.explode(x, y, z, power, false, blue ? 'wither_blue' : 'wither'); } finally { WB_BLAST.owner = null; }
+}
+// the cry when it breaks free is heard from anywhere, from its way (Level.globalLevelEvent 1023)
+function wbGlobalSound(g, name, m) {
+  const p = g.player;
+  if (!p) return g.sound(name, m.x, m.y, m.z);
+  const dx = m.x - p.x, dy = m.y - p.y, dz = m.z - p.z, l = Math.hypot(dx, dy, dz);
+  if (l <= 2) return g.sound(name, m.x, m.y, m.z);
+  g.sound(name, p.x + dx / l * 2, p.y + 1.6 + dy / l * 2, p.z + dz / l * 2);
+}
+function wbFx(P, x, y, z, c) {
+  P.add({ x, y, z, vx: 0, vy: 0.02, vz: 0, life: 18, layer: texL('particle_generic_' + (4 + Math.floor(Math.random() * 3))), u: 0, v: 0, us: 1, size: 0.08, g: -0.001, col: c, bright: false });
+}
+// WitherBoss.aiStep: smoke off each head, the armor's fizz once powered, and a swirl about it while it charges
+function wbParticles(m) {
+  const g = m.game, p = g.player, P = g.particles, R = Math.random;
+  if (!p || (p.x - m.x) ** 2 + (p.z - m.z) ** 2 > 4096) return;
+  const gs = k => (R() + R() + R() - 1.5) * 2 * k;
+  for (let h = 0; h < 3; h++) {
+    const [hx, hy, hz] = wbHead(m, h);
+    P.smoke(hx + gs(0.3), hy + gs(0.3), hz + gs(0.3), 1);
+    if (m.powered && R() < 0.25) wbFx(P, hx + gs(0.3), hy + gs(0.3), hz + gs(0.3), [0.7, 0.7, 0.5]);
+  }
+  if (m.data.invuln > 0) for (let k = 0; k < 3; k++) wbFx(P, m.x + gs(1), m.y + R() * 3.3, m.z + gs(1), [0.7, 0.7, 0.9]);
+}
+
+class WitherBoss extends Mob {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    this.persistent = true; this.ambientT = 1e9;
+    if (!(this.data.invuln > 0)) this.data.invuln = 0;
+    // the side heads: target, next look, idle looks, yaw and pitch now and a tick ago
+    this._wh = [0, 1].map(() => ({ t: null, next: 0, idle: 0, yr: this.yaw, xr: 0, pyr: this.yaw, pxr: 0 }));
+    this._wAtk = -1; this._wSee = 0; this._wBreak = 0; this._wNav = null; this._wAmb = -80; this._wT0 = null; this._wHurtBy = null;
+  }
+  keepWhenUnloaded() { return true; }
+  get powered() { return this.health <= this.maxHealth / 2; }
+  effectImmune(k) { return k === 'wither' || k === 'poison' || k === 'regeneration'; }
+  // WitherBoss.hurtServer
+  hurt(amount, source, attacker) {
+    if (this.dead || this.deathTime > 0) return false;
+    if (source === 'drown' || source === 'wither_skull' || source === 'wither_blast' || attacker instanceof WitherBoss) return false;
+    if (this.data.invuln > 0 && source !== 'void' && source !== 'kill') return false;
+    if (this.powered && (source === 'arrow' || source === 'trident' || source === 'wind')) return false;
+    if (attacker && attacker.T && attacker.T.undead) return false;
+    if (!(this._wBreak > 0)) this._wBreak = 20;
+    for (const H of this._wh) H.idle += 3;
+    return super.hurt(amount, source, attacker);
+  }
+  onHurtBy(a) { if (wbFoe(this, a)) this._wHurtBy = a; }
+  tick() {
+    const g = this.game;
+    // WitherBoss.checkDespawn: only Peaceful sends it away
+    if (OPTIONS.difficulty === 0) { this.dead = true; return; }
+    super.tick();
+    if (this.dead || this.deathTime > 0) return;
+    wbTurnHeads(this);
+    // Mob.baseTick: a growl when a roll of 1000 comes in under a count that restarts at -80
+    if (Math.floor(Math.random() * 1000) < this._wAmb++) { this._wAmb = -80; if (!this.data.silent) g.sound('wither_ambient', this.x, this.y + WB_EYE, this.z); }
+    wbParticles(this);
+  }
+  think() {
+    const g = this.game, d = this.data;
+    wbTargets(this);
+    if (d.invuln > 0) {
+      // charging (WitherDoNothingGoal holds whatever would move or turn it)
+      this._wNav = null; this._wAtk = -1; this._wSee = 0;
+      const k = d.invuln - 1;
+      if (k <= 0) { wbExplode(g, this, this.x, this.y + WB_EYE, this.z, 7, false); if (!d.silent) wbGlobalSound(g, 'wither_spawn', this); }
+      d.invuln = k;
+      if (this.age % 10 === 0) this.health = Math.min(this.maxHealth, this.health + 10);
+      return;
+    }
+    const t = this.target;
+    if (t) wbRanged(this, t);
+    else { this._wAtk = -1; this._wSee = 0; wbStroll(this); GOALS.look(this); }
+    wbSideHeads(this);
+    this._wT0 = t || null;
+    if (this._wBreak > 0 && --this._wBreak === 0 && g.rule('mobGriefing')) wbBreak(this);
+    if (this.age % 20 === 0) this.health = Math.min(this.maxHealth, this.health + 1);
+  }
+  // WitherBoss.aiStep, then LivingEntity.travel with a FlyingMoveControl
+  flyPhysics() {
+    const w = this.game.world, t = this._wT0, live = this.deathTime === 0;
+    let vx = this.vx, vy = this.vy * 0.6, vz = this.vz;
+    if (t && !t.dead && live) {
+      if (this.y < t.y || !this.powered && this.y < t.y + 5) { vy = Math.max(0, vy); vy += 0.3 - vy * 0.6; }
+      const dx = t.x - this.x, dz = t.z - this.z, h2 = dx * dx + dz * dz;
+      if (h2 > 9) { const l = Math.sqrt(h2); vx += dx / l * 0.3 - vx * 0.6; vz += dz / l * 0.3 - vz * 0.6; }
+    }
+    if (vx * vx + vz * vz > 0.05) this.yaw = Math.atan2(vx, vz);
+    if (Math.abs(vx) < 0.003) vx = 0;
+    if (Math.abs(vy) < 0.003) vy = 0;
+    if (Math.abs(vz) < 0.003) vz = 0;
+    const fric = () => { const id = w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.5000001), Math.floor(this.z)); return id && BLK[id].slip ? 0.98 : 0.6; };
+    // flying to a spot it has no gravity and pushes that way (0.02 of its speed off the ground); with nowhere to go it falls
+    const n = live && !this.data.noAI ? this._wNav : null;
+    if (n) {
+      const dx = n.x - this.x, dy = n.y - this.y, dz = n.z - this.z;
+      if (dx * dx + dy * dy + dz * dz >= 2.5e-7) {
+        this.yaw = wbTurn(this.yaw, Math.atan2(dx, dz), Math.PI / 2);
+        const f1 = n.speed * 0.6, fr = fric(), k = this.onGround ? f1 * 0.216 / (fr * fr * fr) : 0.02;
+        const zz = f1 * 0.98, yy = dy > 0 ? f1 : -f1, il = zz * zz + yy * yy, s = il > 1 ? 1 / Math.sqrt(il) : 1;
+        vx += Math.sin(this.yaw) * zz * s * k; vz += Math.cos(this.yaw) * zz * s * k; vy += yy * s * k;
+      }
+    }
+    const res = moveEntity(w, this, vx, vy, vz);
+    if (res.hx) vx = 0;
+    if (res.hy) vy = 0;
+    if (res.hz) vz = 0;
+    this.onGround = res.down;
+    const fh = this.onGround ? fric() * 0.91 : 0.91;
+    this.vx = vx * fh; this.vz = vz * fh; this.vy = (vy - (n ? 0 : 0.08)) * 0.98;
+    this.fallDist = 0;
+    // BodyRotationControl: the body goes with it while it moves
+    if ((this.x - this.px) ** 2 + (this.z - this.pz) ** 2 > 2.5e-7) this.bodyYaw = this.yaw;
+    wbNavTick(this);
+    const spd = Math.hypot(this.x - this.px, this.z - this.pz);
+    this.walkAmt += (Math.min(1, spd * 4) - this.walkAmt) * 0.4; this.walk += spd * 4;
+  }
+  // WitherBoss.dropCustomDeathLoot: one nether star, kept for 10 minutes (setExtendedLifetime)
+  dropLoot() {
+    const g = this.game;
+    Mob.prototype.dropLoot.call(this);
+    if (this.noDrops || g.rule && !g.rule('doMobLoot')) return;
+    const it = g.dropItem(this.x, this.y + 0.5, this.z, { id: I.NETHER_STAR, count: 1 });
+    if (it) it.age = -6000;
+  }
+  // the boss bar: as far as it is tracked (160 blocks or the render distance); it fills as it charges and darkens the world
+  bossRange() { return Math.min(160, OPTIONS.renderDist * 16); }
+  bossProgress() { return this.data.invuln > 0 ? 1 - this.data.invuln / 220 : this.health / this.maxHealth; }
+  get darkens() { return true; }
+  animState(a) {
+    const st = super.animState(a), by = this.pyaw + wbWrap(this.bodyYaw - this.pyaw) * a;
+    const [H1, H2] = this._wh;
+    st.h1y = wbWrap(H1.pyr + wbWrap(H1.yr - H1.pyr) * a - by); st.h1p = H1.pxr + (H1.xr - H1.pxr) * a;
+    st.h2y = wbWrap(H2.pyr + wbWrap(H2.yr - H2.pyr) * a - by); st.h2p = H2.pxr + (H2.xr - H2.pxr) * a;
+    return st;
+  }
+  // WitherBossRenderer.scale: from 1.5 to 2 over the charge
+  renderScale(a) { const i = this.data.invuln; return i > 0 ? (2 - (i - a) / 220 * 0.5) / 2 : 1; }
+}
+MOB_CLASSES.wither = WitherBoss;
+// WitherBossRenderer: the blue skin while charging, flickering through the last 4 seconds; the armor once at half health
+MOB_SKINS.wither = m => {
+  const i = m.data.invuln, s = [{ key: i > 0 && (i > 80 || Math.floor(i / 5) % 2 !== 1) ? 'entity/wither/wither_invulnerable' : 'entity/wither/wither' }];
+  if (m.powered) s.push({ key: 'entity/wither/wither_armor', grow: 0.5, glow: true, trans: true });
+  return s;
+};
+// the skull projectiles' head is in the Wither's own texture (WitherSkullRenderer: 8 x 8 x 8 from 0, 35)
+const WB_SKULL_MODEL = { tw: 64, th: 64, parts: [P_('skull', [0, 20, 0], [[0, 35, -4, -4, -4, 8, 8, 8]])], anim(P, st) { P.skull = [st.hp || 0, 0, 0]; } };
+const WB_FACE = (f, x, y, W, H, R) => f === 'front' && y >= 3 && y <= 4 && (x === 1 || x === 2 || x === 5 || x === 6) ? [10, 10, 10]
+  : f === 'front' && y === 6 && x >= 2 && x <= 5 ? (x % 2 ? [50, 50, 50] : [10, 10, 10]) : nz([46, 46, 46], R);
+defSkin('entity/wither/wither', 64, 64, () => skinParts(64, 64, MM.wither.parts.concat(WB_SKULL_MODEL.parts), {
+  center_head: WB_FACE, skull: WB_FACE,
+  right_head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 1 || x === 4) ? [10, 10, 10] : nz([46, 46, 46], R), left_head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 1 || x === 4) ? [10, 10, 10] : nz([46, 46, 46], R),
+  '*': (f, x, y, W, H, R) => nz((x + y) % 4 === 0 ? [30, 30, 30] : [52, 52, 52], R),
+}, 621));
+defSkin('entity/wither/wither_invulnerable', 64, 64, () => skinParts(64, 64, MM.wither.parts.concat(WB_SKULL_MODEL.parts), {
+  center_head: (f, x, y, W, H, R) => { const c = WB_FACE(f, x, y, W, H, R); return c[0] < 20 ? [30, 40, 110] : nz([80, 90, 180], R); }, skull: (f, x, y, W, H, R) => { const c = WB_FACE(f, x, y, W, H, R); return c[0] < 20 ? [30, 40, 110] : nz([80, 90, 180], R); },
+  '*': (f, x, y, W, H, R) => nz([80, 90, 180], R),
+}, 622));
+defSkin('entity/wither/wither_armor', 64, 64, () => skinParts(64, 64, MM.wither.parts, { '*': (f, x, y) => (x + 2 * y) % 6 < 2 ? [120, 150, 255, 110] : (x + 2 * y) % 6 === 2 ? [90, 110, 220, 60] : null }, 623));
+
+/* ---------------- skulls ---------------- */
+HURTING.add('skull');
+MOB_SCALED.add('wither_skull');
+const _impactWB = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (this.kind !== 'skull' && this.kind !== 'ghast') return _impactWB.call(this, e);
+  const g = this.game, o = this.owner;
+  this.dead = true;
+  if (this.kind === 'ghast') {
+    // LargeFireball: 6 (as fire, scaled for players), then its blast
+    if (e) e.hurt(e instanceof Player && o instanceof Mob ? g.difficultyDmg(6) : 6, 'fireball', o);
+    g.explode(this.x, this.y, this.z, this.power || 1, false, 'fireball');
+    return;
+  }
+  // WitherSkull.onHitEntity: 8 from its Wither (5 as magic with no one behind it); a kill heals the Wither 5
+  if (e) {
+    const living = o && !o.dead && (o instanceof Mob || o instanceof Player);
+    const ok = living ? e.hurt(8, 'wither_skull', o) : e.hurt(5, 'magic', null);
+    if (ok && living && (e.dead || e.deathTime > 0) && o instanceof Mob) o.health = Math.min(o.maxHealth, o.health + 5);
+    const secs = OPTIONS.difficulty === 2 ? 10 : OPTIONS.difficulty === 3 ? 40 : 0;
+    if (ok && secs && e.addEffect && !e.dead) e.addEffect('wither', 20 * secs, 1);
+  }
+  if (o instanceof WitherBoss) wbExplode(g, o, this.x, this.y, this.z, 1, this.blue);
+  else g.explode(this.x, this.y, this.z, 1, false, this.blue ? 'wither_blue' : 'wither');
+};
+// drawn as a head turned the way it flies, lit up (WitherSkullRenderer.getBlockLightLevel 15)
+const _renderPrWB = Projectile.prototype.render;
+Projectile.prototype.render = function (r, a) {
+  if (this.kind !== 'skull') return _renderPrWB.call(this, r, a);
+  const p = this.ipos(a), d = this.dir, h = Math.hypot(d[0], d[2]);
+  drawMob(r, WB_SKULL_MODEL, [{ key: this.blue ? 'entity/wither/wither_invulnerable' : 'entity/wither/wither' }], [p[0], p[1] - 0.25, p[2]], Math.atan2(d[0], d[2]), { hp: -Math.atan2(d[1], h) }, [1, 1, 1, 1], [15, 15], 1, 0);
+};
+
+/* ---------------- what it kills ---------------- */
+// LivingEntity.getKillCredit: a player who hurt it in the last 5 seconds, else the last mob that did (while that's alive)
+function wbCredit(e, attacker) {
+  if (e.playerHurtAge !== undefined && e.age - e.playerHurtAge < 100) return null;
+  if (attacker instanceof Mob) return attacker;
+  return e.lastAttacker && !e.lastAttacker.dead && e.age - e.lastHurtAge <= 100 ? e.lastAttacker : null;
+}
+// LivingEntity.createWitherRose: a rose where it died (mobGriefing, an empty spot it can grow in), else one dropped there
+function wbRose(g, e) {
+  const w = g.world, x = Math.floor(e.x), y = Math.floor(e.y), z = Math.floor(e.z);
+  if (g.rule('mobGriefing') && w.getBlock(x, y, z) === 0 && w.canStay(B.WITHER_ROSE, x, y, z, 0)) { w.setBlock(x, y, z, B.WITHER_ROSE, 0); g.remeshNear(x, z); return; }
+  g.dropItem(e.x, e.y, e.z, { id: B.WITHER_ROSE, count: 1 });
+}
+const _dieWB = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  const first = this.deathTime === 0;
+  _dieWB.call(this, source, attacker);
+  if (first && this.deathTime > 0 && wbCredit(this, attacker) instanceof WitherBoss) wbRose(this.game, this);
+};
+// a Wither's blasts: the mobs they hurt count it as having hurt them (and may go after it)
+const _hurtMobWB = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const o = WB_BLAST.owner;
+  if (!o || attacker || source !== 'wither_blast' || this === o) return _hurtMobWB.call(this, amount, source, attacker);
+  const la = this.lastAttacker, lh = this.lastHurtAge;
+  this.lastAttacker = o; this.lastHurtAge = this.age;
+  const ok = _hurtMobWB.call(this, amount, source, null);
+  if (!ok) { this.lastAttacker = la; this.lastHurtAge = lh; } else if (!this.dead && !(this.deathTime > 0)) this.onHurtBy(o, source);
+  return ok;
+};
+// and a player: the Wither that last hurt it (in 5 seconds) leaves a rose where it falls
+const _hurtPlWB = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  const by = attacker instanceof Mob ? attacker : source === 'wither_blast' ? WB_BLAST.owner : null, alive = !this.dead;
+  const ok = _hurtPlWB.call(this, amount, source, attacker);
+  const g = this.game, t = g.world ? g.world.tick : 0;
+  if (ok && by) { this._lastMob = by; this._lastMobT = t; }
+  if (alive && this.dead && this._lastMob instanceof WitherBoss && !this._lastMob.dead && t - this._lastMobT <= 100) wbRose(g, this);
+  return ok;
+};
+Object.assign(DEATH_MSG, { wither_skull: 'was hit by a skull from Wither', wither_blast: 'was blown up by Wither', fireball_blast: 'was blown up by Ghast' });
+
+/* ---------------- what mobs can't be given ---------------- */
+// LivingEntity.canBeAffected and its overrides: no poison or regeneration for the undead, no poison for spiders, no wither for
+// wither skeletons, no infestation for silverfish, no oozing for slimes, nothing for the dragon
+Mob.prototype.effectImmune = function (k) {
+  const t = this.type;
+  if (t === 'ender_dragon') return true;
+  if (k === 'infested') return t === 'silverfish';
+  if (k === 'oozing') return t === 'slime';
+  if (k === 'wither' && t === 'wither_skeleton') return true;
+  if (k === 'poison' && (t === 'spider' || t === 'cave_spider')) return true;
+  return (k === 'poison' || k === 'regeneration') && !!this.T.undead;
+};
+
+/* ---------------- the world goes dark ---------------- */
+// GameRenderer.darkenWorldAmount: up 0.05 a tick while a darkening boss bar shows, down 0.0125 after; the lightmap goes toward
+// (0.7, 0.6, 0.6) of itself and the fog the same way
+const _statusEnvWB = Game.prototype.statusEnv;
+Game.prototype.statusEnv = function (env) {
+  const r = _statusEnvWB.call(this, env) || env, f = this._darkW || 0;
+  if (f > 0) { r.darkenWorld = f; if (r.fogCol) r.fogCol = [r.fogCol[0] * (1 - 0.3 * f), r.fogCol[1] * (1 - 0.4 * f), r.fogCol[2] * (1 - 0.4 * f)]; }
+  return r;
+};
+
+/* ---------------- sounds ---------------- */
+const WB_SOUNDS = [['wither_ambient', 'Wither snarls'], ['wither_hurt', 'Wither is hurt'], ['wither_death', 'Wither dies'], ['wither_spawn', 'Wither breaks free'],
+  ['wither_shoot', 'Wither fires a skull'], ['wither_break_block', 'Wither smashes blocks']];
+for (const [n, t] of WB_SOUNDS) { SND_CAT[n] = 'hostile'; SUB_TEXT[n] = t; }
+SOUND_EVENTS.unshift([/^entity\.wither\.ambient/, 'wither_ambient'], [/^entity\.wither\.hurt/, 'wither_hurt'], [/^entity\.wither\.death/, 'wither_death'],
+  [/^entity\.wither\.spawn/, 'wither_spawn'], [/^entity\.wither\.shoot/, 'wither_shoot'], [/^entity\.wither\.break_block/, 'wither_break_block']);
+const WB_SOUND_SET = new Set(WB_SOUNDS.map(s => s[0]));
+const _audioPlayWB = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!WB_SOUND_SET.has(name)) return _audioPlayWB.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, name === 'wither_spawn' ? 2.5 : 1.6);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2, t = this.ctx.currentTime;
+  switch (name) {
+    case 'wither_ambient': this.tone(dst, 'sawtooth', 82 * v, 58 * v, 1.3, 0.3); this.tone(dst, 'sawtooth', 123 * v, 87 * v, 1.1, 0.18, t + 0.05); this.noiseHit(dst, 'lowpass', 420, 0.7, 1.1, 0.22); break;
+    case 'wither_hurt': this.tone(dst, 'sawtooth', 210 * v, 110 * v, 0.45, 0.35); this.noiseHit(dst, 'bandpass', 900 * v, 0.9, 0.35, 0.25); break;
+    case 'wither_death': this.tone(dst, 'sawtooth', 170 * v, 38 * v, 2.6, 0.45); this.tone(dst, 'square', 95 * v, 30 * v, 2.9, 0.18, t + 0.1); this.noiseHit(dst, 'lowpass', 500, 0.6, 3, 0.35); break;
+    case 'wither_spawn': this.noiseHit(dst, 'lowpass', 280, 0.6, 2.2, 0.6); this.tone(dst, 'sawtooth', 72 * v, 34 * v, 3.2, 0.5); this.tone(dst, 'sawtooth', 145 * v, 52 * v, 2.6, 0.3, t + 0.15); break;
+    case 'wither_shoot': this.noiseHit(dst, 'bandpass', 700 * v, 1.2, 0.35, 0.35); this.tone(dst, 'sawtooth', 190 * v, 85 * v, 0.28, 0.2); break;
+    case 'wither_break_block': this.noiseHit(dst, 'lowpass', 600, 0.8, 0.55, 0.5); this.noiseHit(dst, 'bandpass', 1500, 1, 0.3, 0.3, t + 0.05); break;
   }
 };
 

@@ -763,6 +763,13 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   when hit, and flop about on land until they dry out. Cod, salmon and tropical fish form schools that follow a
   leader. Pufferfish puff up halfway when something comes near and fully after two seconds, sting with poison
   while puffed, and shrink back once left alone.
+- **The Wither like Java's**: the soul sand T needs its two lower corners empty and can stand, lie down or hang
+  upside down (iron and snow golems can be built lying down too). A built Wither charges for 11 seconds, then
+  blows up and hunts the nearest living thing that isn't undead. It hovers 5 blocks over its target until half
+  health, then comes down to its level. Each head fires on its own, and idle side heads send blue skulls that
+  break almost anything. When hurt it smashes the blocks around it. Skulls go through armor the way Java's do,
+  wither what they hit and leave wither roses where they kill. Its boss bar darkens the world. One from a spawn
+  egg starts fighting straight away.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
