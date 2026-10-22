@@ -227,6 +227,20 @@ body.touch #hotbar { pointer-events: auto; }
 .otext p { margin: 4px 0; }
 .olang { width: 620px; max-width: 94vw; margin: 0 auto; padding: 6px 10px; text-align: center; border: 2px solid transparent; cursor: pointer; box-sizing: border-box; }
 .olang.sel { border-color: #aaa; background: rgba(0,0,0,.5); }
+.btn.w296 { width: 296px; }
+.btn.w144 { width: 144px; }
+.field.wsearch { width: 400px; margin: 0 0 10px; }
+.field.wsearch input { height: 36px; }
+.wentry { display: flex; align-items: center; gap: 8px; padding: 2px 6px; }
+.wentry .wicon { width: 64px; height: 64px; flex: none; image-rendering: pixelated; background: rgba(255,255,255,.06); }
+.wentry .wtext { min-width: 0; flex: 1; }
+.wentry .wd { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wentry .wib { position: relative; width: 64px; height: 64px; flex: none; cursor: pointer; }
+.wentry .wplay { position: absolute; inset: 0; display: none; background: rgba(160,160,160,.45); }
+.wentry .wplay:after { content: ''; position: absolute; left: 24px; top: 16px; border-left: 22px solid #fff; border-top: 16px solid transparent; border-bottom: 16px solid transparent; }
+.wentry:hover .wplay { display: block; }
+#load-map { width: 92px; height: 92px; image-rendering: pixelated; margin-top: 14px; }
+#scr-loading.travel { background-size: 64px 64px; }
 .btn.ghost, .btn.ghost:hover { background: #2c2c2c; color: #a0a0a0; box-shadow: none; cursor: default; }
 /* subtitles, the hotbar attack indicator, the autosave note and the player list */
 #subtitles { position: absolute; right: 4px; bottom: 60px; display: flex; flex-direction: column-reverse; align-items: stretch; font-size: 18px; line-height: 20px; }
@@ -330,10 +344,11 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
 </div>
 
 <div id="scr-worlds" class="screen menubg hidden">
-  <div class="h1">Select World</div>
+  <div class="ohead">Select World</div>
+  <div class="field wsearch"><input id="in-wsearch" placeholder="Search..." autocomplete="off" spellcheck="false"></div>
   <div class="worldlist" id="worldlist"></div>
-  <div class="row"><button class="btn half" id="b-play" disabled>Play Selected World</button><button class="btn half" id="b-create">Create New World</button></div>
-  <div class="row"><button class="btn half" id="b-delete" disabled>Delete</button><button class="btn half" id="b-wback">Cancel</button></div>
+  <div class="row"><button class="btn w296" id="b-play" disabled>Play Selected World</button><button class="btn w296" id="b-create">Create New World</button></div>
+  <div class="row"><button class="btn w144" id="b-wedit" disabled>Edit</button><button class="btn w144" id="b-delete" disabled>Delete</button><button class="btn w144" id="b-wrecreate" disabled>Re-Create</button><button class="btn w144" id="b-wback">Back</button></div>
 </div>
 
 <div id="scr-create" class="screen menubg hidden">
@@ -436,6 +451,7 @@ html.pixfont .title-logo { font-size: 96px; letter-spacing: 0; }
   <div class="h1" id="load-title">Loading world</div>
   <div class="hint" id="load-msg">Generating terrain...</div>
   <div class="progress"><i id="load-bar"></i></div>
+  <canvas id="load-map" class="hidden" width="23" height="23"></canvas>
 </div>
 
 <div id="scr-packs" class="screen menubg hidden">
@@ -18835,7 +18851,8 @@ class Game {
     this.ui.refreshHotbar(); this.ui.refreshBars();
     if (traveling) { this.lockPointer(); return; }
     this.ui.chat('Welcome to Blockcraft! Click to play. Press E for inventory, T for chat, F3 for debug.', '#ffff80');
-    if (p.mode === 0 && firstLoad) this.ui.chat('Tip: hold left click on a tree to collect wood, then craft planks (E).', '#aaa');
+    // (new players get the first-time hints instead)
+    if (p.mode === 0 && firstLoad && (!OPTIONS.tutorialStep || OPTIONS.tutorialStep === 'none')) this.ui.chat('Tip: hold left click on a tree to collect wood, then craft planks (E).', '#aaa');
     this.ui.show('scr-pause');
     $('pause-hint').textContent = this.touch.supported ? 'Tap "Back to Game" to start. Left stick: move. Drag: look. Hold: break. Tap: place/use.' : 'Click "Back to Game" to start playing';
     if (p.health <= 0) { p.dead = true; this.onDeath('kill', true); }
@@ -36144,7 +36161,11 @@ document.addEventListener('keydown', e => {
   const g = window.game;
   if (!g || e.code !== 'Escape' || KB.waiting) return;
   const s = g.ui.screen;
-  if (s === 'scr-osub') { e.preventDefault(); e.stopImmediatePropagation(); if (g.ui.oSub && g.ui.oSub.name === 'lock') g.ui.openOptions(); else g.ui.optDone(); }
+  if (s === 'scr-osub') {
+    e.preventDefault(); e.stopImmediatePropagation();
+    const o = g.ui.oSub;
+    if (o && o.onEsc) o.onEsc(); else if (o && o.name === 'lock') g.ui.openOptions(); else g.ui.optDone();
+  }
   else if (s === 'scr-options') { e.preventDefault(); e.stopImmediatePropagation(); $('b-oback').click(); }
   else if (s === 'scr-controls') { e.preventDefault(); e.stopImmediatePropagation(); g.ui.show(g.ui.ctrlBack || 'scr-title'); }
 }, true);
@@ -37109,6 +37130,362 @@ Game.prototype.renderHandSide = function (held, s, alpha, l) {
   }
   return res;
 };
+
+/* @file 133_worlds.js */
+/* ===================================================================
+   SELECT WORLD AND LOADING LIKE JAVA EDITION 1.21 — the world list
+   with its search box and icons, Edit (rename, reset the icon, make a
+   backup), Delete with its confirmation and Re-Create; the world icon
+   taken a few seconds into the first visit; the loading screen with
+   its chunk map, and the portal screens while changing dimension
+   =================================================================== */
+const worldDate = t => { try { return new Date(t).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }); } catch (e) { return new Date(t).toLocaleString(); } };
+const worldIconOf = w => w.icon || (typeof iconFor === 'function' && ITEM_BY_NAME.grass_block ? iconFor(ITEM_BY_NAME.grass_block.id) : '');
+const WT_SHORT = { flat: 'Superflat', large_biomes: 'Large Biomes', amplified: 'Amplified', single_biome: 'Single Biome' };
+
+/* ---------------- the list ---------------- */
+UI.prototype.openWorlds = async function () {
+  this.show('scr-worlds');
+  const list = $('worldlist');
+  list.innerHTML = '<div class="hint">Loading...</div>';
+  this.selWorld = null; this.worldButtons();
+  let worlds = [];
+  try { worlds = await DB.listWorlds(); } catch (e) { this.worlds = []; list.innerHTML = '<div class="hint">Saving is unavailable in this browser (IndexedDB blocked). You can still play.</div>'; return; }
+  worlds.sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
+  this.worlds = worlds;
+  this.renderWorldList();
+  setTimeout(() => { const s = $('in-wsearch'); if (s && this.screen === 'scr-worlds') s.focus(); }, 0);
+};
+UI.prototype.renderWorldList = function () {
+  const list = $('worldlist'), q = ($('in-wsearch').value || '').trim().toLowerCase(), all = this.worlds || [];
+  list.innerHTML = '';
+  if (!all.length) { list.innerHTML = '<div class="hint">No worlds yet. Create one!</div>'; this.worldButtons(); return; }
+  // WorldSelectionList: the name, then the name and when it was last played, then the game mode
+  for (const w of all.filter(w => !q || String(w.name).toLowerCase().includes(q))) {
+    const kind = w.wo && WT_SHORT[w.wo.type] ? ', ' + WT_SHORT[w.wo.type] : '';
+    const d = el('div', 'world wentry' + (this.selWorld === w ? ' sel' : ''),
+      `<div class="wib"><img class="wicon" src="${worldIconOf(w)}" alt=""><i class="wplay"></i></div><div class="wtext"><div class="wn">${escapeHTML(w.name)}</div><div class="wd">${escapeHTML(w.name)} (${escapeHTML(worldDate(w.lastPlayed || w.created))})</div><div class="wd">${worldModeLabel(w)}${kind}</div></div>`);
+    d.onclick = () => { for (const x of list.children) x.classList.remove('sel'); d.classList.add('sel'); this.selWorld = w; this.worldButtons(); };
+    d.ondblclick = () => { AUDIO.init(); AUDIO.play('click'); this.game.loadWorld(w); };
+    // the play arrow over the icon starts it at once
+    d.querySelector('.wib').onclick = e => { e.stopPropagation(); AUDIO.init(); AUDIO.play('click'); this.selWorld = w; this.game.loadWorld(w); };
+    list.appendChild(d);
+  }
+  if (this.selWorld && !all.includes(this.selWorld)) this.selWorld = null;
+  this.worldButtons();
+};
+UI.prototype.worldButtons = function () {
+  const on = !!this.selWorld;
+  for (const id of ['b-play', 'b-delete', 'b-wedit', 'b-wrecreate']) { const b = $(id); if (b) b.disabled = !on; }
+};
+$('in-wsearch').addEventListener('input', () => { const g = window.game; if (g) g.ui.renderWorldList(); });
+$('in-wsearch').addEventListener('keydown', e => {
+  e.stopPropagation();
+  const g = window.game;
+  if (e.key === 'Enter' && g && g.ui.selWorld) g.loadWorld(g.ui.selWorld);
+  if (e.key === 'Escape' && g) { e.preventDefault(); g.ui.show('scr-title'); }
+});
+// a confirmation or a form on the shared options page, coming back to the world list
+UI.prototype.worldPage = function (name, title) {
+  const scr = $('scr-osub');
+  scr.innerHTML = '';
+  scr.appendChild(el('div', 'ohead', escapeHTML(title)));
+  this.oSub = { name, onEsc: () => this.openWorlds() };
+  return scr;
+};
+const _bindMenusWS = UI.prototype.bindMenus;
+UI.prototype.bindMenus = function () {
+  const r = _bindMenusWS.call(this);
+  // Delete asks on its own screen instead of the browser's box
+  const old = $('b-delete'), b = old.cloneNode(true);
+  old.replaceWith(b);
+  const click = (node, fn) => node.addEventListener('click', () => { if (node.disabled) return; AUDIO.init(); AUDIO.play('click'); fn(); });
+  click(b, () => this.openDeleteWorld());
+  click($('b-wedit'), () => this.openEditWorld());
+  click($('b-wrecreate'), () => this.recreateWorld());
+  return r;
+};
+
+/* ---------------- Delete ---------------- */
+UI.prototype.openDeleteWorld = function () {
+  const w = this.selWorld;
+  if (!w) return;
+  const scr = this.worldPage('delworld', 'Delete this world?');
+  const t = el('div', 'otext'); t.style.textAlign = 'center';
+  t.textContent = '"' + w.name + '" and everything in it will be gone for good.';
+  scr.appendChild(t);
+  const row = el('div', 'row'); row.style.marginTop = '24px';
+  row.append(optButton('Delete', async () => { try { await DB.deleteWorld(w.id); } catch (e) { } this.selWorld = null; this.openWorlds(); }, 'half'), optButton('Cancel', () => this.openWorlds(), 'half'));
+  scr.appendChild(row);
+  this.show('scr-osub');
+};
+
+/* ---------------- Edit ---------------- */
+// EditWorldScreen: the name, Reset Icon, Make Backup (here a copy in the world list), Save and Cancel
+UI.prototype.openEditWorld = function () {
+  const w = this.selWorld;
+  if (!w) return;
+  const scr = this.worldPage('editworld', 'Edit World');
+  const f = el('div', 'field', '<label>World Name</label>');
+  const inp = el('input'); inp.value = w.name; inp.maxLength = 64;
+  inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') this.openWorlds(); });
+  f.appendChild(inp); scr.appendChild(f);
+  let resetIcon = false;
+  const ri = optButton('Reset Icon', () => { resetIcon = true; ri.disabled = true; }, 'btn');
+  ri.disabled = !w.icon;
+  const mb = optButton('Make Backup', async () => {
+    mb.disabled = true; mb.textContent = 'Making Backup...';
+    try { const copy = await backupWorld(w); this.toast({ kind: 'backup', icons: [], title: 'Backup made', text: copy.name, color: '#500050' }); }
+    catch (e) { this.toast({ kind: 'backup', icons: [], title: 'Backup failed', text: String(e && e.message || e).slice(0, 40), color: '#500050' }); }
+    mb.textContent = 'Make Backup'; mb.disabled = false;
+  }, 'btn');
+  scr.append(ri, mb);
+  const row = el('div', 'row'); row.style.marginTop = '18px';
+  row.append(optButton('Save', async () => {
+    const name = inp.value.trim();
+    if (name) w.name = name;
+    if (resetIcon) delete w.icon;
+    try { await DB.putWorld(w); } catch (e) { }
+    this.openWorlds();
+  }, 'half'), optButton('Cancel', () => this.openWorlds(), 'half'));
+  scr.appendChild(row);
+  this.show('scr-osub');
+  setTimeout(() => inp.focus(), 0);
+};
+// a copy of the world (its description and all its chunks) under a new id
+async function backupWorld(w) {
+  const copy = JSON.parse(JSON.stringify(w));
+  copy.id = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  copy.name = w.name + ' - Backup ' + worldDate(Date.now());
+  const keys = await DB.chunkKeys(w.id);
+  for (let i = 0; i < keys.length; i += 64) {
+    const part = keys.slice(i, i + 64), vals = [];
+    for (const k of part) vals.push([copy.id + k.slice(w.id.length), await DB.getChunk(k)]);
+    await DB.putChunks(vals.filter(v => v[1] !== undefined));
+  }
+  await DB.putWorld(copy);
+  return copy;
+}
+
+/* ---------------- Re-Create ---------------- */
+// the Create World screen filled in with the selected world's settings
+UI.prototype.recreateWorld = function () {
+  const w = this.selWorld;
+  if (!w) return;
+  this.newMode = w.hardcore ? 1 : (w.mode | 0) === 1 ? 2 : 0;
+  this.newCheats = w.hardcore ? false : w.cheats !== false;
+  this.newDiff = w.hardcore ? 3 : w.difficulty !== undefined && w.difficulty !== null ? w.difficulty : 2;
+  $('in-name').value = w.name;
+  $('in-seed').value = w.gen === 'vanilla' && w.seed64 !== undefined ? String(w.seed64) : String(w.seed);
+  this.cwReset();
+  const wo = w.wo || {};
+  Object.assign(this.cw, { type: wo.type || 'default', structures: wo.structures !== false, rules: Object.assign({}, w.rules || {}) });
+  if (wo.flat) this.cw.flat = JSON.parse(JSON.stringify(wo.flat));
+  if (wo.biome) this.cw.biome = wo.biome;
+  this.updateModeBtn(); this.cwRefresh();
+  this.show('scr-create');
+};
+
+/* ---------------- the world icon ---------------- */
+// GameRenderer.tryTakeScreenshotIfNeeded: a few seconds into a world without an icon, the middle of the view becomes its 64 x 64 icon
+const _playFrameWS = Game.prototype.playFrame;
+Game.prototype.playFrame = function (dt) {
+  const r = _playFrameWS.call(this, dt);
+  const m = this.meta;
+  if (m && !m.icon && this.state === 'playing' && !this.ui.screen && !this.ui.inv && !this.ui.chatOpen && this.player && !this.player.dead) {
+    this._iconT = (this._iconT || 0) + dt;
+    if (this._iconT > 4) {
+      this._iconT = 0;
+      try {
+        // read the middle square straight from WebGL (reading it back through a 2D canvas can stall for seconds)
+        const gl = this.r.gl, cv = this.canvas, S = Math.min(cv.width, cv.height), x0 = (cv.width - S) >> 1, y0 = (cv.height - S) >> 1;
+        const buf = new Uint8Array(S * S * 4);
+        gl.readPixels(x0, y0, S, S, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        const c = document.createElement('canvas'); c.width = c.height = 64;
+        const g = c.getContext('2d'), img = g.createImageData(64, 64), d = img.data, k = S / 64;
+        let lit = 0;
+        // 4 x 4 samples for each pixel of the icon; the rows of WebGL go bottom up
+        for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+          let r = 0, gg = 0, b = 0;
+          for (let sy = 0; sy < 4; sy++) for (let sx = 0; sx < 4; sx++) {
+            const px = Math.min(S - 1, Math.floor((x + (sx + 0.5) / 4) * k)), py = Math.min(S - 1, Math.floor((63 - y + (sy + 0.5) / 4) * k)), o = (py * S + px) * 4;
+            r += buf[o]; gg += buf[o + 1]; b += buf[o + 2];
+          }
+          const o = (y * 64 + x) * 4;
+          d[o] = r / 16; d[o + 1] = gg / 16; d[o + 2] = b / 16; d[o + 3] = 255;
+          if (r + gg + b > 16 * 30) lit++;
+        }
+        // a blank grab (nothing drawn yet) is not kept
+        if (lit > 200) { g.putImageData(img, 0, 0); m.icon = c.toDataURL('image/png'); }
+      } catch (e) { m.icon = ''; }
+    }
+  } else this._iconT = 0;
+  return r;
+};
+
+/* ---------------- loading ---------------- */
+// LevelLoadingScreen: the progress in per cent above a map of the chunks around the spawn, coloured by how far along they are;
+// changing dimension shows "Loading terrain..." over the portal you went through
+const LOAD_COL = { none: [0x54, 0x54, 0x54], asked: [0x99, 0x99, 0x99], blocks: [0x21, 0xc6, 0x00], lit: [0xff, 0xe0, 0xa0], done: [0xff, 0xff, 0xff] };
+const _loadingFrameWS = Game.prototype.loadingFrame;
+Game.prototype.loadingFrame = function (dt) {
+  const r = _loadingFrameWS.call(this, dt);
+  if (this.state !== 'loading' || !this.world || !this.player) return r;
+  const scr = $('scr-loading'), map = $('load-map'), w = this.world, p = this.player;
+  const travel = !!this.traveling, a = this.arrival;
+  if (scr._mode !== (travel ? (a && a.kind) || 'travel' : 'load')) {
+    scr._mode = travel ? (a && a.kind) || 'travel' : 'load';
+    if (travel) {
+      // the nether portal swirl or the starry end portal behind the text
+      const portal = a && a.kind === 'portal', tex = portal ? texL('nether_portal') : texL('end_portal');
+      scr.style.backgroundImage = `url(${tileCanvas(tex, [255, 255, 255], 1).toDataURL()})`;
+      // ReceivingLevelScreen stretches the portal over the whole screen
+      scr.style.backgroundSize = portal ? '100% 100%' : '64px 64px';
+      scr.classList.add('travel');
+    } else { scr.style.backgroundImage = this._dirtBg || (this._dirtBg = `url(${tileCanvas(texL('dirt'), [255, 255, 255], 0.3).toDataURL()})`); scr.style.backgroundSize = '64px 64px'; scr.classList.remove('travel'); }
+  }
+  const title = $('load-title'), msg = $('load-msg'), bar = $('load-bar').parentNode;
+  if (travel) {
+    title.textContent = 'Loading terrain...'; msg.textContent = ''; bar.classList.add('hidden'); map.classList.add('hidden');
+    return r;
+  }
+  // the percentage of the spawn area that is ready
+  const pcx = Math.floor(p.x / 16), pcz = Math.floor(p.z / 16);
+  let total = 0, done = 0;
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) { total++; const c = w.getChunk(pcx + dx, pcz + dz); if (c && c.state >= 2 && c.meshed && !c.dirty.some(v => v)) done++; }
+  title.textContent = Math.round(done / total * 100) + '%';
+  msg.textContent = ''; bar.classList.add('hidden'); map.classList.remove('hidden');
+  const g = map.getContext('2d'), img = g.createImageData(23, 23), d = img.data;
+  for (let z = 0; z < 23; z++) for (let x = 0; x < 23; x++) {
+    const c = w.getChunk(pcx + x - 11, pcz + z - 11);
+    const k = !c ? 'none' : c.state < 1 ? 'asked' : c.state < 2 ? 'blocks' : c.meshed ? 'done' : 'lit', col = LOAD_COL[k], o = (z * 23 + x) * 4;
+    d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return r;
+};
+// saving on the way out says only that
+const _quitWS = Game.prototype.quitToTitle;
+Game.prototype.quitToTitle = function (...a) {
+  const scr = $('scr-loading');
+  if (scr) { scr._mode = 'save'; scr.classList.remove('travel'); scr.style.backgroundSize = '64px 64px'; scr.style.backgroundImage = this._dirtBg || (this._dirtBg = `url(${tileCanvas(texL('dirt'), [255, 255, 255], 0.3).toDataURL()})`); $('load-map').classList.add('hidden'); $('load-bar').parentNode.classList.add('hidden'); }
+  return _quitWS.apply(this, a);
+};
+
+/* @file 134_tutorial.js */
+/* ===================================================================
+   THE FIRST-TIME HINTS OF JAVA EDITION (net.minecraft.client.tutorial)
+   — for a new player in Survival: move and look around, find a tree,
+   break it, open the inventory, craft planks. Each hint waits a while
+   before showing, stays until it is done, and is never shown again.
+   =================================================================== */
+const TUT_STEPS = ['movement', 'find_tree', 'punch_tree', 'open_inventory', 'craft_planks', 'none'];
+// a fresh copy of the game starts at the first step; options saved before this update skip the hints
+const _loadOptionsTU = loadOptions;
+loadOptions = function () {
+  let had = false;
+  try { had = !!localStorage.getItem('blockcraft.options'); } catch (e) { }
+  _loadOptionsTU();
+  if (!TUT_STEPS.includes(OPTIONS.tutorialStep)) OPTIONS.tutorialStep = had ? 'none' : 'movement';
+};
+if (OPTIONS.tutorialStep === undefined) OPTIONS.tutorialStep = 'movement';
+
+// the hints' pictures: the movement keys and a mouse
+function tutIcon(kind) {
+  tutIcon.c = tutIcon.c || {};
+  if (tutIcon.c[kind]) return tutIcon.c[kind];
+  const rows = {
+    keys: ['................', '......####......', '......#..#......', '......####......', '................', '..####.####.####', '..#..#.#..#.#..#', '..####.####.####',
+      '................', '................', '................', '................', '................', '................', '................', '................'],
+    mouse: ['......####......', '.....#.##.#.....', '....#..##..#....', '....#..##..#....', '....########....', '....#......#....', '....#......#....', '....#......#....',
+      '....#......#....', '....#......#....', '.....#....#.....', '......####......', '................', '................', '................', '................'],
+  }[kind];
+  const c = document.createElement('canvas'); c.width = c.height = 16;
+  const g = c.getContext('2d');
+  rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch === '#') { g.fillStyle = '#3c3c3c'; g.fillRect(x, y, 1, 1); } }));
+  return tutIcon.c[kind] = c.toDataURL();
+}
+const tutKey = id => { const a = KB_ACTIONS.find(o => o.id === id); return a ? keyName(kbBind(a)) : '?'; };
+// a toast that stays until its step is done, with an optional progress bar
+UI.prototype.tutToast = function (title, text, icon, progress) {
+  const t = this.toast({ kind: 'tutorial', icons: [], title, text, color: '#500050', ms: 1e9 });
+  if (!t) return null;
+  const img = t.querySelector('img');
+  if (img) img.src = icon;
+  if (progress) { const b = el('div'); b.style.cssText = `position:absolute;left:${3 * GS}px;right:${3 * GS}px;bottom:${3 * GS}px;height:${GS}px;background:#fff;box-shadow:0 0 0 1px #555`; const f = el('div'); f.style.cssText = 'height:100%;width:0;background:#500050'; b.appendChild(f); t.appendChild(b); t._bar = f; }
+  return t;
+};
+const tutHide = t => { if (t && t.parentNode) t._ms = performance.now() - t._born; };
+
+Game.prototype.tutSet = function (step) {
+  const T = this.tut;
+  if (T) for (const k of ['a', 'b']) tutHide(T[k]);
+  OPTIONS.tutorialStep = step; saveOptions();
+  this.tut = null;
+};
+Game.prototype.tutorialTick = function () {
+  const step = OPTIONS.tutorialStep, p = this.player;
+  if (!step || step === 'none' || !p || p.dead || this.state !== 'playing' || !this.world) return;
+  // Tutorial.onGameModeChanged: the hints are only for survival
+  if (p.mode !== 0) return this.tutSet('none');
+  const T = this.tut || (this.tut = { wait: 0, moved: 0, looked: 0, x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch });
+  T.wait++;
+  const inv = p.inv.concat(p.offhand || []), has = f => inv.some(s => s && ITEMS[s.id] && f(ITEMS[s.id]));
+  const hasLog = () => has(it => it.block && BLK[it.block] && BLK[it.block].log);
+  switch (step) {
+    case 'movement': {
+      // MovementTutorialStepInstance: 40 ticks of walking and 40 of looking around; the hints after 5 seconds
+      const d = Math.hypot(p.x - T.x, p.z - T.z), l = Math.abs(p.yaw - T.yaw) + Math.abs(p.pitch - T.pitch);
+      if (d > 0.01 && d < 3) T.moved++;
+      if (l > 0.001 && l < 1) T.looked++;
+      T.x = p.x; T.z = p.z; T.yaw = p.yaw; T.pitch = p.pitch;
+      if (T.wait === 100) {
+        T.a = this.ui.tutToast('Move around', 'Use ' + ['forward', 'left', 'back', 'right'].map(tutKey).join(' ') + ' to walk', tutIcon('keys'), true);
+        T.b = this.ui.tutToast('Look around', 'Move your mouse to turn', tutIcon('mouse'), true);
+      }
+      if (T.a && T.a._bar) T.a._bar.style.width = Math.min(100, T.moved / 40 * 100) + '%';
+      if (T.b && T.b._bar) T.b._bar.style.width = Math.min(100, T.looked / 40 * 100) + '%';
+      if (T.moved >= 40 && T.a) { tutHide(T.a); }
+      if (T.looked >= 40 && T.b) { tutHide(T.b); }
+      if (T.moved >= 40 && T.looked >= 40) this.tutSet('find_tree');
+      break;
+    }
+    case 'find_tree': {
+      // FindTreeTutorialStepInstance: done once you look at a tree or hold wood; the hint after 5 minutes
+      const t = this.target, onTree = t && BLK[t.id] && (BLK[t.id].log || BLK[t.id].leaves);
+      if (onTree || hasLog()) { this.tutSet('punch_tree'); break; }
+      if (T.wait === 6000) T.a = this.ui.tutToast('Find a tree', 'Logs give you wood', iconFor(itemOf('oak_log')));
+      break;
+    }
+    case 'punch_tree': {
+      // PunchTreeTutorialStepInstance: done with wood in the inventory; the hint after 30 seconds, filling up while you dig
+      if (hasLog()) { this.tutSet('open_inventory'); break; }
+      if (T.wait === 600) T.a = this.ui.tutToast('Break the tree', 'Hold ' + tutKey('attack') + ' on a log', iconFor(itemOf('oak_log')), true);
+      if (T.a && T.a._bar) { const t = this.target, m = t && BLK[t.id] && BLK[t.id].log && p.mining ? Math.min(1, (p.mineProgress || 0) / Math.max(1, p.breakTicks ? p.breakTicks(t.id) : 30)) : 0; T.a._bar.style.width = m * 100 + '%'; }
+      break;
+    }
+    case 'open_inventory':
+      if (T.opened) { this.tutSet('craft_planks'); break; }
+      if (T.wait === 600) T.a = this.ui.tutToast('Open your inventory', 'Press ' + tutKey('inventory'), iconFor(itemOf('chest')));
+      break;
+    case 'craft_planks':
+      // CraftPlanksTutorialStep: done when you have planks
+      if (has(it => /_planks$/.test(it.name))) { this.tutSet('none'); break; }
+      if (T.wait === 1200) T.a = this.ui.tutToast('Craft wooden planks', 'The recipe book can help', iconFor(itemOf('oak_planks')));
+      break;
+  }
+};
+const _gameTickTU = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickTU.call(this); this.tutorialTick(); };
+const _openInvTU = UI.prototype.openInv;
+UI.prototype.openInv = function (type, data) {
+  const g = this.game;
+  if (g && g.tut && OPTIONS.tutorialStep === 'open_inventory' && (type === 'inventory' || type === 'creative')) g.tut.opened = true;
+  return _openInvTU.call(this, type, data);
+};
+// a new world starts the waiting again
+const _startWorldTU = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) { if (this.tut) for (const k of ['a', 'b']) tutHide(this.tut[k]); this.tut = null; return _startWorldTU.call(this, meta, saved); };
 
 </script>
 </body>

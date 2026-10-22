@@ -24,6 +24,13 @@ No install, no server, no build step: the whole game is a single self-contained 
 Worlds are saved automatically in your browser (IndexedDB), including the Nether and the End.
 Worlds from older versions of Blockcraft are converted when you load them (they keep their own
 terrain style; new worlds get Java Edition's terrain, see [Terrain](#java-edition-terrain-from-java-seeds)).
+The **Select World** screen works like Java Edition's: a search box, each world with its icon (a
+picture of the world taken a few seconds into your first visit), **Edit** (rename it, reset its
+icon, make a backup copy), **Delete** (after asking), and **Re-Create** (a new world with the same
+seed, type and settings). Loading a world shows its progress and a map of the chunks being made,
+and a portal trip shows "Loading terrain..." over the portal. The first time you play, Survival
+shows Java's first-time hints one after another: move and look around, find a tree, break it, open
+your inventory and craft planks.
 
 ### Controls
 
