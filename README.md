@@ -98,6 +98,17 @@ the settings do what they do in Java:
 - **Skin Customization**: the jacket, sleeves, pants legs and hat layers of your skin, and **Main
   Hand** Right or Left (the hands, the off-hand slot and the attack indicator swap sides).
 
+### Performance
+
+- Chunk sections hidden behind solid ground are not drawn, as with Java's cave culling: the game
+  walks from your position through the openings of each 16x16x16 section, so caves you can't see
+  into and the rock under your feet cost nothing to draw.
+- Mobs, items and other entities are drawn only as far as Java draws them (64 blocks for each
+  block of their size, further with a bigger render distance or **Entity Distance**), and only
+  the ones within the **Simulation Distance** move.
+- On a slow computer: lower **Render Distance** and **Render Resolution**, set **Graphics** to
+  Fast, **Particles** to Minimal and **Clouds** off, or cap **Max Framerate**.
+
 **Touch screens** (phones/tablets) get on-screen controls automatically: left stick to move
 (push all the way to sprint), drag anywhere on the right to look, hold to break, tap to
 place/use, plus jump, sneak, inventory, pause and chat buttons. Tap hotbar slots to select them.

@@ -10166,6 +10166,41 @@ function meshCross(mb, id, meta, pi, X, Y, Z, tint, to, world, wx, wy, wz) {
   }
 }
 
+// VisGraph: which faces of a 16x16x16 section can see each other through blocks that are not opaque cubes.
+// The renderer walks from the camera's section only through faces that see each other (cave culling).
+const VIS_Q = new Uint16Array(4096), VIS_SEEN = new Uint8Array(4096);
+const VIS_EDGE = (() => { const a = []; for (let y = 0; y < 16; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) if (x === 0 || x === 15 || y === 0 || y === 15 || z === 0 || z === 15) a.push((y << 8) | (z << 4) | x); return a; })();
+function sectionVis(c, sy, empty) {
+  if (!c.vis) c.vis = new Uint8Array(CH_SECS * 6).fill(63);
+  const o = sy * 6, V = c.vis;
+  if (empty) { V.fill(63, o, o + 6); return; }
+  const op = i => OPAQUE[pBlk[((i >> 8) + 1) * PAD2 + (((i >> 4) & 15) + 1) * PADW + (i & 15) + 1]];
+  let solid = 0;
+  for (let i = 0; i < 4096; i++) if (op(i)) solid++;
+  // VisGraph.resolve: with fewer than 256 opaque blocks everything sees everything
+  if (solid < 256) { V.fill(63, o, o + 6); return; }
+  V.fill(0, o, o + 6);
+  if (solid === 4096) return;
+  VIS_SEEN.fill(0);
+  for (const e of VIS_EDGE) {
+    if (VIS_SEEN[e] || op(e)) continue;
+    let head = 0, tail = 0, faces = 0;
+    VIS_Q[tail++] = e; VIS_SEEN[e] = 1;
+    while (head < tail) {
+      const i = VIS_Q[head++], x = i & 15, z = (i >> 4) & 15, y = i >> 8;
+      if (x === 15) faces |= 1; else if (x === 0) faces |= 2;
+      if (y === 15) faces |= 4; else if (y === 0) faces |= 8;
+      if (z === 15) faces |= 16; else if (z === 0) faces |= 32;
+      if (x < 15 && !VIS_SEEN[i + 1] && !op(i + 1)) { VIS_SEEN[i + 1] = 1; VIS_Q[tail++] = i + 1; }
+      if (x > 0 && !VIS_SEEN[i - 1] && !op(i - 1)) { VIS_SEEN[i - 1] = 1; VIS_Q[tail++] = i - 1; }
+      if (z < 15 && !VIS_SEEN[i + 16] && !op(i + 16)) { VIS_SEEN[i + 16] = 1; VIS_Q[tail++] = i + 16; }
+      if (z > 0 && !VIS_SEEN[i - 16] && !op(i - 16)) { VIS_SEEN[i - 16] = 1; VIS_Q[tail++] = i - 16; }
+      if (y < 15 && !VIS_SEEN[i + 256] && !op(i + 256)) { VIS_SEEN[i + 256] = 1; VIS_Q[tail++] = i + 256; }
+      if (y > 0 && !VIS_SEEN[i - 256] && !op(i - 256)) { VIS_SEEN[i - 256] = 1; VIS_Q[tail++] = i - 256; }
+    }
+    for (let f = 0; f < 6; f++) if (faces & (1 << f)) V[o + f] |= faces;
+  }
+}
 function meshSection(world, c, sy) {
   const opq = MESH_OPQ, trn = MESH_TRN;
   opq.n = 0; trn.n = 0;
@@ -10173,8 +10208,9 @@ function meshSection(world, c, sy) {
   let any = false;
   const cb = c.blocks;
   for (let i = b0; i < b0 + 4096; i++) if (cb[i]) { any = true; break; }
-  if (!any) return null;
+  if (!any) { sectionVis(c, sy, true); return null; }
   fillPadded(world, c, sy);
+  sectionVis(c, sy, false);
   if (!c.tint) computeTints(world, c);
   const tint = c.tint;
   const fancy = MESH_OPTS.fancyLeaves;
@@ -11210,6 +11246,8 @@ class Renderer {
   }
   uploadSection(c, sy, mesh) {
     const gl = this.gl;
+    // a section that appears or disappears redoes the culling walk at once, a changed one soon
+    this.visDirty = !c.meshes[sy] !== !mesh ? 2 : Math.max(this.visDirty || 0, 1);
     let s = c.meshes[sy];
     if (!mesh) { if (s) this.freeSection(s); c.meshes[sy] = null; return; }
     if (!s) { s = c.meshes[sy] = { vao: null, vbo: null, n: 0, tvao: null, tvbo: null, tn: 0, sy }; }
@@ -11235,7 +11273,51 @@ class Renderer {
     if (s.vao) { gl.deleteVertexArray(s.vao); gl.deleteBuffer(s.vbo); }
     if (s.tvao) { gl.deleteVertexArray(s.tvao); gl.deleteBuffer(s.tvbo); }
   }
-  freeChunk(c) { for (let i = 0; i < CH_SECS; i++) if (c.meshes[i]) { this.freeSection(c.meshes[i]); c.meshes[i] = null; } }
+  freeChunk(c) { for (let i = 0; i < CH_SECS; i++) if (c.meshes[i]) { this.freeSection(c.meshes[i]); c.meshes[i] = null; } this.visDirty = 2; }
+  // SectionOcclusionGraph: a walk from the camera's section to its neighbours, only through faces that can see each
+  // other, never turning back against a direction already taken; kept until the camera changes section or a mesh changes
+  occlusionList(world, cam, far2) {
+    const csx = Math.floor(cam[0] / 16), csz = Math.floor(cam[2] / 16), cyr = Math.floor(cam[1] / 16), csy = Math.max(0, Math.min(CH_SECS - 1, cyr));
+    const key = csx + ',' + cyr + ',' + csz + ',' + far2 + ',' + world.dim, now = performance.now();
+    if (this.occList && this.occKey === key && this.occWorld === world) {
+      if (!this.visDirty) return this.occList;
+      // remeshed sections (blocks changing, light) redo the walk a few times a second, not every frame
+      if (this.visDirty === 1 && now - this.occT < 120) return this.occList;
+    }
+    this.visDirty = 0; this.occKey = key; this.occWorld = world; this.occT = now;
+    const R = Math.ceil(Math.sqrt(far2) / 16) + 1, W = 2 * R + 1, N = W * W * CH_SECS;
+    if (!this.occIdx || this.occIdx.length < N) { this.occIdx = new Int32Array(N); this.occQ = new Int32Array(N); this.occD = new Uint8Array(N); this.occS = new Uint8Array(N); }
+    const idx = this.occIdx, Q = this.occQ, QD = this.occD, QS = this.occS;
+    idx.fill(-1, 0, N);
+    // the chunks around, looked up once
+    const grid = new Array(W * W);
+    for (let gx = 0; gx < W; gx++) for (let gz = 0; gz < W; gz++) { const c = world.getChunk(csx - R + gx, csz - R + gz); grid[gx * W + gz] = c && c.state >= 2 ? c : null; }
+    const OPP = [1, 0, 3, 2, 5, 4], SX = [1, -1, 0, 0, 0, 0], SY = [0, 0, 1, -1, 0, 0], SZ = [0, 0, 0, 0, 1, -1], out = [];
+    // a node is (grid x, grid z, section) packed into one number
+    let n = 0;
+    const start = (R * W + R) * CH_SECS + csy;
+    idx[start] = 0; Q[0] = start; QD[0] = 0; QS[0] = 0; n = 1;
+    for (let h = 0; h < n; h++) {
+      const q = Q[h], sy = q % CH_SECS, gc = (q - sy) / CH_SECS, gz = gc % W, gx = (gc - gz) / W, dirs = QD[h], src = QS[h], c = grid[gc];
+      if (c && c.meshes[sy]) out.push([c, sy]);
+      const vis = c && c.vis, vo = sy * 6;
+      for (let d = 0; d < 6; d++) {
+        if (dirs & (1 << OPP[d])) continue;
+        const nx = gx + SX[d], ny = sy + SY[d], nz = gz + SZ[d];
+        if (ny < 0 || ny >= CH_SECS || nx < 0 || nz < 0 || nx >= W || nz >= W) continue;
+        const ox = (csx - R + nx) * 16 + 8 - cam[0], oz = (csz - R + nz) * 16 + 8 - cam[2];
+        if (ox * ox + oz * oz > far2) continue;
+        // entered through one of the faces in src: can that face see face d?
+        if (src && vis) { let ok = false; for (let s = 0; s < 6 && !ok; s++) if ((src & (1 << s)) && (vis[vo + OPP[s]] & (1 << d))) ok = true; if (!ok) continue; }
+        const ng = nx * W + nz;
+        if (!grid[ng]) continue;
+        const k = ng * CH_SECS + ny, j = idx[k];
+        if (j >= 0) { QS[j] |= 1 << d; continue; }
+        idx[k] = n; Q[n] = k; QD[n] = dirs | (1 << d); QS[n] = 1 << d; n++;
+      }
+    }
+    return this.occList = out;
+  }
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2) * (OPTIONS.resScale || 1);
     const w = Math.floor(this.canvas.clientWidth * dpr), h = Math.floor(this.canvas.clientHeight * dpr);
@@ -11310,25 +11392,25 @@ class Renderer {
     if (!translucent) {
       gl.uniform1f(u.uAlphaTest, 0.5); gl.uniform1f(u.uAlphaMul, 1);
       let drawn = 0, quads = 0;
-      const list = this.visible = [];
-      for (const c of world.chunks.values()) {
-        if (c.state < 2) continue;
+      const list = this.visible = [], far2 = (env.fogEnd + 24) * (env.fogEnd + 24);
+      // the sections the camera might see (cave culling); everything in range when that walk finds nothing
+      let cand = this.noOcclusion ? null : this.occlusionList(world, cam, far2);
+      if (!cand || !cand.length) { cand = []; for (const c of world.chunks.values()) if (c.state >= 2) for (let sy = 0; sy < CH_SECS; sy++) if (c.meshes[sy]) cand.push([c, sy]); }
+      for (const [c, sy] of cand) {
         const ox = c.cx * 16 - cam[0], oz = c.cz * 16 - cam[2];
-        if (ox * ox + oz * oz > (env.fogEnd + 24) * (env.fogEnd + 24)) continue;
-        for (let sy = 0; sy < CH_SECS; sy++) {
-          const s = c.meshes[sy];
-          if (!s || (!s.n && !s.tn)) continue;
-          const oy = sy * 16 - cam[1];
-          if (!this.boxVisible(ox, oy, oz, ox + 16, oy + 16, oz + 16)) continue;
-          list.push([s, ox, oz, ox + 8, oy + 8, oz + 8]);
-          if (!s.n) continue;
-          gl.uniform3f(u.uOff, ox, -cam[1], oz);
-          gl.bindVertexArray(s.vao);
-          gl.drawElements(gl.TRIANGLES, (s.n >> 2) * 6, gl.UNSIGNED_INT, 0);
-          drawn++; quads += s.n >> 2;
-        }
+        if (ox * ox + oz * oz > far2) continue;
+        const s = c.meshes[sy];
+        if (!s || (!s.n && !s.tn)) continue;
+        const oy = sy * 16 - cam[1];
+        if (!this.boxVisible(ox, oy, oz, ox + 16, oy + 16, oz + 16)) continue;
+        list.push([s, ox, oz, ox + 8, oy + 8, oz + 8]);
+        if (!s.n) continue;
+        gl.uniform3f(u.uOff, ox, -cam[1], oz);
+        gl.bindVertexArray(s.vao);
+        gl.drawElements(gl.TRIANGLES, (s.n >> 2) * 6, gl.UNSIGNED_INT, 0);
+        drawn++; quads += s.n >> 2;
       }
-      this.stats.drawn = drawn; this.stats.quads = quads;
+      this.stats.drawn = drawn; this.stats.quads = quads; this.stats.cand = cand.length;
     } else {
       const list = (this.visible || []).filter(e => e[0].tn);
       list.sort((a, b) => (b[3] * b[3] + b[4] * b[4] + b[5] * b[5]) - (a[3] * a[3] + a[4] * a[4] + a[5] * a[5]));
