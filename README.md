@@ -605,6 +605,25 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   water breathing, fire resistance, healing and swiftness when they need them, holding the bottle
   at the nose. The wandering trader drinks invisibility at dusk and milk in the morning, and you
   can see the bottle while it is invisible.
+- **Goats** ram the nearest living thing they can see (players only in survival or adventure)
+  every 30 seconds to 5 minutes, screaming goats every 5 to 15 seconds: they back off 4 to 7
+  blocks in a straight line, lower their head and charge, and the hit throws you far (half as
+  far if you block it with a shield). A goat that charges into stone, logs, packed ice or some
+  ores snaps off a horn, always the same kind of horn for the same goat. Kids have no horns.
+  Goats leap up to 5 blocks to ledges they can't walk to, and falls only hurt them beyond 13
+  blocks.
+- **Striders** shiver and turn purple out of lava, walking slower, take damage from water and
+  rain, and make their own way back to lava. Riding a pig or a strider, right click with the
+  carrot or warped fungus on a stick for a burst of speed; it wears out the stick, which leaves
+  a fishing rod when it breaks.
+- **Dolphins** go up for air every few minutes, dry out on land, swim alongside you when you
+  sprint-swim and give you Dolphin's Grace, play with items in the water, leap at the surface,
+  follow boats and fight back together. Feed one a fish and it leads you to the nearest
+  shipwreck or ocean ruin.
+- **Sniffers** sniff the air, walk off to a spot they choose and dig up a torchflower seed or a
+  pitcher pod, never in the same place twice, then rest for 8 minutes. Bred, they lay a sniffer
+  egg, which cracks twice and hatches after about 20 minutes (10 on a moss block); snifflets
+  take 40 minutes to grow up.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

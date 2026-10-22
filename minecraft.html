@@ -14383,12 +14383,11 @@ class Mob extends Entity {
     const auto = this.type === 'pig' || this.type === 'strider';
     const fwd = auto ? 1 : f, side = auto ? 0 : s * 0.5;
     const yaw = p.yaw, dx = -Math.sin(yaw) * fwd - Math.cos(yaw) * side, dz = -Math.cos(yaw) * fwd + Math.sin(yaw) * side, l = Math.hypot(dx, dz);
-    const speed = (this.data.speed || T.run) * (this.type === 'pig' ? 1.1 : this.type === 'strider' ? (this.data.cold ? 0.35 : 1.0) : 1) * (inp.keys.has('ControlLeft') && this.type === 'camel' ? 1.6 : 1);
+    const speed = (this.data.speed || T.run) * (this.type === 'pig' ? 1.1 : this.type === 'strider' ? (this.data.cold ? 0.35 / 0.55 : 1.0) : 1) * (inp.keys.has('ControlLeft') && this.type === 'camel' ? 1.6 : 1) * (typeof rideBoost === 'function' ? rideBoost(this) : 1);
     this.move = l > 0.01 ? [dx / l, dz / l, speed, false] : null;
     // the jump bar (riderJump) when there is one
     if (this.riderJump) this.riderJump(p, inp, fwd);
     else if (inp.keys.has('Space') && this.onGround && (this.type === 'horse' || this.type === 'donkey' || this.type === 'mule' || this.type === 'skeleton_horse' || this.type === 'camel') && this.jumpCd <= 0) { this.vy = this.data.jump || 0.75; this.jumpCd = 12; }
-    if (this.type === 'pig' && p.held && p.held.id === I.CARROT_ON_A_STICK && this.age % 120 === 0) p.damageHeld(1);
   }
   // ---------- rendering ----------
   animState(a) {
@@ -42729,6 +42728,825 @@ AUDIO.play = function (name, x, y, z, ...rest) {
   if (name === 'composter_ready') { this.noiseHit(dst, 'lowpass', 900, 1, 0.25, 0.3); this.tone(dst, 'sine', 520, 700, 0.12, 0.05, t0 + 0.12); }
   else if (name === 'trader_disappear') [900, 700, 500].forEach((f, i) => this.tone(dst, 'sine', f, f * 0.9, 0.12, 0.05, t0 + i * 0.08));
   else [500, 700, 900].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.1, 0.12, 0.05, t0 + i * 0.08));
+};
+
+/* @file 145_animals.js */
+/* ===================================================================
+   PART 34: goats, striders, dolphins and sniffers like Java's
+   - goats ram the nearest living thing in sight (not other goats;
+     players only in survival or adventure) once their wait is over
+     (30 seconds to 5 minutes; a screaming goat 5 to 15 seconds): they
+     go to a spot 4 to 7 blocks off in a straight line, lower their
+     head for a second and charge; the hit throws the target far (half
+     as far through a shield). Charging into stone, logs, packed ice or
+     some ores snaps off a horn, always the same kind of horn for the
+     same goat. Kids have no horns, and one grown goat in ten spawns
+     with only one. Now and then a goat leaps up to 5 blocks to a spot
+     it could not walk to. Falls hurt them only beyond 13 blocks
+   - striders are cold out of lava (they shiver, turn purple and walk
+     at two thirds of their speed), water and rain hurt them, and they
+     head back to lava on their own
+   - pigs and striders ridden with a carrot or warped fungus on a stick
+     get a burst of speed for 7 to 49 seconds on a right click; it
+     wears the stick (7 uses of a carrot on a stick, 1 of a warped
+     fungus on a stick), and a used-up one leaves its fishing rod
+   - dolphins hold their breath for 4 minutes and go up for air, dry
+     out on land after 2 minutes, swim with a player who swims nearby
+     and give Dolphin's Grace, lead a player who feeds them fish to the
+     nearest shipwreck or ocean ruin, play with items in the water,
+     leap out at the surface, follow boats, keep away from guardians
+     and fight back together
+   - sniffers sniff the air, pick a spot 10 to 18 blocks away, walk
+     there and dig up a torchflower seed or a pitcher pod, never twice
+     in the same spot (they remember 20), then wait 8 minutes. Bred,
+     they lay a sniffer egg; an egg cracks twice and hatches a snifflet
+     after about 20 minutes (10 on moss). Snifflets take 40 minutes to
+     grow up
+   =================================================================== */
+
+/* ---------------- goats ---------------- */
+const goatRoll = ([a, b]) => a + Math.floor(Math.random() * (b - a + 1));
+// GoatAi: the times between rams (a screaming goat's far shorter) and between long jumps
+const goatRamTimes = m => m.data.screaming ? [100, 300] : [600, 6000];
+const GOAT_JUMP_TIMES = [600, 1200];
+// Goat.calculateFallDamage takes 10 off; the ram and the long jump come before following a parent or wandering
+if (MOB_TYPES.goat) {
+  const T = MOB_TYPES.goat;
+  T.noFall = 13;
+  T.sounds = ['goat_ambient', 'goat_hurt', 'goat_death'];
+  const ai = T.ai.filter(n => n !== 'ram'), at = ai.indexOf('followParent');
+  ai.splice(at < 0 ? ai.length - 2 : at, 0, 'goatRam', 'goatLongJump');
+  T.ai = ai;
+}
+const SCREAMING_GOAT_T = MOB_TYPES.goat ? Object.create(MOB_TYPES.goat, { sounds: { value: ['goat_screaming_ambient', 'goat_screaming_hurt', 'goat_screaming_death'] } }) : null;
+// Goat.finalizeSpawn and getBreedOffspring: 2% scream (a kid also when the parent it takes after does); one grown goat in ten has a
+// horn missing; the waits start over
+const _initGoatAN = MOB_INIT.goat;
+MOB_INIT.goat = (m, o) => {
+  if (_initGoatAN) _initGoatAN(m, o);
+  if (o.loading) return;
+  const d = m.data;
+  if (o.parents) { const q = o.parents[Math.floor(Math.random() * o.parents.length)]; d.screaming = !!(q && q.data.screaming) || Math.random() < 0.02; }
+  d.leftHorn = d.rightHorn = !o.baby;
+  if (!o.baby && Math.random() < 0.1) d[Math.random() < 0.5 ? 'leftHorn' : 'rightHorn'] = false;
+  d.hornSeed = Math.floor(Math.random() * 1e9);
+  d.ramCd = goatRoll(goatRamTimes(m)); d.jumpCd = goatRoll(GOAT_JUMP_TIMES);
+};
+// what a goat rams: anything alive but goats and armor stands; players only in survival or adventure
+const goatRammable = (m, e) => !!e && e !== m && !e.dead && !(e.deathTime > 0) && (e instanceof Player ? !!e.survival : e instanceof Mob && e.type !== 'goat' && e.type !== 'armor_stand');
+const goatCandidates = g => g.player ? [g.player, ...g.entities] : g.entities;
+// the nearest one in sight within 16 blocks (NEAREST_VISIBLE_LIVING_ENTITIES)
+function goatTarget(m) {
+  let best = null, bd = 16;
+  for (const e of goatCandidates(m.game)) { if (!goatRammable(m, e)) continue; const k = m.distTo(e); if (k < bd && m.canSee(e)) { bd = k; best = e; } }
+  return best;
+}
+// PrepareRamNearestTarget.calculateRammingStartPosition: from the target's block straight out along each of the four directions as far
+// as 7 walkable blocks; those 4 or more away, nearest the goat first, the first it can walk to
+function goatRamSpot(m, t) {
+  const g = m.game, w = g.world, tx = Math.floor(t.x), ty = Math.floor(t.y + 0.01), tz = Math.floor(t.z);
+  if (!NAV.stand(w, tx, ty, tz, m)) return null;
+  const mx = Math.floor(m.x), my = Math.floor(m.y + 0.01), mz = Math.floor(m.z), spots = [];
+  for (const [dx, dz] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+    let k = 0;
+    while (k < 7 && NAV.stand(w, tx + dx * (k + 1), ty, tz + dz * (k + 1), m)) k++;
+    if (k >= 4) spots.push([tx + dx * k, ty, tz + dz * k]);
+  }
+  const d2 = s => (s[0] - mx) ** 2 + (s[1] - my) ** 2 + (s[2] - mz) ** 2;
+  spots.sort((a, b) => d2(a) - d2(b));
+  for (const s of spots) {
+    if (!d2(s)) return s;
+    if (g.pathBudget <= 0) return null;
+    g.pathBudget--;
+    const path = findPath(m, s[0], s[1], s[2], 200, 0.5), end = path[path.length - 1];
+    if (end && end[0] === s[0] && end[1] === s[1] && end[2] === s[2]) return s;
+  }
+  return null;
+}
+// Goat.dropHorn and createHorn: one of its horns (either, with both) flies off, of the kind this goat's horns always are
+function goatDropHorn(m) {
+  const d = m.data, sides = ['leftHorn', 'rightHorn'].filter(k => d[k] !== false);
+  if (!sides.length || m.baby) return false;
+  d[sides[Math.floor(Math.random() * sides.length)]] = false;
+  const pool = d.screaming ? HORNS.slice(4) : HORNS.slice(0, 4), seed = d.hornSeed !== undefined ? d.hornSeed : m.id;
+  const e = m.game.dropItem(m.x, m.y, m.z, { id: I.GOAT_HORN, count: 1, tag: { instrument: pool[seed % 4] } });
+  if (e) { e.vx = (Math.random() - 0.5) * 0.4; e.vy = 0.3 + Math.random() * 0.4; e.vz = (Math.random() - 0.5) * 0.4; }
+  return true;
+}
+// RamTarget.tick: the goat's attack damage (2, a kid's 1), then thrown away from it with its charging speed times 1.65 (0.2 to 3,
+// a quarter more or less for each level of Speed or Slowness on it), times 2.5 (a kid 1), half that if a shield took it
+const GOAT_CHARGE_SPEED = 0.6;
+function goatStrike(m, t, dir) {
+  let blocked = false;
+  if (t instanceof Player && t.blocking && t.blocking()) { const lk = t.look(), dx = m.x - t.x, dz = m.z - t.z; blocked = lk[0] * dx + lk[2] * dz > 0; }
+  t.hurt(m.baby ? 1 : 2, 'goat', m);
+  const f2 = Math.min(3, Math.max(0.2, GOAT_CHARGE_SPEED * 1.65)) + 0.25 * (m.effectLevel('speed') - m.effectLevel('slowness'));
+  const s = (blocked ? 0.5 : 1) * f2 * (m.baby ? 1 : 2.5) * (1 - ((t.T && t.T.kbRes) || 0));
+  if (s > 0 && !t.dead) { t.vx = t.vx / 2 - dir[0] * s; t.vz = t.vz / 2 - dir[1] * s; if (t.onGround) t.vy = Math.min(0.4, t.vy / 2 + s); }
+}
+function goatEndRam(m) { m._ram = null; m._headDown = false; m.data.ramCd = goatRoll(goatRamTimes(m)); return false; }
+GOALS.goatRam = function (m) {
+  const d = m.data, g = m.game, w = g.world;
+  let R = m._ram;
+  if (!R) {
+    if (d.ramCd > 0 || m.inWater) return false;
+    if ((m.age + m.id) % 10 === 0) {
+      const t = goatTarget(m), spot = t && goatRamSpot(m, t);
+      if (spot) R = m._ram = { t, spot, tpos: [Math.floor(t.x), Math.floor(t.y + 0.01), Math.floor(t.z)], at: -1, t0: w.tick };
+    }
+    // GoatAi.updateActivity: once its wait is over it stays ready to ram, standing where it is, until something comes along
+    if (!R) { m.nav = null; m.move = null; return true; }
+  }
+  const t = R.t;
+  if (!R.goal) {
+    // PrepareRamNearestTarget: 8 seconds at most; if it never charges it tries again after the shortest wait
+    if (!goatRammable(m, t) || w.tick - R.t0 > 160) { m._ram = null; m._headDown = false; d.ramCd = goatRamTimes(m)[0]; return false; }
+    m.lookAt(t.x, t.y + t.h * 0.85, t.z);
+    const tp = [Math.floor(t.x), Math.floor(t.y + 0.01), Math.floor(t.z)];
+    if (tp[0] !== R.tpos[0] || tp[1] !== R.tpos[1] || tp[2] !== R.tpos[2]) {
+      // the target moved on: a new spot (the old one if there is none), and the head comes up again
+      m._headDown = false; m.nav = null;
+      const s = goatRamSpot(m, t);
+      if (s) { R.spot = s; R.tpos = tp; }
+      R.at = -1;
+      return true;
+    }
+    const [sx, sy, sz] = R.spot;
+    if (Math.floor(m.x) === sx && Math.floor(m.y + 0.01) === sy && Math.floor(m.z) === sz) {
+      m.nav = null; m.move = null; m._headDown = true;
+      if (R.at < 0) R.at = w.tick;
+      if (w.tick - R.at >= 20) {
+        // at the far edge of the block the target stood on
+        const gx = R.tpos[0] + 0.5 + 0.5 * Math.sign(R.tpos[0] - sx), gz = R.tpos[2] + 0.5 + 0.5 * Math.sign(R.tpos[2] - sz), l = Math.hypot(sx - gx, sz - gz) || 1;
+        R.goal = [gx, R.tpos[1], gz]; R.dir = [(sx - gx) / l, (sz - gz) / l]; R.t0 = w.tick; R.last = null;
+        g.sound(d.screaming ? 'goat_screaming_prepare_ram' : 'goat_prepare_ram', m.x, m.y + 1, m.z);
+      }
+    } else if (!m.nav || m.navDone() || m.age % 20 === 0) m.goTo(sx + 0.5, sy, sz + 0.5, m.T.walk * 1.25, 0.5); else m.followPath();
+    return true;
+  }
+  // RamTarget: a charge at three times its speed, 10 seconds at most
+  if (w.tick - R.t0 > 200) return goatEndRam(m);
+  const [gx, , gz] = R.goal;
+  // the first living thing it runs into
+  const hw = m.w / 2;
+  for (const e of goatCandidates(g)) {
+    if (!goatRammable(m, e)) continue;
+    const ew = e.w / 2;
+    if (Math.abs(e.x - m.x) < hw + ew && Math.abs(e.z - m.z) < hw + ew && e.y < m.y + m.h && e.y + e.h > m.y) {
+      goatStrike(m, e, R.dir);
+      g.sound(d.screaming ? 'goat_screaming_ram_impact' : 'goat_ram_impact', m.x, m.y + 1, m.z);
+      return goatEndRam(m);
+    }
+  }
+  // a block that snaps horns, straight ahead
+  const vl = Math.hypot(m.vx, m.vz);
+  if (vl > 1e-3) {
+    const fx = Math.floor(m.x + m.vx / vl), fy = Math.floor(m.y + 0.01), fz = Math.floor(m.z + m.vz / vl);
+    if (SNAPS_HORN.has(w.getBlock(fx, fy, fz)) || SNAPS_HORN.has(w.getBlock(fx, fy + 1, fz))) {
+      g.sound(d.screaming ? 'goat_screaming_ram_impact' : 'goat_ram_impact', m.x, m.y + 1, m.z);
+      if (goatDropHorn(m)) g.sound(d.screaming ? 'goat_screaming_horn_break' : 'goat_horn_break', m.x, m.y + 1, m.z);
+      return goatEndRam(m);
+    }
+  }
+  // it reached the block past the target, or can go no further
+  if (Math.floor(m.x) === Math.floor(gx) && Math.floor(m.z) === Math.floor(gz)) return goatEndRam(m);
+  if (R.last && Math.hypot(m.x - R.last[0], m.z - R.last[1]) < 1e-3 && w.tick - R.t0 > 5) return goatEndRam(m);
+  R.last = [m.x, m.z];
+  const dx = gx - m.x, dz = gz - m.z, l = Math.hypot(dx, dz) || 1;
+  m._headDown = true; m.nav = null;
+  m.lookAt(gx, m.y + 0.8, gz);
+  m.move = [dx / l, dz / l, m.T.walk * 3, false];
+  return true;
+};
+// LongJumpToRandomPos and LongJumpMidJump: on the ground, out of water and going nowhere, it tries spots within 5 blocks across and up or
+// down (the farther, the likelier) standing on a solid block, which it could not walk to within 8 blocks, and a leap there at 65 to 80
+// degrees that clears the way with no more than 1.5 a tick; it looks there for 2 seconds and leaps (with no drag), landing with a
+// step. Then 30 to 60 seconds before the next; half that if nothing came of it
+const GOAT_JUMP_BOX = [0.63, 0.91];
+const goatClear = (w, a, b) => {
+  const [bw, bh] = GOAT_JUMP_BOX, dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.hypot(dx, dy, dz), step = Math.min(bw, bh) * 0.9;
+  const n = Math.max(1, Math.ceil(len / Math.min(bw, bh)));
+  for (let j = 0; j < n; j++) {
+    const k = j === n - 1 ? 1 : Math.min(1, (j + 1) * step / (len || 1)), x = a[0] + dx * k, y = a[1] + dy * k, z = a[2] + dz * k;
+    if (aabbHitsBlock(w, x - bw / 2, y, z - bw / 2, x + bw / 2, y + bh, z + bw / 2, id => SOLID[id])) return false;
+  }
+  return true;
+};
+// LongJumpUtil.calculateJumpVectorForAngle, aiming half a block short of the middle of the spot
+function goatJumpVector(m, tx, ty, tz, angle) {
+  const w = m.game.world, ox = m.x, oy = m.y, oz = m.z;
+  let hx = tx - ox, hz = tz - oz;
+  const hl = Math.hypot(hx, hz) || 1;
+  const vx = tx - ox - hx / hl * 0.5, vy = ty - oy, vz = tz - oz - hz / hl * 0.5;
+  const f = angle * Math.PI / 180, yaw = Math.atan2(vz, vx), d1 = vx * vx + vz * vz, d2 = Math.sqrt(d1), grav = 0.08;
+  const d11 = d1 * grav / (d2 * Math.sin(2 * f) - 2 * vy * Math.cos(f) ** 2);
+  if (!(d11 >= 0)) return null;
+  const v = Math.sqrt(d11);
+  if (v > 1.5) return null;
+  const vh = v * Math.cos(f), vv = v * Math.sin(f);
+  const steps = Math.ceil(d2 / vh) * 2;
+  let s = 0, prev = null;
+  for (let j = 0; j < steps - 1; j++) {
+    s += d2 / steps;
+    const y = Math.tan(f) * s - s * s * grav / (2 * d11 * Math.cos(f) ** 2), p = [ox + s * Math.cos(yaw), oy + y, oz + s * Math.sin(yaw)];
+    if (prev && !goatClear(w, prev, p)) return null;
+    prev = p;
+  }
+  return [vh * Math.cos(yaw) * 0.95, vv * 0.95, vh * Math.sin(yaw) * 0.95];
+}
+function goatJumpCandidates(m) {
+  const bx = Math.floor(m.x), by = Math.floor(m.y + 0.01), bz = Math.floor(m.z), out = [];
+  for (let y = by - 5; y <= by + 5; y++) for (let z = bz - 5; z <= bz + 5; z++) for (let x = bx - 5; x <= bx + 5; x++) {
+    if (x === bx && y === by && z === bz) continue;
+    out.push([x, y, z, Math.ceil((x - bx) ** 2 + (y - by) ** 2 + (z - bz) ** 2)]);
+  }
+  return out;
+}
+GOALS.goatLongJump = function (m) {
+  const d = m.data, g = m.game, w = g.world;
+  let J = m._jump;
+  if (J && J.air) {
+    if (m.onGround && w.tick - J.t > 1) { m.vx *= 0.1; m.vz *= 0.1; g.sound('goat_step', m.x, m.y, m.z); m._jump = null; d.jumpCd = goatRoll(GOAT_JUMP_TIMES); return false; }
+    m.nav = null; m.move = null;
+    return true;
+  }
+  if (!J) {
+    if (d.jumpCd > 0 || (m.nav && !m.navDone())) return false;
+    if (!m.onGround || m.inWater || m.inLava || w.getBlock(Math.floor(m.x), Math.floor(m.y + 0.01), Math.floor(m.z)) === B.HONEY_BLOCK) { d.jumpCd = Math.floor(goatRoll(GOAT_JUMP_TIMES) / 2); return false; }
+    J = m._jump = { tries: 20, cand: goatJumpCandidates(m), total: 0, x: m.x, y: m.y, z: m.z, vec: null, t: w.tick };
+    for (const c of J.cand) J.total += c[3];
+  }
+  if (m.x !== J.x || m.y !== J.y || m.z !== J.z || m.inWater || (!J.vec && (J.tries <= 0 || !J.cand.length))) { m._jump = null; d.jumpCd = Math.floor(goatRoll(GOAT_JUMP_TIMES) / 2); return false; }
+  m.nav = null; m.move = null;
+  if (J.vec) {
+    m.lookAt(J.to[0] + 0.5, J.to[1] + 0.5, J.to[2] + 0.5);
+    if (w.tick - J.t >= 40) {
+      m.vx = J.vec[0]; m.vy = J.vec[1]; m.vz = J.vec[2]; J.v = J.vec.slice(); J.air = true; J.t = w.tick; m.onGround = false;
+      g.sound(d.screaming ? 'goat_screaming_long_jump' : 'goat_long_jump', m.x, m.y, m.z);
+    }
+    return true;
+  }
+  // a few dozen spots a tick, drawn by weight
+  J.tries--;
+  const bx = Math.floor(m.x), bz = Math.floor(m.z);
+  for (let n = 0; n < 40 && J.cand.length; n++) {
+    let r = Math.random() * J.total, i = 0;
+    while (i < J.cand.length - 1 && r >= J.cand[i][3]) r -= J.cand[i++][3];
+    const [x, y, z, wt] = J.cand.splice(i, 1)[0];
+    J.total -= wt;
+    if (x === bx && z === bz) continue;
+    if (!OPAQUE[w.getBlock(x, y - 1, z)] || !NAV.stand(w, x, y, z, m)) continue;
+    let vec = null;
+    for (const a of [65, 70, 75, 80].sort(() => Math.random() - 0.5)) if ((vec = goatJumpVector(m, x + 0.5, y + 0.5, z + 0.5, a))) break;
+    if (!vec) continue;
+    if (g.pathBudget <= 0) break;
+    g.pathBudget--;
+    const path = findPath(m, x, y, z, 128, 0.5), end = path[path.length - 1];
+    if (end && end[0] === x && end[1] === y && end[2] === z) continue;
+    J.vec = vec; J.to = [x, y, z]; J.t = w.tick;
+    break;
+  }
+  return true;
+};
+// GoatModel: the head comes down 30 degrees while it gets ready to ram; kids have no horns
+const _animGoatAN = MOB_ANIM.goat;
+MOB_ANIM.goat = (m, st) => { if (_animGoatAN) _animGoatAN(m, st); st.ram = (m._lowerT || 0) / 20 * 30 * Math.PI / 180; st.noLeftHorn = m.baby || m.data.leftHorn === false; st.noRightHorn = m.baby || m.data.rightHorn === false; };
+if (MOB_MODELS.goat) {
+  const _goatModelAN = MOB_MODELS.goat.anim;
+  MOB_MODELS.goat.anim = function (P, st) { _goatModelAN.call(this, P, st); if (st.ram) P.head = [st.ram, P.head[1], P.head[2]]; };
+}
+
+/* ---------------- striders ---------------- */
+// Strider.tick: warm with lava at its feet, in the block just under them, or around it; cold, it shivers and walks at two thirds of
+// its speed. Water and rain hurt it (Strider.isSensitiveToWater)
+const striderWarm = m => { const w = m.game.world, x = Math.floor(m.x), z = Math.floor(m.z); return !!m.inLava || w.getBlock(x, Math.floor(m.y), z) === B.LAVA || w.getBlock(x, Math.floor(m.y - 0.2), z) === B.LAVA; };
+if (MOB_TYPES.strider) {
+  const T = MOB_TYPES.strider;
+  T.sounds = ['strider_ambient', 'strider_hurt', 'strider_death'];
+  if (!T.ai.includes('striderToLava')) { const ai = T.ai.slice(), at = ai.indexOf('tempt'); ai.splice(at < 0 ? 0 : at + 1, 0, 'striderToLava'); T.ai = ai; }
+}
+const _walkPhysicsAN = Mob.prototype.walkPhysics;
+Mob.prototype.walkPhysics = function () {
+  if (this.type !== 'strider' || !this.data.cold || !this.move) return _walkPhysicsAN.call(this);
+  const mv = this.move, s = mv[2];
+  mv[2] = s * 0.66;
+  const r = _walkPhysicsAN.call(this);
+  mv[2] = s;
+  return r;
+};
+// StriderGoToLavaGoal (MoveToBlockGoal): out of lava, every 10 to 20 seconds it looks for lava within 8 blocks (2 up or down) with room
+// above, and walks there
+GOALS.striderToLava = function (m) {
+  const w = m.game.world;
+  if (m.inLava) { m._lava = null; return false; }
+  let L = m._lava;
+  if (!L) {
+    if ((m._lavaNext = (m._lavaNext || 0) - 1) > 0) return false;
+    m._lavaNext = 200 + Math.floor(Math.random() * 200);
+    const at = nearestBlockFrom(m, 8, 2, (x, y, z) => w.getBlock(x, y, z) === B.LAVA && NAV.open(w, x, y + 1, z, m));
+    if (!at) return false;
+    L = m._lava = { at, t: 0 };
+  }
+  const [x, y, z] = L.at;
+  if (++L.t > 1200 || w.getBlock(x, y, z) !== B.LAVA || Math.hypot(x + 0.5 - m.x, y + 1 - m.y, z + 0.5 - m.z) < 1) { m._lava = null; return false; }
+  walkTowards(m, x + 0.5, y + 1, z + 0.5, m.T.walk, 0.5);
+  return true;
+};
+
+/* ---------------- riding pigs and striders ---------------- */
+// ItemBasedSteering: a right click with the stick while riding gives a burst of 7 to 49 seconds, its speed 1 + 1.15 x sin over its
+// course, not while one is on. It costs a carrot on a stick 7 uses and a warped fungus on a stick 1; used up, either leaves its fishing rod
+const rideBoost = m => m._boost ? 1 + 1.15 * Math.sin(m._boost.t / m._boost.total * Math.PI) : 1;
+const _useItemSpecialAN = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  const v = p.riding;
+  if (held && v && v.data && v.data.saddle && ((held.id === I.CARROT_ON_A_STICK && v.type === 'pig') || (held.id === I.WARPED_FUNGUS_ON_A_STICK && v.type === 'strider'))) {
+    if (v._boost) return true;
+    v._boost = { t: 0, total: 140 + Math.floor(Math.random() * 841) };
+    const left = p.wear(held, held.id === I.CARROT_ON_A_STICK ? 7 : 1);
+    p.inv[p.sel] = left || { id: I.FISHING_ROD, count: 1 };
+    this.ui.refreshHotbar();
+    return true;
+  }
+  return _useItemSpecialAN.call(this, p, hit, held, it);
+};
+
+/* ---------------- dolphins ---------------- */
+// Dolphin: 4800 ticks of air, used up under water and refilled at once at the surface (out of it, 2 damage a second); out of water it
+// dries out over 2400 ticks, then hurts every tick, and flops about on land
+if (MOB_TYPES.dolphin) {
+  const T = MOB_TYPES.dolphin;
+  T.sounds = ['dolphin_ambient', 'dolphin_hurt', 'dolphin_death'];
+  T.ai = ['target', 'dolphinBreath', 'dolphinToWater', 'melee', 'dolphinTreasure', 'dolphinWithPlayer', 'dolphinAvoid', 'dolphinJump', 'dolphinPlay', 'dolphinBoat', 'swim'];
+}
+const dolphinAir = m => m.data.air === undefined ? 4800 : m.data.air;
+const dolphinSwimTo = (m, x, y, z, speed) => { const dx = x - m.x, dy = y - m.y, dz = z - m.z, l = Math.hypot(dx, dy, dz) || 1; m.move = [dx / l, dz / l, speed, false, dy / l]; };
+Object.assign(GOALS, {
+  // BreathAirGoal: with under 140 air it makes for air above it (in the 3x3 column 8 blocks up, else straight up)
+  dolphinBreath(m) {
+    if (!m.inWater || dolphinAir(m) >= 140) { m._air = null; return false; }
+    if (!m._air || m.age % 20 === 0) {
+      const w = m.game.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+      let at = null;
+      for (let z = bz - 1; z <= bz + 1 && !at; z++) for (let y = by; y <= by + 8 && !at; y++) for (let x = bx - 1; x <= bx + 1 && !at; x++) { const id = w.getBlock(x, y, z); if (id === 0 || id === B.BUBBLE_COLUMN) at = [x, y, z]; }
+      m._air = at || [bx, by + 8, bz];
+    }
+    dolphinSwimTo(m, m._air[0] + 0.5, m._air[1] + 0.5, m._air[2] + 0.5, m.T.walk);
+    return true;
+  },
+  // TryFindWaterGoal: on land it heads for water within 2 blocks
+  dolphinToWater(m) {
+    if (m.inWater || !m.onGround) return false;
+    const w = m.game.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+    for (let z = bz - 2; z <= bz + 2; z++) for (let y = by - 2; y <= by; y++) for (let x = bx - 2; x <= bx + 2; x++) if (w.getBlock(x, y, z) === B.WATER) { const dx = x + 0.5 - m.x, dz = z + 0.5 - m.z, l = Math.hypot(dx, dz) || 1; m.move = [dx / l, dz / l, m.T.walk, false]; return true; }
+    return true;
+  },
+  // DolphinSwimToTreasureGoal: fed a fish and with 100 air or more, it swims toward the nearest shipwreck or ocean ruin (within 800
+  // blocks) in steps of up to 16 blocks, happy now and then, until it is within 4 blocks of it or stuck
+  dolphinTreasure(m) {
+    const d = m.data, g = m.game, w = g.world;
+    if (!d.gotFish || dolphinAir(m) < 100 || !m.inWater) { if (m._tr && m._tr.stuck) d.gotFish = false; m._tr = null; return false; }
+    let T = m._tr;
+    if (!T) {
+      let best = null;
+      if (w.dim === 'overworld' && g.genInfo) for (const name of ['shipwreck', 'ocean_ruin']) {
+        const S = STRUCTURES.find(s => s.name === name);
+        if (!S) continue;
+        const p = nearestStructure(g.genInfo(), name, m.x, m.z, Math.ceil(800 / S.region) + 1);
+        if (p && (!best || (p.X - m.x) ** 2 + (p.Z - m.z) ** 2 < (best[0] - m.x) ** 2 + (best[1] - m.z) ** 2)) best = [p.X, p.Z];
+      }
+      if (!best) { d.gotFish = false; return false; }
+      T = m._tr = { at: best, stuck: false, step: null, t: 0 };
+      g.particles.icon(m.x, m.y + 0.5, m.z, 'happy', 6);
+    }
+    if (Math.hypot(T.at[0] + 0.5 - m.x, T.at[1] + 0.5 - m.z) < 4) { d.gotFish = false; m._tr = null; return false; }
+    if (!T.step || Math.hypot(T.step[0] - m.x, T.step[1] - m.y, T.step[2] - m.z) < 1.5 || ++T.t > 200) {
+      // DefaultRandomPos.getPosTowards: a spot in water up to 16 blocks along the way (or 8, if nothing)
+      const dx = T.at[0] + 0.5 - m.x, dz = T.at[1] + 0.5 - m.z, l = Math.hypot(dx, dz) || 1;
+      T.step = null; T.t = 0;
+      for (let k = 0; k < 10 && !T.step; k++) {
+        const r = (k < 5 ? 16 : 8) * (0.5 + Math.random() * 0.5), a = (Math.random() - 0.5) * (k < 5 ? Math.PI / 4 : Math.PI);
+        const sx = m.x + (dx / l * Math.cos(a) - dz / l * Math.sin(a)) * r, sz = m.z + (dz / l * Math.cos(a) + dx / l * Math.sin(a)) * r, sy = m.y + Math.floor(Math.random() * 3) - 1;
+        if (w.getBlock(Math.floor(sx), Math.floor(sy), Math.floor(sz)) === B.WATER) T.step = [sx, sy, sz];
+      }
+      if (!T.step) { T.stuck = true; d.gotFish = false; m._tr = null; return false; }
+    }
+    if (Math.random() < 1 / 80) g.particles.icon(m.x, m.y + 0.5, m.z, 'happy', 6);
+    m.lookAt(T.step[0], T.step[1], T.step[2]);
+    dolphinSwimTo(m, T.step[0], T.step[1], T.step[2], m.T.walk * 1.3);
+    return true;
+  },
+  // DolphinSwimWithPlayerGoal: a player swimming within 10 blocks; it keeps up with them (staying 2.5 blocks off) as long as they swim
+  // and stay within 16, and gives them Dolphin's Grace for 5 seconds at the start and now and then
+  dolphinWithPlayer(m) {
+    const p = m.game.player, swimming = p && !p.dead && p.mode !== 3 && p.inWater && p.sprinting;
+    if (m._withP) { if (!swimming || vDist2(m, p) >= 256 || m.target === p) { m._withP = false; return false; } }
+    else { if (!swimming || vDist2(m, p) > 100 || m.target === p || !m.inWater) return false; m._withP = true; p.addEffect('dolphins_grace', 100, 0); }
+    m.lookAt(p.x, p.y + 0.5, p.z);
+    if (vDist2(m, p) < 6.25) m.move = null; else dolphinSwimTo(m, p.x, p.y + 0.3, p.z, m.T.run);
+    if (Math.random() < 1 / 6) p.addEffect('dolphins_grace', 100, 0);
+    return true;
+  },
+  // AvoidEntityGoal: away from guardians within 8 blocks
+  dolphinAvoid(m) {
+    if (!m.inWater) { m._flee = null; return false; }
+    if (!m._flee && (m.age + m.id) % 5) return false;
+    const gd = m.game.entities.find(e => (e.type === 'guardian' || e.type === 'elder_guardian') && !e.dead && m.distTo(e) < 8);
+    if (!gd) { m._flee = null; return false; }
+    m._flee = gd;
+    const dx = m.x - gd.x, dz = m.z - gd.z, dy = m.y - gd.y, l = Math.hypot(dx, dy, dz) || 1;
+    m.move = [dx / l, dz / l, m.T.walk, false, dy / l * 0.5];
+    return true;
+  },
+  // DolphinJumpGoal: at the surface, with clear water and two blocks of air ahead along the way it swims, now and then it leaps out
+  dolphinJump(m) {
+    const w = m.game.world;
+    if (m._leap) {
+      if (m.onGround || (m.inWater && m.vy <= 0 && m.age - m._leap > 5)) { m._leap = 0; return false; }
+      if (!m._breach && m.inWater && m.age - m._leap > 3) { m._breach = true; m.game.sound('dolphin_jump', m.x, m.y, m.z); }
+      return true;
+    }
+    if (!m.inWater || Math.random() >= 1 / 10) return false;
+    const yw = m.yaw, ax = Math.abs(Math.sin(yw)) > Math.abs(Math.cos(yw)), sx = ax ? -Math.sign(Math.sin(yw)) : 0, sz = ax ? 0 : Math.sign(Math.cos(yw));
+    const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+    for (const k of [0, 1, 4, 5, 6, 7]) {
+      const x = bx + sx * k, z = bz + sz * k;
+      if (w.getBlock(x, by, z) !== B.WATER || w.getBlock(x, by + 1, z) !== 0 || w.getBlock(x, by + 2, z) !== 0) return false;
+    }
+    m.vx += sx * 0.6; m.vy += 0.7; m.vz += sz * 0.6; m.move = null; m._leap = m.age; m._breach = false;
+    return true;
+  },
+  // PlayWithItemsGoal: an item floating in water within 8 blocks: it swims to it and catches it, and tosses what it catches ahead
+  dolphinPlay(m) {
+    const d = m.data, g = m.game;
+    if (d.hand) {
+      // tossed ahead, a little to one side, out of reach for 2 seconds
+      const e = g.dropItem(m.x, m.y + m.h * 0.85 - 0.3, m.z, d.hand);
+      if (e) { const a = Math.random() * Math.PI * 2, f = 0.02 * Math.random(); e.vx = 0.3 * Math.sin(m.yaw) + Math.cos(a) * f; e.vy = 0; e.vz = 0.3 * Math.cos(m.yaw) + Math.sin(a) * f; e.pickupDelay = 40; }
+      d.hand = null; m._toy = null;
+      return false;
+    }
+    if (m._toy) return dolphinChase(m);
+    if (!m.inWater || (m.age + m.id) % 5) return false;
+    const toy = g.entities.find(e => e instanceof ItemEntity && !e.dead && e.pickupDelay <= 0 && e.inWater && Math.abs(e.x - m.x) < 8.45 && Math.abs(e.y - m.y) < 8.3 && Math.abs(e.z - m.z) < 8.45);
+    if (!toy) { m._toy = null; return false; }
+    if (!m._toy) g.sound('dolphin_play', m.x, m.y, m.z);
+    m._toy = toy;
+    return dolphinChase(m);
+  },
+  // FollowBoatGoal: a boat within 5 blocks whose rider is rowing
+  dolphinBoat(m) {
+    const g = m.game, p = g.player, b = p && p.riding && (p.riding.type === 'boat' || p.riding.type === 'chest_boat') ? p.riding : null;
+    const rowing = b && (Math.abs(b.vx) > 0.01 || Math.abs(b.vz) > 0.01);
+    if (!rowing || !m.inWater || (!m._boat && m.distTo(b) > 5)) { m._boat = null; return false; }
+    m._boat = b;
+    if (m.distTo(b) < 2) { m.move = null; return true; }
+    dolphinSwimTo(m, b.x, b.y - 0.5, b.z, m.T.walk * 1.2);
+    return true;
+  },
+});
+function dolphinChase(m) {
+  const t = m._toy;
+  if (!t || t.dead || !t.inWater) { m._toy = null; return false; }
+  dolphinSwimTo(m, t.x, t.y, t.z, m.T.walk * 1.2);
+  return true;
+}
+// a dolphin catches (with mobGriefing) what it swims into, when its mouth is empty; what it holds always drops when it dies
+function dolphinCatch(m) {
+  if (m.data.hand || m.game.rule('mobGriefing') === false) return;
+  for (const e of m.game.entities) {
+    if (!(e instanceof ItemEntity) || e.dead || e.pickupDelay > 0) continue;
+    if (Math.abs(e.x - m.x) >= m.w / 2 + 1.125 || Math.abs(e.z - m.z) >= m.w / 2 + 1.125 || e.y + 0.25 <= m.y || e.y >= m.y + m.h) continue;
+    const it = ITEMS[e.stack.id];
+    if (!it || it.armor || it.wearable === 'head') continue;
+    m.data.hand = copyStack(e.stack); e.dead = true;
+    return;
+  }
+}
+const _dropLootAN = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  if (this.type === 'dolphin' && this.data.hand && !this.noDrops) { this.game.dropItem(this.x, this.y + 0.3, this.z, this.data.hand); this.data.hand = null; }
+  return _dropLootAN.call(this);
+};
+// fed a fish (ItemTags.FISHES) it eats it and will lead the way to treasure
+const _interactDolphinAN = MOB_INTERACT.dolphin;
+const DOLPHIN_FISH = new Set(['cod', 'salmon', 'tropical_fish', 'pufferfish', 'cooked_cod', 'cooked_salmon'].map(n => ITEM_BY_NAME[n] && ITEM_BY_NAME[n].id).filter(v => v !== undefined));
+MOB_INTERACT.dolphin = (m, p, held, name) => {
+  if (held && DOLPHIN_FISH.has(held.id)) { m.game.sound('dolphin_eat', m.x, m.y, m.z); m.data.gotFish = true; p.consumeHeld(1); return true; }
+  return _interactDolphinAN ? _interactDolphinAN(m, p, held, name) : false;
+};
+// HurtByTargetGoal.setAlertOthers: dolphins near one that is hurt join in (not against guardians)
+const _onHurtByAN = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  const r = _onHurtByAN.call(this, a, source);
+  if (this.type === 'dolphin' && a && a !== this && a.type !== 'guardian' && a.type !== 'elder_guardian' && !this.dead) {
+    this.target = a; this.anger = 400 + Math.random() * 400;
+    for (const e of this.game.entities) if (e !== this && e.type === 'dolphin' && !e.dead && e.distTo(this) < 10 && !e.target) { e.target = a; e.anger = 400 + Math.random() * 400; }
+  }
+  return r;
+};
+// DolphinCarryingItemLayer: what it holds sits at its snout
+const DOLPHIN_ITEM_M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+/* ---------------- sniffers ---------------- */
+// SnifferAi: the blocks it digs in, how long it waits after a dig, and how long its states last
+let _sniffable = null;
+const snifferDiggable = id => (_sniffable || (_sniffable = new Set(['dirt', 'grass_block', 'podzol', 'coarse_dirt', 'rooted_dirt', 'moss_block', 'mud', 'muddy_mangrove_roots'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined)))).has(id);
+if (MOB_TYPES.sniffer) {
+  const T = MOB_TYPES.sniffer;
+  T.sounds = ['sniffer_idle', 'sniffer_hurt', 'sniffer_death'];
+  const ai = T.ai.filter(n => n !== 'sniff'), at = ai.indexOf('followParent');
+  ai.splice(at < 0 ? ai.length - 2 : at, 0, 'sniffer');
+  T.ai = ai;
+}
+// Sniffer.getHeadBlock: 2.25 blocks ahead of it
+const snifferHead = m => [Math.floor(m.x - Math.sin(m.bodyYaw) * 2.25), Math.floor(m.y + 0.01), Math.floor(m.z + Math.cos(m.bodyYaw) * 2.25)];
+// Sniffer.canSniff and canDig: not tempted, panicking, in water, in love, carried or leashed, on the ground; to dig, grown up, with a
+// diggable block under its head that it has not dug before and can walk to
+const snifferCanSniff = m => !(m.panic > 0) && m.goal !== 'tempt' && !m.inWater && !(m.love > 0) && m.onGround && !m.leashed;
+function snifferCanDigAt(m, x, y, z) {
+  const w = m.game.world;
+  if (!snifferDiggable(w.getBlock(x, y, z)) || (m.data.explored || []).some(p => p[0] === x && p[1] === y && p[2] === z)) return false;
+  return true;
+}
+const snifferCanDig = m => !m.baby && snifferCanSniff(m) && (h => snifferCanDigAt(m, h[0], h[1] - 1, h[2]))(snifferHead(m));
+// Sniffer.calculateDigPosition: of five tries at a spot on land 10, 12 ... 18 blocks away, the first over a block it can dig and reach
+function snifferDigSpot(m) {
+  const g = m.game;
+  for (let i = 0; i < 5; i++) {
+    const s = m.randomSpot(10 + 2 * i, 3);
+    if (!s || !snifferCanDigAt(m, s[0], s[1] - 1, s[2])) continue;
+    if (g.pathBudget <= 0) return null;
+    g.pathBudget--;
+    const path = findPath(m, s[0], s[1], s[2], 300, 1.5), end = path[path.length - 1];
+    if (end && Math.hypot(end[0] - s[0], end[1] - s[1], end[2] - s[2]) <= 1.5) return s;
+  }
+  return null;
+}
+function snifferState(m, state, len) {
+  m._snf = { state, t: 0, len: len || 0 };
+  const g = m.game, snd = { sniffing: 'sniffer_sniffing', scenting: 'sniffer_scenting', rising: 'sniffer_digging_stop', happy: 'sniffer_happy' }[state];
+  if (snd) g.sound(snd, m.x, m.y + 1, m.z);
+  return m._snf;
+}
+// sniffing (40 to 80 ticks), then off to dig; scenting the air now and then; searching its way to the spot (30 seconds at most); digging
+// (8 to 9 seconds, the find coming up after 6); rising (2 seconds); happy (2 to 5 seconds)
+GOALS.sniffer = function (m) {
+  const d = m.data, g = m.game, w = g.world;
+  let S = m._snf;
+  if (S) S.t++;
+  if (S && S.state === 'searching') {
+    if (!snifferCanSniff(m) || S.t > 600) { m._snf = null; return false; }
+    if (m.age % 20 === 0) g.sound('sniffer_searching', m.x, m.y + 1, m.z);
+    const [x, y, z] = S.to;
+    if (Math.hypot(x + 0.5 - m.x, z + 0.5 - m.z) > 1.2 && !(m.nav && m.navDone() && S.t > 20)) { walkTowards(m, x + 0.5, y, z + 0.5, m.T.walk * 1.25, 1); return true; }
+    // there: dig if its head is over a block it can dig
+    m.nav = null;
+    if (snifferCanDig(m)) { S = snifferState(m, 'digging', 160 + Math.floor(Math.random() * 21)); S.drop = 120; return true; }
+    m._snf = null; return false;
+  }
+  if (S && S.state === 'digging') {
+    m.nav = null; m.move = null;
+    const h = snifferHead(m);
+    if (S.t === S.drop) {
+      // the sniffer_digging loot table: a torchflower seed or a pitcher pod, at its head
+      const e = g.dropItem(h[0], h[1], h[2], { id: Math.random() < 0.5 ? I.TORCHFLOWER_SEEDS : I.PITCHER_POD, count: 1 });
+      if (e) e.pickupDelay = 10;
+      g.sound('sniffer_drop_seed', h[0] + 0.5, h[1], h[2] + 0.5);
+    }
+    if (S.t % 4 === 0) { const id = w.getBlock(h[0], h[1] - 1, h[2]); if (id && g.particles.blockBreak) g.particles.blockBreak(h[0], h[1] - 1, h[2], id); }
+    if (S.t % 10 === 0) g.sound('sniffer_digging', m.x, m.y + 0.5, m.z);
+    if (!(m.panic > 0) && !(m.love > 0) && S.t < S.len) return true;
+    if (S.t < S.len) { m._snf = null; return false; }
+    // dug: 8 minutes before it sniffs again, and the spot is remembered
+    d.sniffCd = 9600;
+    d.explored = (d.explored || []).concat([[h[0], h[1] - 1, h[2]]]).slice(-20);
+    snifferState(m, 'rising', 40);
+    return true;
+  }
+  if (S && S.state === 'rising') { m.nav = null; m.move = null; if (S.t >= S.len) snifferState(m, 'happy', 40 + Math.floor(Math.random() * 61)); return true; }
+  if (S && S.state === 'happy') { if (S.t >= S.len) { m._snf = null; return false; } m.nav = null; return true; }
+  if (S && S.state === 'sniffing') {
+    if (!snifferCanSniff(m)) { m._snf = null; return false; }
+    m.nav = null; m.move = null;
+    if (S.t < S.len) return true;
+    const to = !m.baby && snifferDigSpot(m);
+    if (to) { snifferState(m, 'searching').to = to; return true; }
+    m._snf = null; return false;
+  }
+  if (S && S.state === 'scenting') { if (S.t >= S.len || m.goal === 'tempt') { m._snf = null; return false; } m.nav = null; m.move = null; return true; }
+  // idle: now and then (as often as its RunOne lands on them) it sniffs, if it may, or scents the air
+  if ((m.age + m.id) % 40) return false;
+  const r = Math.random();
+  if (r < 1 / 8 && !(d.sniffCd > 0) && snifferCanSniff(m)) { snifferState(m, 'sniffing', 40 + Math.floor(Math.random() * 41)); return true; }
+  if (r < 2 / 8 && m.goal !== 'tempt') { snifferState(m, 'scenting', 40 + Math.floor(Math.random() * 41)); return true; }
+  return false;
+};
+// Sniffer.spawnChildFromBreeding: bred, it lays a sniffer egg where it stands
+const _breedSN = GOALS.breed;
+GOALS.breed = function (m) {
+  if (m.type !== 'sniffer') return _breedSN(m);
+  if (m.love <= 0 || m.baby) return false;
+  let mate = null, best = 8;
+  for (const e of m.game.entities) if (e !== m && e instanceof Mob && e.type === 'sniffer' && e.love > 0 && !e.baby && !e.dead && e.deathTime === 0) { const k = m.distTo(e); if (k < best) { best = k; mate = e; } }
+  if (!mate) return false;
+  m.lookAt(mate.x, mate.y + mate.h * 0.8, mate.z);
+  if (best > 3) { walkTowards(m, mate.x, mate.y, mate.z, m.T.walk, 2.5); return true; }
+  m.nav = null;
+  m.loveT = (m.loveT || 0) + 1;
+  if (m.loveT > 60 && m.id < mate.id) {
+    m.love = mate.love = 0; m.loveT = mate.loveT = 0; m.breedCd = mate.breedCd = 6000;
+    const e = m.game.dropItem(m.x, m.y, m.z, { id: B.SNIFFER_EGG, count: 1 });
+    if (e) { e.vx = e.vy = e.vz = 0; }
+    m.game.sound('sniffer_egg_plop', m.x, m.y, m.z);
+    for (let k = 0; k < 7; k++) m.game.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5));
+    if (m.game.rule('doMobLoot') !== false) m.game.spawnXP(m.x, m.y + 0.5, m.z, 1 + Math.floor(Math.random() * 7));
+  }
+  return true;
+};
+// SnifferModel, more or less: the head goes down to sniff and further to dig, up to scent the air, bobs when happy
+const _animSnifferAN = MOB_ANIM.sniffer;
+MOB_ANIM.sniffer = (m, st) => { if (_animSnifferAN) _animSnifferAN(m, st); const S = m._snf; st.sstate = S ? S.state : null; st.st = S ? S.t + (st.age % 1) : 0; st.slen = S ? S.len || 40 : 40; st.dig = 0; };
+if (MOB_MODELS.sniffer) {
+  const _snifferModelAN = MOB_MODELS.sniffer.anim;
+  MOB_MODELS.sniffer.anim = function (P, st) {
+    _snifferModelAN.call(this, P, st);
+    const t = st.st || 0, s = st.sstate;
+    let head = null, nose = 0, ears = 0;
+    if (s === 'sniffing') { head = 0.45; nose = Math.sin(t * 1.2) * 0.15; }
+    else if (s === 'scenting') { head = -0.35; nose = Math.sin(t * 0.9) * 0.12; ears = Math.sin(t * 0.3) * 0.2; }
+    else if (s === 'searching') { head = 0.3; nose = Math.sin(t * 0.8) * 0.1; }
+    else if (s === 'digging') { head = 0.95 + Math.sin(t * 0.6) * 0.12; P['body#p'] = [0, 1 + Math.abs(Math.sin(t * 0.3)), 0]; }
+    else if (s === 'rising') head = 0.95 * Math.max(0, 1 - t / (st.slen || 40));
+    else if (s === 'happy') { head = Math.sin(t * 0.5) * 0.2; ears = Math.sin(t * 0.8) * 0.4; }
+    if (head !== null) P.head = [head, P.head ? P.head[1] : 0, 0];
+    if (nose) P.nose = [nose, 0, 0];
+    if (ears) { P.left_ear = [0, 0, -ears]; P.right_ear = [0, 0, ears]; }
+  };
+}
+// SnifferEggBlock: placed, it cracks a stage every 8000 ticks or so (4000 on a moss block) and on the third hatches a snifflet
+const SNIFFER_EGG_DELAY = (w, x, y, z) => (w.getBlock(x, y - 1, z) === B.MOSS_BLOCK ? 12000 : 24000) / 3 + Math.floor(Math.random() * 300);
+const _afterPlaceSN = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const w = this.world;
+  if (id === B.SNIFFER_EGG && w.getBlock(x, y, z) === id) {
+    w.setBE(x, y, z, { type: 'sniffer_egg', left: SNIFFER_EGG_DELAY(w, x, y, z) });
+    if (w.getBlock(x, y - 1, z) === B.MOSS_BLOCK) this.particles.icon(x + 0.5, y + 0.5, z + 0.5, 'happy', 8);
+  }
+  return _afterPlaceSN.call(this, p, x, y, z, id);
+};
+const eggSet = c => c._seg || (c._seg = new Set());
+const _setBESN = World.prototype.setBE;
+World.prototype.setBE = function (x, y, z, be) {
+  _setBESN.call(this, x, y, z, be);
+  if (be && be.type === 'sniffer_egg') { const c = this.getChunk(x >> 4, z >> 4); if (c) eggSet(c).add((y << 8) | ((z & 15) << 4) | (x & 15)); }
+};
+const _onChunkDataSN = Game.prototype.onChunkData;
+Game.prototype.onChunkData = function (cx, cz, ...rest) {
+  _onChunkDataSN.call(this, cx, cz, ...rest);
+  const w = this.world, c = w && w.chunks.get(w.key(cx, cz));
+  if (c && c.be) for (const [i, v] of c.be) if (v && v.type === 'sniffer_egg') eggSet(c).add(i);
+};
+const _tickHivesSN = Game.prototype.tickHives;
+Game.prototype.tickHives = function () {
+  _tickHivesSN.call(this);
+  const w = this.world, p = this.player;
+  if (!p) return;
+  const R = this.simDistance(), pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+  for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || !c._seg || !c._seg.size || c.state < 2) continue;
+    for (const i of c._seg) {
+      const be = c.be.get(i);
+      if (!be || be.type !== 'sniffer_egg' || c.blocks[i] !== B.SNIFFER_EGG) { c._seg.delete(i); continue; }
+      if (--be.left > 0) continue;
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), m = w.getMeta(x, y, z) & 3;
+      if (m < 2) {
+        // a crack, and the next stage begins (SnifferEggBlock.onPlace again)
+        w.setMeta(x, y, z, m + 1); this.remeshNear(x, z);
+        be.left = SNIFFER_EGG_DELAY(w, x, y, z); w.setBE(x, y, z, be);
+        this.sound('sniffer_egg_crack', x + 0.5, y + 0.5, z + 0.5);
+        continue;
+      }
+      c._seg.delete(i);
+      this.hatchSnifferEgg(x, y, z);
+    }
+  }
+};
+Game.prototype.hatchSnifferEgg = function (x, y, z) {
+  const w = this.world;
+  w.setBlock(x, y, z, 0, 0); this.remeshNear(x, z);
+  this.sound('sniffer_egg_hatch', x + 0.5, y + 0.5, z + 0.5);
+  const s = createMob(this, 'sniffer', x + 0.5, y, z + 0.5, { baby: true });
+  if (s) { s.growth = -48000; s.persistent = true; s.yaw = s.bodyYaw = Math.random() * Math.PI * 2; s.savePrev(); this.entities.push(s); }
+  return s;
+};
+// the egg cracks in stages
+TEXGEN.push(function texSnifferEggs() {
+  const crack = n => d => { d.set(copyOf('sniffer_egg')); const pts = [[7, 2], [7, 3], [8, 4], [8, 5], [7, 6], [3, 8], [4, 9], [5, 9], [11, 9], [12, 10], [12, 11], [9, 12], [8, 13], [8, 14]]; for (const [x, y] of pts.slice(0, n)) sp(d, x, y, [60, 34, 30]); };
+  T('sniffer_egg_slightly_cracked', crack(7)); T('sniffer_egg_very_cracked', crack(14));
+});
+BOX_MODELS.sniffer_egg = (d, m) => [BX(1, 0, 2, 15, 16, 14, [null, 'sniffer_egg_slightly_cracked', 'sniffer_egg_very_cracked'][Math.min(2, m & 3)])];
+
+/* ---------------- each tick ---------------- */
+const _tickAN = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const ox = this.x, oy = this.y, oz = this.z;
+  const r = _tickAN.call(this);
+  if (this.dead || this.deathTime > 0) return r;
+  const d = this.data, g = this.game, w = g.world;
+  if (this.type === 'goat') {
+    const want = d.screaming && SCREAMING_GOAT_T ? SCREAMING_GOAT_T : MOB_TYPES.goat;
+    if (this.T !== want) this.T = want;
+    if (d.ramCd > 0) d.ramCd--;
+    if (d.jumpCd > 0) d.jumpCd--;
+    if (d.ramT !== undefined) { delete d.ramT; delete d.ramTarget; delete d.ram; }
+    // Goat.ageBoundaryReached: a kid has no horns; grown up it has both
+    const b = this.baby;
+    if (this._wasBaby !== b) { if (b) d.leftHorn = d.rightHorn = false; else if (this._wasBaby) d.leftHorn = d.rightHorn = true; this._wasBaby = b; }
+    // the head comes down over a second, and up twice as fast
+    this._lowerT = Math.max(0, Math.min(20, (this._lowerT || 0) + (this._headDown ? 1 : -2)));
+    // in the leap: no drag, only gravity (a wall stops it)
+    const J = this._jump;
+    if (J && J.air && J.v) {
+      if (this.onGround) J.v = null;
+      else {
+        J.v = [Math.abs(this.x - ox - J.v[0]) > 1e-4 ? 0 : J.v[0], this.vy === 0 && Math.abs(this.y - oy - J.v[1]) > 1e-4 ? 0 : J.v[1] - 0.08, Math.abs(this.z - oz - J.v[2]) > 1e-4 ? 0 : J.v[2]];
+        this.vx = J.v[0]; this.vy = J.v[1]; this.vz = J.v[2];
+      }
+    }
+  } else if (this.type === 'strider') {
+    if (!d.noAI) d.cold = !striderWarm(this);
+    const bx = Math.floor(this.x), bz = Math.floor(this.z);
+    if (this.inWater || g.rainingAt(bx, Math.floor(this.y), bz) || g.rainingAt(bx, Math.floor(this.y + this.h), bz)) this.hurt(1, 'drown');
+    if (this.panic > 0 && Math.random() < 1 / 60) g.sound('strider_retreat', this.x, this.y + 1, this.z);
+    else if (this.goal === 'tempt' && Math.random() < 1 / 140) g.sound('strider_happy', this.x, this.y + 1, this.z);
+  } else if (this.type === 'dolphin' && !d.noAI) {
+    if (this.headInWater && !this.effectLevel('water_breathing') && !this.effectLevel('conduit_power')) { d.air = dolphinAir(this) - 1; if (d.air <= -20) { d.air = 0; this.hurt(2, 'drown'); } } else d.air = 4800;
+    this.air = 4800;
+    const bx = Math.floor(this.x), bz = Math.floor(this.z);
+    if (this.inWater || g.rainingAt(bx, Math.floor(this.y), bz)) d.moist = 2400;
+    else {
+      d.moist = (d.moist === undefined ? 2400 : d.moist) - 1;
+      if (d.moist <= 0) this.hurt(1, 'dry');
+      if (this.onGround) { this.vx += (Math.random() * 2 - 1) * 0.2; this.vy = 0.5; this.vz += (Math.random() * 2 - 1) * 0.2; this.yaw = Math.random() * Math.PI * 2; this.onGround = false; }
+    }
+    dolphinCatch(this);
+  } else if (this.type === 'sniffer') {
+    if (d.sniffCd > 0) d.sniffCd--;
+    if (this._snf && this._snf.state === 'digging' && this.panic > 0) this._snf = null;
+  }
+  if (this._boost && ++this._boost.t > this._boost.total) this._boost = null;
+  return r;
+};
+// what a dolphin holds is drawn at its snout
+const _renderExtraAN = Mob.prototype.renderExtra;
+Mob.prototype.renderExtra = function (r, a, p, yaw, st, light, at) {
+  if (_renderExtraAN) _renderExtraAN.call(this, r, a, p, yaw, st, light, at);
+  if (this.type === 'dolphin' && this.data.hand && at) drawPosedItem(r, this.game, this.data.hand, at, null, DOLPHIN_ITEM_M, [0, 16, -16], light);
+};
+
+/* ---------------- sounds ---------------- */
+const AN_SOUNDS = [['goat_ambient', 'Goat bleats'], ['goat_hurt', 'Goat hurts'], ['goat_death', 'Goat dies'], ['goat_screaming_ambient', 'Goat screams'], ['goat_screaming_hurt', 'Goat hurts'],
+  ['goat_screaming_death', 'Goat dies'], ['goat_prepare_ram', 'Goat stomps'], ['goat_screaming_prepare_ram', 'Goat stomps'], ['goat_ram_impact', 'Goat rams'], ['goat_screaming_ram_impact', 'Goat rams'],
+  ['goat_horn_break', 'Goat horn breaks off'], ['goat_screaming_horn_break', 'Goat horn breaks off'], ['goat_long_jump', 'Goat leaps'], ['goat_screaming_long_jump', 'Goat leaps'], ['goat_step', 'Footsteps'],
+  ['strider_ambient', 'Strider chirps'], ['strider_hurt', 'Strider hurts'], ['strider_death', 'Strider dies'], ['strider_happy', 'Strider warbles'], ['strider_retreat', 'Strider retreats'],
+  ['dolphin_ambient', 'Dolphin chirps'], ['dolphin_hurt', 'Dolphin hurts'], ['dolphin_death', 'Dolphin dies'], ['dolphin_eat', 'Dolphin eats'], ['dolphin_play', 'Dolphin plays'], ['dolphin_jump', 'Dolphin jumps'],
+  ['sniffer_idle', 'Sniffer grunts'], ['sniffer_hurt', 'Sniffer hurts'], ['sniffer_death', 'Sniffer dies'], ['sniffer_sniffing', 'Sniffer sniffs'], ['sniffer_scenting', 'Sniffer scents'],
+  ['sniffer_searching', 'Sniffer searches'], ['sniffer_digging', 'Sniffer digs'], ['sniffer_digging_stop', 'Sniffer stands up'], ['sniffer_drop_seed', 'Sniffer drops seed'], ['sniffer_happy', 'Sniffer delights'],
+  ['sniffer_egg_plop', 'Sniffer plops'], ['sniffer_egg_crack', 'Sniffer Egg cracks'], ['sniffer_egg_hatch', 'Sniffer Egg hatches']];
+for (const [n, t] of AN_SOUNDS) { SND_CAT[n] = /egg_crack|egg_hatch/.test(n) ? 'block' : 'neutral'; SUB_TEXT[n] = t; }
+const AN_SOUND_SET = new Set(AN_SOUNDS.map(s => s[0]));
+const _audioPlayAN = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!AN_SOUND_SET.has(name)) return _audioPlayAN.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, v = 0.9 + Math.random() * 0.2, scream = /screaming/.test(name);
+  if (name.startsWith('goat_')) {
+    if (/ambient|hurt|death/.test(name)) { const f = (scream ? 900 : 420) * v; this.tone(dst, 'sawtooth', f, f * (name.includes('death') ? 0.5 : 0.8), scream ? 0.5 : 0.35, 0.05); this.tone(dst, 'square', f * 1.5, f * 1.2, 0.2, 0.02, t0 + 0.05); }
+    else if (/prepare_ram/.test(name)) { [0, 0.12, 0.24].forEach(dt => this.noiseHit(dst, 'lowpass', 400, 1, 0.08, 0.35)); this.tone(dst, 'sawtooth', 300 * v, 260 * v, 0.3, 0.04, t0 + 0.3); }
+    else if (/ram_impact/.test(name)) { this.noiseHit(dst, 'lowpass', 300, 1, 0.25, 0.6); this.tone(dst, 'sine', 120, 60, 0.25, 0.12); }
+    else if (/horn_break/.test(name)) { this.noiseHit(dst, 'bandpass', 2400, 3, 0.15, 0.4); this.tone(dst, 'triangle', 1500, 900, 0.12, 0.06); }
+    else if (/long_jump/.test(name)) { this.tone(dst, 'sawtooth', 500 * v, 700 * v, 0.2, 0.04); this.noiseHit(dst, 'highpass', 1500, 1, 0.1, 0.2); }
+    else this.noiseHit(dst, 'lowpass', 600, 1, 0.06, 0.25);
+  } else if (name.startsWith('strider_')) {
+    const f = { strider_ambient: 700, strider_hurt: 900, strider_death: 600, strider_happy: 1100, strider_retreat: 800 }[name] * v;
+    [0, 0.07, 0.14].forEach((dt, i) => this.tone(dst, 'square', f * (1 + i * 0.1), f * (0.9 + i * 0.1), 0.06, 0.04, t0 + dt));
+  } else if (name.startsWith('dolphin_')) {
+    if (name === 'dolphin_jump') this.noiseHit(dst, 'bandpass', 1200, 1, 0.3, 0.4);
+    else if (name === 'dolphin_eat') this.noiseHit(dst, 'bandpass', 1500, 2, 0.1, 0.3);
+    else { const f = (name === 'dolphin_death' ? 1600 : name === 'dolphin_hurt' ? 2200 : 2600) * v; this.tone(dst, 'sine', f, f * 1.3, 0.12, 0.05); this.tone(dst, 'sine', f * 1.2, f * 0.9, 0.1, 0.04, t0 + 0.13); }
+  } else {
+    const k = name.replace('sniffer_', '');
+    if (k === 'egg_plop') this.noiseHit(dst, 'lowpass', 500, 1, 0.15, 0.4);
+    else if (k === 'egg_crack') this.noiseHit(dst, 'bandpass', 2000, 3, 0.06, 0.3);
+    else if (k === 'egg_hatch') { this.noiseHit(dst, 'bandpass', 1800, 2, 0.1, 0.35); this.tone(dst, 'sine', 300, 500, 0.2, 0.05, t0 + 0.08); }
+    else if (k === 'digging' || k === 'drop_seed') this.noiseHit(dst, 'lowpass', 350, 1, 0.2, 0.35);
+    else if (k === 'sniffing' || k === 'searching' || k === 'scenting') [0, 0.1, 0.2].forEach(dt => this.noiseHit(dst, 'highpass', 1800, 1, 0.05, 0.12));
+    else { const f = (k === 'happy' ? 260 : k === 'death' ? 120 : k === 'hurt' ? 200 : 150) * v; this.tone(dst, 'sawtooth', f, f * 0.8, 0.35, 0.05); }
+  }
 };
 
 </script>
