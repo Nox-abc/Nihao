@@ -11771,6 +11771,8 @@ class Entity {
     }
     const wasGround = this.onGround;
     this.onGround = res.down;
+    // Entity.horizontalCollision: this step's sideways movement ran into something
+    this.hcol = !!(res.hx || res.hz);
     if (res.hx) this.vx = 0;
     if (res.hz) this.vz = 0;
     if (res.hy) this.vy = 0;
@@ -14051,7 +14053,8 @@ class Mob extends Entity {
     if (this.invuln > 0 && amount <= (this.lastDmg || 0)) return false;
     if (this.T.fireproof && (source === 'fire' || source === 'lava' || source === 'in_fire' || source === 'fireball')) return false;
     if (this.immune && this.immune(source, attacker)) return false;
-    let dmg = this.invuln > 0 ? amount - this.lastDmg : amount;
+    const cool = this.invuln > 0;
+    let dmg = cool ? amount - this.lastDmg : amount;
     // Wolf.actuallyHurt: body armor that can take the hit takes all of it (and gives its own hurt sound)
     const soaked = this.soakHurt ? this.soakHurt(dmg, source, attacker) : null;
     if (soaked) dmg = 0;
@@ -14062,13 +14065,13 @@ class Mob extends Entity {
     if (res) dmg *= Math.max(0, 1 - 0.2 * res);
     const epf = this.data.armor && source !== 'void' && source !== 'kill' ? armorEPF(this.data.armor, source) : 0;
     if (epf) dmg *= 1 - epf / 25;
-    this.lastDmg = amount; this.invuln = 10; this.hurtTime = 10;
+    this.lastDmg = amount; if (!cool) { this.invuln = 10; this.hurtTime = 10; }
     this.health -= dmg;
     const g = this.game;
-    if (this.T.sounds || soaked) g.sound(soaked || this.T.sounds[1], this.x, this.y + this.h / 2, this.z);
+    if (!cool && (this.T.sounds || soaked)) g.sound(soaked || this.T.sounds[1], this.x, this.y + this.h / 2, this.z);
     if (attacker && attacker !== this) {
       const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1, kb = 0.4 * (1 - (this.T.kbRes || 0));
-      if (source !== 'thorns' && kb > 0) { this.vx = this.vx * 0.5 + dx / l * kb; this.vz = this.vz * 0.5 + dz / l * kb; if (this.onGround) this.vy = Math.max(this.vy, 0.36 * (1 - (this.T.kbRes || 0))); }
+      if (!cool && source !== 'thorns' && kb > 0) { this.vx = this.vx * 0.5 + dx / l * kb; this.vz = this.vz * 0.5 + dz / l * kb; if (this.onGround) this.vy = Math.max(this.vy, 0.36 * (1 - (this.T.kbRes || 0))); }
       this.lastAttacker = attacker; this.lastHurtAge = this.age;
       // hurt by a player or a tamed pet: counts as the player's kill for the next 5 seconds (lastHurtByPlayerTime)
       if (attacker instanceof Player || attacker.data && attacker.data.tame) this.playerHurtAge = this.age;
@@ -14581,7 +14584,7 @@ const GOALS = {
       else if (T.neutralDay && t instanceof Player && m.anger <= 0 && g.isDay() && m.lightLevel() > 11 && Math.random() < 0.01) m.target = null;
       else if (T.cat === 'monster' && t instanceof Player && (m.age + m.id) % 2 === 0) {
         if (m.canSee(t)) m._unseen = 0;
-        else if ((m._unseen = (m._unseen || 0) + 1) > 30) { m.target = null; m._unseen = 0; }
+        else if ((m._unseen = (m._unseen || 0) + 1) > (T.unseen || 60) / 2) { m.target = null; m._unseen = 0; }
       }
       if (m.target) return false;
     }
@@ -15502,7 +15505,9 @@ class Player extends Entity {
     if (this.dead || ((this.mode === 1 || this.mode === 3) && source !== 'void' && source !== 'kill')) return false;
     const fire = source === 'fire' || source === 'lava' || source === 'magma' || source === 'fireball' || source === 'in_fire';
     if (fire && this.effectLevel('fire_resistance')) return false;
-    if (this.invuln > 0 && source !== 'kill' && source !== 'void') return false;
+    // LivingEntity.hurt: in the cooldown after a hit only a stronger one counts, for the difference, without a flinch or knockback
+    const cool = this.invuln > 0 && source !== 'kill' && source !== 'void';
+    if (cool && amount <= (this.lastDmg || 0)) return false;
     // shields stop attacks from the front
     if (this.blocking() && attacker && BLOCKABLE.has(source)) {
       const lk = this.look(), dx = attacker.x - this.x, dz = attacker.z - this.z, l = Math.hypot(dx, dz) || 1;
@@ -15510,6 +15515,7 @@ class Player extends Entity {
         const sh = this.shieldStack();
         if (sh && amount >= 3) { const w = this.wear(sh, 1 + Math.floor(amount)); if (!w) { if (this.offhand[0] === sh) this.offhand[0] = null; else this.inv[this.sel] = null; this.using = null; } }
         this.game.sound('shield_block', this.x, this.y + 1, this.z);
+        if (attacker.blockedByShield) attacker.blockedByShield(this, source);
         if (attacker.vx !== undefined && attacker !== this && source !== 'arrow' && source !== 'fireball') { attacker.vx += dx / l * 0.5; attacker.vz += dz / l * 0.5; }
         // Player.blockUsingShield: an axe (or the warden) knocks the shield out for 5 seconds
         if (attacker.canDisableShield && attacker.canDisableShield(source)) { this.shieldCd = 100; this.using = null; this.game.sound('shield_break', this.x, this.y + 1, this.z); }
@@ -15517,7 +15523,8 @@ class Player extends Entity {
         return false;
       }
     }
-    let dmg = amount;
+    let dmg = cool ? amount - (this.lastDmg || 0) : amount;
+    this.lastDmg = amount;
     if (!BYPASS_ARMOR.has(source)) {
       const def = this.armorPoints(), tough = this.armorToughness();
       dmg *= 1 - Math.min(20, Math.max(def / 5, def - dmg / (2 + tough / 4))) / 25;
@@ -15532,10 +15539,11 @@ class Player extends Entity {
       let th = 0; for (const s of this.armor) th = Math.max(th, enchLevel(s, 'thorns'));
       if (th && Math.random() < 0.15 * th) attacker.hurt(1 + Math.floor(Math.random() * 4), 'thorns', this);
     }
-    this.health -= dmg; this.invuln = 10; this.hurtTime = 10;
+    this.health -= dmg;
+    if (!cool) { this.invuln = 10; this.hurtTime = 10; }
     this.exh += 0.1;
-    if (dmg > 0 || amount > 0) { this.game.sound('hurt', this.x, this.y, this.z); this.game.flashHurt(); }
-    if (attacker && attacker !== this) {
+    if (!cool && (dmg > 0 || amount > 0)) { this.game.sound('hurt', this.x, this.y, this.z); this.game.flashHurt(); }
+    if (!cool && attacker && attacker !== this) {
       let kb = 0; for (const s of this.armor) if (s && ITEMS[s.id].armor) kb += ITEMS[s.id].armor.kb || 0;
       const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1, k = Math.max(0, 1 - kb);
       this.vx += dx / l * 0.4 * k; this.vz += dz / l * 0.4 * k; this.vy = Math.max(this.vy, 0.36 * k);
@@ -19518,7 +19526,7 @@ class Game {
   }
   // ---------------- simulation ----------------
   isDay() { const t = this.world.time % 24000; return t < 12300 || t > 23700; }
-  difficultyDmg(d) { return [0, d * 0.5 + 1, d, d * 1.5][OPTIONS.difficulty] || d; }
+  difficultyDmg(d) { const v = [0, Math.min(d * 0.5 + 1, d), d, d * 1.5][OPTIONS.difficulty]; return v === undefined ? d : v; }
   get difficulty() { return OPTIONS.difficulty; }
   mobsAndPlayer() { const a = this.entities.filter(e => e instanceof Mob); if (this.player && !this.player.dead && this.player.mode !== 3) a.push(this.player); return a; }
   gameTick() {
@@ -22519,7 +22527,7 @@ class Villager extends Mob {
 class ZombieVillager extends Mob {
   interact(p, held) {
     if (held && held.id === I.GOLDEN_APPLE && this.effectLevel('weakness') && !this.data.curing) {
-      p.consumeHeld(1); this.data.curing = 3600 + Math.floor(Math.random() * 2400); this.removeEffect('weakness'); this.addEffect('strength', this.data.curing, OPTIONS.difficulty > 1 ? 1 : 0); this.persistent = true; this.data.curedBy = 'player';
+      p.consumeHeld(1); this.data.curing = 3600 + Math.floor(Math.random() * 2400); this.removeEffect('weakness'); this.addEffect('strength', this.data.curing, 0); this.persistent = true; this.data.curedBy = 'player';
       this.game.sound('zhurt', this.x, this.y, this.z); return true;
     }
     return super.interact(p, held);
@@ -40275,10 +40283,10 @@ AUDIO.play = function (name, x, y, z, ...rest) {
 // AvoidEntityGoal: the nearest one seen within range sends the mob to a spot farther away (DefaultRandomPos.getPosAway),
 // faster while it is within 7 blocks
 const AVOID = {
-  creeper: { from: new Set(['cat', 'ocelot']), r: 6, walk: 1, run: 1.2 },
-  wolf: { from: new Set(['llama', 'trader_llama']), r: 24, walk: 1.5, run: 1.5, ok: (m, e) => !m.data.tame && (e.data.strength || 1) >= Math.floor(Math.random() * 5) },
+  creeper: { from: new Set(['cat', 'ocelot']), r: 6, walk: 1, run: 1.2, base: 0.25 },
+  wolf: { from: new Set(['llama', 'trader_llama']), r: 24, walk: 1.5, run: 1.5, base: 0.3, ok: (m, e) => !m.data.tame && (e.data.strength || 1) >= Math.floor(Math.random() * 5) },
 };
-for (const t of ['skeleton', 'stray', 'bogged', 'wither_skeleton']) AVOID[t] = { from: new Set(['wolf']), r: 6, walk: 1, run: 1.2 };
+for (const t of ['skeleton', 'stray', 'bogged', 'wither_skeleton']) AVOID[t] = { from: new Set(['wolf']), r: 6, walk: 1, run: 1.2, base: 0.25 };
 GOALS.avoid = function (m) {
   const a = AVOID[m.type];
   if (!a) return false;
@@ -40293,7 +40301,7 @@ GOALS.avoid = function (m) {
     const ang = Math.atan2(m.x - best.x, m.z - best.z) + (Math.random() - 0.5) * 2, r = 6 + Math.random() * 10;
     const x = m.x + Math.sin(ang) * r, z = m.z + Math.cos(ang) * r;
     if (Math.hypot(x - best.x, z - best.z) <= bd) continue;
-    m.goTo(x, m.y, z, m.T.walk * (bd < 7 ? a.run : a.walk), 2);
+    m.goTo(x, m.y, z, a.base ? 43.2 * (a.base * (bd < 7 ? a.run : a.walk)) ** 2 : m.T.walk * (bd < 7 ? a.run : a.walk), 2);
     m._avoid = best;
     return true;
   }
@@ -46407,9 +46415,10 @@ Mob.prototype.render = function (r, a) {
 /* ---------------- breaking doors ---------------- */
 // door breakers find their way through wooden (not iron) doors, open or shut
 const isWoodDoor = id => !!(BLK[id] && BLK[id].door && id !== B.IRON_DOOR);
+const doorDifficultyOk = m => m.type === 'vindicator' ? OPTIONS.difficulty >= 2 : OPTIONS.difficulty === 3;
 const _navOpenZB = NAV.open;
 NAV.open = function (w, x, y, z, m) {
-  if (m && m.data && m.data.breakDoors && OPTIONS.difficulty === 3 && isWoodDoor(w.getBlock(x, y, z))) return true;
+  if (m && m.data && m.data.breakDoors && doorDifficultyOk(m) && isWoodDoor(w.getBlock(x, y, z))) return true;
   return _navOpenZB.call(this, w, x, y, z, m);
 };
 // DoorInteractGoal and BreakDoorGoal: bumping into a shut wooden door on its path, it bangs on it (sound 1 tick in 20) and breaks it at 240
@@ -46436,10 +46445,10 @@ Mob.prototype.think = function () {
   if (!d.breakDoors) { this._door = null; return; }
   const g = this.game, w = g.world;
   let D = this._door;
-  // BreakDoorGoal.canContinueToUse: still shut, close by, still Hard
-  if (D && (!isWoodDoor(w.getBlock(D[0], D[1], D[2])) || w.getMeta(D[0], D[1], D[2]) & 4 || (D[0] + 0.5 - this.x) ** 2 + (D[1] + 0.5 - this.y) ** 2 + (D[2] + 0.5 - this.z) ** 2 >= 4 || OPTIONS.difficulty !== 3 || D[3] > 240)) { g.doorCrack(D, -1); this._door = D = null; }
+  // BreakDoorGoal.canContinueToUse: still shut, close by, the difficulty still allows it
+  if (D && (!isWoodDoor(w.getBlock(D[0], D[1], D[2])) || w.getMeta(D[0], D[1], D[2]) & 4 || (D[0] + 0.5 - this.x) ** 2 + (D[1] + 0.5 - this.y) ** 2 + (D[2] + 0.5 - this.z) ** 2 >= 4 || !doorDifficultyOk(this) || D[3] > 240)) { g.doorCrack(D, -1); this._door = D = null; }
   if (!D) {
-    if (OPTIONS.difficulty !== 3 || !g.rule('mobGriefing') || !this.hitWall) return;
+    if (!doorDifficultyOk(this) || !g.rule('mobGriefing') || !this.hitWall) return;
     const at = doorAhead(this);
     if (!at) return;
     this._door = D = [at[0], at[1], at[2], 0, -1];
@@ -46462,9 +46471,8 @@ Mob.prototype.think = function () {
 const _walkHitZB = Mob.prototype.walkPhysics;
 Mob.prototype.walkPhysics = function () {
   if (!this.data.breakDoors) return _walkHitZB.call(this);
-  const x0 = this.x, z0 = this.z, vx = this.vx, vz = this.vz;
   const r = _walkHitZB.call(this);
-  this.hitWall = !!this.move && Math.hypot(this.x - x0, this.z - z0) < Math.hypot(vx, vz) * 0.5;
+  this.hitWall = !!this.move && this.hcol;
   return r;
 };
 // the cracks on a door being broken (Level.destroyBlockProgress)
@@ -46942,19 +46950,22 @@ for (const t of ['spider', 'cave_spider']) {
     if (Math.random() < 0.1 * f) { const i = Math.floor(Math.random() * 5); m.addEffect(i <= 1 ? 'speed' : i <= 2 ? 'strength' : i <= 3 ? 'regeneration' : 'invisibility', 1e9, 0); }
   };
 }
-// Entity.makeStuckInBlock in a cobweb (0.25, 0.05, 0.25): the step is cut down and the speed lost; spiders don't stick (Spider.makeStuckInBlock)
-const _walkSP = Mob.prototype.walkPhysics;
-Mob.prototype.walkPhysics = function () {
-  if (this.type === 'spider' || this.type === 'cave_spider' || this.T.flying) return _walkSP.call(this);
-  const w = this.game.world, hw = this.w / 2;
-  if (!aabbHitsBlock(w, this.x - hw, this.y, this.z - hw, this.x + hw, this.y + this.h, this.z + hw, id => BLK[id].web)) return _walkSP.call(this);
-  const x0 = this.x, y0 = this.y, z0 = this.z;
-  const r = _walkSP.call(this);
-  this.x = x0 + (this.x - x0) * 0.25; this.y = y0 + (this.y - y0) * 0.05; this.z = z0 + (this.z - z0) * 0.25;
-  // the speed is lost, but gravity comes back next tick (so it stays on the ground)
-  this.vx = this.vz = 0; this.vy = this.inWater || this.inLava ? 0 : -0.0784; this.fallDist = 0;
+// Entity.makeStuckInBlock in a cobweb (0.25, 0.05, 0.25; 0.5, 0.25, 0.5 with Weaving): the step is cut down and the speed lost, for
+// walkers and fliers alike; spiders don't stick (Spider.makeStuckInBlock)
+function webStuck(m, base) {
+  if (m.type === 'spider' || m.type === 'cave_spider' || m.T.noClip) return base.call(m);
+  const w = m.game.world, hw = m.w / 2;
+  if (!aabbHitsBlock(w, m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw, id => BLK[id].web)) return base.call(m);
+  const x0 = m.x, y0 = m.y, z0 = m.z, weave = m.effectLevel && m.effectLevel('weaving') ? 2 : 1;
+  const r = base.call(m);
+  m.x = x0 + (m.x - x0) * 0.25 * weave; m.y = y0 + (m.y - y0) * (weave > 1 ? 0.25 : 0.05); m.z = z0 + (m.z - z0) * 0.25 * weave;
+  // the speed is lost, but gravity comes back next tick for walkers (so they stay on the ground)
+  m.vx = m.vz = 0; m.vy = m.T.flying || m.inWater || m.inLava ? 0 : -0.0784; m.fallDist = 0;
   return r;
-};
+}
+const _walkSP = Mob.prototype.walkPhysics, _flySP = Mob.prototype.flyPhysics;
+Mob.prototype.walkPhysics = function () { return webStuck(this, _walkSP); };
+Mob.prototype.flyPhysics = function () { return webStuck(this, _flySP); };
 // CaveSpider.doHurtTarget: poison 7 seconds on Normal, 15 on Hard
 MOB_TYPES.cave_spider.hitEffect = null;
 const _attackCS = Mob.prototype.attackEntity;
@@ -47406,6 +47417,746 @@ AUDIO.play = function (name, x, y, z, ...rest) {
   if (name === 'phantom_swoop') { this.tone(dst, 'sawtooth', 900 * v, 300 * v, 0.7, 0.05); this.noiseHit(dst, 'bandpass', 1800, 2, 0.6, 0.15); return; }
   if (name === 'phantom_bite') { this.noiseHit(dst, 'lowpass', 1200, 1, 0.08, 0.5); this.tone(dst, 'square', 400 * v, 200 * v, 0.06, 0.08); return; }
   this.noiseHit(dst, 'lowpass', 300, 0.7, 0.2, 0.25);
+};
+
+/* @file 157_ghasts_blazes_guardians.js */
+/* ===================================================================
+   Part 46: ghasts, blazes and guardians like Java
+   - fireballs (AbstractHurtingProjectile) leave at 0.1 a tick and gain
+     0.1 a tick along their way, keeping 95% of their speed (80% in
+     water), so they near 1.9 blocks a tick; they leave smoke (bubbles
+     in water) and vanish once whoever shot them is gone. A blaze's
+     small fireball hurts for 5 and sets on fire for 5 seconds, and
+     lights the block it hits (unless a mob shot it and mobs may not
+     grief)
+   - ghasts drift to a spot up to 16 blocks off each way, pushing 0.1
+     every 2 to 6 ticks as long as the way is clear, and pick a new one
+     on arrival or past 60 blocks. They go for a player within 4 blocks
+     up or down (out to 100 blocks) and in sight, face it within 64,
+     charge for 20 ticks (a cry at 10, the lit face after 10), fire and
+     wait 40
+   - blazes walk and fall slowly; every 5 seconds they pick a height
+     (0.5 give or take 6.9 blocks) and rise while their target's eyes
+     are higher than theirs by more. A burst: lit for 60 ticks, three
+     fireballs 6 ticks apart with Java's spread, then 100 ticks of rest;
+     close up they hit every second. Smoke rises off them and they
+     crackle
+   - guardians go for players, squid and axolotls more than 3 blocks
+     off and within 4 blocks up or down; their beam takes 80 ticks (60
+     for an elder), purple turning gold, and then hurts with magic (1,
+     +2 on Hard, +2 for an elder) and the bite (6, an elder's 8). Hit
+     while still, their spikes hurt the attacker for 2. On land they
+     flop about; elders keep within 16 blocks of where they started
+   =================================================================== */
+
+// LivingEntity.hasLineOfSight from given eyes: eye to eye through collision shapes, within 128 blocks
+function jSees(m, e, eyeH) {
+  const ey = m.y + eyeH, ty = emEyeOf(e);
+  return (e.x - m.x) ** 2 + (ty - ey) ** 2 + (e.z - m.z) ** 2 <= 16384 && clipCollider(m.game.world, m.x, ey, m.z, e.x, ty, e.z);
+}
+const jTri = (a, b) => a + b * (Math.random() - Math.random());
+
+/* ---------------- fireballs ---------------- */
+const HURTING = new Set(['ghast', 'fire']);
+const _tickHB = Projectile.prototype.tick;
+Projectile.prototype.tick = function () {
+  if (HURTING.has(this.kind) && this.owner instanceof Mob && this.owner.dead) { this.dead = true; return; }
+  _tickHB.call(this);
+  if (!HURTING.has(this.kind) || this.dead) return;
+  const g = this.game, w = g.world, l = Math.hypot(this.vx, this.vy, this.vz) || 1;
+  const wet = w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.WATER, k = wet ? 0.8 : 0.95;
+  const vx = this.vx, vy = this.vy, vz = this.vz;
+  this.vx = (vx + vx / l * 0.1) * k; this.vy = (vy + vy / l * 0.1) * k; this.vz = (vz + vz / l * 0.1) * k;
+  const p = g.player;
+  if (p && (this.x - p.x) ** 2 + (this.y - p.y) ** 2 + (this.z - p.z) ** 2 < 1024) {
+    if (wet) for (let i = 0; i < 4; i++) g.particles.bubble(this.x - vx * 0.25, this.y - vy * 0.25, this.z - vz * 0.25);
+    else g.trialSmoke(this.x, this.y, this.z, 1);
+  }
+};
+const _impactHB = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (this.kind !== 'fire') return _impactHB.call(this, e);
+  const g = this.game, w = g.world;
+  this.dead = true;
+  if (e) {
+    const f0 = e.fireTicks || 0;
+    e.fireTicks = Math.max(f0, 100);
+    if (!e.hurt(e instanceof Player ? g.difficultyDmg(5) : 5, 'fireball', this.owner)) e.fireTicks = f0;
+    return;
+  }
+  if (this.owner instanceof Mob && !g.rule('mobGriefing')) return;
+  const x = Math.floor(this.x), y = Math.floor(this.y), z = Math.floor(this.z);
+  if (w.getBlock(x, y, z) !== B.AIR) return;
+  const below = w.getBlock(x, y - 1, z);
+  w.setBlock(x, y, z, below === B.SOUL_SAND || below === B.SOUL_SOIL ? B.SOUL_FIRE : B.FIRE, 0);
+};
+
+// Player.hurt: damage that mobs cause scales with the difficulty, arrows, tridents and magic included (DamageScaling
+// WHEN_CAUSED_BY_LIVING_NON_PLAYER); melee and fireballs are scaled where they're dealt
+const MOB_SCALED = new Set(['arrow', 'trident', 'magic']);
+const _playerHurtDS = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  if (attacker instanceof Mob && MOB_SCALED.has(source)) { amount = this.game.difficultyDmg(amount); if (!(amount > 0)) return false; }
+  return _playerHurtDS.call(this, amount, source, attacker);
+};
+
+/* ---------------- ghasts ---------------- */
+Object.assign(MOB_TYPES.ghast, { ai: ['target', 'ghastJava'], follow: 100 });
+const GH_EYE = 2.6;
+// its target goal only takes a player within 4 blocks up or down
+const _targetGH = GOALS.target;
+GOALS.target = function (m) {
+  if (m.type !== 'ghast' || m.target) return _targetGH(m);
+  const r = _targetGH(m);
+  if (m.target && Math.abs(m.target.y - m.y) > 4) m.target = null;
+  return r;
+};
+// GhastMoveControl.canReach: the body moved along the way a block at a time runs into nothing
+function ghClear(m, ux, uy, uz, steps) {
+  const g = m.game, hw = m.w / 2;
+  for (let j = 1; j < steps; j++) {
+    const x = m.x + ux * j, y = m.y + uy * j, z = m.z + uz * j;
+    if (!g.vNoCollision(x - hw, y, z - hw, x + hw, y + m.h, z + hw)) return false;
+  }
+  return true;
+}
+GOALS.ghastJava = function (m) {
+  const g = m.game, d = m.data, R = Math.random;
+  m.nav = null; m.move = null;
+  // RandomFloatAroundGoal (looked at every other tick): a new spot with none to go to, on arrival, or beyond 60 blocks
+  const W = m._ghWant;
+  if (m.age <= 1 || (m.age + m.id) % 2 === 0) {
+    const d2 = W ? (W[0] - m.x) ** 2 + (W[1] - m.y) ** 2 + (W[2] - m.z) ** 2 : 0;
+    if (!W || !m._ghMove || d2 < 1 || d2 > 3600) { m._ghWant = [m.x + (R() * 2 - 1) * 16, m.y + (R() * 2 - 1) * 16, m.z + (R() * 2 - 1) * 16]; m._ghMove = true; }
+  }
+  // GhastMoveControl: a push of 0.1 towards it every 2 to 6 ticks while the way is clear
+  const fd = m._ghFloat || 0;
+  if (m._ghMove) {
+    m._ghFloat = fd - 1;
+    if (fd <= 0) {
+      m._ghFloat += 2 + Math.floor(R() * 5);
+      const V = m._ghWant, vx = V[0] - m.x, vy = V[1] - m.y, vz = V[2] - m.z, l = Math.hypot(vx, vy, vz) || 1;
+      if (ghClear(m, vx / l, vy / l, vz / l, Math.ceil(l))) { m.vx += vx / l * 0.1; m.vy += vy / l * 0.1; m.vz += vz / l * 0.1; }
+      else m._ghMove = false;
+    }
+  }
+  // GhastLookGoal: facing the way it drifts, or its target within 64 blocks
+  const t = m.target, td2 = t ? (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 : 0;
+  if (t) { if (td2 < 4096) m.yaw = m.bodyYaw = Math.atan2(t.x - m.x, t.z - m.z); }
+  else if (Math.abs(m.vx) + Math.abs(m.vz) > 1e-6) m.yaw = m.bodyYaw = Math.atan2(m.vx, m.vz);
+  // GhastShootFireballGoal: in sight within 64 blocks it charges; a cry at 10, the fireball at 20 from 4 blocks in front, 40 ticks of rest
+  if (!t) { if (m._ghShoot) { m._ghShoot = false; d.shooting = false; } return true; }
+  if (!m._ghShoot) { m._ghShoot = true; d.charge = 0; }
+  if (td2 < 4096 && jSees(m, t, GH_EYE)) {
+    d.charge = (d.charge || 0) + 1;
+    if (d.charge === 10 && !d.silent) g.sound('ghast_warn', m.x, m.y + GH_EYE, m.z);
+    if (d.charge === 20) {
+      const fx = Math.sin(m.yaw), fz = Math.cos(m.yaw), sx = m.x + fx * 4, sy = m.y + m.h / 2 + 0.5, sz = m.z + fz * 4;
+      const dx = t.x - sx, dy = t.y + t.h / 2 - sy, dz = t.z - sz, l = Math.hypot(dx, dy, dz) || 1;
+      if (!d.silent) g.sound('ghast_shoot', m.x, m.y + GH_EYE, m.z);
+      const pr = g.spawnProjectile('ghast', sx, sy + 0.5, sz, dx / l * 0.1, dy / l * 0.1, dz / l * 0.1, m);
+      if (pr) pr.power = d.explosionPower || 1;
+      d.charge = -40;
+    }
+  } else if (d.charge > 0) d.charge--;
+  d.shooting = d.charge > 10;
+  return true;
+};
+
+/* ---------------- blazes ---------------- */
+// ground mobs that fall slowly (60% of the speed going down) and take no fall damage
+Object.assign(MOB_TYPES.blaze, { flying: false, walk: 43.2 * 0.23 * 0.23, run: 43.2 * 0.23 * 0.23, noFall: true, ai: ['target', 'blazeAttack', 'wander', 'look'] });
+const BZ_EYE = 1.53;
+// Blaze.customServerAiStep: a new height every 100 ticks; rising while the target's eyes are above its own by more
+function blazeHover(m) {
+  if (!(--m._bzHT > 0)) { m._bzHT = 100; m._bzOff = jTri(0.5, 6.891); }
+  const t = m.target;
+  if (t && emFair(t) && emEyeOf(t) > m.y + BZ_EYE + m._bzOff) m.vy += (0.3 - m.vy) * 0.3;
+}
+function blazeMoveTo(m, t) { const dx = t.x - m.x, dz = t.z - m.z, l = Math.hypot(dx, dz); if (l > 1e-3) m.move = [dx / l, dz / l, m.T.walk, false]; }
+// Blaze.BlazeAttackGoal
+GOALS.blazeAttack = function (m) {
+  const g = m.game, d = m.data, t = m.target;
+  const S = m._bz || (m._bz = { step: 0, time: 0, seen: 0, run: false });
+  if (!t || t.dead || t.deathTime > 0 || t instanceof Player && !emFair(t)) {
+    if (S.run) { S.run = false; d.lit = false; S.seen = 0; }
+    blazeHover(m);
+    return false;
+  }
+  if (!S.run) { S.run = true; S.step = 0; }
+  m.nav = null; m.move = null;
+  S.time--;
+  const see = jSees(m, t, BZ_EYE);
+  if (see) S.seen = 0; else S.seen++;
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2;
+  if (d2 < 4) {
+    // close up: a hit every second, moving onto it
+    if (see) { if (S.time <= 0) { S.time = 20; m.attackEntity(t); } blazeMoveTo(m, t); }
+  } else if (d2 < m.T.follow ** 2 && see) {
+    if (S.time <= 0) {
+      S.step++;
+      if (S.step === 1) { S.time = 60; d.lit = true; }
+      else if (S.step <= 4) S.time = 6;
+      else { S.time = 100; S.step = 0; d.lit = false; }
+      if (S.step > 1) {
+        const h = Math.sqrt(Math.sqrt(d2)) * 0.5, ex = t.x - m.x, ey = t.y + t.h / 2 - (m.y + m.h / 2), ez = t.z - m.z;
+        const vx = jTri(ex, 2.297 * h), vz = jTri(ez, 2.297 * h), l = Math.hypot(vx, ey, vz) || 1;
+        if (!d.silent) g.sound('blaze_shoot', m.x, m.y + m.h / 2, m.z);
+        g.spawnProjectile('fire', m.x, m.y + m.h / 2 + 0.66, m.z, vx / l * 0.1, ey / l * 0.1, vz / l * 0.1, m);
+      }
+    }
+    m.lookAt(t.x, emEyeOf(t), t.z);
+  } else if (S.seen < 5) blazeMoveTo(m, t);
+  blazeHover(m);
+  return true;
+};
+// Blaze.aiStep: two puffs of smoke a tick, a crackle 1 time in 24; lit while charging
+const _tickBZ = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickBZ.call(this);
+  if (this.type !== 'blaze' || this.dead || this.deathTime > 0) return;
+  const g = this.game, p = g.player;
+  if (Math.floor(Math.random() * 24) === 0 && !this.data.silent) g.sound('blaze_burn', this.x, this.y + 0.9, this.z);
+  if (!p || (this.x - p.x) ** 2 + (this.y - p.y) ** 2 + (this.z - p.z) ** 2 > 1024) return;
+  for (let i = 0; i < 2; i++) g.particles.smoke(this.x + (Math.random() * 2 - 1) * 0.3, this.y + Math.random() * this.h, this.z + (Math.random() * 2 - 1) * 0.3, 1);
+  if (this.data.lit && this.age % 3 === 0) g.particles.flame(this.x + (Math.random() - 0.5) * this.w, this.y + Math.random() * this.h, this.z + (Math.random() - 0.5) * this.w);
+};
+
+/* ---------------- guardians ---------------- */
+const GUARDIANS = new Set(['guardian', 'elder_guardian']);
+const GUARDIAN_PREY = new Set(['squid', 'glow_squid', 'axolotl']);
+const gdEye = m => m.type === 'elder_guardian' ? 0.99875 : 0.425;
+for (const t of GUARDIANS) Object.assign(MOB_TYPES[t], { ai: ['guardianTarget', 'guardianAttack', 'guardianSwim'], follow: 16 });
+// NearestAttackableTargetGoal(LivingEntity, GuardianAttackSelector): a player, squid or axolotl more than 3 blocks off, within 16 and
+// 4 blocks up or down of its body, in sight, about every 10 ticks; let go beyond the follow range or after 60 ticks out of sight
+GOALS.guardianTarget = function (m) {
+  const g = m.game, t = m.target, eye = gdEye(m);
+  if (t) {
+    if (t.dead || t.deathTime > 0 || t instanceof Player && !emFair(t) || m.distTo(t) > m.T.follow) m.target = null;
+    else if ((m.age + m.id) % 2 === 0) { if (jSees(m, t, eye)) m._unseen = 0; else if ((m._unseen = (m._unseen || 0) + 1) > 30) m.target = null; }
+    if (m.target) return false;
+  }
+  if ((m.age + m.id) % 2 || Math.floor(Math.random() * 5)) return false;
+  let best = null, bd = Infinity;
+  const consider = (e, range) => {
+    if (e.y >= m.y + m.h + 4 || e.y + e.h <= m.y - 4) return;
+    const d2 = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2;
+    if (d2 > 9 && d2 <= range * range && d2 < bd && jSees(m, e, eye)) { bd = d2; best = e; }
+  };
+  const p = g.player;
+  if (p && emFair(p)) consider(p, emSeenRange(p, m.T.follow));
+  for (const e of g.entities) if (e instanceof Mob && GUARDIAN_PREY.has(e.type) && !e.dead && !(e.deathTime > 0)) consider(e, m.T.follow);
+  if (best) { m.target = best; m._unseen = 0; }
+  return false;
+};
+// Guardian.GuardianAttackGoal: stays still and looks; the beam from tick 0, the hurt at 80 (an elder's at 60); a guardian gives up on
+// anything that comes within 3 blocks; afterwards it lets the target go and swims somewhere new
+GOALS.guardianAttack = function (m) {
+  const g = m.game, d = m.data, t = m.target, elder = m.type === 'elder_guardian';
+  const ok = t && !t.dead && !(t.deathTime > 0) && (elder || (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 > 9);
+  if (!ok) {
+    if (m._gAtk) { m._gAtk = false; m._beam = null; m.target = null; m._swimT = 0; }
+    return false;
+  }
+  if (!m._gAtk) { m._gAtk = true; m._gTime = -10; }
+  m.nav = null; m.move = null; m._swimTo = null;
+  m.lookAt(t.x, t.y + t.h / 2, t.z);
+  m.yaw = m.bodyYaw = Math.atan2(t.x - m.x, t.z - m.z);
+  if (!jSees(m, t, gdEye(m))) { m.target = null; return true; }
+  m._gTime++;
+  if (m._gTime === 0) { m._beam = t; if (!d.silent) g.sound('guardian_attack', m.x, m.y, m.z); }
+  else if (m._gTime >= (elder ? 60 : 80)) {
+    const f = 1 + (OPTIONS.difficulty === 3 ? 2 : 0) + (elder ? 2 : 0), isP = t instanceof Player;
+    t.hurt(f, 'magic', m);
+    t.hurt(isP ? g.difficultyDmg(m.T.dmg) : m.T.dmg, 'guardian', m);
+    m.target = null;
+  }
+  return true;
+};
+// swimming about (the shared swim goal without its flopping, which Guardian.aiStep does its own way); an elder keeps within 16 blocks
+// of where it started (restrictTo)
+GOALS.guardianSwim = function (m) {
+  if (!m.inWater) return true;
+  if (m.type === 'elder_guardian') {
+    const h = m.data.home || (m.data.home = [Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)]);
+    if ((h[0] + 0.5 - m.x) ** 2 + (h[1] + 0.5 - m.y) ** 2 + (h[2] + 0.5 - m.z) ** 2 > 256) { m._swimTo = [h[0] + 0.5, h[1] + 0.5, h[2] + 0.5]; m._swimT = m.age + 100; }
+  }
+  return GOALS.swim(m);
+};
+// Guardian.aiStep: beached, it hops about (up 0.5, up to 0.4 sideways, a random way) whenever it touches the ground
+const _tickGD = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickGD.call(this);
+  if (!GUARDIANS.has(this.type) || this.dead || this.deathTime > 0 || this.inWater || !this.onGround) return;
+  const R = Math.random;
+  this.vx += (R() * 2 - 1) * 0.4; this.vy += 0.5; this.vz += (R() * 2 - 1) * 0.4;
+  this.yaw = this.bodyYaw = R() * Math.PI * 2; this.onGround = false;
+};
+// Guardian.hurt: with its spikes out (not swimming) a hand-to-hand attacker takes 2 thorns damage; a hit sends it swimming
+const _hurtGD = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (GUARDIANS.has(this.type) && !this.dead && !(this.deathTime > 0)) {
+    const melee = attacker && attacker !== this && (source === 'player' && attacker instanceof Player || attacker instanceof Mob && source === attacker.type);
+    if (melee && !this.move && attacker.hurt) attacker.hurt(2, 'thorns', this);
+    this._swimT = 0;
+  }
+  return _hurtGD.call(this, amount, source, attacker);
+};
+// GuardianRenderer: the beam from its eye to the middle of the target, a turning square ribbon purple at first, gold when it hits
+function drawGuardianBeam(r, m, t, prog, a) {
+  const vt = VTEX['misc/white'];
+  if (!vt) return;
+  const A = ATLAS.S, U = (vt.reg.x + vt.reg.w / 2) / A, V = (vt.reg.y + vt.reg.h / 2) / A;
+  const p = m.ipos(a), q = t.ipos ? t.ipos(a) : [t.x, t.y, t.z];
+  const s = [p[0], p[1] + gdEye(m), p[2]], e = [q[0], q[1] + t.h * 0.5, q[2]];
+  const dx = e[0] - s[0], dy = e[1] - s[1], dz = e[2] - s[2], len = Math.hypot(dx, dy, dz);
+  if (len < 0.05) return;
+  const ux = dx / len, uy = dy / len, uz = dz / len;
+  let ax = -uz, az = ux, al = Math.hypot(ax, az);
+  if (al < 1e-4) { ax = 1; az = 0; al = 1; }
+  ax /= al; az /= al;
+  const bx = uy * az, by = uz * ax - ux * az, bz = -uy * ax;
+  const time = m.age + a, rot = time * 0.05 * -1.5, c = Math.cos(rot), sn = Math.sin(rot);
+  const k = prog * prog, cr = (64 + k * 191) / 255, cg = (32 + k * 191) / 255, cb = (128 - k * 64) / 255;
+  const sides = [[ax * c + bx * sn, by * sn, az * c + bz * sn], [-ax * sn + bx * c, by * c, -az * sn + bz * c]];
+  // stripes run along it like the texture scrolling towards the target
+  const step = 0.5, off = (time * 0.25) % (2 * step);
+  for (const [vx, vy, vz] of sides) {
+    const hx = vx * 0.1, hy = vy * 0.1, hz = vz * 0.1;
+    for (let l0 = -off; l0 < len; l0 += step) {
+      const a0 = Math.max(0, l0), a1 = Math.min(len, l0 + step);
+      if (a1 <= a0) continue;
+      const sh = Math.round((l0 + off) / step) % 2 ? 0.75 : 1;
+      const P0 = [s[0] + ux * a0, s[1] + uy * a0, s[2] + uz * a0], P1 = [s[0] + ux * a1, s[1] + uy * a1, s[2] + uz * a1];
+      const quad = [[P0[0] - hx, P0[1] - hy, P0[2] - hz], [P0[0] + hx, P0[1] + hy, P0[2] + hz], [P1[0] + hx, P1[1] + hy, P1[2] + hz], [P1[0] - hx, P1[1] - hy, P1[2] - hz]];
+      for (const order of [[0, 1, 2, 3], [1, 0, 3, 2]]) for (const i of order) { const v = quad[i]; r.dv(v[0], v[1], v[2], U, V, -1, cr * sh, cg * sh, cb * sh, 1, 15, 15); }
+    }
+  }
+}
+const _renderGD = Mob.prototype.render;
+Mob.prototype.render = function (r, a) {
+  _renderGD.call(this, r, a);
+  if (GUARDIANS.has(this.type) && this._gAtk && this._beam && !this._beam.dead && this._gTime >= 0 && !this.dead)
+    drawGuardianBeam(r, this, this._beam, Math.min(1, (this._gTime + a) / (this.type === 'elder_guardian' ? 60 : 80)), a);
+};
+// VexCopyOwnerTargetGoal: a vex takes its evoker's target, seen or not (so it isn't dropped for being out of sight)
+const _targetVX = GOALS.target;
+GOALS.target = function (m) {
+  if (m.type === 'vex' && m.data.owner) {
+    const o = m.game.entities.find(e => e.id === m.data.owner), t = o && !o.dead && o.target;
+    if (t && !t.dead && !(t.deathTime > 0) && (!(t instanceof Player) || emFair(t))) { m.target = t; m._unseen = 0; return false; }
+  }
+  return _targetVX(m);
+};
+GOALS.ghast = () => false; GOALS.blaze = () => false; GOALS.guardian = () => false;
+
+/* ---------------- sounds ---------------- */
+const GB_SOUNDS = [['ghast_warn', 'Ghast shrieks', 'hostile'], ['ghast_shoot', 'Ghast shoots', 'hostile'], ['blaze_shoot', 'Blaze shoots', 'hostile'],
+  ['blaze_burn', 'Blaze crackles', 'hostile'], ['guardian_attack', 'Guardian shoots', 'hostile'], ['thorns', 'Thorns prick', 'hostile']];
+for (const [n, t, c] of GB_SOUNDS) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+const GB_SOUND_SET = new Set(GB_SOUNDS.map(s => s[0]));
+const _audioPlayGB = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!GB_SOUND_SET.has(name)) return _audioPlayGB.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'ghast_warn': this.tone(dst, 'sawtooth', 1100 * v, 500 * v, 0.9, 0.12); this.tone(dst, 'square', 1500 * v, 700 * v, 0.7, 0.04); break;
+    case 'ghast_shoot': this.noiseHit(dst, 'lowpass', 900, 0.8, 0.35, 0.4); this.tone(dst, 'sawtooth', 220 * v, 90 * v, 0.3, 0.1); break;
+    case 'blaze_shoot': this.noiseHit(dst, 'bandpass', 1400, 1.2, 0.25, 0.35); break;
+    case 'blaze_burn': this.noiseHit(dst, 'highpass', 2200, 0.7, 0.5, 0.08); break;
+    case 'guardian_attack': this.tone(dst, 'sine', 300 * v, 1200 * v, 3.5, 0.06); this.tone(dst, 'triangle', 310 * v, 1250 * v, 3.5, 0.03); break;
+    case 'thorns': this.noiseHit(dst, 'highpass', 3500, 1, 0.06, 0.3); break;
+  }
+};
+
+/* @file 158_illagers.js */
+/* ===================================================================
+   Part 47: illagers like Java
+   - pillagers come within 8 blocks and keep the target in sight for a
+     moment, load the crossbow for 1.25 seconds (less with Quick
+     Charge), hold it 1 to 2 seconds, shoot with Java's aim and spread,
+     and load again; loading, they move at half speed
+   - vindicators run at Java's speed (faster than a walking player),
+     carry an iron axe outside raids and, in a raid on Normal or Hard,
+     break wooden doors; one named Johnny goes for anything alive that
+     isn't on the illagers' side
+   - evokers keep away from players within 8 blocks and stand still to
+     cast: vexes (3, while fewer than 1 to 8 are around, every 17
+     seconds), fangs (a ring around them up close, a line of 16 farther
+     off, every 5 seconds) and, with no target and mob griefing on,
+     turning blue sheep red; they remember a target 15 seconds out of
+     sight. Fangs snap 8 ticks after they appear
+   - vexes dart at their target, drift around where they were summoned,
+     fly through walls and waste away after 30 to 119 seconds
+   - ravagers speed up as they hunt, crash through leaves (with mob
+     griefing on), and a bite stopped by a shield either throws the
+     player back or stuns the ravager for 2 seconds, after which it
+     roars, hurting and throwing everything but illagers within 4 blocks
+   =================================================================== */
+
+const ilSpeed = (attr, mod) => 43.2 * (attr * mod) ** 2;
+// keep the raid and patrol goals that raiders get (120_raids)
+function ilSetAI(t, ai) {
+  const T = MOB_TYPES[t];
+  if (!T) return;
+  const raider = T.ai.includes('raid');
+  T.ai = ai.slice();
+  if (raider) { const i = Math.max(0, T.ai.indexOf('wander')); T.ai.splice(i, 0, 'raid', 'patrol'); }
+}
+Object.assign(MOB_TYPES.pillager, { walk: ilSpeed(0.35, 0.6), run: ilSpeed(0.35, 1), follow: 32 });
+// base damage before the weapon (an iron axe brings a vindicator to 13, an iron sword a vex to 9)
+Object.assign(MOB_TYPES.vindicator, { walk: ilSpeed(0.35, 0.6), run: ilSpeed(0.35, 1), follow: 12, dmg: 5 });
+Object.assign(MOB_TYPES.vex, { dmg: 4 });
+Object.assign(MOB_TYPES.evoker, { walk: ilSpeed(0.5, 0.6), run: ilSpeed(0.5, 1), follow: 12, unseen: 300 });
+Object.assign(MOB_TYPES.ravager, { walk: ilSpeed(0.3, 0.4), run: ilSpeed(0.35, 1), follow: 32, stepH: 1 });
+ilSetAI('pillager', ['target', 'pillagerCrossbow', 'wander', 'look']);
+ilSetAI('vindicator', ['target', 'johnny', 'melee', 'wander', 'look']);
+ilSetAI('evoker', ['target', 'evokerJava', 'wander', 'look']);
+ilSetAI('vex', ['target', 'vexJava']);
+ilSetAI('ravager', ['target', 'ravagerJava', 'melee', 'wander', 'look']);
+// AbstractIllager.isAlliedTo: illagers, vexes, ravagers and witches stick together (EntityTypeTags.ILLAGER_FRIENDS)
+const ILLAGER_FRIENDS = new Set(['pillager', 'vindicator', 'evoker', 'illusioner', 'vex', 'ravager', 'witch']);
+
+/* ---------------- pillagers ---------------- */
+const holdsCrossbow = m => !!(m.data.hand && m.data.hand.id === I.CROSSBOW);
+// CrossbowItem.getChargeDuration: 1.25 seconds, a quarter less for each level of Quick Charge
+const xbCharge = m => Math.max(0, 25 - 5 * (m.data.hand && typeof enchLevel === 'function' ? enchLevel(m.data.hand, 'quick_charge') : 0));
+// CrossbowAttackMob.shootCrossbowProjectile: from the eyes less 0.1, at a third of the target's height lifted by 0.2 of the distance,
+// 1.6 blocks a tick with Java's spread (14 - 4 x difficulty); base damage 2
+function crossbowShoot(m, t) {
+  const g = m.game, sx = m.x, sy = m.eyeY() - 0.1, sz = m.z;
+  const dx = t.x - sx, dz = t.z - sz, h = Math.hypot(dx, dz), dy = t.y + t.h / 3 - sy + h * 0.2;
+  const l = Math.hypot(dx, dy, dz) || 1, a = 0.0172275 * (14 - OPTIONS.difficulty * 4);
+  const pr = g.spawnProjectile('arrow', sx, sy, sz, (dx / l + jTri(0, a)) * 1.6, (dy / l + jTri(0, a)) * 1.6, (dz / l + jTri(0, a)) * 1.6, m);
+  if (pr) { pr.pickup = false; pr.mobDamage = 2; }
+  if (!m.data.silent) g.sound('crossbow_shoot', sx, sy, sz);
+}
+// RangedCrossbowAttackGoal: close in until within 8 blocks with the target seen for 5 ticks; then load, wait 20 to 39 ticks, shoot
+GOALS.pillagerCrossbow = function (m) {
+  const d = m.data, t = m.target, R = Math.random;
+  const S = m._xb || (m._xb = { state: 0, see: 0, delay: 0, path: 0, use: 0 });
+  if (!t || t.dead || t.deathTime > 0 || !holdsCrossbow(m)) {
+    if (S.state === 1) S.state = 0;
+    d.charging = false; d.aiming = S.state >= 2;
+    return false;
+  }
+  const see = jSees(m, t, m.eyeY() - m.y);
+  if (see !== S.see > 0) S.see = 0;
+  S.see += see ? 1 : -1;
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2;
+  const away = (d2 > 64 || S.see < 5) && S.delay === 0;
+  if (away) {
+    if (--S.path <= 0) { m.goTo(t.x, t.y, t.z, S.state === 0 ? m.T.run : m.T.run * 0.25, 1); S.path = 20 + Math.floor(R() * 21); }
+    else m.followPath();
+  } else { S.path = 0; m.nav = null; }
+  m.lookAt(t.x, emEyeOf(t), t.z);
+  if (S.state === 0) { if (!away) { S.state = 1; S.use = 0; } }
+  else if (S.state === 1) { if (++S.use >= xbCharge(m)) { S.state = 2; S.delay = 20 + Math.floor(R() * 20); if (!d.silent) m.game.sound('crossbow_load', m.x, m.y + 1, m.z); } }
+  else if (S.state === 2) { if (--S.delay <= 0) { S.delay = 0; S.state = 3; } }
+  else if (S.state === 3 && see) { crossbowShoot(m, t); S.state = 0; }
+  d.charging = S.state === 1; d.aiming = S.state >= 2 || S.state === 1;
+  return true;
+};
+
+/* ---------------- vindicators ---------------- */
+// Vindicator.populateDefaultEquipmentSlots and Raid.applyRaidBuffs: an iron axe
+const _initVD = MOB_INIT.vindicator;
+MOB_INIT.vindicator = (m, o) => { if (_initVD) _initVD(m, o); if (!(o && o.loading) && !m.data.hand) m.data.hand = { id: itemOf('iron_axe'), count: 1 }; };
+// VindicatorJohnnyAttackGoal: Johnny goes for any living thing that isn't an illager's friend
+GOALS.johnny = function (m) {
+  if (m.customName !== 'Johnny' || m.target && !m.target.dead || (m.age + m.id) % 2) return false;
+  let best = null, bd = m.T.follow ** 2;
+  for (const e of m.game.entities) {
+    if (!(e instanceof Mob) || e === m || e.dead || e.deathTime > 0 || ILLAGER_FRIENDS.has(e.type) || e.T.cat === 'ambient') continue;
+    if (e.y >= m.y + m.h + 4 || e.y + e.h <= m.y - 4) continue;
+    const d2 = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2;
+    if (d2 < bd && m.canSee(e)) { bd = d2; best = e; }
+  }
+  if (best) m.target = best;
+  return false;
+};
+// VindicatorBreakDoorGoal: only in an ongoing raid (the difficulty check is doorDifficultyOk in Part 41)
+const _thinkVD = Mob.prototype.think;
+Mob.prototype.think = function () {
+  if (this.type === 'vindicator') {
+    const r = this.data.raid && this.game.raidOf && this.game.raidOf(this.data.raid);
+    this.data.breakDoors = !!(r && r.status === 'ongoing');
+  }
+  return _thinkVD.call(this);
+};
+
+/* ---------------- evokers ---------------- */
+// EvokerFangs: snapping up 8 ticks after appearing (6 magic damage to all but the evoker's friends), gone 14 ticks later
+function jFang(g, x, y, z, delay, owner) {
+  const f = new Entity(g, x, y, z);
+  f.w = 0.5; f.h = 0.8; f.delay = delay; f.owner = owner;
+  f.tick = function () {
+    this.age++;
+    const k = this.age - this.delay;
+    if (k === 1 && !(owner && owner.data && owner.data.silent)) this.game.sound('evoker_fangs', this.x, this.y, this.z);
+    if (k === 8) {
+      for (const e of this.game.mobsAndPlayer()) {
+        if (e === owner || e.dead || e.deathTime > 0 || e.type && ILLAGER_FRIENDS.has(e.type)) continue;
+        if (e instanceof Player && (e.mode === 1 || e.mode === 3)) continue;
+        const hw = (e.w || 0.6) / 2 + 0.25 + 0.2;
+        if (Math.abs(e.x - this.x) < hw && Math.abs(e.z - this.z) < hw && e.y < this.y + this.h && e.y + (e.h || 1.8) > this.y) e.hurt(6, 'magic', owner);
+      }
+    }
+    if (k > 22) this.dead = true;
+  };
+  f.render = function (r, a) {
+    const k = this.age + a - this.delay;
+    if (k < 0) return;
+    const up = Math.sin(Math.min(1, k / 8) * Math.PI / 2) * (k > 16 ? Math.max(0, 1 - (k - 16) / 6) : 1);
+    drawSprite(r, texL('particle_generic_0'), this.x, this.y + up * 0.5, this.z, 0.45 * up + 0.05, 0, [0.62, 0.6, 0.5, 1], this.lightAt());
+  };
+  g.entities.push(f);
+}
+// Evoker.EvokerAttackSpellGoal.createSpellEntity: down from the higher of the two to the lower, onto the first sturdy top
+function evokerFangAt(m, x, z, yMin, yMax, delay) {
+  const w = m.game.world;
+  let y = Math.floor(yMax);
+  for (; y >= Math.floor(yMin) - 1; y--) {
+    const below = w.getBlock(Math.floor(x), y - 1, Math.floor(z));
+    if (SOLID[below] && (SHAPE[below] === SH.CUBE || BLK[below].fullCollide)) {
+      const here = w.getBlock(Math.floor(x), y, Math.floor(z));
+      let top = 0;
+      if (here && SOLID[here]) { const b = selBox(here, w.getMeta(Math.floor(x), y, Math.floor(z)), w, Math.floor(x), y, Math.floor(z)); top = b ? b[4] - y : 0; }
+      jFang(m.game, x, y + Math.max(0, Math.min(1, top)), z, delay, m);
+      return;
+    }
+  }
+}
+function evokerFangs(m, t) {
+  const yMin = Math.min(t.y, m.y), yMax = Math.max(t.y, m.y) + 1, f = Math.atan2(t.z - m.z, t.x - m.x);
+  if ((t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 < 9) {
+    for (let i = 0; i < 5; i++) { const a = f + i * Math.PI * 0.4; evokerFangAt(m, m.x + Math.cos(a) * 1.5, m.z + Math.sin(a) * 1.5, yMin, yMax, 0); }
+    for (let i = 0; i < 8; i++) { const a = f + i * Math.PI * 2 / 8 + Math.PI * 2 / 5; evokerFangAt(m, m.x + Math.cos(a) * 2.5, m.z + Math.sin(a) * 2.5, yMin, yMax, 3); }
+  } else for (let i = 0; i < 16; i++) { const h = 1.25 * (i + 1); evokerFangAt(m, m.x + Math.cos(f) * h, m.z + Math.sin(f) * h, yMin, yMax, i); }
+}
+// Evoker.EvokerSummonSpellGoal: three vexes a block up and up to 2 off, each living 30 to 119 seconds
+function evokerSummon(m) {
+  const g = m.game, R = Math.random, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  for (let i = 0; i < 3; i++) {
+    const x = bx - 2 + Math.floor(R() * 5), y = by + 1, z = bz - 2 + Math.floor(R() * 5);
+    const v = createMob(g, 'vex', x, y, z);
+    if (!v) continue;
+    v.data.owner = m.id; v.data.origin = [x, y, z]; v.data.life = 20 * (30 + Math.floor(R() * 90));
+    if (m.data.raid) v.data.raid = m.data.raid;
+    g.entities.push(v);
+  }
+}
+const vexesNear = m => m.game.entities.filter(e => e.type === 'vex' && !e.dead && Math.abs(e.x - m.x) < 16 + 0.5 && Math.abs(e.y - m.y) < 16 + 1 && Math.abs(e.z - m.z) < 16 + 0.5).length;
+// SpellcasterIllager.isCastingSpell: arms raised (IllagerArmPose.SPELLCASTING), and the spell's colour rising from both hands
+const EV_SPELL_COL = { summon: [0.7, 0.7, 0.8], fangs: [0.4, 0.3, 0.35], wololo: [0.7, 0.5, 0.2] };
+MOB_ANIM.evoker = (m, st) => { st.spell = m.data.castT > 0; };
+const _tickEVP = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickEVP.call(this);
+  if (this.type !== 'evoker' || !(this.data.castT > 0) || this.dead || !this.game.particles) return;
+  const c = EV_SPELL_COL[this.data.spell] || [0.5, 0.5, 0.5], f = Math.cos(this.age * 0.6662) * 0.25 - this.bodyYaw, hx = Math.cos(f) * 0.6, hz = Math.sin(f) * 0.6;
+  for (const k of [1, -1]) this.game.particles.add({ x: this.x + hx * k, y: this.y + 1.8, z: this.z + hz * k, vx: 0, vy: 0.02, vz: 0, life: 18, layer: texL('particle_generic_' + (4 + Math.floor(Math.random() * 3))), u: 0, v: 0, us: 1, size: 0.08, g: -0.001, col: c, bright: false });
+};
+// SpellcasterIllager spells: each has its own interval from when it starts; casting holds the evoker still (EvokerCastingSpellGoal)
+// for the casting time, and the spell itself happens after the warm-up
+const EV_SPELLS = {
+  summon: { cast: 100, warm: 20, every: 340, sound: 'evoker_prepare_summon' },
+  fangs: { cast: 40, warm: 20, every: 100, sound: 'evoker_prepare_attack' },
+  wololo: { cast: 40, warm: 40, every: 140, sound: 'evoker_prepare_wololo' },
+};
+function evokerStart(m, kind, sheep) {
+  const S = EV_SPELLS[kind], d = m.data;
+  m._spell = { kind, warm: S.warm, sheep };
+  d.castT = S.cast; d.spell = kind;
+  m['_next_' + kind] = m.age + S.every;
+  if (!d.silent) m.game.sound(S.sound, m.x, m.y + 1, m.z);
+}
+GOALS.evokerJava = function (m) {
+  const g = m.game, d = m.data, t = m.target, R = Math.random, p = g.player;
+  if (d.castT > 0) d.castT--;
+  if (!(d.castT > 0)) d.spell = null;
+  const alive = t && !t.dead && !(t.deathTime > 0);
+  // a running spell: the warm-up, then the spell (it stops early if the target or sheep is gone)
+  const S = m._spell;
+  if (S) {
+    const gone = S.kind === 'wololo' ? !S.sheep || S.sheep.dead : !alive;
+    if (gone) m._spell = null;
+    else if (--S.warm === 0) {
+      if (S.kind === 'fangs') evokerFangs(m, t);
+      else if (S.kind === 'summon') evokerSummon(m);
+      else if (S.sheep.data.color === 'blue') S.sheep.data.color = 'red';
+      if (!d.silent) g.sound('evoker_cast', m.x, m.y + 1, m.z);
+      m._spell = null;
+    }
+  }
+  // starting one (checked every other tick): vexes if few are around, else fangs; with no target, a blue sheep
+  if (!(d.castT > 0) && (m.age + m.id) % 2 === 0) {
+    if (alive && m.age >= (m._next_summon || 0) && Math.floor(R() * 8) + 1 > vexesNear(m)) evokerStart(m, 'summon');
+    else if (alive && m.age >= (m._next_fangs || 0)) evokerStart(m, 'fangs');
+    else if (!t && m.age >= (m._next_wololo || 0) && g.rule('mobGriefing')) {
+      const sheep = g.entities.filter(e => e.type === 'sheep' && !e.dead && e.data.color === 'blue' && Math.abs(e.x - m.x) < 16.3 && Math.abs(e.y - m.y) < 5 && Math.abs(e.z - m.z) < 16.3 && m.distTo(e) <= 16);
+      if (sheep.length) evokerStart(m, 'wololo', sheep[Math.floor(R() * sheep.length)]);
+    }
+  }
+  // EvokerCastingSpellGoal: stand still and look at the target (or the sheep) while casting
+  if (d.castT > 0) {
+    m.nav = null; m.move = null;
+    const at = m._spell && m._spell.sheep || t;
+    if (at) m.lookAt(at.x, emEyeOf(at), at.z);
+    return true;
+  }
+  // AvoidEntityGoal(Player, 8, 0.6, 1.0): away from a player within 8 blocks, faster within 7
+  if (p && emFair(p) && m.distTo(p) < 8 && m.canSee(p)) {
+    if (!m._evFlee || m.navDone() || m.age % 20 === 0) {
+      const dp = m.distTo(p);
+      for (let k = 0; k < 10; k++) {
+        const ang = Math.atan2(m.x - p.x, m.z - p.z) + (R() - 0.5) * 2, r = 6 + R() * 10, x = m.x + Math.sin(ang) * r, z = m.z + Math.cos(ang) * r;
+        if (Math.hypot(x - p.x, z - p.z) <= dp) continue;
+        if (m.goTo(x, m.y, z, dp < 7 ? m.T.run : m.T.walk, 2)) { m._evFlee = true; break; }
+      }
+    } else m.followPath();
+    if (alive) m.lookAt(t.x, emEyeOf(t), t.z);
+    return true;
+  }
+  m._evFlee = false;
+  if (alive) m.lookAt(t.x, emEyeOf(t), t.z);
+  return false;
+};
+
+/* ---------------- vexes ---------------- */
+// Vex.VexMoveControl: a pull of 0.05 x speed a tick towards the wanted spot, stopping (and halving the speed) on arrival
+function vexFly(m) {
+  const W = m._vxWant, t = m.target;
+  if (!W) return;
+  const dx = W[0] - m.x, dy = W[1] - m.y, dz = W[2] - m.z, d = Math.hypot(dx, dy, dz);
+  if (d < (m.w * 2 + m.h) / 3) { m._vxWant = null; m.vx *= 0.5; m.vy *= 0.5; m.vz *= 0.5; return; }
+  const k = m._vxSpeed * 0.05 / d;
+  m.vx += dx * k; m.vy += dy * k; m.vz += dz * k;
+  m.yaw = m.bodyYaw = t ? Math.atan2(t.x - m.x, t.z - m.z) : Math.atan2(m.vx, m.vz);
+}
+GOALS.vexJava = function (m) {
+  const g = m.game, d = m.data, t = m.target, R = Math.random, full = m.age <= 1 || (m.age + m.id) % 2 === 0;
+  m.nav = null; m.move = null;
+  // Vex.tick: a limited life loses a heart a second once it runs out
+  if (d.life !== undefined && --d.life <= 0) { d.life = 20; m.hurt(1, 'starve'); }
+  const alive = t && !t.dead && !(t.deathTime > 0);
+  // VexChargeAttackGoal: at the target's eyes; a hit on touching it; close by, it keeps aiming at it
+  if (m._vxCharge) {
+    if (!alive || !m._vxWant) { m._vxCharge = false; d.charging = false; }
+    else {
+      const hw = (m.w + (t.w || 0.6)) / 2;
+      if (Math.abs(t.x - m.x) < hw && Math.abs(t.z - m.z) < hw && t.y < m.y + m.h && t.y + t.h > m.y) { m.attackEntity(t); m._vxCharge = false; d.charging = false; }
+      else if ((t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 < 9) m._vxWant = [t.x, emEyeOf(t), t.z];
+    }
+  } else if (full && alive && !m._vxWant && Math.floor(R() * 4) === 0 && (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 > 4) {
+    m._vxCharge = true; m._vxWant = [t.x, emEyeOf(t), t.z]; m._vxSpeed = 1; d.charging = true;
+    if (!d.silent) g.sound('vex_charge', m.x, m.y, m.z);
+  }
+  // VexRandomMoveGoal: somewhere within 7 blocks across and 5 up or down of where it was summoned
+  if (!m._vxCharge && full && !m._vxWant && Math.floor(R() * 4) === 0) {
+    const o = d.origin || [Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)];
+    for (let i = 0; i < 3; i++) {
+      const x = o[0] + Math.floor(R() * 15) - 7, y = o[1] + Math.floor(R() * 11) - 5, z = o[2] + Math.floor(R() * 15) - 7;
+      if (g.world.getBlock(x, y, z) === B.AIR) { m._vxWant = [x + 0.5, y + 0.5, z + 0.5]; m._vxSpeed = 0.25; break; }
+    }
+  }
+  vexFly(m);
+  return true;
+};
+// LivingEntity.travel without gravity: 0.91 across but 0.98 up and down
+const _flyVX = Mob.prototype.flyPhysics;
+Mob.prototype.flyPhysics = function () {
+  if (this.type !== 'vex') return _flyVX.call(this);
+  const vy = this.vy, r = _flyVX.call(this);
+  if (this.vy !== 0 || vy === 0) this.vy = vy * 0.98;
+  return r;
+};
+// Vex.finalizeSpawn: an iron sword that never drops
+const _initVX = MOB_INIT.vex;
+MOB_INIT.vex = (m, o) => { if (_initVX) _initVX(m, o); if (!(o && o.loading)) { m.data.hand = m.data.hand || { id: I.IRON_SWORD, count: 1 }; m.data.noDrop = (m.data.noDrop || []).concat([0]); if (m.data.life === 900) delete m.data.life; } };
+
+/* ---------------- ravagers ---------------- */
+// Ravager.aiStep: leaves in the way break (mob griefing) or it jumps; stunned it stands still, then roars
+GOALS.ravagerJava = function (m) {
+  const g = m.game, d = m.data;
+  if (d.stun > 0 || d.roar > 0) { m.nav = null; m.move = null; return true; }
+  return false;
+};
+const _tickRV = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickRV.call(this);
+  if (this.type !== 'ravager' || this.dead || this.deathTime > 0) return;
+  const g = this.game, d = this.data, w = g.world;
+  if (this.hcol && g.rule('mobGriefing')) {
+    let broke = false;
+    const hw = this.w / 2 + 0.2;
+    for (let x = Math.floor(this.x - hw); x <= Math.floor(this.x + hw); x++) for (let y = Math.floor(this.y - 0.2); y <= Math.floor(this.y + this.h + 0.2); y++) for (let z = Math.floor(this.z - hw); z <= Math.floor(this.z + hw); z++) {
+      const id = w.getBlock(x, y, z);
+      if (BLK[id] && BLK[id].leaves) { for (const st of g.dropsFor(id, w.getMeta(x, y, z))) g.dropItem(x + 0.5, y + 0.5, z + 0.5, st); g.particles.blockBreak && g.particles.blockBreak(x, y, z, id); w.setBlock(x, y, z, 0, 0); broke = true; }
+    }
+    if (!broke && this.onGround) this.vy = 0.42;
+  }
+  if (d.roar > 0 && --d.roar === 10) ravagerRoar(this);
+  if (d.stun > 0) {
+    d.stun--;
+    if (Math.random() < 0.5) g.particles.add({ x: this.x + (Math.random() - 0.5) * this.w, y: this.y + this.h - 0.3, z: this.z + (Math.random() - 0.5) * this.w, vx: 0, vy: 0.02, vz: 0, life: 20, anim: g.particles.gen(), u: 0, v: 0, us: 1, size: 0.12, g: 0, col: [0.5, 0.5, 0.65] });
+    if (d.stun === 0) { if (!d.silent) g.sound('ravager_roar', this.x, this.y + 1, this.z); d.roar = 20; }
+  }
+};
+// Ravager.roar: 6 damage and a strong push to all but illagers within 4 blocks
+function ravagerRoar(m) {
+  const g = m.game;
+  for (const e of g.mobsAndPlayer()) {
+    if (e === m || e.dead || e.deathTime > 0 || e.type && ILLAGER_FRIENDS.has(e.type) && e.type !== 'witch' || e instanceof Player && (e.mode === 1 || e.mode === 3)) continue;
+    if (Math.abs(e.x - m.x) > m.w / 2 + 4 || Math.abs(e.z - m.z) > m.w / 2 + 4 || e.y > m.y + m.h + 4 || e.y + (e.h || 1.8) < m.y - 4) continue;
+    e.hurt(e instanceof Player ? g.difficultyDmg(6) : 6, 'ravager', m);
+    ravagerShove(m, e);
+  }
+  for (let i = 0; i < 40; i++) g.particles.poof(m.x + (Math.random() - 0.5) * m.w, m.y + Math.random() * m.h, m.z + (Math.random() - 0.5) * m.w, [0.9, 0.9, 0.9], 1);
+}
+// Ravager.strongKnockback: 4 over the squared distance across, and a little up
+function ravagerShove(m, e) {
+  const dx = e.x - m.x, dz = e.z - m.z, f = Math.max(dx * dx + dz * dz, 0.001);
+  e.vx += dx / f * 4; e.vy += 0.2; e.vz += dz / f * 4;
+}
+// LivingEntity.blockedByShield / Ravager.blockedByShield: half the time stunned for 2 seconds, otherwise a shove
+Mob.prototype.blockedByShield = function (p) {
+  if (this.type !== 'ravager' || this.data.roar > 0) return;
+  if (Math.random() < 0.5) { this.data.stun = 40; if (!this.data.silent) this.game.sound('ravager_stunned', this.x, this.y + 1, this.z); }
+  else ravagerShove(this, p);
+};
+// Ravager.doHurtTarget: the bite shows for 10 ticks
+const _attackRV = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) { const r = _attackRV.call(this, t); if (this.type === 'ravager') this.attackAnim = 10; return r; };
+GOALS.evoker = () => false; GOALS.vex = () => false;
+
+/* ---------------- sounds ---------------- */
+const IL_SOUNDS = [['crossbow_shoot', 'Crossbow fires', 'hostile'], ['crossbow_load', 'Crossbow loads', 'hostile'], ['evoker_fangs', 'Fangs snap', 'hostile'],
+  ['evoker_prepare_summon', 'Evoker prepares summoning', 'hostile'], ['evoker_prepare_attack', 'Evoker prepares attack', 'hostile'], ['evoker_prepare_wololo', 'Evoker prepares charming', 'hostile'],
+  ['evoker_cast', 'Evoker casts spell', 'hostile'], ['vex_charge', 'Vex shrieks', 'hostile'], ['ravager_roar', 'Ravager roars', 'hostile'], ['ravager_stunned', 'Ravager stunned', 'hostile']];
+for (const [n, t, c] of IL_SOUNDS) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+const IL_SOUND_SET = new Set(IL_SOUNDS.map(s => s[0]));
+const _audioPlayIL = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!IL_SOUND_SET.has(name)) return _audioPlayIL.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'crossbow_shoot': this.noiseHit(dst, 'bandpass', 2200, 1.5, 0.12, 0.35); this.tone(dst, 'square', 500 * v, 200 * v, 0.06, 0.06); break;
+    case 'crossbow_load': this.noiseHit(dst, 'highpass', 3000, 1, 0.08, 0.25); this.tone(dst, 'triangle', 900 * v, 1300 * v, 0.1, 0.05); break;
+    case 'evoker_fangs': this.noiseHit(dst, 'lowpass', 700, 1, 0.15, 0.4); this.tone(dst, 'square', 180 * v, 90 * v, 0.12, 0.06); break;
+    case 'evoker_prepare_summon': case 'evoker_prepare_attack': case 'evoker_prepare_wololo':
+      this.tone(dst, 'sawtooth', (name === 'evoker_prepare_wololo' ? 330 : 260) * v, 520 * v, 0.6, 0.05); this.tone(dst, 'sine', 700 * v, 1100 * v, 0.6, 0.04); break;
+    case 'evoker_cast': this.tone(dst, 'triangle', 800 * v, 400 * v, 0.4, 0.06); break;
+    case 'vex_charge': this.tone(dst, 'square', 1400 * v, 2000 * v, 0.25, 0.04); break;
+    case 'ravager_roar': this.tone(dst, 'sawtooth', 110 * v, 70 * v, 1.2, 0.2); this.noiseHit(dst, 'lowpass', 400, 0.7, 1.0, 0.3); break;
+    case 'ravager_stunned': this.tone(dst, 'sawtooth', 160 * v, 120 * v, 0.6, 0.12); break;
+  }
 };
 
 </script>

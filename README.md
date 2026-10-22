@@ -711,6 +711,26 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   hit or a cat nearby breaks off the swoop (the cat hisses). Hiding under a roof makes them lose
   you. They speed up on straight runs and turn slowly, flap with a sound you can hear, leave
   grey specks behind their wings and burn in daylight.
+- **Ghasts like Java's**: they drift around, pick a player no more than 4 blocks above or below
+  them, cry out as they charge and fire every 3 seconds while they can see you. Fireballs (theirs
+  and blazes') start slow and speed up the farther they fly, trail smoke, and still bounce back
+  when you hit them.
+- **Blazes like Java's**: they walk, float down slowly and rise to stay above you, light up for 3
+  seconds, then shoot three fireballs in quick succession and rest for 5 seconds. Their fireballs
+  set you on fire and light the ground where they land.
+- **Guardians like Java's**: they lock on to players, squid and axolotls with a beam you can see
+  turning from purple to gold, and hit when it's charged (4 seconds, 3 for elder guardians).
+  Hitting one while its spikes are out hurts you back, and on land they flop around.
+- **Illagers like Java's**: pillagers walk up, load their crossbows, take aim and shoot, then load
+  again; vindicators run you down with their axes (and in a raid break wooden doors on Normal and
+  Hard). Evokers keep their distance and stop to cast: vexes, rows or rings of fangs that snap
+  shut a moment after they appear, and with nothing to fight they turn blue sheep red. Vexes dart
+  at you through walls until they waste away; ravagers crash through leaves, and if your shield
+  stops one, it may be stunned and then roar, throwing everything around it back.
+- Mobs that hurt you now scale with the difficulty for arrows, tridents and magic too (on Easy
+  never more than the hit itself), and a second, stronger hit during the moment you're
+  invulnerable deals the difference, like in Java. Cobwebs hold flying mobs as well, and mobs
+  with Weaving get through them twice as fast, like players do.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
