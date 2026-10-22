@@ -8911,7 +8911,15 @@ TEXGEN.push(function texItems() {
   IT('turtle_helmet', (d) => { ARMOR_SHAPE.helmet(d, ARMOR_COL.turtle); for (const [x, y] of [[5, 4], [9, 4], [7, 5]]) sp(d, x, y, [60, 120, 50]); });
   IT('elytra', (d, r) => { fillPoly(d, [[7, 2], [2, 4], [1, 14], [5, 11], [7, 13]], (x) => mul([140, 140, 170], 0.85 + x * 0.03)); fillPoly(d, [[8, 2], [13, 4], [14, 14], [10, 11], [8, 13]], (x) => mul([130, 130, 160], 1.1 - (x - 8) * 0.03)); });
   for (const m of ['leather', 'iron', 'golden', 'diamond']) IT(m + '_horse_armor', (d) => { const c = ARMOR_COL[m]; rect(d, 2, 5, 12, 9, c); rect(d, 11, 2, 14, 5, mul(c, 1.1)); rect(d, 3, 10, 4, 13, mul(c, 0.85)); rect(d, 9, 10, 10, 13, mul(c, 0.85)); sp(d, 13, 3, [40, 40, 40]); });
-  IT('wolf_armor', (d) => { rect(d, 2, 6, 13, 10, [170, 110, 100]); rect(d, 3, 4, 12, 5, [150, 96, 88]); for (let x = 3; x < 13; x += 2) sp(d, x, 8, [120, 70, 64]); });
+  // wolf armor: an arch of scute plates over a wolf's back, a neck guard and two straps; the overlay is what a dye colours
+  const waTop = x => 5 - Math.round(Math.sin((x - 1) / 13 * Math.PI) * 2);
+  const waPlate = (x, y) => { const k = y - waTop(x), band = k % 3, seam = (x + Math.floor(k / 3)) % 3 === 0; return band === 2 || seam ? 0 : band === 0 ? 2 : 1; };
+  IT('wolf_armor', (d) => {
+    for (let x = 3; x <= 13; x++) for (let y = waTop(x); y <= 10; y++) sp(d, x, y, [[134, 84, 74], [176, 118, 102], [206, 150, 132]][waPlate(x, y)]);
+    for (let y = 3; y <= 8; y++) for (let x = 1; x <= 3; x++) sp(d, x, y, y === 3 ? [206, 150, 132] : x === 1 ? [134, 84, 74] : [168, 110, 96]);
+    for (let y = 11; y <= 12; y++) { sp(d, 5, y, [92, 60, 52]); sp(d, 11, y, [92, 60, 52]); }
+  });
+  IT('wolf_armor_overlay', (d) => { for (let x = 3; x <= 13; x++) for (let y = waTop(x); y <= 10; y++) { const k = waPlate(x, y); if (k) sp(d, x, y, k === 2 ? [250, 250, 250] : [214, 214, 214]); } }, true);
 
   /* ---------------- weapons and tools ---------------- */
   IT('mace', (d) => { handle(d, 0, 9); for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const [v, u] = rot(x, y); if (v >= 9 && v <= 14 && Math.abs(u) <= 2.8 - Math.abs(v - 11.5) * 0.4) sp(d, x, y, mul([110, 112, 120], u > 0.5 ? 1.15 : 0.9)); } });
@@ -11938,11 +11946,8 @@ class Projectile extends Entity {
     }
     if (this.kind === 'potion') { g.sound('break_glass', this.x, this.y, this.z); if (g.splashPotion) g.splashPotion(this.x, this.y, this.z, this.stack, this.owner); return; }
     if (this.kind === 'xp') { g.sound('break_glass', this.x, this.y, this.z); g.particles.poof(this.x, this.y, this.z, [0.4, 0.6, 1], 10); const n = 3 + Math.floor(Math.random() * 9); if (g.spawnXP) g.spawnXP(this.x, this.y, this.z, n); else if (g.player) g.player.addXP(n); return; }
-    if (this.kind === 'wind') {
-      g.particles.poof(this.x, this.y, this.z, [0.85, 0.9, 1], 14); g.sound('explode', this.x, this.y, this.z);
-      for (const m of g.mobsAndPlayer()) { const dx = m.x - this.x, dy = m.y + m.h / 2 - this.y, dz = m.z - this.z, d = Math.hypot(dx, dy, dz); if (d < 2.5) { const k = (2.5 - d) / 2.5 * 1.1, l = d || 1; m.vx += dx / l * k; m.vy += Math.max(0.3, dy / l * k + 0.4); m.vz += dz / l * k; m.fallDist = 0; } }
-      return;
-    }
+    // wind charges burst like Java's (see windChargeHit)
+    if (this.kind === 'wind') { g.windChargeHit(this, e); return; }
     if (this.kind === 'ghast' || this.kind === 'skull') {
       if (e) e.hurt(this.kind === 'ghast' ? 6 : 8, this.kind === 'ghast' ? 'fireball' : 'wither', this.owner);
       if (e && this.kind === 'skull' && e.addEffect && OPTIONS.difficulty > 1) e.addEffect('wither', OPTIONS.difficulty === 3 ? 800 : 200, 1);
@@ -13999,6 +14004,9 @@ class Mob extends Entity {
     if (this.T.fireproof && (source === 'fire' || source === 'lava' || source === 'in_fire' || source === 'fireball')) return false;
     if (this.immune && this.immune(source, attacker)) return false;
     let dmg = this.invuln > 0 ? amount - this.lastDmg : amount;
+    // Wolf.actuallyHurt: body armor that can take the hit takes all of it (and gives its own hurt sound)
+    const soaked = this.soakHurt ? this.soakHurt(dmg, source, attacker) : null;
+    if (soaked) dmg = 0;
     const ap = this.armorPoints();
     // CombatRules.getDamageAfterAbsorb; a Breach mace makes the armor work less well (armor_effectiveness)
     if (ap && !BYPASS_ARMOR.has(source)) dmg *= 1 - Math.max(0, Math.min(20, Math.max(ap / 5, ap - dmg / (2 + this.armorToughness() / 4))) / 25 - (attacker && attacker.breachNow || 0));
@@ -14009,7 +14017,7 @@ class Mob extends Entity {
     this.lastDmg = amount; this.invuln = 10; this.hurtTime = 10;
     this.health -= dmg;
     const g = this.game;
-    if (this.T.sounds) g.sound(this.T.sounds[1], this.x, this.y + this.h / 2, this.z);
+    if (this.T.sounds || soaked) g.sound(soaked || this.T.sounds[1], this.x, this.y + this.h / 2, this.z);
     if (attacker && attacker !== this) {
       const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1, kb = 0.4 * (1 - (this.T.kbRes || 0));
       if (source !== 'thorns' && kb > 0) { this.vx = this.vx * 0.5 + dx / l * kb; this.vz = this.vz * 0.5 + dz / l * kb; if (this.onGround) this.vy = Math.max(this.vy, 0.36 * (1 - (this.T.kbRes || 0))); }
@@ -15451,6 +15459,8 @@ class Player extends Entity {
         if (sh && amount >= 3) { const w = this.wear(sh, 1 + Math.floor(amount)); if (!w) { if (this.offhand[0] === sh) this.offhand[0] = null; else this.inv[this.sel] = null; this.using = null; } }
         this.game.sound('shield_block', this.x, this.y + 1, this.z);
         if (attacker.vx !== undefined && attacker !== this && source !== 'arrow' && source !== 'fireball') { attacker.vx += dx / l * 0.5; attacker.vz += dz / l * 0.5; }
+        // Player.blockUsingShield: an axe (or the warden) knocks the shield out for 5 seconds
+        if (attacker.canDisableShield && attacker.canDisableShield(source)) { this.shieldCd = 100; this.using = null; this.game.sound('shield_break', this.x, this.y + 1, this.z); }
         this.invuln = 10;
         return false;
       }
@@ -20907,6 +20917,7 @@ Object.assign(Game.prototype, {
     }
     // ---- eyes, pearls and other throwables
     if (held.id === I.ENDER_EYE) return this.useEye(p, hit);
+    if (it.throw === 'wind' && this.throwWindCharge) return this.throwWindCharge(p, held) ? done() : false;
     if (it.throw && it.throw !== 'trident') {
       if (it.throw === 'pearl' && p.pearlCd > 0) return false;
       const e = p.eye(), d = p.look(), sp = it.throw === 'xp' ? 0.7 : it.throw === 'potion' ? 0.5 : 1.5;
@@ -22794,7 +22805,7 @@ class Warden extends Mob {
       const dmg = [16, 16, 30, 45][OPTIONS.difficulty] || 30;
       this.attackAnim = 10;
       t.invuln = 0;
-      if (t.hurt(t instanceof Player ? dmg : 30, 'warden', this)) { if (t instanceof Player && t.using && t.using.kind === 'shield') { t.shieldCd = 100; t.using = null; } }
+      t.hurt(t instanceof Player ? dmg : 30, 'warden', this);
     }
   }
   attackEntity() { }
@@ -23532,7 +23543,7 @@ const RS = {
       case C_PISTON: { const want = this.poweredQC(w, x, y, z, m & 7); if (want !== !!(m & 8)) w.schedule(x, y, z, 1, 'rs_piston'); break; }
       case C_DISPENSER: if (this.edge(x, y, z, this.poweredQC(w, x, y, z)) > 0) w.schedule(x, y, z, 4, 'rs_dispense'); break;
       case C_NOTE: if (this.edge(x, y, z, this.powered(w, x, y, z)) > 0 && g) g.playNote(x, y, z); break;
-      case C_BELL: if (this.edge(x, y, z, this.powered(w, x, y, z)) > 0 && g) g.sound('bell', x + 0.5, y + 0.5, z + 0.5); break;
+      case C_BELL: if (this.edge(x, y, z, this.powered(w, x, y, z)) > 0 && g) { if (g.ringBell) g.ringBell(x, y, z, null); else g.sound('bell', x + 0.5, y + 0.5, z + 0.5); } break;
       case C_BULB: { const on = this.powered(w, x, y, z); if (on !== !!(m & 2)) this.set(w, x, y, z, id, on ? (m ^ 1) | 2 : m & ~2); break; }
       case C_RAIL: { const on = this.powered(w, x, y, z); if (on !== !!(m & 8)) this.set(w, x, y, z, id, on ? m | 8 : m & ~8); break; }
       case C_HOPPER: { const on = this.powered(w, x, y, z); if (on !== !!(m & 8)) w.setBlock(x, y, z, id, on ? m | 8 : m & ~8, false); break; }
@@ -23702,6 +23713,8 @@ Game.prototype.dispense = function (x, y, z) {
     if (st.id === I.SNOWBALL) { shoot('snow', 1.1); take(); return; }
     if (st.id === I.EGG) { shoot('egg', 1.1); take(); return; }
     if (st.id === I.FIRE_CHARGE) { shoot('fire', 1.0); take(); this.sound('blast', px, py, pz); return; }
+    // WindChargeItem.asProjectile: from a block out of the front, at about one block a tick
+    if (st.id === I.WIND_CHARGE) { const tri = v => v + 0.11485000000000001 * (Math.random() - Math.random()); this.spawnProjectile('wind', x + 0.5 + DX[d], y + 0.5 + DY[d], z + 0.5 + DZ[d], tri(DX[d]), tri(DY[d]), tri(DZ[d]), null); take(); this.sound('wind_charge_throw', px, py, pz); return; }
     // rockets fly straight out of the front (FireworkRocketEntity.shoot at 0.5, a little inaccuracy)
     if (st.id === I.FIREWORK_ROCKET && this.launchFirework) { const j = () => (Math.random() - 0.5) * 0.0172; this.launchFirework(px, py + (DY[d] ? 0 : 0.15), pz, st, { shot: [(DX[d] + j()) * 0.5, (DY[d] + j()) * 0.5, (DZ[d] + j()) * 0.5] }); take(); return; }
     if (st.id === I.SPLASH_POTION || st.id === I.LINGERING_POTION) { const pr = shoot('potion', 0.8); if (pr) pr.stack = { id: st.id, count: 1, tag: st.tag }; take(); return; }
@@ -25943,7 +25956,7 @@ Game.prototype.updateTarget = function () {
   const hit = raycast(this.world, e[0], e[1], e[2], d[0], d[1], d[2], reach, false);
   let best = hit ? hit.t : reach;
   for (const m of this.entities) {
-    if (!(m instanceof Mob || m instanceof Projectile && (m.kind === 'ghast' || m.kind === 'skull')) || m.deathTime > 0 || m === p.riding) continue;
+    if (!(m instanceof Mob || m instanceof Projectile && (m.kind === 'ghast' || m.kind === 'skull' || m.kind === 'wind')) || m.deathTime > 0 || m === p.riding) continue;
     const hw = m.w / 2, box = m.hitBox ? m.hitBox() : [m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw];
     const rr = rayBox(e[0], e[1], e[2], d[0], d[1], d[2], box);
     // a frame on the face of the targeted block wins over the block
@@ -29474,6 +29487,8 @@ Object.assign(Game.prototype, {
     let spawned = 0;
     for (let pack = 0; pack < 3; pack++) {
       let x = x0, z = z0, data = null, n = Math.ceil(R() * 4), inPack = 0;
+      // SpawnGroupData: what the first mob of a pack decides (a wolf's coat) the rest share
+      this._spawnGroup = {};
       for (let i = 0; i < n; i++) {
         x += Math.floor(R() * 6) - Math.floor(R() * 6); z += Math.floor(R() * 6) - Math.floor(R() * 6);
         const d2 = (x + 0.5 - p.x) ** 2 + (y - p.y) ** 2 + (z + 0.5 - p.z) ** 2;
@@ -29622,6 +29637,7 @@ Object.assign(Game.prototype, {
       for (const e of list) if ((k -= e[1]) < 0) { data = e; break; }
       const [type, , mn, mx] = data, T = MOB_TYPES[type], n = mn + r.nextInt(1 + mx - mn);
       let l = x0 + r.nextInt(16), m = z0 + r.nextInt(16), group = 0, first = null;
+      this._spawnGroup = {};
       const l0 = l, m0 = m;
       for (let p = 0; p < n; p++) {
         let done = false;
@@ -38917,9 +38933,10 @@ Player.prototype.attack = function (ent) {
   else g.sound('wind_burst', ent.x, ent.y, ent.z);
   // the smash cancels the fall; fall damage after it only counts from where it hit
   this.impulseY = y0;
+  this.vy = 0.01;
+  // Wind Burst: a wind explosion of 3.5 at your feet with 1.2, 1.75 or 2.2 knockback, throwing you (and what is around) away
   const wb = enchLevel(held, 'wind_burst');
-  if (wb) { this.vy = 0.77 * (WIND_BURST_K[wb - 1] || 1.5 + 0.35 * wb); g.sound('wind_burst', this.x, this.y, this.z); g.particles.poof(this.x, this.y, this.z, [0.85, 0.9, 1], 10); }
-  else this.vy = 0.01;
+  if (wb && g.windBurstAt) g.windBurstAt(this.x, this.y, this.z, 3.5, WIND_BURST_K[wb - 1] || 1.5 + 0.35 * (wb - 1), null);
   return r;
 };
 const _landedMC = Player.prototype.landed;
@@ -38940,6 +38957,639 @@ Game.prototype.playNote = function (x, y, z) {
     return;
   }
   return _playNoteNH.call(this, x, y, z);
+};
+
+/* @file 138_wolves.js */
+/* ===================================================================
+   PART 28: wolves of every coat with armor, dyeing like Java, wind
+   charges that burst like Java's, bells, and axes against shields
+   - nine wolf coats picked by biome (a pack shares one, a pup takes a
+     parent's); tame wolves have 40 health and heal by what they eat
+   - wolf armor: the owner puts it on, shears take it off, armadillo
+     scutes mend it while the wolf sits; it takes every hit it can
+     (Wolf.actuallyHurt), cracks as it wears down and drops on death
+   - leather armor, leather horse armor and wolf armor dyed in the
+     crafting grid (ArmorDyeRecipe, DyedItemColor.applyDyes)
+   - wind charges: Java's wind explosion (rays, push by exposure, the
+     doors, trapdoors, gates, buttons, levers, bells and candles it
+     reaches), no fall damage below where your charge threw you,
+     knocked back by a hit, thrown from dispensers
+   - bells ring from the side they swing to, from projectiles, wind
+     and redstone; raiders near one glow and villagers hide
+   - an axe (or the warden) striking a raised shield knocks it out
+   =================================================================== */
+
+/* ---------------- wolf coats ---------------- */
+// WolfVariants.getSpawnVariant: the biome a wolf spawns in picks its coat; taiga and anywhere without its own coat give pale
+const WOLF_VARIANTS = ['pale', 'ashen', 'black', 'chestnut', 'rusty', 'snowy', 'spotted', 'striped', 'woods'];
+const WOLF_BIOME = new Map();
+for (const [v, bs] of [['pale', ['TAIGA']], ['ashen', ['SNOWY_TAIGA']], ['black', ['OLD_GROWTH_PINE_TAIGA']], ['chestnut', ['OLD_GROWTH_SPRUCE_TAIGA']],
+  ['rusty', ['JUNGLE', 'BAMBOO_JUNGLE', 'SPARSE_JUNGLE']], ['snowy', ['GROVE']], ['spotted', ['SAVANNA', 'SAVANNA_PLATEAU', 'WINDSWEPT_SAVANNA']],
+  ['striped', ['BADLANDS', 'ERODED_BADLANDS', 'WOODED_BADLANDS']], ['woods', ['FOREST']]]) for (const b of bs) if (BI[b] !== undefined) WOLF_BIOME.set(BI[b], v);
+const wolfSpawnVariant = (g, x, y, z) => WOLF_BIOME.get(g.vBiome ? g.vBiome(Math.floor(x), Math.floor(y), Math.floor(z)) : biomeAt(g, x, z)) || 'pale';
+const _initWolfWV = MOB_INIT.wolf;
+MOB_INIT.wolf = function (m, o) {
+  _initWolfWV(m, o);
+  if (o.loading) return;
+  const R = Math.random, grp = m.game._spawnGroup;
+  if (o.parents) {
+    // Wolf.getBreedOffspring: either parent's coat, and for a tame pup either parent's collar
+    const [a, b] = o.parents;
+    m.data.variant = (R() < 0.5 ? a : b).data.variant || 'pale';
+    if (a.data.tame) m.data.collar = (R() < 0.5 ? a : b).data.collar || 'red';
+  } else {
+    // Wolf.finalizeSpawn: a pack takes the coat of its first wolf
+    m.data.variant = grp && grp.wolf || wolfSpawnVariant(m.game, m.x, m.y, m.z);
+    if (grp) grp.wolf = m.data.variant;
+  }
+};
+// the natural spawner hands each pack one SpawnGroupData; outside of it there is none
+for (const k of ['vSpawnInChunk', 'vInitialSpawn']) {
+  const f = Game.prototype[k];
+  if (f) Game.prototype[k] = function (...a) { try { return f.apply(this, a); } finally { this._spawnGroup = null; } };
+}
+
+// coats: fur, the darker back, the pale belly and muzzle, and spots or stripes on some
+const WOLF_COATS = {
+  ashen: { fur: [148, 150, 158], back: [110, 112, 120], belly: [204, 204, 210] },
+  black: { fur: [50, 48, 50], back: [32, 30, 32], belly: [82, 78, 78], muzzle: [104, 98, 94], eye: [176, 132, 48] },
+  chestnut: { fur: [140, 90, 58], back: [106, 66, 42], belly: [226, 216, 204] },
+  rusty: { fur: [184, 106, 52], back: [148, 80, 38], belly: [228, 198, 158] },
+  snowy: { fur: [240, 240, 242], back: [226, 226, 230], belly: [250, 250, 251] },
+  spotted: { fur: [216, 192, 144], back: [198, 172, 122], belly: [238, 228, 206], spot: [118, 84, 50] },
+  striped: { fur: [196, 148, 94], back: [162, 114, 68], belly: [230, 206, 168], stripe: [100, 68, 40] },
+  woods: { fur: [106, 80, 54], back: [78, 58, 40], belly: [160, 134, 104], muzzle: [178, 156, 126] },
+};
+const wolfHash = (a, b, c) => { let h = Math.imul(a * 73856093 ^ b * 19349663 ^ c * 83492791, 0x9E3779B1); h ^= h >>> 15; return (h >>> 0) % 997; };
+function wolfCoatSkin(C, mode, seed) {
+  const lift = c => mode === 'tame' ? shd(c, 1.05) : c, angry = mode === 'angry';
+  const fur = lift(C.fur), back = lift(C.back), belly = lift(C.belly), muz = lift(C.muzzle || C.belly);
+  // the body and the mane are turned to lie along the wolf: their back face is the spine, the front face the belly,
+  // and on the sides x runs from the spine (right) or the belly (left)
+  const up = (f, x, W) => f === 'back' ? 1 : f === 'front' ? 0 : f === 'right' ? 1 - x / Math.max(1, W - 1) : f === 'left' ? x / Math.max(1, W - 1) : 0.6;
+  const mark = (pi, f, x, y, top) => {
+    if (C.spot && top > 0.3 && wolfHash(pi * 7 + f.length, x >> 1, (y + (x & 1)) >> 1) % 5 === 0) return C.spot;
+    if (C.stripe && top > 0.45 && y % 3 === 1) return C.stripe;
+    return null;
+  };
+  const torso = pi => (f, x, y, W, H, R) => {
+    const top = up(f, x, W), mk = mark(pi, f, x, y, top);
+    if (mk) return nz(mk, R, 0.05);
+    return nz(top > 0.7 ? back : top < 0.25 ? belly : fur, R, 0.06);
+  };
+  return skinParts(64, 32, MM.wolf.parts, {
+    head: (f, x, y, W, H, R, ci) => {
+      if (ci === 3) {
+        if (f === 'front' && y === 0 && x >= 1) return [28, 26, 26];
+        if (f === 'front' && y === 2 && angry) return x % 2 ? [250, 250, 250] : [60, 30, 30];
+        return nz(f === 'top' ? shd(muz, 0.94) : muz, R, 0.05);
+      }
+      if (ci > 0) return nz(f === 'front' ? shd(belly, 0.78) : back, R);
+      if (f === 'front') {
+        if (y === 2 && (x === 1 || x === 4)) return angry ? [200, 20, 20] : C.eye || [30, 26, 24];
+        if (angry && y === 1 && x >= 1 && x <= 4) return shd(back, 0.6);
+        if (y >= 4) return nz(muz, R, 0.05);
+      }
+      const mk = f === 'top' ? mark(0, f, x, y, 1) : null;
+      if (mk) return nz(mk, R, 0.05);
+      return nz(f === 'top' || f === 'back' ? back : f === 'bottom' ? belly : fur, R, 0.05);
+    },
+    upper_body: torso(1), body: torso(2),
+    tail: (f, x, y, W, H, R) => nz(y > H - 3 ? belly : C.stripe && y % 3 === 1 ? C.stripe : back, R, 0.06),
+    '*': (f, x, y, W, H, R) => nz(y > H - 2 ? shd(fur, 0.9) : C.spot && f !== 'bottom' && wolfHash(9, x, y) % 7 === 0 ? C.spot : fur, R, 0.05),
+  }, seed);
+}
+WOLF_VARIANTS.forEach((v, i) => {
+  if (v === 'pale') return;
+  for (const mode of ['', 'tame', 'angry']) defSkin('entity/wolf/wolf_' + v + (mode ? '_' + mode : ''), 64, 32, () => wolfCoatSkin(WOLF_COATS[v], mode, 71 + i));
+});
+const wolfSkinKey = (v, mode) => 'entity/wolf/wolf' + (v && v !== 'pale' ? '_' + v : '') + (mode ? '_' + mode : '');
+
+/* ---------------- wolf armor ---------------- */
+// the scute plates over the back, the sides, the top of the head and the tops of the legs
+const WA_PLATE = [176, 116, 102], WA_LIGHT = [204, 148, 130], WA_EDGE = [128, 82, 72];
+function wolfArmorSkin(overlay) {
+  const plate = (y, x, R) => {
+    const band = y % 3, seam = (x + Math.floor(y / 3)) % 4 === 0;
+    if (overlay) return band === 2 || seam ? null : nz(band === 0 ? [236, 236, 236] : [206, 206, 206], R, 0.03);
+    return nz(band === 2 || seam ? WA_EDGE : band === 0 ? WA_LIGHT : WA_PLATE, R, 0.04);
+  };
+  const up = (f, x, W) => f === 'back' ? 1 : f === 'front' ? 0 : f === 'right' ? 1 - x / Math.max(1, W - 1) : f === 'left' ? x / Math.max(1, W - 1) : 0.6;
+  const torso = (f, x, y, W, H, R) => {
+    const top = up(f, x, W);
+    if (f === 'front' || top < 0.3) return null;
+    if (f === 'top' || f === 'bottom') return y >= H - 3 || overlay ? null : nz(WA_EDGE, R, 0.04);
+    return plate(f === 'back' ? y : y + (f === 'left' ? 1 : 0), x, R);
+  };
+  return skinParts(64, 32, MM.wolf.parts, {
+    head: (f, x, y, W, H, R, ci) => ci !== 0 ? null : f === 'top' ? plate(y + 1, x, R) : (f === 'right' || f === 'left' || f === 'back') && y < 2 ? (overlay ? null : nz(WA_EDGE, R, 0.04)) : null,
+    upper_body: torso, body: torso,
+    tail: () => null,
+    '*': (f, x, y, W, H, R) => f !== 'top' && f !== 'bottom' && y < 3 ? (y === 2 ? (overlay ? null : nz(WA_EDGE, R, 0.04)) : plate(y, x, R)) : null,
+  }, 83);
+}
+let wolfArmorCanvas = null;
+defSkin('entity/wolf/wolf_armor', 64, 32, () => (wolfArmorCanvas = wolfArmorSkin(false)));
+defSkin('entity/wolf/wolf_armor_overlay', 64, 32, () => wolfArmorSkin(true));
+// cracks: random walks over the plates, more of them at each level (the same walks carry on from one level to the next)
+function wolfCrackSkin(level) {
+  const base = wolfArmorCanvas || (wolfArmorCanvas = wolfArmorSkin(false)), W = 64, H = 32;
+  const src = base.getContext('2d').getImageData(0, 0, W, H).data;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), img = g.createImageData(W, H), d = img.data, R = mulberry32(977);
+  const opaque = [];
+  for (let i = 0; i < W * H; i++) if (src[i * 4 + 3] > 0) opaque.push(i);
+  const walks = [8, 16, 28][level];
+  for (let k = 0; k < walks && opaque.length; k++) {
+    let p = opaque[Math.floor(R() * opaque.length)], x = p % W, y = (p / W) | 0;
+    const dx = R() < 0.5 ? 1 : -1, len = 5 + Math.floor(R() * 6);
+    for (let s = 0; s < len; s++) {
+      const o = (y * W + x) * 4;
+      if (x < 0 || y < 0 || x >= W || y >= H || src[o + 3] === 0) break;
+      d[o] = 62; d[o + 1] = 38; d[o + 2] = 32; d[o + 3] = 235;
+      const below = o + W * 4;
+      if (y + 1 < H && src[below + 3] > 0 && d[below + 3] === 0) { d[below] = 214; d[below + 1] = 172; d[below + 2] = 152; d[below + 3] = 150; }
+      if (R() < 0.6) x += dx; else y += R() < 0.5 ? 1 : -1;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+['low', 'medium', 'high'].forEach((n, i) => defSkin('entity/wolf/wolf_armor_crackiness_' + n, 64, 32, () => wolfCrackSkin(i)));
+
+const wolfArmor = m => { const a = m.type === 'wolf' && m.data.armor && m.data.armor[0]; return a && a.id === I.WOLF_ARMOR ? a : null; };
+// Crackiness.WOLF_ARMOR: by the share of durability left
+function wolfCrack(st) {
+  const max = ITEMS[st.id].dur, f = Math.fround((max - (st.dmg || 0)) / max);
+  return f < Math.fround(0.32) ? 'high' : f < Math.fround(0.69) ? 'medium' : f < Math.fround(0.95) ? 'low' : null;
+}
+
+// the coat (tame, angry or wild), the collar, then WolfArmorLayer: the armor, its dye and its cracks
+MOB_SKINS.wolf = m => {
+  const s = [{ key: wolfSkinKey(m.data.variant, m.data.tame ? 'tame' : m.target ? 'angry' : '') }];
+  if (m.data.tame) s.push({ key: 'entity/wolf/wolf_collar', tint: dyeTint(m.data.collar || 'red'), grow: 0.01, only: ['upper_body'] });
+  const a = wolfArmor(m);
+  if (a) {
+    s.push({ key: 'entity/wolf/wolf_armor', grow: 0.2 });
+    if (a.tag && a.tag.color !== undefined) s.push({ key: 'entity/wolf/wolf_armor_overlay', grow: 0.205, tint: rgb01(a.tag.color) });
+    const c = wolfCrack(a);
+    if (c) s.push({ key: 'entity/wolf/wolf_armor_crackiness_' + c, grow: 0.21, trans: true });
+  }
+  return s;
+};
+// Wolf.getTailAngle: straight up when angry, by health when tame
+const _animWolfWA = MOB_ANIM.wolf;
+MOB_ANIM.wolf = (m, st) => { _animWolfWA(m, st); if (m.target) st.tailUp = 1.5393804; };
+
+// #bypasses_wolf_armor: what goes past armor anyway, and fire, lava, cactus, campfires, magma and lightning
+const WOLF_ARMOR_BYPASS = new Set(['fall', 'drown', 'starve', 'void', 'kill', 'magic', 'poison', 'fire', 'freeze', 'sonic_boom', 'suffocate', 'block',
+  'cramming', 'dripstone', 'pearl', 'fly_into_wall', 'outside_border', 'dry', 'dragon_breath', 'cactus', 'campfire', 'magma', 'in_fire', 'lava', 'lightning']);
+// Wolf.actuallyHurt: armor that can take the hit takes all of it, ceil(damage) durability; returns the hurt sound to play
+Mob.prototype.soakHurt = function (dmg, source, attacker) {
+  const a = wolfArmor(this);
+  if (!a || WOLF_ARMOR_BYPASS.has(source) || source === 'wither' && !attacker) return null;
+  const g = this.game, max = ITEMS[a.id].dur, was = wolfCrack(a);
+  a.dmg = (a.dmg || 0) + Math.ceil(dmg);
+  const broke = a.dmg >= max, now = broke ? null : wolfCrack(a);
+  if (now !== was) { g.sound('wolf_armor_crack', this.x, this.y + 0.5, this.z); g.itemBits(this.x, this.y + 1, this.z, I.ARMADILLO_SCUTE, 20); }
+  if (broke) { delete this.data.armor; g.sound('wolf_armor_break', this.x, this.y + 0.5, this.z); g.itemBits(this.x, this.y + 0.6, this.z, I.WOLF_ARMOR, 12); }
+  return 'wolf_armor_damage';
+};
+// ArmorMaterials.ARMADILLO: 11 armor on the body (for the hits that pass the armor's soaking)
+const _armorPointsWA = Mob.prototype.armorPoints;
+Mob.prototype.armorPoints = function () { return _armorPointsWA.call(this) + (wolfArmor(this) ? 11 : 0); };
+// bits of an item flying apart (ItemParticleOption)
+Game.prototype.itemBits = function (x, y, z, id, n) {
+  const layer = itemLayer(id);
+  for (let i = 0; i < (n || 8); i++) this.particles.add({ x: x + (Math.random() - 0.5) * 0.4, y: y + (Math.random() - 0.5) * 0.2, z: z + (Math.random() - 0.5) * 0.4,
+    vx: (Math.random() - 0.5) * 0.2, vy: Math.random() * 0.15, vz: (Math.random() - 0.5) * 0.2, life: 15 + Math.random() * 10, layer,
+    u: Math.floor(Math.random() * 12) / 16, v: Math.floor(Math.random() * 12) / 16, us: 4 / 16, size: 0.08 + Math.random() * 0.04, g: 0.04, col: [1, 1, 1], coll: true });
+};
+
+/* ---------------- tame wolves ---------------- */
+// #wolf_food: meat, fish and rabbit stew; a tame wolf eats them to heal twice their nourishment
+const WOLF_FOOD = new Set(['beef', 'porkchop', 'chicken', 'mutton', 'rabbit', 'rotten_flesh', 'cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'cooked_mutton', 'cooked_rabbit',
+  'cod', 'cooked_cod', 'salmon', 'cooked_salmon', 'tropical_fish', 'pufferfish', 'rabbit_stew'].filter(n => ITEM_BY_NAME[n] !== undefined));
+MOB_TYPES.wolf.breed = [...WOLF_FOOD];
+const wolfSit = m => { m.data.sitting = !m.data.sitting; m.nav = null; m.target = null; return true; };
+// Wolf.mobInteract for a tame wolf, in Java's order
+MOB_INTERACT.wolf = (m, p, held, name) => {
+  const d = m.data, g = m.game, id = held ? held.id : 0;
+  if (!d.tame) return false;
+  if (held && WOLF_FOOD.has(name) && m.health < m.maxHealth) {
+    const f = ITEMS[id].food;
+    p.consumeHeld(1); m.health = Math.min(m.maxHealth, m.health + 2 * (f ? f[0] : 1));
+    g.sound('eat', m.x, m.y + 0.5, m.z);
+    return true;
+  }
+  if (!d.owner) return false;
+  // a dye of another colour for the collar; the same colour just sits it down or up
+  if (held && ITEMS[id].dye) { if (ITEMS[id].dye === (d.collar || 'red')) return wolfSit(m); d.collar = ITEMS[id].dye; p.consumeHeld(1); return true; }
+  const a = wolfArmor(m);
+  if (id === I.WOLF_ARMOR && !a && !m.baby) {
+    d.armor = [copyStack(held, 1)]; m.persistent = true; p.consumeHeld(1);
+    g.sound('wolf_armor_equip', m.x, m.y + 0.5, m.z);
+    return true;
+  }
+  if (id === I.SHEARS && a) {
+    if (!p.wear(held, 1)) p.inv[p.sel] = null;
+    delete d.armor;
+    g.dropItem(m.x, m.y + 0.5, m.z, a);
+    g.sound('wolf_armor_unequip', m.x, m.y + 0.5, m.z);
+    g.ui.refreshHotbar();
+    return true;
+  }
+  // an armadillo scute mends an eighth of it while the wolf sits (used up even in creative: itemStack.shrink)
+  if (id === I.ARMADILLO_SCUTE && a && d.sitting && a.dmg > 0) {
+    held.count--; if (held.count <= 0) p.inv[p.sel] = null;
+    a.dmg = Math.max(0, a.dmg - Math.floor(ITEMS[a.id].dur * 0.125));
+    if (!a.dmg) delete a.dmg;
+    g.sound('wolf_armor_repair', m.x, m.y + 0.5, m.z);
+    g.ui.refreshHotbar();
+    return true;
+  }
+  return false;
+};
+// TamableAnimal.applyTamingSideEffects: 40 health once tamed (bones, breeding, or a world from before)
+const _interactWT = Mob.prototype.interact;
+Mob.prototype.interact = function (p, held) {
+  const was = this.data.tame, r = _interactWT.call(this, p, held);
+  if (this.type === 'wolf' && !was && this.data.tame) this.maxHealth = this.health = 40;
+  return r;
+};
+const _tickWT = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'wolf' && this.data.tame && this.maxHealth < 40) this.maxHealth = this.health = 40;
+  return _tickWT.call(this);
+};
+const _loadWT = Mob.load;
+Mob.load = function (game, o) {
+  const m = _loadWT.call(this, game, o);
+  if (m && m.type === 'wolf' && m.data.tame) { m.maxHealth = 40; m.health = Math.min(40, o.hp || 40); }
+  return m;
+};
+// Wolf.hurt: a sitting wolf that is hurt stands up
+const _hurtWT = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'wolf' && this.data.sitting && !this.dead && !(this.deathTime > 0)) { this.data.sitting = false; this.nav = null; }
+  return _hurtWT.call(this, amount, source, attacker);
+};
+// Mob.setBodyArmorItem makes the armor a sure drop, taken off the wolf as it dies
+const _dieWA = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  const a = this.deathTime > 0 ? null : wolfArmor(this);
+  _dieWA.call(this, source, attacker);
+  if (!a) return;
+  delete this.data.armor;
+  if (!this.noDrops && (!this.game.rule || this.game.rule('doMobLoot') !== false)) this.game.dropItem(this.x, this.y + 0.5, this.z, a);
+};
+// /summon wolf {variant:"minecraft:ashen",CollarColor:1b,body_armor_item:{id:"minecraft:wolf_armor"}}
+const _applyEntNBTWV = Game.prototype.applyEntNBT;
+Game.prototype.applyEntNBT = function (e, nb) {
+  _applyEntNBTWV.call(this, e, nb);
+  if (!nb || !(e instanceof Mob) || e.type !== 'wolf') return;
+  if (typeof nb.variant === 'string') { const v = nb.variant.replace(/^minecraft:/, ''); if (WOLF_VARIANTS.includes(v)) e.data.variant = v; }
+  if (nb.CollarColor !== undefined && COLORS[nb.CollarColor | 0]) e.data.collar = COLORS[nb.CollarColor | 0];
+  const ba = nb.body_armor_item;
+  if (ba && typeof ba.id === 'string' && ba.id.replace(/^minecraft:/, '') === 'wolf_armor') e.data.armor = [{ id: I.WOLF_ARMOR, count: 1 }];
+};
+
+/* ---------------- dyeing ---------------- */
+// #dyeable: leather armor, leather horse armor and wolf armor
+for (const n of ['leather_horse_armor', 'wolf_armor']) if (ITEM_BY_NAME[n] !== undefined) ITEMS[itemOf(n)].dyeable = true;
+// DyedItemColor.applyDyes: the average of the old colour and the dyes, scaled back up to their average brightest channel
+function applyDyes(color, dyes) {
+  let r = 0, g = 0, b = 0, hi = 0, n = 0;
+  const add = v => { const cr = (v >> 16) & 255, cg = (v >> 8) & 255, cb = v & 255; hi += Math.max(cr, cg, cb); r += cr; g += cg; b += cb; n++; };
+  if (color !== undefined) add(color);
+  for (const d of dyes) add(DYE_RGB[d]);
+  let ar = Math.trunc(r / n), ag = Math.trunc(g / n), ab = Math.trunc(b / n);
+  const f = Math.fround(hi / n), top = Math.max(ar, ag, ab);
+  const k = v => Math.trunc(Math.fround(Math.fround(v * f) / top));
+  ar = k(ar); ag = k(ag); ab = k(ab);
+  return (ar << 16) | (ag << 8) | ab;
+}
+// ArmorDyeRecipe: exactly one dyeable item and at least one dye
+RECIPES.push({ type: 'special', out: I.LEATHER_HELMET, count: 1,
+  test: ids => { let it = 0, dyes = 0; for (const id of ids) { if (ITEMS[id].dyeable) it++; else if (dyeOf(id)) dyes++; else return false; } return it === 1 && dyes > 0; },
+  fn: grid => {
+    const st = grid.find(s => s && ITEMS[s.id].dyeable), dyes = grid.filter(s => s && dyeOf(s.id)).map(s => dyeOf(s.id));
+    const out = copyStack(st, 1);
+    out.tag = Object.assign(JSON.parse(JSON.stringify(st.tag || {})), { color: applyDyes(st.tag && st.tag.color, dyes) });
+    return out;
+  } });
+// DyedItemColor.addToTooltip: "Dyed", or the colour itself with advanced tooltips; animal armor's "When equipped:" armor
+const ANIMAL_ARMOR_PTS = { leather_horse_armor: 3, iron_horse_armor: 5, golden_horse_armor: 7, diamond_horse_armor: 11, wolf_armor: 11 };
+const _tooltipLinesDY = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesDY(st), it = ITEMS[st.id];
+  if (it && it.dyeable && st.tag && st.tag.color !== undefined) {
+    const at = out.findIndex((l, i) => i > 0 && (l[0] === '' || l[0] === 'Unbreakable' || /^Durability: |^minecraft:/.test(l[0])));
+    const line = [OPTIONS.advTooltips ? 'Color: #' + st.tag.color.toString(16).toUpperCase().padStart(6, '0') : 'Dyed', TT_GRAY];
+    out.splice(at < 0 ? out.length : at, 0, line);
+  }
+  const pts = it && ANIMAL_ARMOR_PTS[it.name];
+  if (pts) {
+    const at = out.findIndex((l, i) => i > 0 && (l[0] === 'Unbreakable' || /^Durability: |^minecraft:/.test(l[0])));
+    out.splice(at < 0 ? out.length : at, 0, ['', TT_GRAY], ['When equipped:', TT_GRAY], ['+' + pts + ' Armor', TT_BLUE]);
+  }
+  return out;
+};
+// leather is drawn here in its own brown where Java tints a grey texture, so a dye tints it relative to that brown; wolf
+// armor only dyes its overlay
+const _stackTintDY = stackTint;
+stackTint = function (st) {
+  if (st && st.tag && st.tag.color !== undefined && ITEMS[st.id] && ITEMS[st.id].dyeable) {
+    if (st.id === I.WOLF_ARMOR) return null;
+    const c = st.tag.color, L = ARMOR_COL.leather;
+    return [((c >> 16) & 255) / L[0] * 255, ((c >> 8) & 255) / L[1] * 255, (c & 255) / L[2] * 255];
+  }
+  return _stackTintDY(st);
+};
+// the wolf armor icon: the plates as they are, the dye only on the overlay (ItemColors: tint index 1)
+const _iconForWA = iconFor;
+iconFor = function (id, tag, st) {
+  if (id !== I.WOLF_ARMOR) return _iconForWA(id, tag, st);
+  const col = tag && tag.color, key = 'wolfarmor#' + (col !== undefined ? col : '');
+  if (ICONS[key]) return ICONS[key];
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  g.drawImage(tileC(itemLayer(id), null), 0, 0, 64, 64);
+  const ov = texLayer('wolf_armor_overlay', -1);
+  if (col !== undefined && ov >= 0) g.drawImage(tileC(ov, [(col >> 16) & 255, (col >> 8) & 255, col & 255]), 0, 0, 64, 64);
+  return ICONS[key] = c.toDataURL();
+};
+
+/* ---------------- wind charges ---------------- */
+// gust sprites, swirling out and fading over eight frames
+TEXGEN.push(function texWind() {
+  for (let k = 0; k < 8; k++) T('particle_gust_' + k, (d) => {
+    const t = k / 7, r0 = 2 + t * 4.5;
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const dx = x + 0.5 - 8, dy = y + 0.5 - 8, r = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+      const swirl = ((a / (Math.PI * 2) + r / 9 - t * 0.6) % 0.5 + 0.5) % 0.5;
+      if (r < r0 && r > r0 - 3 && swirl < 0.22) sp(d, x, y, [255, 255, 255, Math.round(230 * (1 - t * 0.7))]);
+    }
+  });
+});
+const _packTexMapWC = packTexMap;
+packTexMap = function () {
+  const m = _packTexMapWC();
+  for (let k = 0; k < 8; k++) m['particle_gust_' + k] = ['particle/gust_' + k];
+  m.wolf_armor_overlay = ['item/wolf_armor_overlay'];
+  return m;
+};
+// GUST_EMITTER_SMALL and GUST_EMITTER_LARGE
+Particles.prototype.gust = function (x, y, z, big) {
+  const L = texL('particle_gust_0'), n = big ? 14 : 4, r = big ? 2.2 : 0.6;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, q = Math.random() * r, h = (Math.random() - 0.5) * r;
+    this.add({ x: x + Math.cos(a) * q, y: y + h, z: z + Math.sin(a) * q, vx: 0, vy: 0, vz: 0, life: 12 + Math.floor(Math.random() * 4), anim: [L, 8], u: 0, v: 0, us: 1,
+      size: (big ? 0.9 : 0.55) + Math.random() * 0.25, g: 0, col: [1, 1, 1], bright: true });
+  }
+};
+// #blocks_wind_charge_explosions: the rays stop at bedrock and barriers
+const WIND_STOP = new Set([B.BEDROCK, B.BARRIER].filter(v => v !== undefined));
+// Level.clip with the blocks' collision boxes: where a flight line first meets a block, and through which face
+function clipBlockHit(w, ax, ay, az, dx, dy, dz, len) {
+  const l0 = Math.hypot(dx, dy, dz);
+  if (l0 < 1e-7) return null;
+  const ux = dx / l0, uy = dy / l0, uz = dz / l0, sx = ux > 0 ? 1 : -1, sy = uy > 0 ? 1 : -1, sz = uz > 0 ? 1 : -1;
+  let x = Math.floor(ax), y = Math.floor(ay), z = Math.floor(az);
+  const tdx = ux ? Math.abs(1 / ux) : Infinity, tdy = uy ? Math.abs(1 / uy) : Infinity, tdz = uz ? Math.abs(1 / uz) : Infinity;
+  let mx = ux ? (ux > 0 ? x + 1 - ax : ax - x) * tdx : Infinity, my = uy ? (uy > 0 ? y + 1 - ay : ay - y) * tdy : Infinity, mz = uz ? (uz > 0 ? z + 1 - az : az - z) * tdz : Infinity;
+  for (let i = 0; i < 64; i++) {
+    const id = w.getBlock(x, y, z);
+    if (id && SOLID[id] && !BLK[id].noCollide) {
+      const b = SHAPE[id] === SH.CUBE ? [0, 0, 0, 1, 1, 1] : selBox(id, w.getMeta(x, y, z), w, x, y, z), h = b && rayBox(ax - x, ay - y, az - z, ux, uy, uz, b);
+      if (h && h.t <= len && h.face >= 0) return { x: ax + ux * h.t, y: ay + uy * h.t, z: az + uz * h.t, face: h.face, bx: x, by: y, bz: z, id };
+    }
+    const t = Math.min(mx, my, mz);
+    if (t > len) return null;
+    if (mx === t) { x += sx; mx += tdx; } else if (my === t) { y += sy; my += tdy; } else { z += sz; mz += tdz; }
+  }
+  return null;
+}
+// AbstractWindCharge: a creature it hits takes 1 damage and the burst comes where the charge was; on a block it comes a
+// quarter block out from the face it hit. The player's (and a dispenser's) charge is a 1.2 burst with 1.22 knockback, a breeze's 3
+Game.prototype.windChargeHit = function (pr, e) {
+  let x = pr.x, y = pr.y, z = pr.z;
+  if (e) {
+    if (e.hurt) e.hurt(1, 'wind', pr.owner || null);
+    if (pr.px !== undefined) { x = pr.px; y = pr.py; z = pr.pz; }
+  } else {
+    const h = clipBlockHit(this.world, pr.px !== undefined ? pr.px : pr.x, pr.py !== undefined ? pr.py : pr.y, pr.pz !== undefined ? pr.pz : pr.z, pr.vx, pr.vy, pr.vz, Math.hypot(pr.vx, pr.vy, pr.vz) + 0.6);
+    if (h) { x = h.x + DX[h.face] * 0.25; y = h.y + DY[h.face] * 0.25; z = h.z + DZ[h.face] * 0.25; }
+  }
+  this.windBurstAt(x, y, z, pr.breeze ? 3 : 1.2, pr.breeze ? 1 : 1.22, pr);
+};
+// Explosion with ExplosionInteraction.TRIGGER: hurts nothing and breaks nothing; it pushes everything around by how close it
+// is and how much of it the blast can see, and works the blocks its rays reach (a breeze's only with mobGriefing)
+Game.prototype.windBurstAt = function (x, y, z, r, kbMul, src) {
+  const w = this.world, R = Math.random, breeze = !!(src && src.breeze), mobBurst = breeze || !!(src && src.windEffect), p = this.player, reach = new Map();
+  for (let j = 0; j < 16; j++) for (let k = 0; k < 16; k++) for (let l = 0; l < 16; l++) {
+    if (j !== 0 && j !== 15 && k !== 0 && k !== 15 && l !== 0 && l !== 15) continue;
+    let dx = j / 15 * 2 - 1, dy = k / 15 * 2 - 1, dz = l / 15 * 2 - 1;
+    const d = Math.hypot(dx, dy, dz); dx /= d; dy /= d; dz /= d;
+    let f = r * (0.7 + R() * 0.6), px = x, py = y, pz = z;
+    for (; f > 0; f -= 0.22500001) {
+      const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz);
+      if (by < 0 || by > CH_TOP) break;
+      const id = w.getBlock(bx, by, bz);
+      if (id) {
+        let res = WIND_STOP.has(id) ? 3600000 : BLAST_RES[id];
+        if (WATERY[id] && !BLK[id].liquid) res = Math.max(res, 100);
+        f -= (res + 0.3) * 0.3;
+        if (f > 0) { const key = bx + ',' + by + ',' + bz; if (!reach.has(key)) reach.set(key, [bx, by, bz]); }
+      }
+      px += dx * 0.3; py += dy * 0.3; pz += dz * 0.3;
+    }
+  }
+  // what gets pushed: creatures, items, orbs, TNT, falling blocks and other projectiles, not frames, paintings or armor stands
+  const f2 = r * 2;
+  const things = this.entities.filter(e => e !== src && !e.dead && !(e.deathTime > 0) && (e instanceof Mob ? !(e instanceof Hanging) && !(e instanceof ArmorStand) && !(e instanceof EndCrystal) && e.type !== 'ender_dragon'
+    : e instanceof ItemEntity || e instanceof XPOrb || e instanceof PrimedTNT || e instanceof FallingBlock || e instanceof Projectile && !e.stuck || typeof FireworkRocket !== 'undefined' && e instanceof FireworkRocket));
+  if (p && !p.dead && p.mode !== 3) things.push(p);
+  for (const e of things) {
+    const d11 = Math.hypot(e.x - x, e.y - y, e.z - z) / f2;
+    if (d11 > 1) continue;
+    let dx = e.x - x, dy = (e instanceof PrimedTNT ? e.y : e.y + (e.eyeH || e.h * 0.85)) - y, dz = e.z - z;
+    const l = Math.hypot(dx, dy, dz);
+    if (l === 0) continue;
+    dx /= l; dy /= l; dz /= l;
+    let kb = (1 - d11) * seenPercent(w, x, y, z, e) * kbMul;
+    const armor = e === p ? p.armor : e.data && e.data.armor;
+    if (armor) { let bp = 0; for (const s of armor) if (s) bp += enchLevel(s, 'blast_protection'); kb *= Math.max(0, 1 - 0.15 * bp); }
+    if (e === p && p.mode === 1 && p.flying) continue;
+    e.vx += dx * kb; e.vy += dy * kb; e.vz += dz * kb;
+    // Player.onExplosionHit: after a wind charge's push (not a breeze's), falls only count below where it hit
+    if (e === p) p.impulseY = mobBurst ? undefined : p.y;
+  }
+  // finalizeExplosion: the blocks in random order
+  if (!breeze || this.rule('mobGriefing')) {
+    const list = [...reach.values()];
+    for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)), t = list[i]; list[i] = list[j]; list[j] = t; }
+    for (const [bx, by, bz] of list) this.windTrigger(bx, by, bz);
+  }
+  this.particles.gust(x, y, z, r >= 2);
+  this.sound(mobBurst ? 'breeze_wind_burst' : 'wind_burst', x, y, z);
+};
+// WindChargedMobEffect.onMobRemoved: a 3 to 5 block wind burst where the creature died (it works blocks whatever mobGriefing says)
+Game.prototype.windBurst = function (x, y, z, r) { this.windBurstAt(x, y, z, r, 1, { windEffect: true }); };
+// onExplosionHit of each block for TRIGGER_BLOCK explosions
+Game.prototype.windTrigger = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z), d = BLK[id], m = w.getMeta(x, y, z), sh = SHAPE[id];
+  if (!id) return;
+  const at = [x + 0.5, y + 0.5, z + 0.5], done = () => this.remeshNear(x, z);
+  // DoorBlock: the lower half of a door wind can open (not iron) that redstone isn't holding
+  if (d.door) { if (!(m & 8) && !d.redstoneOnly && !RS.powered(w, x, y, z) && !RS.powered(w, x, y + 1, z)) this.toggleDoor(x, y, z); return; }
+  if (d.trapdoor) { if (!d.redstoneOnly && !RS.powered(w, x, y, z)) { w.setMeta(x, y, z, m ^ 4); this.sound((m & 4) ? 'door_close' : 'door_open', ...at); done(); } return; }
+  if (d.gate) { if (!RS.powered(w, x, y, z)) { w.setMeta(x, y, z, m ^ 4); this.sound((m & 4) ? 'door_close' : 'door_open', ...at); done(); } return; }
+  if (sh === SH.BUTTON) {
+    if (m & 8) return;
+    w.setMeta(x, y, z, m | 8); this.sound('click', ...at); w.schedule(x, y, z, d.button || 20, 'button');
+    if (this.redstoneChanged) this.redstoneChanged(x, y, z);
+    done(); return;
+  }
+  if (sh === SH.LEVER) { w.setMeta(x, y, z, m ^ 8); this.sound('click', ...at); if (this.redstoneChanged) this.redstoneChanged(x, y, z); done(); return; }
+  if (id === B.BELL) { this.ringBell(x, y, z, null); return; }
+  // AbstractCandleBlock.extinguish
+  if (d.candle && (m & 4)) { w.setMeta(x, y, z, m & ~4); this.sound('fizz', ...at); this.particles.smoke(x + 0.5, y + 0.5, z + 0.5, 3); done(); }
+};
+// the old wind push in the projectile code now goes through the burst above
+const _spawnProjectileWC = Game.prototype.spawnProjectile;
+Game.prototype.spawnProjectile = function (kind, x, y, z, vx, vy, vz, owner) {
+  const pr = _spawnProjectileWC.call(this, kind, x, y, z, vx, vy, vz, owner);
+  // a breeze's charge is its own kind; wind charges fly on until they hit something (or leave the world's top)
+  if (pr && kind === 'wind') { if (owner && owner.type === 'breeze') pr.breeze = true; pr.life = 1200; }
+  return pr;
+};
+// WindCharge: no slowing in the air or water, and a burst 30 blocks above the build limit
+const _projTickWC = Projectile.prototype.tick;
+Projectile.prototype.tick = function () {
+  if (this.kind === 'wind' && !this.dead && this.y > CH_TOP + 31) { this.dead = true; this.game.windBurstAt(this.x, this.y, this.z, this.breeze ? 3 : 1.2, this.breeze ? 1 : 1.22, this); return; }
+  return _projTickWC.call(this);
+};
+// AbstractHurtingProjectile.hurt + ProjectileDeflection.AIM_DEFLECT: a hit sends it where the attacker looks (not your own
+// charge in its first 5 ticks)
+const _projHurtWC = Projectile.prototype.hurt;
+Projectile.prototype.hurt = function (amount, source, attacker) {
+  if (this.kind === 'wind' && attacker === this.game.player) {
+    if (!this.breeze && this.owner === attacker && this.age < 5) return false;
+    const d = attacker.look(), l = Math.hypot(d[0], d[1], d[2]) || 1;
+    this.vx = d[0] / l; this.vy = d[1] / l; this.vz = d[2] / l; this.owner = attacker;
+    return true;
+  }
+  return _projHurtWC.call(this, amount, source, attacker);
+};
+// WindChargeItem: thrown from the eyes at 1.5 with the player's own motion, then 10 ticks before the next one
+Game.prototype.throwWindCharge = function (p, held) {
+  if (p.cooldownLeft && p.cooldownLeft(held.id) > 0) return false;
+  const e = p.eye(), d = p.look(), j = () => (Math.random() - Math.random()) * 0.0075 * 0.5;
+  this.spawnProjectile('wind', p.x, e[1], p.z, d[0] * 1.5 + j() + p.vx, d[1] * 1.5 + j() + (p.onGround ? 0 : p.vy), d[2] * 1.5 + j() + p.vz, p);
+  this.sound('wind_charge_throw', p.x, p.y, p.z);
+  if (p.setCooldown) p.setCooldown(held.id, 10);
+  p.consumeHeld(1); p.useCd = 6;
+  return true;
+};
+
+/* ---------------- bells ---------------- */
+// BellBlock.isProperHit: from the side it swings to, below the top of its frame (bells here stand on the floor)
+const bellProperHit = (m, face, hy) => face !== 2 && face !== 3 && hy <= 0.8124 && ((m & 1) ? face <= 1 : face >= 4);
+// BellBlock.attemptToRing and BellBlockEntity: a ring shakes the bell for 50 ticks; a raider within 32 blocks makes it
+// resonate, and 2 seconds later raiders within 48 blocks glow for 3 seconds; villagers within 32 blocks hear it and hide
+Game.prototype.ringBell = function (x, y, z, by) {
+  const w = this.world, key = x + ',' + y + ',' + z, bells = this.bells || (this.bells = new Map()), cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+  let b = bells.get(key);
+  if (!b) bells.set(key, b = { x, y, z, t: 0, res: 0, on: false, near: null, nearT: -1e9 });
+  if (w.tick > b.nearT + 60 || !b.near) { b.nearT = w.tick; b.near = this.entities.filter(e => e instanceof Mob && !e.dead && Math.abs(e.x - cx) <= 48.5 && Math.abs(e.y - cy) <= 48.5 && Math.abs(e.z - cz) <= 48.5); }
+  for (const e of b.near) if (!e.dead && Math.hypot(e.x - cx, e.y - cy, e.z - cz) < 32) e.data.heardBell = w.tick;
+  b.t = 0; b.res = 0; b.shaking = true;
+  this.sound('bell', cx, cy, cz);
+  if (this.vibrate) this.vibrate(cx, cy, cz, 'block', by || null);
+  if (by && by === this.player && by.stat) by.stat('bell_ring');
+  return true;
+};
+const bellRaiders = (b, r) => b.near.filter(e => !e.dead && RAIDERS.has(e.type) && Math.hypot(e.x - b.x - 0.5, e.y - b.y - 0.5, e.z - b.z - 0.5) < r);
+const _gameTickBL = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickBL.call(this);
+  if (!this.bells || !this.bells.size || !this.world) return;
+  for (const [k, b] of this.bells) {
+    if (this.world.getBlock(b.x, b.y, b.z) !== B.BELL) { this.bells.delete(k); continue; }
+    if (b.shaking && ++b.t >= 50) { b.shaking = false; b.t = 0; }
+    if (b.t >= 5 && b.res === 0 && !b.on && bellRaiders(b, 32).length) { b.on = true; this.sound('bell_resonate', b.x + 0.5, b.y + 0.5, b.z + 0.5); }
+    if (b.on) {
+      if (b.res < 40) b.res++;
+      else { for (const e of bellRaiders(b, 48)) if (e.addEffect) e.addEffect('glowing', 60, 0); b.on = false; }
+    }
+    if (!b.shaking && !b.on) this.bells.delete(k);
+  }
+};
+// the hide activity: for 15 seconds after a bell villagers go to their beds and stay there
+const _villagerLifeBL = GOALS.villagerLife;
+GOALS.villagerLife = function (m) {
+  const d = m.data, w = m.game.world;
+  if (d.heardBell !== undefined && w.tick - d.heardBell < 300 && d.bed && !d.trading) {
+    const [bx, by, bz] = d.bed;
+    if (Math.hypot(bx + 0.5 - m.x, bz + 0.5 - m.z) > 1.5 || Math.abs(by - m.y) > 1.5) m.goTo(bx, by, bz, m.T.walk * 1.25, 1.2); else m.nav = null;
+    return true;
+  }
+  return _villagerLifeBL.call(this, m);
+};
+// right click a bell on the side it swings to
+const _useBlockBL = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit.id === B.BELL) {
+    const e = p.eye(), d = p.look(), hy = e[1] + d[1] * (hit.t || 0) - hit.y;
+    if (bellProperHit(this.world.getMeta(hit.x, hit.y, hit.z), hit.face, hy)) return this.ringBell(hit.x, hit.y, hit.z, p);
+    return false;
+  }
+  return _useBlockBL.call(this, p, hit, held);
+};
+// BellBlock.onProjectileHit: arrows, snowballs, wind charges and the rest ring it the same way
+const _impactBL = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (!e && !this.stuck) {
+    const g = this.game, sx = this.px !== undefined ? this.px : this.x, sy = this.py !== undefined ? this.py : this.y, sz = this.pz !== undefined ? this.pz : this.z;
+    const h = clipBlockHit(g.world, sx, sy, sz, this.vx, this.vy, this.vz, Math.hypot(this.vx, this.vy, this.vz) + 0.6);
+    if (h && h.id === B.BELL && bellProperHit(g.world.getMeta(h.bx, h.by, h.bz), h.face, h.y - h.by)) g.ringBell(h.bx, h.by, h.bz, this.owner instanceof Player ? this.owner : null);
+  }
+  return _impactBL.call(this, e);
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t, c] of [['wolf_armor_equip', 'Wolf armor equips', 'neutral'], ['wolf_armor_unequip', 'Wolf armor snips away', 'neutral'], ['wolf_armor_crack', 'Wolf armor cracks', 'neutral'],
+  ['wolf_armor_damage', 'Wolf armor takes damage', 'neutral'], ['wolf_armor_repair', 'Wolf armor is repaired', 'neutral'], ['wolf_armor_break', 'Wolf armor breaks', 'neutral'],
+  ['wind_charge_throw', 'Wind Charge flies', 'neutral'], ['breeze_wind_burst', 'Wind Charge bursts', 'hostile'], ['bell_resonate', 'Bell resonates', 'block']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+SUB_TEXT.wind_burst = SUB_TEXT.wind_burst || 'Wind Charge bursts';
+const _audioPlayWV = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^(wolf_armor_|wind_charge_throw$|breeze_wind_burst$|bell_resonate$)/.test(name)) return _audioPlayWV.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime;
+  switch (name) {
+    case 'wolf_armor_equip': this.noiseHit(dst, 'bandpass', 1100, 1.2, 0.12, 0.4); this.tone(dst, 'triangle', 420, 300, 0.12, 0.15); break;
+    case 'wolf_armor_unequip': this.noiseHit(dst, 'highpass', 2400, 1, 0.08, 0.35); this.tone(dst, 'triangle', 320, 420, 0.1, 0.12, t0 + 0.05); break;
+    case 'wolf_armor_damage': this.noiseHit(dst, 'bandpass', 900, 1.4, 0.1, 0.45); this.tone(dst, 'square', 260, 200, 0.06, 0.08); break;
+    case 'wolf_armor_crack': this.noiseHit(dst, 'bandpass', 1800, 2, 0.06, 0.5); this.noiseHit(dst, 'bandpass', 1300, 2, 0.07, 0.4); break;
+    case 'wolf_armor_repair': this.tone(dst, 'triangle', 500, 700, 0.12, 0.15); this.noiseHit(dst, 'bandpass', 1500, 1.5, 0.08, 0.25); break;
+    case 'wolf_armor_break': this.noiseHit(dst, 'bandpass', 700, 1, 0.3, 0.6); this.tone(dst, 'square', 280, 90, 0.25, 0.12); break;
+    case 'wind_charge_throw': this.noiseHit(dst, 'bandpass', 1400, 0.9, 0.18, 0.3); break;
+    case 'breeze_wind_burst': this.noiseHit(dst, 'lowpass', 500, 0.7, 0.9, 0.8); this.tone(dst, 'sine', 120, 45, 0.6, 0.25); break;
+    case 'bell_resonate': for (const [m, a] of [[1, 0.12], [1.5, 0.08], [2.76, 0.05]]) this.tone(dst, 'sine', 640 * m, 660 * m, 2.2, a); break;
+  }
+};
+
+/* ---------------- axes against shields ---------------- */
+// LivingEntity.canDisableShield: a melee hit from an axe, or from the warden
+Mob.prototype.canDisableShield = function (source) {
+  if (source !== this.type) return false;
+  if (this.type === 'warden') return true;
+  const h = this.data.hand;
+  return !!(h && ITEMS[h.id] && /_axe$/.test(ITEMS[h.id].name));
 };
 
 </script>

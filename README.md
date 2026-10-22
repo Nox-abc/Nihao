@@ -487,6 +487,31 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   everything standing around the target, and Wind Burst throws you back up; landing no lower than
   where you hit costs no health.
 - A mob head on top of a note block makes it play that mob's sound.
+- **Wolves of every coat**: the nine coats of 1.21 come from the biome a wolf spawns in (pale in
+  taigas, ashen in snowy taigas, black and chestnut in the old growth taigas, rusty in jungles,
+  snowy in groves, spotted in savannas, striped in badlands, woods in forests); a pack shares one
+  coat and a pup takes one of its parents'. Tamed wolves have 40 health, eat meat or fish to heal
+  twice what the food is worth, and stand up when they are hurt.
+- **Wolf armor**: the owner puts it on a grown tame wolf with a right click and takes it off with
+  shears. It takes every hit it can (not falls, fire, lava, magic and the like), losing as much
+  durability as the damage, shows cracks as it wears down and breaks when it runs out; armadillo
+  scutes mend it while the wolf sits. It always drops when its wolf dies.
+- **Dyeing**: leather armor, leather horse armor and wolf armor are dyed in the crafting grid with
+  one or more dyes, mixed like Java (dyeing again mixes with the old colour). Dyed items say so in
+  their tooltip, and a water cauldron washes the dye off.
+- **Wind charges** burst like Java's: a charge thrown from your eyes flies straight until it hits
+  something (they rest half a second between throws, and dispensers shoot them too). The burst
+  throws everything near it away by how close it is and how much of it the blast sees, so
+  throwing one at your feet sends you about 6 blocks up, and falling no lower than where it hit
+  you costs no health. It opens and closes wooden and copper doors, trapdoors and gates, presses
+  buttons, flips levers, rings bells and puts out candles. A breeze's charge bursts bigger, and only
+  works blocks with mobGriefing on. Hit a charge to send it back where you look. A mace with Wind
+  Burst now makes the same kind of burst at your feet.
+- **Bells** ring when used from the side they swing to, when a projectile hits that side, by
+  redstone and by wind. Villagers near a ringing bell run to their beds, and raiders near one glow
+  for a few seconds.
+- An axe (in a vindicator's or a piglin brute's hand, say) or the warden hitting your raised
+  shield knocks it out for 5 seconds.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
