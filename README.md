@@ -469,6 +469,20 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   it into its sherds; broken by hand it keeps its sides. Trial chambers have pots with flow,
   guster and scrape sherds, some holding loot.
 - Sponges soak up water and dry out in the Nether.
+- **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
+  table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
+  lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
+  material is a darker shade). Trims show on the armor worn by you, mobs and armor stands, on
+  the armor's icon and in its tooltip. The smithing table shows an armor stand wearing the
+  result, pictures of what goes in each empty slot, and a crossed-out arrow when the three
+  items don't go together. The player in the inventory wears your armor too.
+- **Banner shields**: craft a shield with any banner to put the banner's colour and pattern
+  layers on the shield (it is then called e.g. *Red Shield*). Shields are drawn as Java's 3D
+  shield: in your hand in first and third person (raised while blocking), on the ground, in item
+  frames and in the inventory.
+- **Banner markers on maps**: use a filled map on a banner inside the map's area to mark it in
+  the banner's colour, with its name if you renamed it at an anvil; use it again to take the
+  marker off. A marker disappears once its banner is broken and the map is updated there.
 
 ### Graphics and sound
 
@@ -531,7 +545,7 @@ What a pack changes:
 
 - **Blocks and items**, including animated textures (`.mcmeta`), grass, foliage and water tinting,
   block-breaking cracks, chests, beds, signs, banners, the end portal, compass and clock frames,
-  and paintings.
+  paintings, shields and their banner patterns, and armor trims (on the armor and on its icon).
 - **Mobs**: every mob uses the vanilla model shapes and texture layout, so the pack's entity
   textures fit directly, and the player uses the pack's Steve skin.
 - **Interface**: the hotbar, hearts, hunger, armor, air and experience bar, crosshair, buttons,

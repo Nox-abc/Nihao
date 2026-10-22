@@ -11021,7 +11021,7 @@ const SH_DYN_F = `#version 300 es
 precision highp float; precision highp sampler2DArray;
 ${SH_TEX_FN}
 uniform sampler2D uAtlas;
-uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright; uniform float uGlint; uniform float uTime; uniform vec2 uGlintK;
+uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright; uniform float uGlint; uniform float uTime; uniform vec2 uGlintK; uniform float uGlintAtlas;
 ${SH_LIGHT_FN}
 in vec3 vUV; in vec4 vCol; in vec2 vLight; in float vDist; out vec4 o;
 void main(){
@@ -11029,8 +11029,10 @@ void main(){
   if (c.a < 0.1) discard;
   if (uGlint > 0.5) {
     // enchantment glint: two diagonal bands scrolling over the item, added on top (uGlintK: Glint Speed and Strength)
-    float a = fract(dot(vUV.xy, vec2(0.55, 1.0)) * 0.9 - uTime * 0.32 * uGlintK.x);
-    float b = fract(dot(vUV.xy, vec2(-1.0, 0.45)) * 0.8 + uTime * 0.21 * uGlintK.x);
+    // (on model atlas textures the bands follow the texels: uGlintAtlas = atlas size / 8)
+    vec2 gu = vUV.z < -0.5 ? vUV.xy * uGlintAtlas : vUV.xy;
+    float a = fract(dot(gu, vec2(0.55, 1.0)) * 0.9 - uTime * 0.32 * uGlintK.x);
+    float b = fract(dot(gu, vec2(-1.0, 0.45)) * 0.8 + uTime * 0.21 * uGlintK.x);
     float g = smoothstep(0.0, 0.25, a) * smoothstep(0.6, 0.25, a) + 0.7 * smoothstep(0.0, 0.2, b) * smoothstep(0.5, 0.2, b);
     o = vec4(vec3(0.5, 0.2, 0.9) * (0.25 + g * 0.75) * vCol.a * uGlintK.y, 1.0);
     return;
@@ -11471,6 +11473,7 @@ class Renderer {
     gl.uniform1f(u.uGlint, opts && opts.glint ? 1 : 0);
     gl.uniform1f(u.uTime, (performance.now() / 1000) % 1000);
     if (u.uGlintK) gl.uniform2f(u.uGlintK, (OPTIONS.glintSpeed === undefined ? 0.5 : OPTIONS.glintSpeed) / 0.5, (OPTIONS.glintStrength === undefined ? 0.75 : OPTIONS.glintStrength) / 0.75);
+    if (u.uGlintAtlas) gl.uniform1f(u.uGlintAtlas, ATLAS.S / 8);
     this.bindTex(u);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.atlas); gl.uniform1i(u.uAtlas, 1);
     gl.activeTexture(gl.TEXTURE0);
@@ -12154,6 +12157,8 @@ function buildMobAtlas(game, packImg) {
     const sk = SKINS[key];
     let im = null;
     if (packImg) for (const p of [key, ...(SKIN_ALIAS[key] || [])]) if ((im = packImg(p))) break;
+    // textures only a resource pack can supply
+    if (!im && sk.packOnly) continue;
     if (im) {
       const w = Math.min(im.width, sk.tw * 2), h = Math.round(w * im.height / im.width);
       items.push({ key, sk, im, w, h, th: sk.tw * im.height / im.width });
@@ -12238,6 +12243,8 @@ function emitVCube(r, c, xf, uvx, tint, light) {
 // translucent model passes are drawn after the opaque ones
 const TRANS_Q = [];
 const transRenderer = { dv(...a) { TRANS_Q.push(a); } };
+// enchanted armor's glint: the same faces again, queued for the glint pass
+const glintRenderer = { dv(x, y, z, u, v, layer) { const g = window.game; if (g) (g.glintQ || (g.glintQ = [])).push([x, y, z, u, v, layer, 1, 1, 1, 1, 15, 15]); } };
 // draw a model. skins: [{ key, parts?, tint?, glow?, grow?, trans? }]
 // st: animation state; opts: { scale, tilt, tint, light, hide: Set of part names }
 function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
@@ -12254,7 +12261,7 @@ function drawMob(r, def, skins, pos, yaw, st, tint, light, scale, tilt) {
     const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th;
     const uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
     const tn = sk.tint ? [tint[0] * sk.tint[0], tint[1] * sk.tint[1], tint[2] * sk.tint[2], tint[3] * (sk.tint[3] === undefined ? 1 : sk.tint[3])] : tint;
-    const li = sk.glow ? [15, 15] : light, grow = sk.grow || (sk.glow ? 0.01 : 0), out = sk.trans ? transRenderer : r;
+    const li = sk.glow ? [15, 15] : light, grow = sk.grow || (sk.glow ? 0.01 : 0), out = sk.trans ? transRenderer : sk.glint ? glintRenderer : r;
     for (const part of sk.parts || def.parts) {
       if (P[part.n + '#hide'] || (sk.only && !sk.only.includes(part.n))) continue;
       const M = sk.parts ? (mats[part.n] && part.p === undefined ? mats[part.n] : partMatrix(part, P, mats)) : mats[part.n];
@@ -12361,7 +12368,11 @@ function animHumanoid(P, st, zombieArms) {
   } else {
     P.right_arm = [c2 * st.amt - (st.attack || 0) * 1.4 + bx, 0, bz]; P.left_arm = [c * st.amt - bx, 0, -bz];
     if (st.aim) { P.right_arm = [-Math.PI / 2 + st.hp, -0.1 - st.hy, 0]; P.left_arm = [-Math.PI / 2 + st.hp, 0.4 - st.hy, 0]; }
-    if (st.hold) P.right_arm = [P.right_arm[0] * 0.5 - Math.PI / 10, P.right_arm[1], P.right_arm[2]];
+    if (st.hold || st.holdR) P.right_arm = [P.right_arm[0] * 0.5 - Math.PI / 10, P.right_arm[1], P.right_arm[2]];
+    if (st.holdL) P.left_arm = [P.left_arm[0] * 0.5 - Math.PI / 10, P.left_arm[1], P.left_arm[2]];
+    // HumanoidModel's BLOCK pose: the arm with the shield raised across the body
+    if (st.block === 'R') P.right_arm = [P.right_arm[0] * 0.5 - 0.9424779, -Math.PI / 6, P.right_arm[2]];
+    if (st.block === 'L') P.left_arm = [P.left_arm[0] * 0.5 - 0.9424779, Math.PI / 6, P.left_arm[2]];
   }
   if (st.sit) { P.right_leg = [-1.4137, 0.3142, 0.0785]; P.left_leg = [-1.4137, -0.3142, -0.0785]; }
 }
@@ -20193,11 +20204,14 @@ class Game {
   }
   renderPlayerModel(r, p, alpha) {
     const pp = p.ipos(alpha), riding = p.riding;
-    const st = { swing: riding ? 0 : p.walkDist * 3.3, amt: riding ? 0 : Math.min(1, p.bob * 12), age: p.age + alpha, hy: 0, hp: -p.pitch, attack: p.swing ? Math.sin(p.swing * Math.PI) : 0, sneak: p.sneaking, sit: !!riding };
+    // the arm holding a raised shield (the main hand's arm is the left one for a left-handed player; p.held is already swapped then)
+    const leftMain = OPTIONS.mainHand === 1 && p === this.player, u = p.using && p.using.kind === 'shield' ? p.using.hand : null;
+    const block = !u ? null : (u === 'main') !== leftMain ? 'R' : 'L';
+    const st = { swing: riding ? 0 : p.walkDist * 3.3, amt: riding ? 0 : Math.min(1, p.bob * 12), age: p.age + alpha, hy: 0, hp: -p.pitch, attack: p.swing ? Math.sin(p.swing * Math.PI) : 0, sneak: p.sneaking, sit: !!riding, holdR: !!p.held, holdL: !!p.offhand[0], block };
     const L = p.lightAt(), skins = [{ key: 'entity/player/wide/steve' }, ...armorPasses(p.armor, MOB_MODELS.player)];
     const at = drawMob(r, MOB_MODELS.player, skins, [pp[0], pp[1], pp[2]], p.yaw + Math.PI, st, p.hurtTime > 0 ? [1, 0.5, 0.5, 1] : [1, 1, 1, 1], L, 0.9375);
-    if (p.held) drawMobItem(r, this, p.held, at, 'right_arm', [-1, 10, 0], L);
-    if (p.offhand[0]) drawMobItem(r, this, p.offhand[0], at, 'left_arm', [1, 10, 0], L);
+    if (p.held) drawMobItem(r, this, p.held, at, 'right_arm', [-1, 10, 0], L, undefined, { blocking: block === 'R' });
+    if (p.offhand[0]) drawMobItem(r, this, p.offhand[0], at, 'left_arm', [1, 10, 0], L, undefined, { blocking: block === 'L' });
   }
   // first-person hands: main hand on the right, offhand on the left
   renderHand(alpha, env) {
@@ -28906,7 +28920,8 @@ const _renderHandSideHD = Game.prototype.renderHandSide;
 Game.prototype.renderHandSide = function (held, s, alpha, l) {
   const p = this.player, main = s > 0, o = main ? 1 : -1;
   const use = p.using && (p.using.hand === 'main') === main ? p.using : null;
-  // maps and shields keep their own poses
+  // maps keep their own poses; shields are drawn as their 3D model
+  if (p.mhh !== undefined && held && held.id === I.SHIELD && this.renderShieldHand) return this.renderShieldHand(held, s, alpha, l);
   if (p.mhh === undefined || (held && (held.id === I.FILLED_MAP || held.id === I.SHIELD))) return _renderHandSideHD.call(this, held, s, alpha, l);
   const r = this.r, eq = equipOf(p, main, alpha);
   const h = main && p.swingT > 0 ? Math.max(0, Math.min(1, 1 - (p.swingT - alpha) / 6)) : 0;
@@ -37568,6 +37583,679 @@ UI.prototype.openInv = function (type, data) {
 // a new world starts the waiting again
 const _startWorldTU = Game.prototype.startWorld;
 Game.prototype.startWorld = function (meta, saved) { if (this.tut) for (const k of ['a', 'b']) tutHide(this.tut[k]); this.tut = null; return _startWorldTU.call(this, meta, saved); };
+
+/* @file 135_trims_shields.js */
+/* ===================================================================
+   ARMOR TRIMS, BANNER SHIELDS AND BANNER MARKERS — trims drawn on worn
+   armor, on armor icons and in tooltips; the player in the inventory and
+   the smithing table's armor stand wearing what they have on; shields
+   that take a banner's design, held like Java's 3D shield; maps that
+   mark the banners they are used on
+   =================================================================== */
+
+/* ---------------- trim materials ---------------- */
+// the ingredient of each trim material, and its colour (the tooltip colour of Java's trim materials)
+const TRIM_MAT_OF = { quartz: 'quartz', iron_ingot: 'iron', netherite_ingot: 'netherite', redstone: 'redstone', copper_ingot: 'copper', gold_ingot: 'gold', emerald: 'emerald', diamond: 'diamond', lapis_lazuli: 'lapis', amethyst_shard: 'amethyst' };
+const TRIM_COL = { quartz: 0xE3D4C4, iron: 0xECECEC, netherite: 0x625859, redstone: 0x971607, copper: 0xB4684D, gold: 0xDEB12D, emerald: 0x11A036, diamond: 0x6EECD2, lapis: 0x416E97, amethyst: 0x9A5CC6 };
+// a trim of the armor's own material is drawn in a darker shade, so it still shows (iron, gold, diamond and netherite)
+const TRIM_DARKER = { iron: 'iron', gold: 'golden', diamond: 'diamond', netherite: 'netherite' };
+const TRIM_DARK_COL = { iron: 0xA4A4A8, gold: 0xB28A1C, diamond: 0x2F9C8C, netherite: 0x3A3133 };
+const TRIMMABLE = /_(helmet|chestplate|leggings|boots)$/;
+// the trim on a stack: { pattern, mat, darker } or null
+function trimOf(st) {
+  const t = st && st.tag && st.tag.trim, it = st && ITEMS[st.id];
+  if (!t || !it || !it.armor || !TRIMMABLE.test(it.name) || !TRIMS.includes(t.pattern)) return null;
+  const mat = TRIM_MAT_OF[t.material] || t.material;
+  if (TRIM_COL[mat] === undefined) return null;
+  return { pattern: t.pattern, mat, darker: TRIM_DARKER[mat] === it.armor.mat };
+}
+const trimHex = tr => tr.darker ? TRIM_DARK_COL[tr.mat] : TRIM_COL[tr.mat];
+const trimRGB = tr => { const h = trimHex(tr); return [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]; };
+const cssHex = h => '#' + h.toString(16).padStart(6, '0');
+
+/* ---------------- trim patterns ---------------- */
+// gray shades of the trim textures: they are tinted with the material's colour
+const TRIM_SHADE = [255, 226, 190, 150];
+const trimSide = f => f !== 'top' && f !== 'bottom';
+// each design: (part, face, x, y, W, H) -> shade index or -1, on the part of each face the armor covers (y counted from the top of that band)
+const TRIM_ART = {
+  // a band along the top, rivets along the bottom and a ridge down the front
+  sentry: (n, f, x, y, W, H) => !trimSide(f) ? -1 : y === 0 ? 1 : y === H - 1 && x % 3 === 1 ? 0 : f === 'front' && n !== 'right_leg' && Math.abs(x - (W - 1) / 2) < 1 && y < H - 1 ? 2 : -1,
+  // wings: V shapes opening upwards on the front and back, slanted lines on the sides
+  vex: (n, f, x, y, W, H) => !trimSide(f) ? -1 : f === 'front' || f === 'back' ? (Math.abs(Math.abs(x - (W - 1) / 2) - (H - 1 - y) * 0.6) < 0.55 ? 1 : -1) : (x + y) % 4 === 0 ? 2 : -1,
+  // a creeping vine with leaves
+  wild: (n, f, x, y, W, H) => {
+    if (!trimSide(f)) return -1;
+    const v = Math.round((H - 1) / 2 + Math.sin((x + FACE_I[f] * 3) * 1.1) * Math.min(1.5, (H - 1) / 2));
+    return y === v ? 1 : y === v - 1 && (x + FACE_I[f]) % 3 === 0 ? 0 : -1;
+  },
+  // waves over the lower part
+  coast: (n, f, x, y, W, H) => !trimSide(f) || y < H / 3 ? -1 : (y + Math.round(Math.sin(x * 1.3 + FACE_I[f]) * 1.2) + 30) % 3 === 0 ? 1 : -1,
+  // stacked chevrons, like dunes
+  dune: (n, f, x, y, W, H) => !trimSide(f) ? -1 : (y + Math.round(Math.abs(x - (W - 1) / 2))) % 4 === 0 ? 2 : -1,
+  // a compass rose on the front, a line around the sides
+  wayfinder: (n, f, x, y, W, H) => {
+    if (!trimSide(f)) return -1;
+    const dx = Math.abs(x - (W - 1) / 2), dy = Math.abs(y - (H - 1) / 2);
+    if (f !== 'front') return y === Math.round((H - 1) / 2) ? 2 : -1;
+    return Math.abs(dx + dy - 1.5) < 0.6 ? 0 : (dx < 0.6 || dy < 0.6) && dx + dy < Math.min(W, H) / 2 + 1 ? 1 : -1;
+  },
+  // columns rising from the bottom
+  raiser: (n, f, x, y, W, H) => !trimSide(f) || x % 3 !== 1 || y < Math.floor(H / 2) ? -1 : y === Math.floor(H / 2) ? 0 : 2,
+  // a band of square blocks at the bottom
+  shaper: (n, f, x, y, W, H) => !trimSide(f) ? (Math.min(x, y, W - 1 - x, H - 1 - y) === 0 ? 2 : -1) : y >= H - 4 && ((x >> 1) + ((y - H + 4) >> 1)) % 2 === 0 ? 1 : -1,
+  // a frame around every face
+  host: (n, f, x, y, W, H) => Math.min(x, y, W - 1 - x, H - 1 - y) === 0 ? ((x + y) % 2 ? 1 : 2) : -1,
+  // frames inside frames
+  ward: (n, f, x, y, W, H) => { const e = Math.min(x, y, W - 1 - x, H - 1 - y); return !trimSide(f) ? (e === 1 ? 2 : -1) : e === 0 ? 2 : e === 2 ? 1 : -1; },
+  // a dotted line under the top and a scatter of bright points
+  silence: (n, f, x, y, W, H) => !trimSide(f) ? -1 : y === 1 && x % 2 === 0 ? 1 : y > 2 && (x * 5 + y * 3 + FACE_I[f]) % 9 === 0 ? 0 : -1,
+  // fish scales
+  tide: (n, f, x, y, W, H) => { if (!trimSide(f) || y < 1) return -1; const r = y % 3, s = (x + Math.floor(y / 3)) % 3; return (r === 0 && s !== 2) || (r === 1 && s === 1) ? 1 : -1; },
+  // a snout at the bottom of the front, a line along the bottom elsewhere
+  snout: (n, f, x, y, W, H) => {
+    if (!trimSide(f)) return -1;
+    const dx = Math.abs(x - (W - 1) / 2);
+    if (f === 'front') return y >= H - 3 && dx < 2.5 ? (y === H - 2 && dx < 1 ? 3 : 1) : -1;
+    return y === H - 1 ? 2 : -1;
+  },
+  // ribs across the front and back
+  rib: (n, f, x, y, W, H) => !trimSide(f) || y % 2 || y === 0 || x === 0 || x === W - 1 ? -1 : f === 'front' || f === 'back' ? 1 : 2,
+  // an eye on the front, a line along the top elsewhere
+  eye: (n, f, x, y, W, H) => {
+    if (!trimSide(f)) return -1;
+    if (f !== 'front') return y === 0 ? 2 : -1;
+    const q = ((x - (W - 1) / 2) / Math.max(1, W / 2.5)) ** 2 + ((y - (H - 1) / 2) / Math.max(1, H / 3)) ** 2;
+    return q < 0.25 ? 0 : Math.abs(q - 1) < 0.45 ? 1 : -1;
+  },
+  // a spire up the middle of each face, with a point at the top
+  spire: (n, f, x, y, W, H) => { if (!trimSide(f)) return -1; const dx = Math.abs(x - (W - 1) / 2); return dx < 0.6 && y >= 1 ? 1 : Math.abs(dx - 0.5 - (2 - y)) < 0.5 && y < 3 ? 0 : -1; },
+  // spirals
+  flow: (n, f, x, y, W, H) => {
+    if (!trimSide(f)) return -1;
+    const cx = (W - 1) / 2, cy = (H - 1) / 2, d = Math.hypot(x - cx, y - cy), a = Math.atan2(y - cy, x - cx) / (2 * Math.PI) + 1;
+    return d < Math.max(W, H) / 2 && (a * 3 + d * 0.7) % 1.5 < 0.45 ? 1 : -1;
+  },
+  // a lightning zigzag down the front and back, notches on the sides
+  bolt: (n, f, x, y, W, H) => {
+    if (!trimSide(f)) return -1;
+    if (f !== 'front' && f !== 'back') return y % 4 === 0 ? 2 : -1;
+    const px = Math.round((W - 1) / 2 - 1 + Math.abs((y % 4) - 2));
+    return x === px ? 1 : x === px + 1 ? 2 : -1;
+  },
+};
+// the trim textures follow Java's armor layout (64x32, layer 1 for the helmet, chestplate and boots, layer 2 for leggings),
+// painted only where this game's armor textures cover the model; a resource pack's trims/models/armor textures take their place
+function trimSkin(pattern, layer) {
+  const art = TRIM_ART[pattern], lv = (k, R) => k < 0 ? null : nz([TRIM_SHADE[k], TRIM_SHADE[k], TRIM_SHADE[k]], R, 0.03);
+  const painters = layer === 1 ? {
+    head: (f, x, y, W, H, R) => f === 'bottom' || (f === 'front' && y >= 2 && x >= 1 && x <= 6) ? null : lv(art('head', f, x, y, W, H), R),
+    body: (f, x, y, W, H, R) => f === 'bottom' || (trimSide(f) && y >= 10) ? null : lv(art('body', f, x, y, W, trimSide(f) ? 10 : H), R),
+    right_arm: (f, x, y, W, H, R) => f === 'bottom' || (trimSide(f) && y >= 4) ? null : lv(art('right_arm', f, x, y, W, trimSide(f) ? 4 : H), R),
+    right_leg: (f, x, y, W, H, R) => f === 'top' || (trimSide(f) && y < 8) ? null : lv(art('right_leg', f, x, trimSide(f) ? y - 8 : y, W, trimSide(f) ? 4 : H), R),
+  } : {
+    body: (f, x, y, W, H, R) => !trimSide(f) || y < 9 ? null : lv(art('body', f, x, y - 9, W, 3), R),
+    right_leg: (f, x, y, W, H, R) => f === 'bottom' || (trimSide(f) && y >= 9) ? null : lv(art('right_leg', f, x, y, W, trimSide(f) ? 9 : H), R),
+  };
+  return skinParts(64, 32, ARMOR_PARTS_UV, painters, 900 + TRIMS.indexOf(pattern) * 2 + layer);
+}
+for (const t of TRIMS) {
+  defSkin('trims/models/armor/' + t, 64, 32, () => trimSkin(t, 1));
+  defSkin('trims/models/armor/' + t + '_leggings', 64, 32, () => trimSkin(t, 2));
+}
+// worn armor: each piece, then its trim drawn over it in the material's colour
+armorPasses = function (armor, def) {
+  const out = [];
+  if (!armor) return out;
+  armor.forEach((st, slot) => {
+    if (!st || !ITEMS[st.id] || !ITEMS[st.id].armor) return;
+    const a = ITEMS[st.id].armor, mat = a.mat === 'golden' ? 'gold' : a.mat;
+    if (mat === 'elytra') return;
+    const src = slot === 2 ? ARMOR_INNER : ARMOR_OUTER, parts = [];
+    for (const n of ARMOR_SLOT_PARTS[slot]) if (src[n] && def.parts.some(p => p.n === n)) parts.push({ n, c: src[n] });
+    const tint = mat === 'leather' ? (st.tag && st.tag.color !== undefined ? [((st.tag.color >> 16) & 255) / 255, ((st.tag.color >> 8) & 255) / 255, (st.tag.color & 255) / 255] : [0.63, 0.4, 0.25]) : null;
+    out.push({ key: 'models/armor/' + mat + '_layer_' + (slot === 2 ? 2 : 1), parts, tint });
+    const tr = trimOf(st);
+    if (tr) out.push({ key: 'trims/models/armor/' + tr.pattern + (slot === 2 ? '_leggings' : ''), parts, tint: trimRGB(tr), grow: 0.01, trim: true });
+    if (hasGlint(st)) out.push({ key: 'models/armor/' + mat + '_layer_' + (slot === 2 ? 2 : 1), parts, glint: true, grow: tr ? 0.01 : 0 });
+  });
+  return out;
+};
+
+/* ---------------- trims on the armor icons ---------------- */
+// the overlay of each piece (one per piece whatever the pattern, like Java's trims/items textures), in the trim shades
+const TRIM_ITEM_ART = {
+  helmet: [[3, 6, 1], [4, 6, 1], [5, 6, 1], [6, 6, 1], [7, 6, 1], [8, 6, 1], [9, 6, 1], [10, 6, 1], [11, 6, 1], [12, 6, 1], [7, 4, 0], [8, 4, 0], [3, 10, 2], [4, 10, 2], [11, 10, 2], [12, 10, 2]],
+  chestplate: [[5, 4, 1], [6, 5, 0], [7, 6, 0], [8, 6, 0], [9, 5, 0], [10, 4, 1], [4, 11, 1], [5, 11, 1], [6, 11, 1], [7, 11, 2], [8, 11, 2], [9, 11, 1], [10, 11, 1], [11, 11, 1], [2, 5, 2], [3, 5, 2], [12, 5, 2], [13, 5, 2]],
+  leggings: [[3, 2, 1], [4, 2, 1], [5, 2, 1], [6, 2, 1], [7, 3, 0], [8, 3, 0], [9, 2, 1], [10, 2, 1], [11, 2, 1], [12, 2, 1], [3, 10, 2], [4, 10, 2], [5, 10, 2], [6, 10, 2], [9, 10, 2], [10, 10, 2], [11, 10, 2], [12, 10, 2]],
+  boots: [[2, 7, 1], [3, 7, 1], [4, 7, 1], [5, 7, 1], [10, 7, 1], [11, 7, 1], [12, 7, 1], [13, 7, 1], [1, 13, 2], [2, 13, 2], [3, 13, 2], [4, 13, 2], [5, 13, 2], [10, 13, 2], [11, 13, 2], [12, 13, 2], [13, 13, 2], [14, 13, 2]],
+};
+for (const piece of ARMOR_PIECES) defSkin('trims/items/' + piece + '_trim', 16, 16, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 16;
+  const g = c.getContext('2d');
+  for (const [x, y, k] of TRIM_ITEM_ART[piece]) { const v = TRIM_SHADE[k]; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 1, 1); }
+  return c;
+});
+// a skin region multiplied by a colour (for the 2D pictures, which can't tint while drawing)
+const TINTED = new Map();
+function tintedSkin(key, tint) {
+  const vt = VTEX[key], sk = SKINS[key];
+  const id = key + '|' + tint.map(v => v.toFixed(3)).join(',');
+  const e = TINTED.get(id);
+  if (e && e.atlas === ATLAS.canvas) return e;
+  let src, sx = 0, sy = 0, w, h;
+  if (vt && ATLAS.canvas) { src = ATLAS.canvas; sx = vt.reg.x; sy = vt.reg.y; w = vt.reg.w; h = vt.reg.h; }
+  else if (sk) { src = sk.canvas || (sk.canvas = sk.gen()); w = src.width; h = src.height; }
+  else return null;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.drawImage(src, sx, sy, w, h, 0, 0, w, h);
+  const img = g.getImageData(0, 0, w, h), d = img.data;
+  for (let i = 0; i < d.length; i += 4) { d[i] *= tint[0]; d[i + 1] *= tint[1]; d[i + 2] *= tint[2]; }
+  g.putImageData(img, 0, 0);
+  const out = { cv: c, atlas: ATLAS.canvas, k: w / (vt ? vt.tw : sk.tw) };
+  TINTED.set(id, out);
+  return out;
+}
+const _iconForTR = iconFor;
+iconFor = function (id, tag, st) {
+  const tr = tag && tag.trim ? trimOf({ id, tag }) : null;
+  if (!tr || itemStyle(id) !== 'sprite') return _iconForTR(id, tag, st);
+  const key = id + '|' + (tag.color !== undefined ? tag.color : '') + '|trim:' + tr.mat + (tr.darker ? '_darker' : '') + '#' + (ATLAS.canvas ? 1 : 0);
+  if (ICONS[key]) return ICONS[key];
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  g.drawImage(tileC(itemLayer(id), stackTint({ id, tag })), 0, 0, 64, 64);
+  const ov = tintedSkin('trims/items/' + ARMOR_PIECES[ITEMS[id].armor.slot] + '_trim', trimRGB(tr));
+  if (ov) g.drawImage(ov.cv, 0, 0, 64, 64);
+  return ICONS[key] = c.toDataURL();
+};
+
+/* ---------------- tooltips ---------------- */
+const TT_GRAY = '#aaaaaa', TT_BLUE = '#5555ff';
+const _tooltipLinesTR = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesTR(st), it = ITEMS[st.id];
+  // a trimmed piece: "Upgrade:", then the pattern and the material in the material's colour
+  const tr = trimOf(st);
+  if (tr) { const col = cssHex(TRIM_COL[tr.mat]); out.splice(1, 0, ['Upgrade:', TT_GRAY], [' ' + titleCase(tr.pattern) + ' Armor Trim', col], [' ' + titleCase(tr.mat) + ' Material', col]); }
+  // smithing templates: what they apply to and what they take
+  if (it && it.template) {
+    const net = it.template === 'netherite', at = out.findIndex(l => l[0] === (net ? 'Netherite Upgrade' : titleCase(it.template) + ' Armor Trim'));
+    if (at >= 0) out.splice(at + 1, 0, ['', TT_GRAY], ['Applies to:', TT_GRAY], [net ? ' Diamond Equipment' : ' Armor', TT_BLUE], ['Ingredients:', TT_GRAY], [net ? ' Netherite Ingot' : ' Ingot & Crystals', TT_BLUE]);
+  }
+  return out;
+};
+
+/* ---------------- the smithing table ---------------- */
+// SmithingTrimRecipe: only the four armor pieces take a trim, and putting on the trim a piece already has gives nothing
+const _smithResultTR = SCREEN_LOGIC.smithing.result;
+SCREEN_LOGIC.smithing.result = function (ui) {
+  const [t, b, a] = ui.inv.local;
+  if (t && b && a && ITEMS[t.id].template && ITEMS[t.id].template !== 'netherite') {
+    const bi = ITEMS[b.id], cur = b.tag && b.tag.trim;
+    if (!bi.armor || !TRIMMABLE.test(bi.name)) return null;
+    if (cur && cur.pattern === ITEMS[t.id].template && cur.material === ITEMS[a.id].name) return null;
+  }
+  return _smithResultTR.call(this, ui);
+};
+
+/* ---------------- models drawn into 2D pictures ---------------- */
+// passes: [{ src, ax, ay, k, parts: [{ n, c }], grow }] — src is a canvas holding the texture at (ax, ay), k texels per texture pixel;
+// view(point in model pixels) -> [x, y on the canvas, depth (larger is further away)]
+function paintModel(g, def, P, passes, view) {
+  const mats = {};
+  for (const part of def.parts) mats[part.n] = partMatrix(part, P, mats);
+  const faces = [];
+  passes.forEach((ps, pi) => {
+    for (const part of ps.parts) {
+      const M = mats[part.n];
+      if (!M || P[part.n + '#hide']) continue;
+      const xf = q => view([M[0] * q[0] + M[1] * q[1] + M[2] * q[2] + M[9], M[3] * q[0] + M[4] * q[1] + M[5] * q[2] + M[10], M[6] * q[0] + M[7] * q[1] + M[8] * q[2] + M[11]]);
+      for (const cube of part.c) {
+        const quad = [], c = ps.grow ? cube.slice(0, 8).concat([(cube[8] || 0) + ps.grow, cube[9]]) : cube;
+        const col = { dv(x, y, z, u, v) { quad.push([x, y, z, u, v]); if (quad.length === 4) { faces.push({ q: quad.slice(), ps, z: (quad[0][2] + quad[1][2] + quad[2][2] + quad[3][2]) / 4 - pi * 0.02 - (cube[8] ? 0.01 : 0) }); quad.length = 0; } } };
+        emitVCube(col, c, xf, (u, v) => [u, v], [1, 1, 1, 1], { flat: true, 0: 15, 1: 15 });
+      }
+    }
+  });
+  // painter's order: far faces first; each face is its texture rectangle mapped onto the quad
+  faces.sort((a, b) => b.z - a.z);
+  for (const f of faces) {
+    const [v0, v1, v2, v3] = f.q, ps = f.ps;
+    // faces seen edge-on are left out (they would only leave slivers)
+    if (Math.abs((v2[0] - v0[0]) * (v3[1] - v1[1]) - (v2[1] - v0[1]) * (v3[0] - v1[0])) < 1) continue;
+    const U1 = ps.ax + v1[3] * ps.k, U2 = ps.ax + v0[3] * ps.k, V1 = ps.ay + v1[4] * ps.k, V2 = ps.ay + v2[4] * ps.k;
+    if (U1 === U2 || V1 === V2) continue;
+    const a = (v0[0] - v1[0]) / (U2 - U1), b = (v0[1] - v1[1]) / (U2 - U1), cc = (v2[0] - v1[0]) / (V2 - V1), d = (v2[1] - v1[1]) / (V2 - V1);
+    const path = () => { g.beginPath(); g.moveTo(v0[0], v0[1]); g.lineTo(v1[0], v1[1]); g.lineTo(v2[0], v2[1]); g.lineTo(v3[0], v3[1]); g.closePath(); };
+    g.save(); path(); g.clip();
+    g.setTransform(a, b, cc, d, v1[0] - a * U1 - cc * V1, v1[1] - b * U1 - d * V1);
+    const sx = Math.min(U1, U2), sy = Math.min(V1, V2), sw = Math.abs(U2 - U1), sh = Math.abs(V2 - V1);
+    g.drawImage(ps.src, sx, sy, sw, sh, sx, sy, sw, sh);
+    g.restore();
+    // light from the front and above: faces turned away get darker
+    const ex = [v0[0] - v1[0], v0[1] - v1[1], v0[2] - v1[2]], ey = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
+    const n = [ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]], nl = Math.hypot(n[0], n[1], n[2]) || 1;
+    const lit = Math.abs(-0.25 * n[0] - 0.55 * n[1] - 0.8 * n[2]) / nl, dark = Math.max(0, Math.min(0.5, 0.42 - lit * 0.42));
+    if (dark > 0.01) { g.save(); path(); g.fillStyle = `rgba(0,0,0,${dark.toFixed(3)})`; g.fill(); g.restore(); }
+  }
+}
+// a skin as a pass: from the model atlas, or tinted
+function skinPass(key, parts, tint, grow) {
+  const vt = VTEX[key];
+  if (!vt || !ATLAS.canvas) return null;
+  if (tint) { const t = tintedSkin(key, tint); return t && { src: t.cv, ax: 0, ay: 0, k: t.k, parts, grow }; }
+  return { src: ATLAS.canvas, ax: vt.reg.x, ay: vt.reg.y, k: vt.reg.w / vt.tw, parts, grow };
+}
+const armorPaintPasses = (armor, def) => armorPasses(armor, def).filter(a => !a.glint).map(a => skinPass(a.key, a.parts, a.tint, a.grow)).filter(Boolean);
+
+// the player in the inventory (InventoryScreen.renderEntityInInventoryFollowsMouse): the body turns 20 degrees per unit
+// of atan(mouse offset / 40), the head 20 more, the view tilts as far; wearing its armor
+drawPlayerPreview = function (c) {
+  skinPartsFiltered(() => {
+    const vt = VTEX['entity/player/wide/steve'], box = c.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const dpr = window.devicePixelRatio || 1, W = Math.round(box.width * dpr), H = Math.round(box.height * dpr);
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+    const g = c.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
+    if (!vt || !ATLAS.canvas) return;
+    g.imageSmoothingEnabled = false;
+    const z = window.UIZ || 1, f = Math.atan((box.left + box.width / 2 - PV_MOUSE[0]) / GS / z / 40), q = Math.atan((box.top + box.height / 2 - PV_MOUSE[1]) / GS / z / 40);
+    const def = MOB_MODELS.player, P = {}, gm = window.game, p = gm && gm.player;
+    def.anim(P, { swing: 0, amt: 0, age: 0, hy: -f * 20 * D2R, hp: -q * 20 * D2R, holdR: !!(p && p.held), holdL: !!(p && p.offhand && p.offhand[0]) });
+    const parts = def.parts.map(pt => ({ n: pt.n, c: vt.legacy && def.legacy[pt.n] ? def.legacy[pt.n] : pt.c }));
+    const passes = [skinPass('entity/player/wide/steve', parts), ...(p ? armorPaintPasses(p.armor, def) : [])].filter(Boolean);
+    // model pixels -> blocks (the player is drawn at 0.9375), feet at the origin; then the body turn and the tilt
+    const s = H * (+c.dataset.k || 30 / 70), by = f * 20 * D2R, tx = -q * 20 * D2R, cyw = Math.cos(by), syw = Math.sin(by), ct = Math.cos(tx), stt = Math.sin(tx);
+    paintModel(g, def, P, passes, m => {
+      const k = 0.9375 / 16, x = m[0] * k, y = (m[1] - 24) * k, zz = m[2] * k;
+      const x1 = x * cyw + zz * syw, z1 = -x * syw + zz * cyw, y2 = y * ct - z1 * stt, z2 = y * stt + z1 * ct;
+      return [W / 2 + x1 * s, H / 2 + (y2 + 0.9625) * s, z2 * s];
+    });
+  });
+};
+
+/* ---------------- the smithing table's armor stand ---------------- */
+// SmithingScreen: an armor stand with arms and no base plate, turned to 210 degrees and seen from 25 degrees above,
+// wearing the result (or holding it, when it isn't armor); its feet at (141, 75), 25 GUI pixels a block
+const STAND_ARMS = { right_arm: [[24, 0, -2, -2, -1, 2, 12, 2]], left_arm: [[32, 16, 0, -2, -1, 2, 12, 2, 0, 1]] };
+const STAND_PREVIEW = { parts: MOB_MODELS.armor_stand.parts.filter(p => p.n !== 'base_plate').map(p => STAND_ARMS[p.n] ? Object.assign({}, p, { c: STAND_ARMS[p.n] }) : p) };
+// the built-in armor stand texture, now with its arms
+defSkin('entity/armorstand/wood', 64, 64, () => skinParts(64, 64, [...MOB_MODELS.armor_stand.parts, ...STAND_PREVIEW.parts.filter(p => STAND_ARMS[p.n])], {
+  base_plate: (f, x, y, W, H, R) => nz([150, 150, 150], R, 0.06),
+  '*': (f, x, y, W, H, R) => nz(f === 'top' || f === 'bottom' ? [176, 138, 84] : [164, 126, 74], R, 0.08),
+}, 31));
+function drawStandPreview(cv, res) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, k = W / 52;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
+  const vt = VTEX['entity/armorstand/wood'];
+  if (!vt || !ATLAS.canvas) return;
+  g.imageSmoothingEnabled = false;
+  const armor = [null, null, null, null], it = res && ITEMS[res.id];
+  if (it && it.armor && it.armor.mat !== 'elytra') armor[it.armor.slot] = res;
+  const def = STAND_PREVIEW, P = {};
+  const passes = [skinPass('entity/armorstand/wood', def.parts), ...armorPaintPasses(armor, def)].filter(Boolean);
+  // the canvas covers GUI x 115..167, y 18..78: feet at (26, 57)
+  const a = 30 * D2R, ca = Math.cos(a), sa = Math.sin(a), t = 25 * D2R, ct = Math.cos(t), st = Math.sin(t), S = 25 * k;
+  const view = m => {
+    const x = m[0] / 16, y = (m[1] - 24) / 16, z = m[2] / 16;
+    const x1 = x * ca + z * sa, z1 = -x * sa + z * ca, y2 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+    return [26 * k + x1 * S, 57 * k + y2 * S, z2 * S];
+  };
+  paintModel(g, def, P, passes, view);
+  // anything else is held in the left hand
+  if (res && !(it && it.armor)) {
+    const mats = {}; for (const part of def.parts) mats[part.n] = partMatrix(part, P, mats);
+    const M = mats.left_arm, h = [M[0] + M[1] * 10 + M[9], M[3] + M[4] * 10 + M[10], M[6] + M[7] * 10 + M[11]], [hx, hy] = view(h);
+    const ic = itemStyle(res.id) === 'sprite' ? tileC(itemLayer(res.id), stackTint(res)) : null;
+    if (ic) { g.save(); g.translate(hx, hy); g.rotate(-Math.PI / 4); g.drawImage(ic, -7 * k, -12 * k, 14 * k, 14 * k); g.restore(); }
+  }
+}
+// the empty slots show what goes in them, one picture after another (CyclingSlotBackground: every 30 ticks)
+const SMITH_HINTS = {
+  template: ['sentry_armor_trim_smithing_template', 'netherite_upgrade_smithing_template'],
+  trim: [['helmet', 'chestplate', 'leggings', 'boots'].map(n => 'iron_' + n), ['iron_ingot', 'redstone', 'lapis_lazuli', 'quartz', 'diamond', 'emerald', 'amethyst_shard']],
+  netherite: [['diamond_helmet', 'diamond_sword', 'diamond_chestplate', 'diamond_pickaxe', 'diamond_leggings', 'diamond_axe', 'diamond_boots', 'diamond_hoe', 'diamond_shovel'], ['netherite_ingot']],
+};
+const HINT_ICONS = {};
+function hintIcon(name) {
+  if (HINT_ICONS[name]) return HINT_ICONS[name];
+  const id = itemOf(name), c = document.createElement('canvas'); c.width = c.height = 16;
+  const g = c.getContext('2d');
+  g.drawImage(tileC(itemLayer(id), null), 0, 0, 16, 16);
+  g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgba(55,55,55,0.55)'; g.fillRect(0, 0, 16, 16);
+  return HINT_ICONS[name] = c.toDataURL();
+}
+Object.assign(SCREEN_LOGIC.smithing, {
+  extra(ui, win) {
+    const cv = document.createElement('canvas'), dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(52 * GS * dpr); cv.height = Math.round(60 * GS * dpr);
+    cv.style.cssText = `position:absolute;left:${115 * GS}px;top:${18 * GS}px;width:${52 * GS}px;height:${60 * GS}px;pointer-events:none`;
+    win.appendChild(cv); ui._smithPv = cv; ui._smithKey = null;
+    // the crossed-out arrow when the three items make nothing
+    const x = el('div'); x.style.cssText = `position:absolute;left:${65 * GS}px;top:${46 * GS}px;width:${28 * GS}px;height:${21 * GS}px;display:none;cursor:default`;
+    x.innerHTML = `<svg viewBox="0 0 14 14" width="100%" height="100%" style="display:block"><path d="M3 3 L11 11 M11 3 L3 11" stroke="#ff2a2a" stroke-width="2.4" stroke-linecap="square"/></svg>`;
+    x.title = 'Can\'t be upgraded this way';
+    win.appendChild(x); ui._smithErr = x;
+    // keep the slot pictures turning while the screen is open
+    const iv = setInterval(() => { if (!win.isConnected) { clearInterval(iv); return; } if (ui.inv && ui.inv.type === 'smithing') SCREEN_LOGIC.smithing.update(ui); }, 250);
+  },
+  update(ui) {
+    const [t, b, a] = ui.inv.local, res = this.result(ui);
+    const key = JSON.stringify(res || null);
+    if (ui._smithPv && key !== ui._smithKey) { ui._smithKey = key; drawStandPreview(ui._smithPv, res); }
+    if (ui._smithErr) ui._smithErr.style.display = t && b && a && !res ? 'block' : 'none';
+    // pictures in the empty slots
+    const win = ui.winEl, tick = Math.floor(performance.now() / 1500);
+    if (!win) return;
+    const tp = t && ITEMS[t.id].template, kind = tp === 'netherite' ? 'netherite' : tp ? 'trim' : null;
+    const lists = [SMITH_HINTS.template, kind ? SMITH_HINTS[kind][0] : [], kind ? SMITH_HINTS[kind][1] : []];
+    for (let i = 0; i < 3; i++) {
+      const s = win.querySelector(`.slot[data-c="local"][data-i="${i}"]`);
+      if (!s) continue;
+      const L = lists[i], img = !ui.inv.local[i] && L.length ? `url(${hintIcon(L[tick % L.length])})` : '';
+      if (s._hint !== img) { s._hint = img; s.style.backgroundImage = img; s.style.backgroundSize = img ? '100% 100%' : ''; s.style.imageRendering = 'pixelated'; }
+    }
+  },
+});
+
+/* ---------------- shields ---------------- */
+// ShieldModel: a 12x22x1 plate and a 2x6x6 handle on a 64x64 texture
+const SHIELD_MODEL = { parts: [{ n: 'plate', p: [0, 0, 0], c: [[0, 0, -6, -11, -2, 12, 22, 1]] }, { n: 'handle', p: [0, 0, 0], c: [[26, 0, -1, -3, -1, 2, 6, 6]] }] };
+// display transforms of Java's item/shield and item/shield_blocking models: [rotation, translation in pixels, scale], right hand then left
+const SHIELD_DISPLAY = {
+  fp: [[[0, 180, 5], [-10, 2, -10], 1.25], [[0, 180, 5], [10, 0, -10], 1.25]],
+  fpBlock: [[[0, 180, -5], [-15, 5, -11], 1.25], [[0, 180, -5], [5, 5, -11], 1.25]],
+  tp: [[[0, 90, 0], [10, 6, -4], 1], [[0, 90, 0], [10, 6, 12], 1]],
+  tpBlock: [[[45, 135, 0], [3.51, 11, -2], 1], [[45, 135, 0], [13.51, 3, 5], 1]],
+  gui: [[15, -25, -5], [2, 3, 0], 0.65],
+};
+// ItemTransform.apply: in the left hand the translation's x and the rotation's y and z change sign
+function applyDisplay(P, d, left) {
+  const [rot, tr, s] = d, o = left ? -1 : 1;
+  P.t(o * tr[0] / 16, tr[1] / 16, tr[2] / 16).rxyz(left ? [rot[0], -rot[1], -rot[2]] : rot).s(s);
+}
+// built-in textures: oak boards in an iron frame, and the plain board a banner's design goes over
+function shieldSkin(plain) {
+  const wood = (x, y, R) => { const k = Math.floor(x / 3), b = k % 2 ? [134, 100, 58] : [120, 88, 52]; return nz((y + k * 5) % 9 === 0 ? shd(b, 0.8) : b, R, 0.05); };
+  return skinParts(64, 64, SHIELD_MODEL.parts, {
+    plate: (f, x, y, W, H, R) => {
+      if (f === 'front') {
+        const e = Math.min(x, y, W - 1 - x, H - 1 - y);
+        if (!plain) return nz([216, 212, 204], R, 0.03);
+        if (e === 0) return nz(y === 0 || y === H - 1 ? [160, 160, 168] : [138, 138, 146], R, 0.04);
+        if (Math.abs(x - 5.5) < 1 && Math.abs(y - 10.5) < 1) return nz([170, 170, 178], R, 0.04);
+        return wood(x, y, R);
+      }
+      if (f === 'back') return wood(x, y, R);
+      return nz([124, 124, 132], R, 0.05);
+    },
+    handle: (f, x, y, W, H, R) => nz(f === 'front' || f === 'back' ? [86, 62, 36] : [100, 72, 42], R, 0.06),
+  }, plain ? 1201 : 1202);
+}
+defSkin('entity/shield_base_nopattern', 64, 64, () => shieldSkin(true));
+defSkin('entity/shield_base', 64, 64, () => shieldSkin(false));
+// a resource pack's entity/shield/<pattern> textures are used when it has them; otherwise the banner's pattern is scaled down
+for (const n in BANNER_SHAPES) { defSkin('entity/shield/' + n, 64, 64, null); SKINS['entity/shield/' + n].packOnly = true; }
+// the creeper and skull charges at one texel a pixel, so they stay sharp on the small shield
+const SHIELD_BITMAPS = {
+  creeper: ['........', '.##..##.', '.##..##.', '...##...', '..####..', '..####..', '..#..#..', '........'],
+  skull: ['..####..', '.######.', '.#.##.#.', '.######.', '..#..#..', '#..##..#', '.##..##.', '#......#'],
+};
+const SHIELD_MASKS = { atlas: null, m: {} };
+const regionPixels = vt => ATLAS.canvas.getContext('2d').getImageData(vt.reg.x, vt.reg.y, vt.reg.w, vt.reg.h).data;
+// one layer of a design over the whole 64x64 texture: RGBA 0..1 (the front of the plate is at 1, 1, 12x22)
+function shieldMask(n) {
+  if (SHIELD_MASKS.atlas !== ATLAS.canvas) { SHIELD_MASKS.atlas = ATLAS.canvas; SHIELD_MASKS.m = {}; }
+  if (SHIELD_MASKS.m[n]) return SHIELD_MASKS.m[n];
+  const out = new Float32Array(64 * 64 * 4), vt = VTEX['entity/shield/' + n];
+  if (vt && vt.pack && ATLAS.canvas) {
+    const d = regionPixels(vt), k = vt.reg.w / 64;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const s = (Math.min(vt.reg.h - 1, Math.floor((y + 0.5) * k)) * vt.reg.w + Math.floor((x + 0.5) * k)) * 4, o = (y * 64 + x) * 4;
+      for (let c = 0; c < 4; c++) out[o + c] = d[s + c] / 255;
+    }
+    return SHIELD_MASKS.m[n] = out;
+  }
+  const bmp = SHIELD_BITMAPS[n], bm = bmp ? null : bannerMask(n), grad = n === 'gradient' || n === 'gradient_up';
+  for (let y = 0; y < 22; y++) for (let x = 0; x < 12; x++) {
+    const o = ((y + 1) * 64 + x + 1) * 4;
+    if (bmp) { const bx = x - 2, by = y - 7; if (bx >= 0 && by >= 0 && bx < 8 && by < 8 && bmp[by][bx] === '#') { out[o] = out[o + 1] = out[o + 2] = 0.95; out[o + 3] = 1; } continue; }
+    // 3x3 samples of the banner's 20x40 front for each shield texel
+    let a = 0, r = 0, g = 0, b = 0;
+    for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) {
+      const bx = Math.min(19, Math.floor((x + (i + 0.5) / 3) * 20 / 12)), by = Math.min(39, Math.floor((y + (j + 0.5) / 3) * 40 / 22)), s = (by * 20 + bx) * 4, al = bm[s + 3];
+      a += al; r += bm[s] * al; g += bm[s + 1] * al; b += bm[s + 2] * al;
+    }
+    if (!a) continue;
+    out[o] = r / a; out[o + 1] = g / a; out[o + 2] = b / a; out[o + 3] = grad ? a / 9 : a / 9 >= 0.5 ? 1 : 0;
+  }
+  return SHIELD_MASKS.m[n] = out;
+}
+// the whole texture of a decorated shield: the base, then the banner's colour and its layers in their dye colours
+function shieldPixels(color, patterns) {
+  const out = new Uint8ClampedArray(64 * 64 * 4), vt = VTEX['entity/shield_base'];
+  if (vt && ATLAS.canvas) {
+    const d = regionPixels(vt), k = vt.reg.w / 64;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const s = (Math.min(vt.reg.h - 1, Math.floor((y + 0.5) * k)) * vt.reg.w + Math.floor((x + 0.5) * k)) * 4, o = (y * 64 + x) * 4; for (let c = 0; c < 4; c++) out[o + c] = d[s + c]; }
+  }
+  const acc = new Float32Array(4096 * 3);
+  for (let i = 0; i < 4096; i++) for (let k = 0; k < 3; k++) acc[i * 3 + k] = out[i * 4 + k] / 255;
+  for (const [n, c] of [['base', color], ...(patterns || [])]) {
+    const m = shieldMask(n), t = dyeTint(c);
+    for (let i = 0; i < 4096; i++) { const a = m[i * 4 + 3]; if (!a) continue; for (let k = 0; k < 3; k++) acc[i * 3 + k] = acc[i * 3 + k] * (1 - a) + t[k] * m[i * 4 + k] * a; }
+  }
+  for (let i = 0; i < 4096; i++) for (let k = 0; k < 3; k++) out[i * 4 + k] = acc[i * 3 + k] * 255;
+  return out;
+}
+// decorated shields on screen share a few slots of the model atlas, like banners
+const SHIELD_SLOTS = 8;
+for (let k = 0; k < SHIELD_SLOTS; k++) defSkin('shield/slot' + k, 64, 64, () => { const c = document.createElement('canvas'); c.width = c.height = 64; return c; });
+const SHTEX = { atlas: null, slots: [], clock: 0 };
+function shieldTexture(g, color, patterns) {
+  if (!ATLAS.canvas || !g.r || !g.r.atlas) return null;
+  if (SHTEX.atlas !== ATLAS.canvas) { SHTEX.atlas = ATLAS.canvas; SHTEX.slots = []; for (let k = 0; k < SHIELD_SLOTS; k++) SHTEX.slots.push({ key: 'shield/slot' + k, id: null, used: 0 }); }
+  const id = bannerKey(color, patterns);
+  let s = SHTEX.slots.find(q => q.id === id);
+  if (!s) {
+    s = SHTEX.slots.reduce((a, b) => a.used <= b.used ? a : b);
+    const vt = VTEX[s.key];
+    if (!vt) return null;
+    const img = new ImageData(shieldPixels(color, patterns), 64, 64), gl = g.r.gl;
+    ATLAS.canvas.getContext('2d').putImageData(img, vt.reg.x, vt.reg.y);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, g.r.atlas);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, vt.reg.x, vt.reg.y, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    s.id = id;
+  }
+  s.used = ++SHTEX.clock;
+  return VTEX[s.key];
+}
+const SHIELD_CANVAS = new Map();
+function shieldCanvas(color, patterns) {
+  const id = bannerKey(color, patterns), e = SHIELD_CANVAS.get(id);
+  if (e && e.atlas === ATLAS.canvas) return e.cv;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  cv.getContext('2d').putImageData(new ImageData(shieldPixels(color, patterns), 64, 64), 0, 0);
+  SHIELD_CANVAS.set(id, { cv, atlas: ATLAS.canvas });
+  return cv;
+}
+const shieldBanner = st => st && st.id === I.SHIELD && st.tag && st.tag.banner ? st.tag.banner : null;
+// the shield model through xf (model pixels -> the scene), glinting when enchanted
+Game.prototype.pushShield = function (r, st, l, xf) {
+  const b = shieldBanner(st), vt = (b && shieldTexture(this, b.color, b.patterns)) || VTEX['entity/shield_base_nopattern'];
+  if (!vt) return;
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th, uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+  for (const part of SHIELD_MODEL.parts) for (const c of part.c) emitVCube(r, c, xf, uvx, [1, 1, 1, 1], l);
+  if (hasGlint(st)) {
+    const G = this.glintQ || (this.glintQ = []), gr = { dv(x, y, z, u, v) { G.push([x, y, z, u, v, -1, 1, 1, 1, 1, 15, 15]); } };
+    for (const part of SHIELD_MODEL.parts) for (const c of part.c) emitVCube(gr, c, xf, uvx, [1, 1, 1, 1], { flat: true, 0: 15, 1: 15 });
+  }
+};
+// first person (ItemInHandRenderer): raised with the shield_blocking transform while in use, otherwise held and swung like any item
+Game.prototype.renderShieldHand = function (held, s, alpha, l) {
+  const p = this.player, main = s > 0, o = main ? 1 : -1;
+  const use = p.using && (p.using.hand === 'main') === main ? p.using : null, blocking = !!(use && use.kind === 'shield');
+  const eq = equipOf(p, main, alpha), P = this.handBase(alpha);
+  if (blocking) P.t(o * 0.56, -0.52 + eq * -0.6, -0.72);
+  else {
+    const h = main && p.swingT > 0 ? Math.max(0, Math.min(1, 1 - (p.swingT - alpha) / 6)) : 0;
+    P.t(o * -0.4 * Math.sin(Math.sqrt(h) * Math.PI), 0.2 * Math.sin(Math.sqrt(h) * Math.PI * 2), -0.2 * Math.sin(h * Math.PI)).t(o * 0.56, -0.52 + eq * -0.6, -0.72);
+    const f = Math.sin(h * h * Math.PI), g = Math.sin(Math.sqrt(h) * Math.PI);
+    P.ry(o * (45 + f * -20)).rz(o * g * -20).rx(g * -80).ry(o * -45);
+  }
+  applyDisplay(P, SHIELD_DISPLAY[blocking ? 'fpBlock' : 'fp'][main ? 0 : 1], !main);
+  P.t(-0.5, -0.5, -0.5).s(1, -1, -1);
+  const m = P.m;
+  this.pushShield(this.r, held, l, q => M4.xform(m, q[0] / 16, q[1] / 16, q[2] / 16));
+};
+// third person (ItemInHandLayer): from the hand, turned out of the arm, then the model's third-person transform
+const _drawMobItemSH = drawMobItem;
+drawMobItem = function (r, g, st, at, part, hx, light, scale, opts) {
+  if (!st || st.id !== I.SHIELD || !g || !g.pushShield) return _drawMobItemSH(r, g, st, at, part, hx, light, scale, opts);
+  if (!at(part, [0, 0, 0])) return;
+  const left = part === 'left_arm', P = handPose();
+  P.rx(-90).ry(180).t((left ? -1 : 1) / 16, 0.125, -0.625);
+  applyDisplay(P, SHIELD_DISPLAY[opts && opts.blocking ? 'tpBlock' : 'tp'][left ? 1 : 0], left);
+  P.t(-0.5, -0.5, -0.5).s(1, -1, -1);
+  const m = P.m;
+  g.pushShield(r, st, light, q => { const v = M4.xform(m, q[0] / 16, q[1] / 16, q[2] / 16); return at(part, [v[0] * 16, v[1] * 16, v[2] * 16]); });
+};
+// dropped and framed shields: the model in the space of a flat item, its front facing out
+const _pushItemXformSH = Game.prototype.pushItemXform;
+Game.prototype.pushItemXform = function (r, m, st, l, layerOverride) {
+  if (st && st.id === I.SHIELD && layerOverride === undefined && VTEX['entity/shield_base_nopattern']) {
+    const k = 0.04;
+    return this.pushShield(r, st, l, q => M4.xform(m, q[0] * k, -q[1] * k, -(q[2] + 1.5) * k));
+  }
+  return _pushItemXformSH.call(this, r, m, st, l, layerOverride);
+};
+// the inventory icon: the model seen with the shield model's GUI transform
+const _iconForSH = iconFor;
+iconFor = function (id, tag, st) {
+  if (id !== I.SHIELD || !ATLAS.canvas || !VTEX['entity/shield_base_nopattern']) return _iconForSH(id, tag, st);
+  const b = tag && tag.banner, key = 'shield#' + (b ? bannerKey(b.color, b.patterns) : '-');
+  if (ICONS[key]) return ICONS[key];
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  const pass = b ? { src: shieldCanvas(b.color, b.patterns), ax: 0, ay: 0, k: 1, parts: SHIELD_MODEL.parts } : skinPass('entity/shield_base_nopattern', SHIELD_MODEL.parts);
+  const P = handPose(); applyDisplay(P, SHIELD_DISPLAY.gui, false); P.t(-0.5, -0.5, -0.5).s(1, -1, -1);
+  const m = P.m;
+  paintModel(g, SHIELD_MODEL, {}, [pass], q => { const v = M4.xform(m, q[0] / 16, q[1] / 16, q[2] / 16); return [(v[0] + 0.5) * 64, (0.5 - v[1]) * 64, -v[2] * 64]; });
+  return ICONS[key] = c.toDataURL();
+};
+// ShieldDecorationRecipe: a shield without a design and any banner give the shield the banner's colour and layers
+shapeless('shield', 1, ['shield', COLORS.map(c => itemOf(c + '_banner'))]);
+RECIPES[RECIPES.length - 1].fn = (grid, out) => {
+  const sh = grid.find(s => s && s.id === I.SHIELD), bn = grid.find(s => s && isBannerItem(s.id));
+  if (!sh || !bn || shieldBanner(sh)) return null;
+  const r = copyStack(sh, 1);
+  r.tag = Object.assign({}, r.tag || {}, { banner: { color: BLK[ITEMS[bn.id].block].color, patterns: (bn.tag && bn.tag.patterns || []).map(q => q.slice()) } });
+  return r;
+};
+// a decorated shield is named after its colour, and lists its layers like a banner
+const _stackNameSH = stackName;
+stackName = function (st) {
+  const b = shieldBanner(st);
+  if (b && !(st.tag && st.tag.name)) return titleWords(b.color) + ' Shield';
+  return _stackNameSH(st);
+};
+const _tooltipLinesSH = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesSH(st), b = shieldBanner(st);
+  if (b && b.patterns && b.patterns.length) out.splice(1, 0, ...b.patterns.map(([n, c]) => [titleWords(c) + ' ' + (BANNER_NAMES[n] || titleWords(n)), TT_GRAY]));
+  return out;
+};
+
+/* ---------------- banner markers on maps ---------------- */
+// MapItem.useOn / MapItemSavedData.toggleBanner: a filled map used on a banner inside its area marks it in the banner's colour
+// (and its name, if it has one); using it again takes the marker off. A marker goes when its banner does
+const BANNER_DECO = { p: [116, 84, 48], P: [80, 58, 32] };
+for (const c of COLORS) defSkin('map/decorations/' + c + '_banner', 8, 8, () => {
+  const t = dyeTint(c).map(v => v * 255), dark = t.map(v => v * 0.6);
+  return skinFromRows(8, 8, ['pppppppp', ' kccccP ', ' kccccP ', ' kccccP ', ' kccccP ', ' kccccP ', ' kckkcP ', ' kk  kP '], Object.assign({ c: t, k: dark }, BANNER_DECO));
+});
+function mapBannerAt(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (SHAPE[id] !== SH.BANNER) return null;
+  const be = w.getBE(x, y, z);
+  return { k: BLK[id].color + '_banner', name: be && be.name || null };
+}
+Game.prototype.toggleMapBanner = function (st, x, y, z) {
+  const map = this.mapById(st.tag && st.tag.map), w = this.world;
+  if (!map || map.dim !== w.dim) return false;
+  const s = 1 << map.scale, fx = (x + 0.5 - map.x) / s, fz = (z + 0.5 - map.z) / s;
+  if (fx < -63 || fz < -63 || fx > 63 || fz > 63) return false;
+  const cur = mapBannerAt(w, x, y, z);
+  if (!cur) return false;
+  const marks = map.marks || (map.marks = []), i = marks.findIndex(m => m.banner && m.pos[0] === x && m.pos[1] === y && m.pos[2] === z);
+  if (i >= 0 && marks[i].k === cur.k && (marks[i].name || null) === cur.name) { marks.splice(i, 1); return true; }
+  if (i < 0 && marks.filter(m => m.banner).length >= 256) return false;
+  const mk = { k: cur.k, x: x + 0.5, z: z + 0.5, banner: 1, pos: [x, y, z] };
+  if (cur.name) mk.name = cur.name;
+  if (i >= 0) marks[i] = mk; else marks.push(mk);
+  return true;
+};
+// (the item's use, so it works while sneaking too; ItemStack.useOn needs a player who may build)
+const _useItemSpecialMB = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (hit && held && held.id === I.FILLED_MAP && SHAPE[hit.id] === SH.BANNER && p.mayBuild) { if (this.toggleMapBanner(held, hit.x, hit.y, hit.z)) p.doSwing(); return true; }
+  return _useItemSpecialMB.call(this, p, hit, held, it);
+};
+// MapItemSavedData.checkBanners: while the map is being drawn around a marker, a banner that is gone or changed loses it
+const _updateMapMB = Game.prototype.updateMap;
+Game.prototype.updateMap = function (map, h) {
+  _updateMapMB.call(this, map, h);
+  const marks = map.marks;
+  if (!marks || !marks.some(m => m.banner)) return;
+  const w = this.world, s = 1 << map.scale, px = Math.floor((h.x - map.x) / s) + 64, pz = Math.floor((h.z - map.z) / s) + 64, R = 128 / s;
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const m = marks[i];
+    if (!m.banner) continue;
+    const X = Math.floor((m.pos[0] - map.x) / s) + 64, Z = Math.floor((m.pos[2] - map.z) / s) + 64;
+    if ((X & 15) !== map.step || (X - px) ** 2 + (Z - pz) ** 2 >= R * R || !w.isLoadedAt(m.pos[0], m.pos[2])) continue;
+    const cur = mapBannerAt(w, m.pos[0], m.pos[1], m.pos[2]);
+    if (!cur || cur.k !== m.k || cur.name !== (m.name || null)) marks.splice(i, 1);
+  }
+};
+// MapRenderer: a marker's name under it in small letters on a dark band, at most 25 map pixels wide
+const _drawMap3DMB = drawMap3D;
+drawMap3D = function (g, r, m, id, l, inFrame) {
+  _drawMap3DMB(g, r, m, id, l, inFrame);
+  const map = g.mapById(id);
+  if (!map || !map.marks || !map.marks.some(mk => mk.name)) return;
+  const bg = VTEX['map/map_background'], A = ATLAS.S, s = 1 << map.scale;
+  let z = -3;
+  for (const mk of map.marks) {
+    if (!mk.name) continue;
+    const fx = (mk.x - map.x) / s, fz = (mk.z - map.z) / s;
+    if (Math.abs(fx) >= 64 || Math.abs(fz) >= 64) continue;
+    const w = textW(mk.name), q = Math.min(25 / Math.max(1, w), 6 / 9), x0 = 64 + fx - w * q / 2, y0 = 64 + fz + 4;
+    if (bg) {
+      const u = (bg.reg.x + bg.reg.w / 2) / A, v = (bg.reg.y + bg.reg.h / 2) / A;
+      for (const [px, py] of [[x0 - q, y0 + 9 * q], [x0 + (w + 1) * q, y0 + 9 * q], [x0 + (w + 1) * q, y0 - q], [x0 - q, y0 - q]]) { const P = M4.xform(m, px, py, z); r.dv(P[0], P[1], P[2], u, v, -1, 0.18, 0.18, 0.18, 1, l[0], l[1]); }
+    }
+    drawText3D(r, mk.name, 0, 0, (tx, ty, d) => M4.xform(m, x0 + tx * q, y0 + ty * q, z - 0.1 + d), [1, 1, 1], l, 0);
+    z -= 0.3;
+  }
+};
+// placed banners keep their name, and give it back when broken
+const _afterPlaceMB = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const held = p.held, name = held && held.id === id && held.tag && held.tag.name;
+  const r = _afterPlaceMB.call(this, p, x, y, z, id);
+  if (name && SHAPE[id] === SH.BANNER && this.world.getBlock(x, y, z) === id) this.world.setBE(x, y, z, Object.assign({ type: 'banner' }, this.world.getBE(x, y, z) || {}, { name }));
+  return r;
+};
+const _breakBlockMB = Game.prototype.breakBlock;
+Game.prototype.breakBlock = function (x, y, z, byPlayer, natural) {
+  const w = this.world, id = w.getBlock(x, y, z), be = SHAPE[id] === SH.BANNER ? w.getBE(x, y, z) : null;
+  if (!be || !be.name) return _breakBlockMB.call(this, x, y, z, byPlayer, natural);
+  const own = Object.prototype.hasOwnProperty.call(this, 'dropItem'), drop = this.dropItem;
+  this.dropItem = (px, py, pz, st, ...rest) => drop.call(this, px, py, pz, st && st.id === id ? Object.assign({}, st, { tag: Object.assign({}, st.tag || {}, { name: be.name }) }) : st, ...rest);
+  try { return _breakBlockMB.call(this, x, y, z, byPlayer, natural); } finally { if (own) this.dropItem = drop; else delete this.dropItem; }
+};
 
 </script>
 </body>
