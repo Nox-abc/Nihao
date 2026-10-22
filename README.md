@@ -469,6 +469,24 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   it into its sherds; broken by hand it keeps its sides. Trial chambers have pots with flow,
   guster and scrape sherds, some holding loot.
 - Sponges soak up water and dry out in the Nether.
+- **Fireworks**: a firework star is gunpowder and dyes, plus a fire charge (large ball), a gold
+  nugget (star), a feather (burst) or any head (creeper face), a diamond for a trail and glowstone
+  dust for a twinkle; craft a star with more dyes to make it fade to those colours. A rocket is
+  paper, one to three gunpowder (how high it flies) and any stars. Used on the ground it climbs and
+  bursts into sparks in the stars' shapes and colours, and rockets with stars hurt what is close
+  when they go off. Dispensers shoot rockets straight out, crossbows fire them, and a rocket used
+  while flying with an elytra pulls you along for as long as it lasts.
+- **Chiseled bookshelves**: right click one of the six slots on the front to put a book in or take
+  it out (the front shows which slots are full). Hoppers fill and empty them, and a comparator
+  reads the last slot used (1 to 6).
+- **Goat horns**: eight horns with their own calls (Ponder, Sing, Seek and Feel from ordinary goats
+  and outposts; Admire, Call, Yearn and Dream from screaming goats). A horn rests for 7 seconds
+  after it plays, shown on the hotbar like the ender pearl's cooldown. A goat that rams into
+  stone, logs, packed ice or some ores snaps off one of its horns.
+- **The mace**: Breach makes the target's armor work less well, a smash attack knocks back
+  everything standing around the target, and Wind Burst throws you back up; landing no lower than
+  where you hit costs no health.
+- A mob head on top of a note block makes it play that mob's sound.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

@@ -7331,7 +7331,7 @@ shaped('paper', 3, ['###'], { '#': 'sugar_cane' });
 shapeless('writable_book', 1, ['book', 'ink_sac', 'feather']);
 shaped('leather', 1, SQ2, { '#': 'rabbit_hide' });
 shapeless('firework_rocket', 3, ['paper', 'gunpowder']);
-shapeless('firework_star', 1, ['gunpowder', ids(COLORS.map(c => c + '_dye'))]);
+RECIPES[RECIPES.length - 1].tag = { flight: 1 };
 shaped('beacon', 1, ['GGG', 'GNG', 'OOO'], { G: 'glass', N: 'nether_star', O: 'obsidian' });
 shaped('conduit', 1, ['NNN', 'NHN', 'NNN'], { N: 'nautilus_shell', H: 'heart_of_the_sea' });
 shaped('end_crystal', 1, ['GGG', 'GEG', 'GTG'], { G: 'glass', E: 'ender_eye', T: 'ghast_tear' });
@@ -7370,6 +7370,8 @@ function matchRecipe(grid, gw) {
   if (!n) return null;
   const w = maxx - minx + 1, h = maxy - miny + 1;
   for (const r of RECIPES) {
+    // special recipes (fireworks, shield decoration...) decide for themselves from the items in the grid
+    if (r.type === 'special') { if (r.test(grid.filter(v => v))) return r; continue; }
     if (r.type === 'shaped') {
       if (r.w !== w || r.h !== h) continue;
       for (const mirror of [false, true]) {
@@ -12016,7 +12018,7 @@ class EyeEntity extends Entity {
 /* ---------------- particles ---------------- */
 class Particles {
   constructor(game) { this.game = game; this.list = []; }
-  add(p) { if (p.max === undefined) p.max = p.life; if (this.list.length < 1500) this.list.push(p); }
+  add(p) { if (p.max === undefined) p.max = p.life; if (this.list.length < 4000) this.list.push(p); }
   // animated puff: frames particle_generic_0 (big) .. _7 (small) over the particle's life
   gen() { return [texL('particle_generic_0'), 8]; }
   blockBreak(x, y, z, id) {
@@ -12078,7 +12080,7 @@ class Particles {
       const sky = l >> 4, blk = l & 15, s = p.size;
       const x = p.x, y = p.y, z = p.z;
       const u0 = p.u, v0 = p.v, u1 = p.u + p.us, v1 = p.v + p.us;
-      const c = p.col, al = p.grow ? Math.min(1, p.life / 10) : 1;
+      const c = p.col, al = p.alpha !== undefined ? p.alpha : p.grow ? Math.min(1, p.life / 10) : 1;
       r.dv(x - right[0] * s - up[0] * s, y - right[1] * s - up[1] * s, z - right[2] * s - up[2] * s, u0, v1, layer, c[0], c[1], c[2], al, sky, blk);
       r.dv(x + right[0] * s - up[0] * s, y + right[1] * s - up[1] * s, z + right[2] * s - up[2] * s, u1, v1, layer, c[0], c[1], c[2], al, sky, blk);
       r.dv(x + right[0] * s + up[0] * s, y + right[1] * s + up[1] * s, z + right[2] * s + up[2] * s, u1, v0, layer, c[0], c[1], c[2], al, sky, blk);
@@ -13998,7 +14000,8 @@ class Mob extends Entity {
     if (this.immune && this.immune(source, attacker)) return false;
     let dmg = this.invuln > 0 ? amount - this.lastDmg : amount;
     const ap = this.armorPoints();
-    if (ap && !BYPASS_ARMOR.has(source)) dmg *= 1 - Math.min(20, Math.max(ap / 5, ap - dmg / (2 + this.armorToughness() / 4))) / 25;
+    // CombatRules.getDamageAfterAbsorb; a Breach mace makes the armor work less well (armor_effectiveness)
+    if (ap && !BYPASS_ARMOR.has(source)) dmg *= 1 - Math.max(0, Math.min(20, Math.max(ap / 5, ap - dmg / (2 + this.armorToughness() / 4))) / 25 - (attacker && attacker.breachNow || 0));
     const res = this.effectLevel ? this.effectLevel('resistance') : 0;
     if (res) dmg *= Math.max(0, 1 - 0.2 * res);
     const epf = this.data.armor && source !== 'void' && source !== 'kill' ? armorEPF(this.data.armor, source) : 0;
@@ -23699,6 +23702,8 @@ Game.prototype.dispense = function (x, y, z) {
     if (st.id === I.SNOWBALL) { shoot('snow', 1.1); take(); return; }
     if (st.id === I.EGG) { shoot('egg', 1.1); take(); return; }
     if (st.id === I.FIRE_CHARGE) { shoot('fire', 1.0); take(); this.sound('blast', px, py, pz); return; }
+    // rockets fly straight out of the front (FireworkRocketEntity.shoot at 0.5, a little inaccuracy)
+    if (st.id === I.FIREWORK_ROCKET && this.launchFirework) { const j = () => (Math.random() - 0.5) * 0.0172; this.launchFirework(px, py + (DY[d] ? 0 : 0.15), pz, st, { shot: [(DX[d] + j()) * 0.5, (DY[d] + j()) * 0.5, (DZ[d] + j()) * 0.5] }); take(); return; }
     if (st.id === I.SPLASH_POTION || st.id === I.LINGERING_POTION) { const pr = shoot('potion', 0.8); if (pr) pr.stack = { id: st.id, count: 1, tag: st.tag }; take(); return; }
     if (st.id === I.TNT) { if (!front || REPL[front]) { w.setBlock(fx, fy, fz, B.TNT, 0, false); this.primeTNT(fx, fy, fz, 80); take(); } return; }
     if (st.id === I.WATER_BUCKET || st.id === I.LAVA_BUCKET) { if (!front || REPL[front]) { w.setBlock(fx, fy, fz, st.id === I.WATER_BUCKET ? B.WATER : B.LAVA, 0); giveBack(I.BUCKET); } return; }
@@ -38255,6 +38260,686 @@ Game.prototype.breakBlock = function (x, y, z, byPlayer, natural) {
   const own = Object.prototype.hasOwnProperty.call(this, 'dropItem'), drop = this.dropItem;
   this.dropItem = (px, py, pz, st, ...rest) => drop.call(this, px, py, pz, st && st.id === id ? Object.assign({}, st, { tag: Object.assign({}, st.tag || {}, { name: be.name }) }) : st, ...rest);
   try { return _breakBlockMB.call(this, x, y, z, byPlayer, natural); } finally { if (own) this.dropItem = drop; else delete this.dropItem; }
+};
+
+/* @file 136_fireworks.js */
+/* ===================================================================
+   FIREWORKS — firework stars (a shape, colours, fade colours, a trail
+   and a twinkle) and rockets (flight duration and stars) crafted like
+   Java's; rockets that climb and burst into sparks, launched by hand,
+   from dispensers and crossbows, and that boost elytra flight
+   =================================================================== */
+// DyeColor.getFireworkColor
+const FW_RGB = { white: 0xF0F0F0, orange: 0xEB8844, magenta: 0xC354CD, light_blue: 0x6689D3, yellow: 0xDECF2A, lime: 0x41CD34, pink: 0xD88198, gray: 0x434343,
+  light_gray: 0xABABAB, cyan: 0x287697, purple: 0x7B2FBE, blue: 0x253192, brown: 0x51301A, green: 0x3B511A, red: 0xB3312C, black: 0x1E1B1B };
+const FW_NAME = {};
+for (const k in FW_RGB) FW_NAME[FW_RGB[k]] = k;
+const FW_SHAPE_NAME = { small_ball: 'Small Ball', large_ball: 'Large Ball', star: 'Star-shaped', creeper: 'Creeper-shaped', burst: 'Burst' };
+const dyeOf = id => { const m = /^(.+)_dye$/.exec(ITEMS[id].name); return m && FW_RGB[m[1]] !== undefined ? m[1] : null; };
+// FireworkStarRecipe's shape ingredients: a fire charge, a gold nugget, a feather or any head
+const fwShapeOf = id => { const n = ITEMS[id].name; return n === 'fire_charge' ? 'large_ball' : n === 'gold_nugget' ? 'star' : n === 'feather' ? 'burst' : /_(head|skull)$/.test(n) ? 'creeper' : null; };
+const gaussR = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const fw01 = h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255];
+
+/* ---------------- crafting ---------------- */
+// special recipes: a test over the items in the grid, then the result from the stacks themselves (hidden from the recipe book)
+function specialRecipe(out, count, test, fn) { RECIPES.push({ type: 'special', out: itemOf(out), count, test, fn }); }
+const countBy = (ids, f) => { const c = {}; for (const id of ids) { const k = f(id); if (k === null) return null; c[k] = (c[k] || 0) + 1; } return c; };
+// a firework star: one gunpowder, one or more dyes, at most one shape item, diamond (trail) and glowstone dust (twinkle)
+specialRecipe('firework_star', 1, ids => {
+  const c = countBy(ids, id => { const n = ITEMS[id].name; return n === 'gunpowder' ? 'g' : dyeOf(id) ? 'd' : fwShapeOf(id) ? 's' : n === 'diamond' ? 't' : n === 'glowstone_dust' ? 'w' : null; });
+  return !!c && c.g === 1 && c.d >= 1 && !(c.s > 1) && !(c.t > 1) && !(c.w > 1);
+}, (grid, out) => {
+  const e = { shape: 'small_ball', colors: [] };
+  for (const s of grid) {
+    if (!s) continue;
+    const d = dyeOf(s.id), sh = fwShapeOf(s.id), n = ITEMS[s.id].name;
+    if (d) e.colors.push(FW_RGB[d]); else if (sh) e.shape = sh; else if (n === 'diamond') e.trail = true; else if (n === 'glowstone_dust') e.twinkle = true;
+  }
+  out.tag = { explosion: e };
+  return out;
+});
+// FireworkStarFadeRecipe: a star and dyes set the colours it fades to
+specialRecipe('firework_star', 1, ids => {
+  const c = countBy(ids, id => id === I.FIREWORK_STAR ? 's' : dyeOf(id) ? 'd' : null);
+  return !!c && c.s === 1 && c.d >= 1;
+}, (grid, out) => {
+  const star = grid.find(s => s && s.id === I.FIREWORK_STAR), e = Object.assign({ shape: 'small_ball', colors: [] }, star.tag && star.tag.explosion);
+  e.fade = grid.filter(s => s && dyeOf(s.id)).map(s => FW_RGB[dyeOf(s.id)]);
+  out.tag = Object.assign({}, star.tag || {}, { explosion: e });
+  return out;
+});
+// FireworkRocketRecipe: paper, one to three gunpowder (the flight duration) and any firework stars
+specialRecipe('firework_rocket', 3, ids => {
+  const c = countBy(ids, id => id === I.PAPER ? 'p' : id === I.GUNPOWDER ? 'g' : id === I.FIREWORK_STAR ? 's' : null);
+  return !!c && c.p === 1 && c.g >= 1 && c.g <= 3;
+}, (grid, out) => {
+  out.tag = { flight: grid.filter(s => s && s.id === I.GUNPOWDER).length, explosions: grid.filter(s => s && s.id === I.FIREWORK_STAR && s.tag && s.tag.explosion).map(s => JSON.parse(JSON.stringify(s.tag.explosion))) };
+  if (!out.tag.explosions.length) delete out.tag.explosions;
+  return out;
+});
+
+/* ---------------- tooltips and icons ---------------- */
+const fwColorList = cs => cs.map(c => FW_NAME[c] ? titleCase(FW_NAME[c]) : 'Custom').join(', ');
+// FireworkExplosion.addAdditionalTooltip: the colours, the fade colours, trail and twinkle
+function fwExtraLines(e, pre) {
+  const out = [];
+  if (e.colors && e.colors.length) out.push([pre + fwColorList(e.colors), TT_GRAY]);
+  if (e.fade && e.fade.length) out.push([pre + 'Fade to ' + fwColorList(e.fade), TT_GRAY]);
+  if (e.trail) out.push([pre + 'Trail', TT_GRAY]);
+  if (e.twinkle) out.push([pre + 'Twinkle', TT_GRAY]);
+  return out;
+}
+const fwSame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const _tooltipLinesFW = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesFW(st), t = st.tag;
+  if (st.id === I.FIREWORK_STAR && t && t.explosion) out.splice(1, 0, [FW_SHAPE_NAME[t.explosion.shape] || 'Small Ball', TT_GRAY], ...fwExtraLines(t.explosion, ''));
+  if (st.id === I.FIREWORK_ROCKET && t && t.explosions && t.explosions.length) {
+    // Fireworks.addToTooltip: runs of the same star are counted ("2 x Small Ball")
+    const lines = [];
+    for (let i = 0; i < t.explosions.length;) {
+      const e = t.explosions[i];
+      let n = 1;
+      while (i + n < t.explosions.length && fwSame(t.explosions[i + n], e)) n++;
+      const name = FW_SHAPE_NAME[e.shape] || 'Small Ball';
+      lines.push([n > 1 ? n + ' x ' + name : name, TT_GRAY], ...fwExtraLines(e, '  '));
+      i += n;
+    }
+    const at = out.findIndex(l => /^Flight Duration/.test(l[0]));
+    out.splice(at >= 0 ? at + 1 : 1, 0, ...lines);
+  }
+  return out;
+};
+// the star's middle in the average of its colours (FireworkStarItem's tint)
+TEXGEN.push(function texFireworks() {
+  IT('firework_star_overlay', (d) => { for (let y = 5; y <= 10; y++) for (let x = 5; x <= 10; x++) if (Math.hypot(x - 7.5, y - 7.5) < 3.2) sp(d, x, y, [255, 255, 255]); }, true);
+  // spark sprites, from a bright cross down to a dot
+  for (let k = 0; k < 8; k++) T('particle_spark_' + k, (d) => {
+    const r = 3.5 - k * 0.4;
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const dx = Math.abs(x + 0.5 - 8), dy = Math.abs(y + 0.5 - 8), core = Math.hypot(dx, dy) < r * 0.55, arm = (dx < 1 && dy < r * 1.6) || (dy < 1 && dx < r * 1.6);
+      if (core || arm) sp(d, x, y, [255, 255, 255, core ? 255 : 210]);
+    }
+  });
+  T('particle_flash', (d) => fillEl(d, 8, 8, 7.5, 7.5, (x, y) => { const q = Math.hypot(x + 0.5 - 8, y + 0.5 - 8) / 7.5; return [255, 255, 255, Math.max(0, (1 - q) * 255)]; }));
+});
+const _packTexMapFW = packTexMap;
+packTexMap = function () {
+  const m = _packTexMapFW();
+  m.firework_star_overlay = ['item/firework_star_overlay'];
+  for (let k = 0; k < 8; k++) m['particle_spark_' + k] = ['particle/spark_' + k];
+  m.particle_flash = ['particle/flash'];
+  return m;
+};
+const fwAverage = cs => { if (!cs || !cs.length) return [138, 138, 138]; let r = 0, g = 0, b = 0; for (const c of cs) { r += (c >> 16) & 255; g += (c >> 8) & 255; b += c & 255; } return [r / cs.length, g / cs.length, b / cs.length]; };
+const _iconForFW = iconFor;
+iconFor = function (id, tag, st) {
+  if (id !== I.FIREWORK_STAR) return _iconForFW(id, tag, st);
+  const cs = tag && tag.explosion && tag.explosion.colors, key = 'fwstar#' + (cs ? cs.join(',') : '');
+  if (ICONS[key]) return ICONS[key];
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  g.drawImage(tileC(itemLayer(id), null), 0, 0, 64, 64);
+  const ov = texLayer('firework_star_overlay', -1);
+  if (ov >= 0) g.drawImage(tileC(ov, fwAverage(cs)), 0, 0, 64, 64);
+  return ICONS[key] = c.toDataURL();
+};
+
+/* ---------------- sounds ---------------- */
+// blasts are heard much further than other sounds (they play at volume 20 in Java)
+for (const [n, t] of [['firework_blast', 'Firework blasts'], ['firework_large_blast', 'Firework blasts'], ['firework_twinkle', 'Firework twinkles']]) { SND_CAT[n] = 'ambient'; SUB_TEXT[n] = t; }
+const _audioPlayFW = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'firework_blast' && name !== 'firework_large_blast' && name !== 'firework_twinkle') return _audioPlayFW.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  // brought closer so the usual falloff reaches 96 blocks
+  const [lx, ly, lz] = this.listener, k = 0.25, dst = this.out(lx + (x - lx) * k, ly + (y - ly) * k, lz + (z - lz) * k, 1);
+  if (!dst) return;
+  const now = this.ctx.currentTime;
+  if (name === 'firework_twinkle') { for (let i = 0; i < 14; i++) this.noiseHit(dst, 'highpass', 4000 + Math.random() * 3000, 1, 0.04, 0.16, now + Math.random() * 1.1); return; }
+  const big = name === 'firework_large_blast';
+  this.noiseHit(dst, 'lowpass', big ? 520 : 900, 0.7, big ? 1.6 : 0.9, big ? 0.95 : 0.7);
+  this.tone(dst, 'sine', big ? 60 : 90, 30, big ? 1.1 : 0.6, big ? 0.6 : 0.35);
+};
+
+/* ---------------- the rocket ---------------- */
+class FireworkRocket extends Entity {
+  // o: { shot: [vx, vy, vz] (crossbows, dispensers: flies straight), attached: a gliding player it pulls along, owner }
+  constructor(game, x, y, z, st, o) {
+    super(game, x, y, z);
+    this.w = this.h = 0.25; this.o = o || {};
+    const t = st && st.tag || {};
+    this.stack = { id: I.FIREWORK_ROCKET, count: 1, tag: st && st.tag ? JSON.parse(JSON.stringify(st.tag)) : undefined };
+    this.explosions = Array.isArray(t.explosions) ? t.explosions : [];
+    // FireworkRocketEntity: 10 ticks a level of flight duration (plus one), and a little random
+    this.lifetime = 10 * (1 + (t.flight === undefined ? 1 : t.flight)) + Math.floor(Math.random() * 6) + Math.floor(Math.random() * 7);
+    this.life = 0;
+    if (this.o.shot) [this.vx, this.vy, this.vz] = this.o.shot;
+    else if (!this.o.attached) { this.vx = gaussR() * 0.001; this.vy = 0.05; this.vz = gaussR() * 0.001; }
+  }
+  tick() {
+    const g = this.game, w = g.world;
+    this.savePrev(); this.age++;
+    if (this.life === 0) g.sound('fireworks', this.x, this.y, this.z);
+    const a = this.o.attached;
+    if (a) {
+      // pulling a flying player along (the push itself is the player's boost); it stays with them until it goes off
+      if (!a.dead) { this.x = a.x; this.y = a.y; this.z = a.z; }
+    } else {
+      if (!this.o.shot) { const k = this.hcoll ? 1 : 1.15; this.vx *= k; this.vz *= k; this.vy += 0.04; }
+      if (this.step()) return;
+    }
+    this.life++;
+    // the trail of sparks behind it
+    g.particles.add(sparkParticle(this.x, this.y - 0.2, this.z, gaussR() * 0.05, -this.vy * 0.5, gaussR() * 0.05, [1, 1, 1], null, false, false));
+    if (this.life > this.lifetime) this.explode();
+  }
+  // moves one tick; returns true when it hit something and exploded
+  step() {
+    const g = this.game, w = g.world, sub = Math.max(1, Math.ceil(Math.hypot(this.vx, this.vy, this.vz) / 0.25));
+    this.hcoll = false;
+    for (let i = 0; i < sub; i++) {
+      const nx = this.x + this.vx / sub, ny = this.y + this.vy / sub, nz = this.z + this.vz / sub;
+      // entities in the way (not its owner in the first few ticks)
+      for (const e of g.entities.concat(g.player ? [g.player] : [])) {
+        if (e === this || e.dead || !(e instanceof Mob || e === g.player) || (e === this.o.owner && this.life < 5) || (e === g.player && (e.mode === 3 || e.dead))) continue;
+        const hw = e.w / 2;
+        if (nx > e.x - hw - 0.1 && nx < e.x + hw + 0.1 && nz > e.z - hw - 0.1 && nz < e.z + hw + 0.1 && ny > e.y - 0.1 && ny < e.y + e.h + 0.1) { this.x = nx; this.y = ny; this.z = nz; this.explode(); return true; }
+      }
+      const solid = (x, y, z) => SOLID[w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z))] && !BLK[w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z))].noCollide;
+      if (solid(nx, ny, nz)) {
+        // a rocket with stars bursts against the block; one without just stops there
+        if (this.explosions.length) { this.explode(); return true; }
+        if (solid(nx, this.y, this.z)) { this.vx = 0; this.hcoll = true; }
+        if (solid(this.x, ny, this.z)) this.vy = 0;
+        if (solid(this.x, this.y, nz)) { this.vz = 0; this.hcoll = true; }
+        continue;
+      }
+      this.x = nx; this.y = ny; this.z = nz;
+    }
+    return false;
+  }
+  explode() {
+    if (this.dead) return;
+    this.dead = true;
+    const g = this.game;
+    g.fireworkBurst(this.x, this.y, this.z, this.vx, this.vy, this.vz, this.explosions);
+    // FireworkRocketEntity.dealExplosionDamage: 5 + 2 per star, less with distance, only where it can see
+    const a = this.o.attached;
+    if (a && a.boostRocket === this) { a.boost = 0; a.boostRocket = null; }
+    if (!this.explosions.length) return;
+    const f = 5 + this.explosions.length * 2;
+    if (a && a.hurt && !a.dead) a.hurt(f, 'fireworks', this.o.owner || this);
+    for (const e of g.entities.concat(g.player ? [g.player] : [])) {
+      if (e === a || e.dead || !e.hurt || !(e instanceof Mob || e === g.player)) continue;
+      const d = Math.hypot(e.x - this.x, e.y + e.h / 2 - this.y, e.z - this.z);
+      if (d > 5) continue;
+      let seen = false;
+      for (let k = 0; k < 2 && !seen; k++) {
+        const ty = e.y + e.h * 0.5 * k, dx = e.x - this.x, dy = ty - this.y, dz = e.z - this.z, l = Math.hypot(dx, dy, dz) || 1e-6;
+        seen = !raycast(g.world, this.x, this.y, this.z, dx / l, dy / l, dz / l, l, false);
+      }
+      if (seen) e.hurt(f * Math.sqrt((5 - d) / 5), 'fireworks', this.o.owner || this);
+    }
+  }
+  render(r, a) { const p = this.ipos(a); drawSprite(r, itemLayer(I.FIREWORK_ROCKET), p[0], p[1], p[2], 0.25, (this.game.camYaw || 0), [1, 1, 1, 1], [15, 15]); }
+}
+Game.prototype.launchFirework = function (x, y, z, st, o) {
+  const e = new FireworkRocket(this, x, y, z, st, o);
+  this.entities.push(e);
+  return e;
+};
+
+/* ---------------- the bursts ---------------- */
+// FireworkParticles.SparkParticle: 48 to 59 ticks, slowing down and falling a little, fading out over its second half
+// (towards its fade colour, if it has one), flickering when it twinkles and leaving sparks behind when it has a trail
+function sparkParticle(x, y, z, vx, vy, vz, col, fade, trail, twinkle) {
+  const life = 48 + Math.floor(Math.random() * 12);
+  return { x, y, z, vx, vy, vz, life, max: life, anim: [texL('particle_spark_0'), 8], u: 0, v: 0, us: 1, size: (0.05 + Math.random() * 0.05) * 1.5, g: 0.004, drag: 0.91 / 0.98,
+    col: col.slice(), bright: true, alpha: 0.99, spark: { fade, trail, twinkle } };
+}
+const STAR_SHAPE = [[0, 1], [0.3455, 0.309], [0.9511, 0.309], [0.3796, -0.1265], [0.6122, -0.8045], [0, -0.3591]];
+const CREEPER_SHAPE = [[0, 0.2], [0.2, 0.2], [0.2, 0.6], [0.6, 0.6], [0.6, 0.2], [0.2, 0.2], [0.2, 0], [0.4, 0], [0.4, -0.6], [0.2, -0.6], [0.2, -0.4], [0, -0.4]];
+Game.prototype.fireworkBurst = function (x, y, z, vx, vy, vz, explosions) {
+  if (!explosions || !explosions.length) {
+    for (let i = 0, n = 2 + Math.floor(Math.random() * 3); i < n; i++) this.particles.add({ x, y, z, vx: gaussR() * 0.05, vy: 0.005, vz: gaussR() * 0.05, life: 20 + Math.random() * 10, anim: this.particles.gen(), u: 0, v: 0, us: 1, size: 0.2, g: 0, col: [0.8, 0.8, 0.8] });
+    return;
+  }
+  (this.fwStarters || (this.fwStarters = [])).push({ x, y, z, vx, vy, vz, ex: explosions, life: 0, lifetime: explosions.length * 2 - 1, twinkle: explosions.some(e => e.twinkle) });
+};
+// FireworkParticles.Starter: the sound first, then one star every two ticks, and the crackle of twinkling stars at the end
+Game.prototype.tickFireworks = function () {
+  const S = this.fwStarters;
+  if (!S || !S.length) return;
+  const P = this.particles, p = this.player;
+  for (const s of S) {
+    if (s.life === 0) {
+      const big = s.ex.length >= 3 || s.ex.some(e => e.shape === 'large_ball');
+      AUDIO.play(big ? 'firework_large_blast' : 'firework_blast', s.x, s.y, s.z);
+    }
+    if (s.life % 2 === 0 && s.life / 2 < s.ex.length) {
+      const e = s.ex[s.life / 2], cols = (e.colors && e.colors.length ? e.colors : [FW_RGB.black]).map(fw01), fades = (e.fade || []).map(fw01);
+      const add = (dx, dy, dz) => P.add(sparkParticle(s.x, s.y, s.z, dx, dy, dz, cols[Math.floor(Math.random() * cols.length)], fades.length ? fades[Math.floor(Math.random() * fades.length)] : null, !!e.trail, !!e.twinkle));
+      const ball = (speed, size) => {
+        for (let j = -size; j <= size; j++) for (let k = -size; k <= size; k++) for (let l = -size; l <= size; l++) {
+          const gx = k + (Math.random() - Math.random()) * 0.5, gy = j + (Math.random() - Math.random()) * 0.5, gz = l + (Math.random() - Math.random()) * 0.5;
+          const n = Math.hypot(gx, gy, gz) / speed + gaussR() * 0.05;
+          add(gx / n, gy / n, gz / n);
+          if (j !== -size && j !== size && k !== -size && k !== size) l += size * 2 - 1;
+        }
+      };
+      const shape = (speed, pts, creeper) => {
+        const [d, f0] = pts[0];
+        add(d * speed, f0 * speed, 0);
+        const f = Math.random() * Math.PI, gk = creeper ? 0.034 : 0.34;
+        for (let i = 0; i < 3; i++) {
+          const h = f + i * Math.PI * gk;
+          let j = d, k = f0;
+          for (let l = 1; l < pts.length; l++) {
+            const [m, n] = pts[l];
+            for (let o = 0.25; o <= 1; o += 0.25) {
+              let px = (j + (m - j) * o) * speed;
+              const q = (k + (n - k) * o) * speed, r = px * Math.sin(h);
+              px *= Math.cos(h);
+              for (let sgn = -1; sgn <= 1; sgn += 2) add(px * sgn, q, r * sgn);
+            }
+            j = m; k = n;
+          }
+        }
+      };
+      switch (e.shape) {
+        case 'large_ball': ball(0.5, 4); break;
+        case 'star': shape(0.5, STAR_SHAPE, false); break;
+        case 'creeper': shape(0.5, CREEPER_SHAPE, true); break;
+        case 'burst': {
+          const a = gaussR() * 0.05, b = gaussR() * 0.05;
+          for (let i = 0; i < 70; i++) add(s.vx * 0.5 + gaussR() * 0.15 + a, s.vy * 0.5 + Math.random() * 0.5, s.vz * 0.5 + gaussR() * 0.15 + b);
+          break;
+        }
+        default: ball(0.25, 2);
+      }
+      // the flash of light in the first colour
+      P.add({ x: s.x, y: s.y, z: s.z, vx: 0, vy: 0, vz: 0, life: 4, max: 4, layer: texL('particle_flash'), u: 0, v: 0, us: 1, size: 0.5, g: 0, col: cols[0], bright: true, alpha: 0.6, flash: true });
+    }
+    s.life++;
+    if (s.life > s.lifetime) { s.done = true; if (s.twinkle) AUDIO.play('firework_twinkle', s.x, s.y, s.z); }
+  }
+  this.fwStarters = S.filter(s => !s.done);
+};
+const _gameTickFW = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickFW.call(this); this.tickFireworks(); };
+// spark behaviour on top of the plain particle motion
+const _particlesTickFW = Particles.prototype.tick;
+Particles.prototype.tick = function () {
+  const extra = [];
+  for (const p of this.list) {
+    if (p.flash) { const age = p.max - p.life + 1; p.size = Math.max(0.1, 7.1 * Math.sin(age * 0.25 * Math.PI)); p.alpha = Math.max(0, 0.6 - age * 0.125); continue; }
+    const s = p.spark;
+    if (!s) continue;
+    const age = p.max - p.life, half = Math.floor(p.max / 2);
+    if (age > half) {
+      p.alpha = Math.max(0, 1 - (age - half) / p.max);
+      if (s.fade) for (let k = 0; k < 3; k++) p.col[k] += (s.fade[k] - p.col[k]) * 0.2;
+    }
+    if (s.twinkle) p.hidden = !(age < p.max / 3 || Math.floor((age + p.max) / 3) % 2 === 0);
+    if (s.trail && age < half && (age + p.max) % 2 === 0) {
+      const t = sparkParticle(p.x, p.y, p.z, 0, 0, 0, p.col, s.fade, false, s.twinkle);
+      t.life = t.max - Math.floor(t.max / 2);
+      extra.push(t);
+    }
+  }
+  _particlesTickFW.call(this);
+  for (const t of extra) this.add(t);
+};
+const _particlesRenderFW = Particles.prototype.render;
+Particles.prototype.render = function (r, cam, right, up) {
+  if (!this.list.some(p => p.hidden)) return _particlesRenderFW.call(this, r, cam, right, up);
+  const all = this.list;
+  this.list = all.filter(p => !p.hidden);
+  try { return _particlesRenderFW.call(this, r, cam, right, up); } finally { this.list = all; }
+};
+
+/* ---------------- launching ---------------- */
+// on a block: a rocket rising from where it was used (FireworkRocketItem.useOn)
+// in flight: pulled along by the rocket for its lifetime (FireworkRocketItem.use while fall flying)
+const _useItemSpecialFW = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (!held || held.id !== I.FIREWORK_ROCKET) return _useItemSpecialFW.call(this, p, hit, held, it);
+  if (p.gliding) {
+    const e = this.launchFirework(p.x, p.y, p.z, held, { attached: p, owner: p });
+    p.boost = e.lifetime; p.boostRocket = e;
+    if (p.mode !== 1) p.consumeHeld(1);
+    this.ui.refreshHotbar();
+    return true;
+  }
+  if (!hit) return false;
+  // from the point clicked, a little out from the face
+  const n = [DX[hit.face], DY[hit.face], DZ[hit.face]];
+  let at = [hit.x + 0.5 + n[0] * 0.5, hit.y + 0.5 + n[1] * 0.5, hit.z + 0.5 + n[2] * 0.5];
+  if (hit.t !== undefined && p.eye) {
+    const e = p.eye(), d = p.look(), q = [e[0] + d[0] * hit.t, e[1] + d[1] * hit.t, e[2] + d[2] * hit.t];
+    if (Math.hypot(q[0] - at[0], q[1] - at[1], q[2] - at[2]) < 0.75) at = q;
+  }
+  this.launchFirework(at[0] + n[0] * 0.15, at[1] + n[1] * 0.15, at[2] + n[2] * 0.15, held, { owner: p });
+  if (p.mode !== 1) p.consumeHeld(1);
+  this.ui.refreshHotbar();
+  return true;
+};
+DEATH_MSG.fireworks = 'was caught in a firework blast';
+// crossbows fire rockets straight (CrossbowItem: 1.6 blocks a tick, multishot spreading them)
+const _shootCrossbowFW = Player.prototype.shootCrossbow;
+Player.prototype.shootCrossbow = function (st, hand) {
+  const ch = st.tag && st.tag.charged;
+  if (!ch || ch.id !== I.FIREWORK_ROCKET) return _shootCrossbowFW.call(this, st, hand);
+  const g = this.game, e = this.eye(), d = this.look(), shots = enchLevel(st, 'multishot') ? [0, -0.17, 0.17] : [0];
+  for (const off of shots) {
+    const c = Math.cos(off), s = Math.sin(off), dx = d[0] * c - d[2] * s, dz = d[0] * s + d[2] * c;
+    g.launchFirework(e[0], e[1] - 0.15, e[2], ch, { shot: [dx * 1.6, d[1] * 1.6, dz * 1.6], owner: this });
+  }
+  delete st.tag.charged; if (!Object.keys(st.tag).length) delete st.tag;
+  g.sound('bow', this.x, this.y + 1.5, this.z);
+  this.damageHand(hand, shots.length === 3 ? 3 : 1);
+  g.ui.refreshHotbar();
+};
+
+/* @file 137_books_horns.js */
+/* ===================================================================
+   CHISELED BOOKSHELVES, GOAT HORNS, THE MACE AND NOTE BLOCK HEADS —
+   bookshelves holding six books (by hand, hoppers and comparators);
+   the eight goat horns, item cooldowns shown on the hotbar, goats that
+   snap off their horns; Breach, the mace's smash shock wave and Wind
+   Burst; mob heads that make note blocks play their mob's sound
+   =================================================================== */
+
+/* ---------------- chiseled bookshelves ---------------- */
+// six slots, two rows of three; the front shows which hold a book (meta bits 2..7, ChiseledBookShelfBlock's slot_N_occupied)
+const SHELF_BOOKS = new Set(['book', 'written_book', 'enchanted_book', 'writable_book', 'knowledge_book'].filter(n => ITEM_BY_NAME[n]).map(n => ITEM_BY_NAME[n].id));
+// the front's columns in texture pixels from the left as seen from outside (getSection: 6, 5 and 5 pixels); the top row is slots 0..2
+const SHELF_COLS = [0, 6, 11, 16];
+TEXGEN.push(function texShelfFronts() {
+  for (let k = 0; k < 64; k++) T('chiseled_bookshelf_front_' + k, () => { });
+});
+// the 64 fronts are put together from the empty and occupied textures whenever textures are uploaded (so a resource pack's are used)
+function composeShelfFronts() {
+  const R = TEX.res, E = TEX.imgs[TEX.idx.chiseled_bookshelf_empty], O = TEX.imgs[TEX.idx.chiseled_bookshelf_occupied];
+  if (!E || !O) return;
+  const slotAt = new Uint8Array(R * R);
+  for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) {
+    const u = (x + 0.5) * 16 / R, v = (y + 0.5) * 16 / R, col = u < SHELF_COLS[1] ? 0 : u < SHELF_COLS[2] ? 1 : 2;
+    slotAt[y * R + x] = col + (v < 8 ? 0 : 3);
+  }
+  for (let k = 0; k < 64; k++) {
+    const i = TEX.idx['chiseled_bookshelf_front_' + k];
+    if (i === undefined) continue;
+    let d = TEX.imgs[i];
+    if (!d || d.length !== R * R * 4) d = TEX.imgs[i] = new Uint8Array(R * R * 4);
+    for (let p = 0; p < R * R; p++) { const src = (k >> slotAt[p]) & 1 ? O : E; d[p * 4] = src[p * 4]; d[p * 4 + 1] = src[p * 4 + 1]; d[p * 4 + 2] = src[p * 4 + 2]; d[p * 4 + 3] = src[p * 4 + 3]; }
+  }
+}
+const _uploadTexturesCB = Renderer.prototype.uploadTextures;
+Renderer.prototype.uploadTextures = function () { composeShelfFronts(); return _uploadTexturesCB.call(this); };
+const _resolveFaceTexturesCB = resolveFaceTextures;
+resolveFaceTextures = function () {
+  _resolveFaceTexturesCB();
+  const L = n => texLayer(n, 0), side = L('chiseled_bookshelf_side'), top = L('chiseled_bookshelf_top'), sets = [];
+  for (let k = 0; k < 64; k++) sets.push(Int16Array.of(side, side, top, top, L('chiseled_bookshelf_front_' + k), side));
+  VARTEX[B.CHISELED_BOOKSHELF] = m => sets[(m >> 2) & 63];
+};
+const shelfBE = (w, x, y, z) => {
+  let be = w.getBE(x, y, z);
+  if (!be || be.type !== 'chiseled_bookshelf') { be = { type: 'chiseled_bookshelf', items: new Array(6).fill(null), last: -1 }; w.setBE(x, y, z, be); }
+  if (!be.items) be.items = new Array(6).fill(null);
+  return be;
+};
+// the meta follows the books (and comparators next to it hear about it)
+Game.prototype.syncShelf = function (x, y, z) {
+  const w = this.world, be = w.getBE(x, y, z);
+  if (w.getBlock(x, y, z) !== B.CHISELED_BOOKSHELF) return;
+  let bits = 0;
+  if (be && be.items) be.items.forEach((s, k) => { if (s) bits |= 1 << k; });
+  const m = w.getMeta(x, y, z), nm = (m & 3) | (bits << 2);
+  if (nm !== m) { w.setMeta(x, y, z, nm); this.remeshNear(x, z); }
+  if (this.redstoneChanged) this.redstoneChanged(x, y, z);
+};
+// ChiseledBookShelfBlock.getHitSlot: where on the front the click landed (left to right as seen from outside, top row first)
+function shelfSlot(p, hit, m) {
+  const fr = FRONT4[m & 3];
+  if (hit.face !== fr) return -1;
+  let rx, ry;
+  if (hit.rel) [rx, ry] = hit.rel;
+  else {
+    if (hit.t === undefined || !p.eye) return -1;
+    const e = p.eye(), d = p.look(), q = [e[0] + d[0] * hit.t - hit.x, e[1] + d[1] * hit.t - hit.y, e[2] + d[2] * hit.t - hit.z];
+    ry = q[1];
+    rx = fr === 4 ? q[0] : fr === 5 ? 1 - q[0] : fr === 1 ? q[2] : 1 - q[2];
+  }
+  const col = rx < 0.375 ? 0 : rx < 0.6875 ? 1 : 2;
+  return col + (ry >= 0.5 ? 0 : 3);
+}
+const _useBlockCB = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit.id !== B.CHISELED_BOOKSHELF) return _useBlockCB.call(this, p, hit, held);
+  const w = this.world, { x, y, z } = hit, slot = shelfSlot(p, hit, w.getMeta(x, y, z));
+  if (slot < 0) return _useBlockCB.call(this, p, hit, held);
+  if (!p.mayBuild) return true;
+  const be = shelfBE(w, x, y, z), cur = be.items[slot];
+  if (held && SHELF_BOOKS.has(held.id) && !cur) {
+    // a book goes into the empty slot clicked
+    be.items[slot] = copyStack(held, 1);
+    if (p.mode !== 1) p.consumeHeld(1);
+    AUDIO.play(held.id === I.ENCHANTED_BOOK ? 'shelf_insert_enchanted' : 'shelf_insert', x + 0.5, y + 0.5, z + 0.5);
+  } else if (cur) {
+    // a full slot gives its book back (whatever is in hand)
+    be.items[slot] = null;
+    if (p.addItem(cur) > 0) this.dropItem(x + 0.5 + DX[hit.face] * 0.6, y + 0.5, z + 0.5 + DZ[hit.face] * 0.6, cur);
+    AUDIO.play(cur.id === I.ENCHANTED_BOOK ? 'shelf_pickup_enchanted' : 'shelf_pickup', x + 0.5, y + 0.5, z + 0.5);
+  } else return true;
+  be.last = slot;
+  w.setBE(x, y, z, be);
+  this.syncShelf(x, y, z);
+  this.ui.refreshHotbar();
+  return true;
+};
+// comparators: the last slot used, counted from 1
+const _containerSignalCB = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  if (w.getBlock(x, y, z) !== B.CHISELED_BOOKSHELF) return _containerSignalCB.call(this, w, x, y, z);
+  const be = w.getBE(x, y, z);
+  return be && be.last >= 0 ? be.last + 1 : 0;
+};
+// hoppers put books into the first empty slot and take them out again, one book a slot
+const _insertItemCB = Game.prototype.insertItem;
+Game.prototype.insertItem = function (be, st, slots) {
+  if (!be || be.type !== 'chiseled_bookshelf') return _insertItemCB.call(this, be, st, slots);
+  const i = SHELF_BOOKS.has(st.id) ? be.items.findIndex(s => !s) : -1;
+  if (i < 0) return st;
+  be.items[i] = Object.assign({}, st, { count: 1 }); be.last = i;
+  return st.count > 1 ? Object.assign({}, st, { count: st.count - 1 }) : null;
+};
+const _tickHopperCB = Game.prototype.tickHopper;
+Game.prototype.tickHopper = function (x, y, z) {
+  const w = this.world, f = hopperFace(w.getMeta(x, y, z)), spots = [[x + DX[f], y + DY[f], z + DZ[f]], [x, y + 1, z]].filter(([a, b, c]) => w.getBlock(a, b, c) === B.CHISELED_BOOKSHELF);
+  if (!spots.length) return _tickHopperCB.call(this, x, y, z);
+  const before = spots.map(([a, b, c]) => { const be = w.getBE(a, b, c); return be && be.items ? be.items.map(s => !!s) : null; });
+  const r = _tickHopperCB.call(this, x, y, z);
+  spots.forEach(([a, b, c], k) => {
+    const be = w.getBE(a, b, c);
+    if (!be || !be.items) return;
+    const was = before[k], changed = was ? be.items.findIndex((s, i) => !!s !== was[i]) : -1;
+    if (changed >= 0) { be.last = changed; this.syncShelf(a, b, c); }
+  });
+  return r;
+};
+// sounds of books going in and coming out
+for (const [n, t] of [['shelf_insert', 'Book placed'], ['shelf_insert_enchanted', 'Enchanted book placed'], ['shelf_pickup', 'Book taken'], ['shelf_pickup_enchanted', 'Enchanted book taken']]) { SND_CAT[n] = 'block'; SUB_TEXT[n] = t; }
+const _audioPlayCB = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^shelf_/.test(name)) return _audioPlayCB.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const ins = /insert/.test(name), ench = /enchanted/.test(name);
+  this.noiseHit(dst, 'bandpass', ins ? 600 : 900, 1.6, ins ? 0.12 : 0.09, 0.45);
+  this.tone(dst, 'triangle', ins ? 160 : 220, ins ? 110 : 260, 0.1, 0.18);
+  if (ench) for (let i = 0; i < 4; i++) this.tone(dst, 'sine', 1400 + i * 300, 1500 + i * 300, 0.18, 0.04, this.ctx.currentTime + 0.05 + i * 0.05);
+};
+
+/* ---------------- item cooldowns ---------------- */
+// ItemCooldowns: per item, shown on the hotbar as a white veil that shrinks away
+Player.prototype.setCooldown = function (id, ticks) { (this.cooldowns || (this.cooldowns = new Map())).set(id, [ticks, ticks]); };
+Player.prototype.cooldownLeft = function (id) {
+  const c = this.cooldowns && this.cooldowns.get(id);
+  let f = c ? c[0] / c[1] : 0;
+  if (id === I.ENDER_PEARL && this.pearlCd > 0) f = Math.max(f, this.pearlCd / 20);
+  if (id === I.SHIELD && this.shieldCd > 0) f = Math.max(f, this.shieldCd / 100);
+  return f;
+};
+// a shield knocked out of use can't be raised until its cooldown is over
+const _useKindCB = Player.prototype.useKind;
+Player.prototype.useKind = function (st) { if (st && st.id === I.SHIELD && this.shieldCd > 0) return null; return _useKindCB.call(this, st); };
+const _playerTickCB = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const r = _playerTickCB.call(this, inp);
+  if (this.cooldowns) for (const [id, c] of this.cooldowns) if (--c[0] <= 0) this.cooldowns.delete(id);
+  if (this.shieldCd > 0) this.shieldCd--;
+  return r;
+};
+Game.prototype.drawCooldowns = function () {
+  const p = this.player, ui = this.ui;
+  if (!p || !ui.hslots) return;
+  for (let i = 0; i < 9; i++) {
+    const s = ui.hslots[i], st = p.inv[i], f = st ? p.cooldownLeft(st.id) : 0;
+    let ov = s.querySelector('.cdov');
+    if (!f) { if (ov) ov.remove(); continue; }
+    if (!ov) { ov = el('div', 'cdov'); ov.style.cssText = 'position:absolute;left:3px;right:3px;bottom:3px;background:rgba(255,255,255,0.5);pointer-events:none'; s.appendChild(ov); }
+    ov.style.height = Math.ceil(16 * f) * 2 + 'px';
+  }
+};
+const _gameTickCB = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickCB.call(this); this.drawCooldowns(); };
+
+/* ---------------- goat horns ---------------- */
+// the eight instruments: the first four come from ordinary goats and outposts, the others from screaming goats
+const HORNS = ['ponder', 'sing', 'seek', 'feel', 'admire', 'call', 'yearn', 'dream'];
+const hornOf = st => st && st.tag && HORNS.includes(st.tag.instrument) ? st.tag.instrument : 'ponder';
+const _tooltipLinesGH = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesGH(st);
+  if (st.id === I.GOAT_HORN) out.splice(1, 0, [titleCase(hornOf(st)), TT_GRAY]);
+  return out;
+};
+// each instrument its own call: base pitch, rise and length
+const HORN_SOUND = { ponder: [196, 1.05, 2.6], sing: [262, 1.25, 2.2], seek: [233, 0.9, 2.4], feel: [175, 1.12, 2.8], admire: [294, 1.3, 2.0], call: [220, 1.5, 2.6], yearn: [165, 0.85, 3.0], dream: [247, 1.18, 2.9] };
+AUDIO.horn = function (x, y, z, kind) {
+  if (!this.ctx) return;
+  // InstrumentItem: heard 256 blocks away, so it comes in from much further than other sounds
+  const [lx, ly, lz] = this.listener, k = 24 / 256, dst = this.out(lx + (x - lx) * k, ly + (y - ly) * k, lz + (z - lz) * k, 1.4);
+  if (!dst) return;
+  const [f0, rise, len] = HORN_SOUND[kind] || HORN_SOUND.ponder, now = this.ctx.currentTime;
+  const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 1200; f2.connect(dst);
+  this.tone(f2, 'sawtooth', f0, f0 * rise, len, 0.4); this.tone(f2, 'sawtooth', f0 * 1.5, f0 * 1.5 * rise, len * 0.9, 0.15);
+  if (kind === 'call' || kind === 'admire') this.tone(f2, 'sawtooth', f0 * 2, f0 * 2 * rise, len * 0.5, 0.12, now + len * 0.4);
+};
+// InstrumentItem.use: plays where the player stands, then the horn rests for its 7 seconds (only the horn)
+const _useItemSpecialGH = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (!held || held.id !== I.GOAT_HORN) return _useItemSpecialGH.call(this, p, hit, held, it);
+  if (p.cooldownLeft(I.GOAT_HORN) > 0) return false;
+  AUDIO.horn(p.x, p.y + 1.6, p.z, hornOf(held));
+  p.setCooldown(I.GOAT_HORN, 140);
+  return true;
+};
+// the creative inventory holds all eight
+const _buildCreativeTabsGH = buildCreativeTabs;
+buildCreativeTabs = function () {
+  _buildCreativeTabsGH();
+  for (const k in CREATIVE) {
+    const list = CREATIVE[k];
+    if (!Array.isArray(list)) continue;
+    for (let i = list.length - 1; i >= 0; i--) if (list[i] && list[i].id === I.GOAT_HORN && !(list[i].tag && list[i].tag.instrument)) list.splice(i, 1, ...HORNS.map(h => ({ id: I.GOAT_HORN, tag: { instrument: h } })));
+  }
+};
+// loot (pillager outposts) gives one of the ordinary four
+const _rollLootGH = rollLoot;
+rollLoot = function (table, R, out) {
+  const res = _rollLootGH(table, R, out);
+  for (const s of res || []) if (s && s.id === I.GOAT_HORN && !(s.tag && s.tag.instrument)) s.tag = Object.assign({}, s.tag || {}, { instrument: HORNS[Math.floor((R || Math.random)() * 4)] });
+  return res;
+};
+// Goat.dropHorn (RamTarget): a ramming goat that runs into stone, logs, packed ice or certain ores snaps off one of its horns
+const SNAPS_HORN = new Set(['stone', 'packed_ice', 'iron_ore', 'coal_ore', 'copper_ore', 'emerald_ore', ...WOODS.filter(w => w !== 'crimson' && w !== 'warped').map(w => w + '_log')].filter(n => B[n.toUpperCase()] !== undefined).map(n => B[n.toUpperCase()]));
+const _physicsStepGH = Entity.prototype.physicsStep;
+Entity.prototype.physicsStep = function (drag) {
+  const res = _physicsStepGH.call(this, drag);
+  if (this.type === 'goat' && this.data && this.data.ramT > 0 && (res.hx || res.hz) && this.ramHit !== this.data.ramTarget) {
+    const w = this.game.world, t = this.data.ramTarget, dx = t ? t.x - this.x : -Math.sin(this.yaw), dz = t ? t.z - this.z : Math.cos(this.yaw), l = Math.hypot(dx, dz) || 1;
+    const bx = Math.floor(this.x + dx / l), by = Math.floor(this.y), bz = Math.floor(this.z + dz / l);
+    if (SNAPS_HORN.has(w.getBlock(bx, by, bz)) || SNAPS_HORN.has(w.getBlock(bx, by + 1, bz))) {
+      this.ramHit = this.data.ramTarget;
+      const sides = ['leftHorn', 'rightHorn'].filter(k => this.data[k] !== false);
+      if (sides.length) {
+        this.data[sides[Math.floor(Math.random() * sides.length)]] = false;
+        const pool = this.data.screaming ? HORNS.slice(4) : HORNS.slice(0, 4);
+        this.game.dropItem(this.x, this.y + this.h * 0.6, this.z, { id: I.GOAT_HORN, count: 1, tag: { instrument: pool[Math.floor(Math.random() * 4)] } });
+        this.game.sound('golem_hit', this.x, this.y, this.z);
+      }
+      this.data.ramT = 0; this.data.ramCd = 600 + Math.random() * 2400;
+    }
+  }
+  return res;
+};
+
+/* ---------------- the mace ---------------- */
+// MaceItem: a smash knocks back whatever stands within 3.5 blocks of the target (harder after a fall of more than 5 blocks),
+// with a thud on the ground or a whoosh in the air; Wind Burst then throws the attacker up with its wind
+const WIND_BURST_K = [1.2, 1.75, 2.2];
+const _attackMC = Player.prototype.attack;
+Player.prototype.attack = function (ent) {
+  const held = this.inv[this.sel], mace = held && held.id === I.MACE;
+  const smash = mace && this.fallDist > 1.5 && !this.gliding, fall = this.fallDist, y0 = this.y;
+  const br = mace ? enchLevel(held, 'breach') : 0;
+  this.breachNow = br ? 0.15 * br : 0;
+  const hp = ent && ent.health;
+  let r;
+  try { r = _attackMC.call(this, ent); } finally { this.breachNow = 0; }
+  if (!smash || !ent || ent.health === hp && !ent.dead) return r;
+  const g = this.game;
+  for (const e of g.entities) {
+    if (e === ent || e === this || e.dead || !(e instanceof Mob) || (e.data && e.data.owner && e.data.tame)) continue;
+    const dx = e.x - ent.x, dy = e.y - ent.y, dz = e.z - ent.z, d = Math.hypot(dx, dy, dz);
+    if (d > 3.5) continue;
+    const k = (3.5 - d) * 0.7 * (fall > 5 ? 2 : 1) * (1 - (e.T && e.T.kbRes || 0)), l = d || 1;
+    if (k > 0) { e.vx += dx / l * k; e.vy += 0.7; e.vz += dz / l * k; }
+  }
+  const below = g.world.getBlock(Math.floor(ent.x), Math.floor(ent.y - 0.2), Math.floor(ent.z));
+  if (ent.onGround && below) { g.sound(fall > 5 ? 'explode' : 'anvil_land', ent.x, ent.y, ent.z); for (let i = 0; i < 2; i++) g.particles.blockBreak(Math.floor(ent.x), Math.floor(ent.y - 0.2), Math.floor(ent.z), below); }
+  else g.sound('wind_burst', ent.x, ent.y, ent.z);
+  // the smash cancels the fall; fall damage after it only counts from where it hit
+  this.impulseY = y0;
+  const wb = enchLevel(held, 'wind_burst');
+  if (wb) { this.vy = 0.77 * (WIND_BURST_K[wb - 1] || 1.5 + 0.35 * wb); g.sound('wind_burst', this.x, this.y, this.z); g.particles.poof(this.x, this.y, this.z, [0.85, 0.9, 1], 10); }
+  else this.vy = 0.01;
+  return r;
+};
+const _landedMC = Player.prototype.landed;
+Player.prototype.landed = function (dist) {
+  if (this.impulseY !== undefined) { dist = Math.min(dist, Math.max(0, this.impulseY - this.y)); this.impulseY = undefined; }
+  return _landedMC.call(this, dist);
+};
+
+/* ---------------- mob heads on note blocks ---------------- */
+// NoteBlock: with a mob head on top it plays that mob's sound instead of a note
+const HEAD_SOUND = { zombie_head: 'zombie', skeleton_skull: 'skeleton', creeper_head: 'creeper', piglin_head: 'piglin', wither_skeleton_skull: 'wither_skeleton', dragon_head: 'ender_dragon' };
+const _playNoteNH = Game.prototype.playNote;
+Game.prototype.playNote = function (x, y, z) {
+  const w = this.world, above = w.getBlock(x, y + 1, z), mob = above && HEAD_SOUND[BLK[above].name];
+  if (above && BLK[above].head) {
+    const T = mob && MOB_TYPES[mob], snd = T && T.sounds && T.sounds[0];
+    if (snd) this.sound(snd, x + 0.5, y + 1, z + 0.5);
+    return;
+  }
+  return _playNoteNH.call(this, x, y, z);
 };
 
 </script>
