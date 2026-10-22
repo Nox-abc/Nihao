@@ -14385,7 +14385,9 @@ class Mob extends Entity {
     const yaw = p.yaw, dx = -Math.sin(yaw) * fwd - Math.cos(yaw) * side, dz = -Math.cos(yaw) * fwd + Math.sin(yaw) * side, l = Math.hypot(dx, dz);
     const speed = (this.data.speed || T.run) * (this.type === 'pig' ? 1.1 : this.type === 'strider' ? (this.data.cold ? 0.35 : 1.0) : 1) * (inp.keys.has('ControlLeft') && this.type === 'camel' ? 1.6 : 1);
     this.move = l > 0.01 ? [dx / l, dz / l, speed, false] : null;
-    if (inp.keys.has('Space') && this.onGround && (this.type === 'horse' || this.type === 'donkey' || this.type === 'mule' || this.type === 'skeleton_horse' || this.type === 'camel') && this.jumpCd <= 0) { this.vy = this.data.jump || 0.75; this.jumpCd = 12; }
+    // the jump bar (riderJump) when there is one
+    if (this.riderJump) this.riderJump(p, inp, fwd);
+    else if (inp.keys.has('Space') && this.onGround && (this.type === 'horse' || this.type === 'donkey' || this.type === 'mule' || this.type === 'skeleton_horse' || this.type === 'camel') && this.jumpCd <= 0) { this.vy = this.data.jump || 0.75; this.jumpCd = 12; }
     if (this.type === 'pig' && p.held && p.held.id === I.CARROT_ON_A_STICK && this.age % 120 === 0) p.damageHeld(1);
   }
   // ---------- rendering ----------
@@ -17530,15 +17532,17 @@ Object.assign(UI.prototype, {
       if (st && btn === 0 && stackable(st, cur) && cur.count + st.count <= maxStack(st.id)) { cur.count += st.count; this.setSlot(c, i, null); this.renderInv(); this.refreshHotbar(); }
       return;
     }
-    const lim = st ? (c === 'armor' ? 1 : maxStack(st.id)) : 0;
+    // armor slots (and slots a screen marks, like a horse's saddle) hold one item
+    const one = c === 'armor' || !!(this.singleSlot && this.singleSlot(c, i));
+    const lim = st ? (one ? 1 : maxStack(st.id)) : 0;
     if (btn === 0) {
       if (!cur) { if (st) { this.cursor = st; this.setSlot(c, i, null); } }
-      else if (!st) { if (c === 'armor' && cur.count > 1) { this.setSlot(c, i, copyStack(cur, 1)); cur.count--; } else { this.setSlot(c, i, cur); this.cursor = null; } }
-      else if (stackable(st, cur) && c !== 'armor') {
+      else if (!st) { if (one && cur.count > 1) { this.setSlot(c, i, copyStack(cur, 1)); cur.count--; } else { this.setSlot(c, i, cur); this.cursor = null; } }
+      else if (stackable(st, cur) && !one) {
         const k = Math.min(cur.count, lim - st.count);
         st.count += k; cur.count -= k; if (cur.count <= 0) this.cursor = null;
         this.setSlot(c, i, st);
-      } else if (this.accepts(c, i, cur) && !(c === 'armor' && cur.count > 1)) { this.setSlot(c, i, cur); this.cursor = st; }
+      } else if (this.accepts(c, i, cur) && !(one && cur.count > 1)) { this.setSlot(c, i, cur); this.cursor = st; }
     } else if (btn === 2) {
       if (!cur && st) { const h = Math.ceil(st.count / 2); this.cursor = copyStack(st, h); st.count -= h; this.setSlot(c, i, st.count > 0 ? st : null); }
       else if (cur && !st) { this.setSlot(c, i, copyStack(cur, 1)); cur.count--; if (cur.count <= 0) this.cursor = null; }
@@ -17596,11 +17600,12 @@ Object.assign(UI.prototype, {
     const moveInto = (cont, from, to) => {
       let n = st.count;
       const ms = maxStack(st.id);
-      for (let k = from; k < to && n > 0; k++) { if (!this.accepts(cont, k, st)) continue; const s = this.getSlot(cont, k); if (s && stackable(s, st) && s.count < ms) { const m = Math.min(n, ms - s.count); s.count += m; n -= m; this.setSlot(cont, k, s); } }
-      for (let k = from; k < to && n > 0; k++) { if (!this.accepts(cont, k, st)) continue; if (!this.getSlot(cont, k)) { const m = Math.min(n, cont === 'armor' ? 1 : ms); this.setSlot(cont, k, copyStack(st, m)); n -= m; } }
+      for (let k = from; k < to && n > 0; k++) { if (!this.accepts(cont, k, st)) continue; const s = this.getSlot(cont, k), lim = cont === 'armor' || (this.singleSlot && this.singleSlot(cont, k)) ? 1 : ms; if (s && stackable(s, st) && s.count < lim) { const m = Math.min(n, lim - s.count); s.count += m; n -= m; this.setSlot(cont, k, s); } }
+      for (let k = from; k < to && n > 0; k++) { if (!this.accepts(cont, k, st)) continue; if (!this.getSlot(cont, k)) { const m = Math.min(n, cont === 'armor' || (this.singleSlot && this.singleSlot(cont, k)) ? 1 : ms); this.setSlot(cont, k, copyStack(st, m)); n -= m; } }
       return n;
     };
-    const S = SCREENS[inv.type] || {}, beCount = (S.slots || []).filter(s => s[0] === 'be').length, localCount = S.local || 0;
+    // the container's slots run up to the highest one on the screen (a horse's may skip the saddle or armor slot)
+    const S = SCREENS[inv.type] || {}, beCount = (S.slots || []).reduce((n, s) => s[0] === 'be' ? Math.max(n, s[1] + 1) : n, 0), localCount = S.local || 0;
     let left = st.count;
     if (c === 'inv') {
       const t = inv.type;
@@ -39590,6 +39595,580 @@ Mob.prototype.canDisableShield = function (source) {
   if (this.type === 'warden') return true;
   const h = this.data.hand;
   return !!(h && ITEMS[h.id] && /_axe$/.test(ITEMS[h.id].name));
+};
+
+/* @file 139_horses.js */
+/* ===================================================================
+   PART 29: the horse inventory, horse armor, llama carpets and chests,
+   and armadillos that shed scutes and curl up like Java's
+   - sneak and right click a tamed horse, donkey, mule, llama, camel or
+     skeleton horse (or press the inventory key while riding it) for
+     its screen: the saddle, the armor or carpet, the chest
+   - horse armor (leather, iron, gold, diamond) put on by right click
+     or in the screen, protecting by 3, 5, 7 or 11 and drawn on the
+     horse (leather in its dye); carpets on llamas drawn as blankets
+   - chests on donkeys and mules (15 slots) and llamas (3 slots a point
+     of strength); llama strength like Java's, and inherited
+   - everything a horse carries drops when it dies
+   =================================================================== */
+
+/* ---------------- what each kind carries ---------------- */
+const HORSE_ARMOR = { leather_horse_armor: ['leather', 3], iron_horse_armor: ['iron', 5], golden_horse_armor: ['gold', 7], diamond_horse_armor: ['diamond', 11] };
+const HORSE_KIND = {
+  horse: { saddle: true, armor: 'horse' }, donkey: { saddle: true, cols: 5 }, mule: { saddle: true, cols: 5 },
+  skeleton_horse: { saddle: true }, zombie_horse: { saddle: true }, camel: { saddle: true },
+  llama: { armor: 'carpet', cols: 'strength' }, trader_llama: { armor: 'carpet', cols: 'strength' },
+};
+const WOOL_CARPET = new Map(COLORS.map(c => [itemOf(c + '_carpet'), c]).filter(([id]) => id !== undefined));
+const horseCols = m => { const k = HORSE_KIND[m.type]; return !k || !k.cols || !m.data.chest ? 0 : k.cols === 'strength' ? Math.max(1, Math.min(5, m.data.strength || 3)) : k.cols; };
+// AbstractHorse.isBodyArmorItem: horse armor for horses, wool carpets for llamas
+function horseBodyFits(m, st) {
+  const k = HORSE_KIND[m.type];
+  if (!st || !k || !k.armor) return false;
+  return k.armor === 'horse' ? !!HORSE_ARMOR[ITEMS[st.id].name] : WOOL_CARPET.has(st.id);
+}
+const horseArmorPts = m => { const b = m.data.body, a = b && HORSE_ARMOR[ITEMS[b.id].name]; return a && m.type === 'horse' ? a[1] : 0; };
+const _armorPointsHA = Mob.prototype.armorPoints;
+Mob.prototype.armorPoints = function () { return _armorPointsHA.call(this) + (this.data.body ? horseArmorPts(this) : 0); };
+
+/* ---------------- the screen ---------------- */
+// HorseInventoryScreen: saddle (8,18) and armor (8,36) slots, the horse in a 52x52 frame at (26,18), the chest from (80,18)
+function horseScreenType(m) {
+  const k = HORSE_KIND[m.type], cols = horseCols(m), type = 'horse' + (k.saddle ? 's' : '') + (k.armor ? 'a' : '') + cols;
+  if (!SCREENS[type]) {
+    const slots = [];
+    if (k.saddle) slots.push(['be', 0, 8, 18, 'saddle']);
+    if (k.armor) slots.push(['be', 1, 8, 36, k.armor === 'horse' ? 'horse_armor' : 'llama_armor']);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < cols; c++) slots.push(['be', 2 + r * cols + c, 80 + c * 18, 18 + r * 18]);
+    SCREENS[type] = { size: [176, 166], title: 'Horse', pack: null, labels: [['Inventory', 8, 72]], slots: [...slots, ...INV_ROWS(84)], deco(g) { guiInset(g, 25, 17, 54, 54, '#000'); } };
+    SCREEN_LOGIC[type] = HORSE_LOGIC;
+  }
+  return type;
+}
+const HORSE_NAMES = { horse: 'Horse', donkey: 'Donkey', mule: 'Mule', skeleton_horse: 'Skeleton Horse', zombie_horse: 'Zombie Horse', camel: 'Camel', llama: 'Llama', trader_llama: 'Trader Llama' };
+// AbstractHorse.openCustomInventoryScreen: only a tamed one opens up (camels need no taming)
+Game.prototype.openMobInventory = function (m) {
+  if (!m || !HORSE_KIND[m.type] || !m.data.tame && m.type !== 'camel' || m.dead) return false;
+  const cols = horseCols(m);
+  if (cols) { const n = cols * 3; if (!m.data.items) m.data.items = []; while (m.data.items.length < n) m.data.items.push(null); }
+  const items = [m.data.saddle ? { id: I.SADDLE, count: 1 } : null, m.data.body || null];
+  for (let k = 0; k < cols * 3; k++) items.push(m.data.items[k] || null);
+  this.ui.openInv(horseScreenType(m), { items, title: m.customName || HORSE_NAMES[m.type], mob: m, x: m.x, y: m.y, z: m.z, horse: true });
+  return true;
+};
+// what the screen holds goes back onto the animal as it changes
+function horseSync(ui) {
+  const d = ui.inv && ui.inv.data, m = d && d.mob;
+  if (!m) return;
+  const wasSaddle = !!m.data.saddle, wasBody = m.data.body ? m.data.body.id : 0;
+  m.data.saddle = !!d.items[0];
+  if (d.items[1]) m.data.body = d.items[1]; else delete m.data.body;
+  for (let k = 2; k < d.items.length; k++) m.data.items[k - 2] = d.items[k] || null;
+  const g = ui.game;
+  if (!wasSaddle && m.data.saddle) g.sound('horse_saddle', m.x, m.y + 1, m.z);
+  if (m.data.body && m.data.body.id !== wasBody) g.sound(WOOL_CARPET.has(m.data.body.id) ? 'llama_swag' : 'horse_armor', m.x, m.y + 1, m.z);
+  m.persistent = true;
+}
+const HORSE_LOGIC = {
+  accept(ui, c, i, st) {
+    const m = ui.inv.data.mob, k = HORSE_KIND[m.type];
+    if (c !== 'be') return true;
+    if (i === 0) return !!k.saddle && st.id === I.SADDLE && !m.baby;
+    if (i === 1) return !!k.armor && horseBodyFits(m, st) && !m.baby;
+    return i - 2 < horseCols(m) * 3;
+  },
+  single(ui, c, i) { return c === 'be' && i < 2; },
+  changed(ui) { horseSync(ui); },
+  close(ui) { horseSync(ui); },
+  extra(ui, win) {
+    const cv = document.createElement('canvas'), dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(52 * GS * dpr); cv.height = Math.round(52 * GS * dpr);
+    cv.style.cssText = `position:absolute;left:${26 * GS}px;top:${18 * GS}px;width:${52 * GS}px;height:${52 * GS}px;pointer-events:none`;
+    win.appendChild(cv); ui._horsePv = cv;
+    const iv = setInterval(() => { if (!win.isConnected) { clearInterval(iv); return; } if (ui.inv && ui.inv.data && ui.inv.data.horse) HORSE_LOGIC.update(ui); }, 100);
+  },
+  update(ui) {
+    const m = ui.inv.data.mob, win = ui.winEl;
+    if (ui._horsePv) drawMobPreview(ui._horsePv, m, ui.mx, ui.my, win);
+    if (!win) return;
+    // the empty saddle and armor slots show what goes in them
+    for (const [i, name] of [[0, 'saddle'], [1, HORSE_KIND[m.type].armor === 'horse' ? 'iron_horse_armor' : 'white_carpet']]) {
+      const s = win.querySelector(`.slot[data-c="be"][data-i="${i}"]`);
+      if (!s) continue;
+      const img = !ui.inv.data.items[i] && typeof hintIcon === 'function' ? `url(${hintIcon(name)})` : '';
+      if (s._hint !== img) { s._hint = img; s.style.backgroundImage = img; s.style.backgroundSize = img ? '100% 100%' : ''; s.style.imageRendering = 'pixelated'; }
+    }
+    // the animal walked off, died or lost its taming: the screen shuts
+    if (m.dead || m.deathTime > 0 || ui.game.player && m.distTo(ui.game.player) > 8) ui.closeInv();
+  },
+};
+
+/* ---------------- the animal in the frame ---------------- */
+// InventoryScreen.renderEntityInInventoryFollowsMouse at scale 17: the body turns toward the mouse, the head further
+function drawMobPreview(cv, m, mx, my, win) {
+  const g = cv.getContext('2d'), W = cv.width, k = W / 52, def = MOB_MODELS[m.type];
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, cv.height);
+  if (!def || !ATLAS.canvas) return;
+  g.imageSmoothingEnabled = false;
+  let fx = 0, fy = 0;
+  if (win && mx !== undefined) { const r = win.getBoundingClientRect(), cx = r.left + 52 * GS, cy = r.top + 44 * GS; fx = Math.atan((cx - mx) / (40 * GS)); fy = Math.atan((cy - my) / (40 * GS)); }
+  const st = { swing: 0, amt: 0, hp: -fy * 20 * D2R, hy: -fx * 20 * D2R, age: performance.now() / 50, saddle: m.data.saddle, chest: m.data.chest, baby: m.baby, longEars: m.type === 'donkey' || m.type === 'mule' };
+  const P = {};
+  if (def.anim) def.anim(P, st);
+  const skins = (MOB_SKINS[m.type] ? MOB_SKINS[m.type](m) : []).filter(s => !s.glint && !s.trans);
+  const passes = skins.map(s => skinPass(s.key, s.parts || (s.only ? def.parts.filter(p => s.only.includes(p.n)) : def.parts), s.tint || null, s.grow)).filter(Boolean);
+  // the whole animal fits the frame: its middle (and a quarter block) at the frame's middle
+  const T = MOB_TYPES[m.type], s = 17 / Math.max(1, Math.max(T.h, T.w * 1.25) / 1.6) * (m.baby ? 1.4 : 1) * k, a = Math.PI + fx * 20 * D2R, t = -fy * 20 * D2R;
+  const ca = Math.cos(a), sa = Math.sin(a), ct = Math.cos(t), stt = Math.sin(t), mid = (T.h * (m.baby ? 0.5 : 1)) / 2 + 0.25;
+  const view = q => {
+    const sc = (def.scale || 1) * (m.baby ? 0.5 : 1);
+    const x = q[0] / 16 * sc, y = (q[1] - 24) / 16 * sc, z = q[2] / 16 * sc;
+    const x1 = x * ca + z * sa, z1 = -x * sa + z * ca, y2 = y * ct - z1 * stt, z2 = y * stt + z1 * ct;
+    return [26 * k + x1 * s, 26 * k + (y2 + mid) * s, z2 * s];
+  };
+  paintModel(g, def, P, passes, view);
+}
+
+/* ---------------- right clicks ---------------- */
+const _interactHA = Mob.prototype.interact;
+Mob.prototype.interact = function (p, held) {
+  const k = HORSE_KIND[this.type], g = this.game;
+  if (k && !this.rider && !this.baby) {
+    // sneaking opens a tamed one's inventory
+    if (p.sneaking && (this.data.tame || this.type === 'camel')) return g.openMobInventory(this);
+    // AbstractHorse.equipBodyArmor: armor (or a carpet) on a tamed one that has none
+    if (held && this.data.tame && !this.data.body && horseBodyFits(this, held)) {
+      this.data.body = copyStack(held, 1); p.consumeHeld(1); this.persistent = true;
+      g.sound(WOOL_CARPET.has(held.id) ? 'llama_swag' : 'horse_armor', this.x, this.y + 1, this.z);
+      g.ui.refreshHotbar();
+      return true;
+    }
+  }
+  const hadChest = this.data.chest, r = _interactHA.call(this, p, held);
+  // a llama's chest holds 3 slots a point of strength
+  if (k && !hadChest && this.data.chest) { this.data.items = new Array(horseCols(this) * 3).fill(null); g.sound('chest_equip', this.x, this.y + 1, this.z); }
+  return r;
+};
+// the inventory key while riding opens the mount's inventory (isServerControlledInventory)
+const _openInvHA = UI.prototype.openInv;
+UI.prototype.openInv = function (type, data) {
+  const p = this.game.player, v = p && p.riding;
+  if ((type === 'inventory' || type === 'creative') && v && HORSE_KIND[v.type]) { this.game.openMobInventory(v); return; }
+  return _openInvHA.call(this, type, data);
+};
+// one item only in the saddle and armor slots
+UI.prototype.singleSlot = function (c, i) { const L = this.inv && SCREEN_LOGIC[this.inv.type]; return !!(L && L.single && L.single(this, c, i)); };
+
+/* ---------------- drawn on the animal ---------------- */
+// horse armor: plates over the back and sides, a neck and face guard and the tops of the legs (HorseArmorLayer, inflated 0.1)
+const HA_COL = { leather: [[214, 214, 214], [244, 244, 244], [150, 150, 150]], iron: [[212, 212, 214], [240, 240, 242], [148, 148, 154]], gold: [[244, 210, 64], [255, 240, 140], [186, 146, 28]], diamond: [[92, 224, 214], [170, 255, 248], [36, 146, 146]] };
+const HA_PARTS = ['body', 'head_parts', 'head', 'upper_mouth', 'left_hind_leg', 'right_hind_leg', 'left_front_leg', 'right_front_leg'];
+function horseArmorSkin(mat) {
+  const [base, light, dark] = HA_COL[mat];
+  const plate = (x, y, R) => nz((y % 4 === 3 || x % 5 === 0) ? dark : y % 4 === 0 ? light : base, R, 0.04);
+  return skinParts(64, 64, MM.horse.parts.filter(p => HA_PARTS.includes(p.n)), {
+    body: (f, x, y, W, H, R) => f === 'bottom' ? null : (f === 'right' || f === 'left') && y > 6 ? (y === 7 ? nz(dark, R, 0.04) : null) : plate(x, y, R),
+    head_parts: (f, x, y, W, H, R) => f === 'back' || f === 'bottom' ? null : plate(x, y, R),
+    head: (f, x, y, W, H, R) => f === 'top' || (f !== 'bottom' && f !== 'back' && y < 3) ? plate(x, y, R) : null,
+    upper_mouth: (f, x, y, W, H, R) => f === 'top' || f === 'front' && y < 2 ? plate(x, y + 1, R) : null,
+    '*': (f, x, y, W, H, R) => f !== 'top' && f !== 'bottom' && y < 5 ? (y === 4 ? nz(dark, R, 0.04) : plate(x, y, R)) : null,
+  }, 167 + mat.length);
+}
+for (const mat of ['leather', 'iron', 'gold', 'diamond']) defSkin('entity/horse/armor/horse_armor_' + mat, 64, 64, () => horseArmorSkin(mat));
+const LEATHER_DEFAULT = [0xA0 / 255, 0x65 / 255, 0x40 / 255];
+const _skinsHorseHA = MOB_SKINS.horse;
+MOB_SKINS.horse = m => {
+  const s = _skinsHorseHA(m), b = m.data.body, a = b && HORSE_ARMOR[ITEMS[b.id].name];
+  if (a) s.push({ key: 'entity/horse/armor/horse_armor_' + a[0], grow: 0.1, only: HA_PARTS, tint: a[0] === 'leather' ? (b.tag && b.tag.color !== undefined ? rgb01(b.tag.color) : LEATHER_DEFAULT) : undefined });
+  return s;
+};
+// llama carpets: a blanket in the carpet's colour over the back (LlamaDecorLayer, inflated 0.5)
+function llamaDecorSkin(c) {
+  const v = DYE_RGB[c] || 0xffffff, col = [(v >> 16) & 255, (v >> 8) & 255, v & 255], edge = shd(col, 0.72), mark = c === 'white' ? [200, 60, 60] : [240, 236, 226];
+  const up = (f, x, W) => f === 'back' ? 1 : f === 'front' ? 0 : f === 'right' ? 1 - x / Math.max(1, W - 1) : f === 'left' ? x / Math.max(1, W - 1) : 0.5;
+  return skinParts(128, 64, [MM.llama.parts[1]], {
+    body: (f, x, y, W, H, R) => {
+      if (f === 'front') return null;
+      const top = up(f, x, W);
+      if (top < 0.35) return null;
+      if (top < 0.45) return nz(edge, R, 0.04);
+      const zig = (y + Math.abs(((x % 6) + 6) % 6 - 3)) % 6 === 0;
+      return nz(zig ? mark : col, R, 0.04);
+    },
+  }, 191 + c.length);
+}
+for (const c of COLORS) defSkin('entity/llama/decor/' + c, 128, 64, () => llamaDecorSkin(c));
+for (const t of ['llama', 'trader_llama']) {
+  const f = MOB_SKINS[t];
+  MOB_SKINS[t] = m => {
+    const c = m.data.body && WOOL_CARPET.get(m.data.body.id);
+    if (!c) return f(m);
+    return [{ key: 'entity/llama/' + (m.data.variant || 'creamy') }, { key: 'entity/llama/decor/' + c, grow: 0.5, only: ['body'] }];
+  };
+}
+
+/* ---------------- llama strength ---------------- */
+// Llama.setRandomStrength: 1 to 3, or 1 to 5 one time in 25; a young one gets 1 to the stronger parent's, sometimes one more
+for (const t of ['llama', 'trader_llama']) {
+  const f = MOB_INIT[t];
+  MOB_INIT[t] = function (m, o) {
+    if (f) f(m, o);
+    if (o.loading) return;
+    const R = Math.random;
+    m.data.strength = 1 + Math.floor(R() * (R() < 0.04 ? 5 : 3));
+    if (o.parents) {
+      const [a, b] = o.parents;
+      let s = 1 + Math.floor(R() * Math.max(a.data.strength || 1, b.data.strength || 1));
+      if (R() < 0.03) s++;
+      m.data.strength = Math.max(1, Math.min(5, s));
+    }
+  };
+}
+
+/* ---------------- dying ---------------- */
+// AbstractHorse.dropEquipment: the armor or carpet with the rest of what it carries
+const _dropLootHA = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  const b = HORSE_KIND[this.type] && this.data.body;
+  _dropLootHA.call(this);
+  if (b && !this.noDrops) { this.game.dropItem(this.x, this.y + 0.5, this.z, b); delete this.data.body; }
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t] of [['horse_armor', 'Horse armor equips'], ['horse_saddle', 'Saddle equips'], ['llama_swag', 'Llama is decorated'], ['chest_equip', 'Chest equips']]) { SND_CAT[n] = 'neutral'; SUB_TEXT[n] = t; }
+const _audioPlayHA = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^(horse_armor|horse_saddle|llama_swag|chest_equip)$/.test(name)) return _audioPlayHA.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  switch (name) {
+    case 'horse_armor': this.noiseHit(dst, 'bandpass', 1600, 1.4, 0.14, 0.45); this.tone(dst, 'triangle', 520, 380, 0.14, 0.14); break;
+    case 'horse_saddle': this.noiseHit(dst, 'bandpass', 700, 1, 0.16, 0.4); this.tone(dst, 'triangle', 220, 160, 0.12, 0.12); break;
+    case 'llama_swag': this.noiseHit(dst, 'lowpass', 900, 0.8, 0.22, 0.35); break;
+    case 'chest_equip': this.noiseHit(dst, 'bandpass', 500, 1, 0.12, 0.45); this.tone(dst, 'square', 180, 120, 0.08, 0.1); break;
+  }
+};
+
+/* ---------------- armadillos ---------------- */
+// Armadillo.isScaredBy: undead within 7 blocks (2 up or down), whatever last hurt it, or a player sprinting or riding
+GOALS.roll = function (m) {
+  const g = m.game, p = g.player, recent = e => m.lastAttacker === e && m.age - (m.lastHurtAge || -999) < 80;
+  const near = e => Math.abs(e.x - m.x) < 7 + (m.w + e.w) / 2 && Math.abs(e.z - m.z) < 7 + (m.w + e.w) / 2 && e.y < m.y + m.h + 2 && e.y + e.h > m.y - 2;
+  const scared = p && !p.dead && p.mode !== 3 && near(p) && (p.sprinting || !!p.riding || recent(p)) ||
+    g.entities.some(e => e instanceof Mob && e !== m && !e.dead && (e.T.undead || recent(e)) && near(e));
+  m.data.roll = Math.max(0, Math.min(1, (m.data.roll || 0) + (scared ? 0.1 : -0.02)));
+  if (m.data.roll > 0.5) { m.nav = null; return true; }
+  return false;
+};
+// Armadillo.hurt: rolled up it takes (damage - 1) / 2
+const _hurtAR = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'armadillo' && this.data.roll > 0.5 && source !== 'void' && source !== 'kill') amount = Math.max(0, (amount - 1) / 2);
+  return _hurtAR.call(this, amount, source, attacker);
+};
+// a grown armadillo sheds a scute every 5 to 10 minutes
+const _tickAR = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'armadillo' && !this.baby && !this.dead && !(this.deathTime > 0)) {
+    if (this.data.scuteT === undefined) this.data.scuteT = 6000 + Math.floor(Math.random() * 6000);
+    if (--this.data.scuteT <= 0) {
+      this.data.scuteT = 6000 + Math.floor(Math.random() * 6000);
+      this.game.dropItem(this.x, this.y + 0.3, this.z, { id: itemOf('armadillo_scute'), count: 1 });
+      this.game.sound('armadillo_scute_drop', this.x, this.y, this.z);
+    }
+  }
+  return _tickAR.call(this);
+};
+// Armadillo.brushOffScute: not from a young one
+const _brushArmadilloAR = Game.prototype.brushArmadillo;
+Game.prototype.brushArmadillo = function (m, p) { if (m.baby) return; return _brushArmadilloAR.call(this, m, p); };
+SND_CAT.armadillo_scute_drop = 'neutral'; SUB_TEXT.armadillo_scute_drop = 'Armadillo sheds scute';
+const _audioPlayAD2 = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'armadillo_scute_drop') return _audioPlayAD2.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (dst) { this.noiseHit(dst, 'bandpass', 1200, 1.6, 0.06, 0.35); this.tone(dst, 'triangle', 700, 900, 0.05, 0.08); }
+};
+// brushing goes through brushArmadillo (sound, brush wear, not from young ones)
+MOB_INTERACT.armadillo = (m, p, held) => { if (held && held.id === I.BRUSH) { if (m.baby) return false; m.game.brushArmadillo(m, p); return true; } return false; };
+
+/* ---------------- shears on golems and the bogged ---------------- */
+// SnowGolem.shear: the pumpkin comes off and drops; Bogged.shear: two mushrooms off its head
+for (const t of ['snow_golem', 'bogged']) {
+  const f = MOB_INTERACT[t];
+  MOB_INTERACT[t] = (m, p, held, name) => {
+    if (held && held.id === I.SHEARS && !m.data.sheared && !m.dead) {
+      const g = m.game;
+      m.data.sheared = true;
+      if (t === 'snow_golem') g.dropItem(m.x, m.y + 1.7, m.z, { id: itemOf('carved_pumpkin'), count: 1 });
+      else for (let k = 0; k < 2; k++) g.dropItem(m.x, m.y + 1.6, m.z, { id: itemOf(Math.random() < 0.5 ? 'red_mushroom' : 'brown_mushroom'), count: 1 });
+      g.sound('scrape', m.x, m.y + 1, m.z); p.damageHeld(1);
+      return true;
+    }
+    return f ? f(m, p, held, name) : false;
+  };
+}
+// BoggedModel: a sheared one shows no mushrooms
+const _animBoggedSH = MOB_ANIM.bogged, _poseBoggedSH = MOB_MODELS.bogged.anim;
+MOB_ANIM.bogged = (m, st) => { _animBoggedSH(m, st); st.sheared = !!m.data.sheared; };
+MOB_MODELS.bogged.anim = (P, st) => { _poseBoggedSH(P, st); if (st.sheared) for (const n of ['red_mushroom_1', 'red_mushroom_2', 'brown_mushroom_1', 'brown_mushroom_2', 'brown_mushroom_3']) P[n + '#hide'] = 1; };
+
+/* ---------------- riding: the jump bar and the mount's hearts ---------------- */
+// LocalPlayer.aiStep: holding jump fills the bar a tenth a tick, past full it eases back toward 0.8; letting go
+// (AbstractHorse.onPlayerJump) jumps at 0.4 + 0.4 x the bar, all of it from 90% - only with a saddle
+const RIDER_JUMPERS = new Set(['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse', 'camel']);
+Mob.prototype.riderJump = function (p, inp, fwd) {
+  if (!RIDER_JUMPERS.has(this.type)) return;
+  const held = inp.keys.has('Space');
+  if (this.jumpCd > 0) { p.jumpBar = 0; p._jt = 0; p._jHeld = held; return; }
+  if (p._jt < 0) { if (++p._jt === 0) p.jumpBar = 0; }
+  if (p._jHeld && !held) {
+    p._jt = -10;
+    const power = Math.floor((p.jumpBar || 0) * 100);
+    if (this.data.saddle && power > 0) this.pendingJump = power >= 90 ? 1 : 0.4 + 0.4 * power / 90;
+  } else if (!p._jHeld && held) { p._jt = 0; p.jumpBar = 0; }
+  else if (held) { p._jt = (p._jt || 0) + 1; p.jumpBar = p._jt < 10 ? p._jt * 0.1 : 0.8 + 2 / (p._jt - 9) * 0.1; }
+  p._jHeld = held;
+  if (!this.pendingJump || !this.onGround) return;
+  const k = this.pendingJump, yaw = p.yaw;
+  this.pendingJump = 0;
+  if (this.type === 'camel') {
+    // Camel.executeRidersJump: a dash along the look, 55 ticks before the next
+    const v = 22.2222 * k * 0.09;
+    this.vx += -Math.sin(yaw) * v; this.vz += -Math.cos(yaw) * v; this.vy = 1.4285 * k * 0.42;
+    this.jumpCd = 55; this.game.sound('camel_dash', this.x, this.y, this.z);
+    return;
+  }
+  // AbstractHorse.executeRidersJump: jump strength x the bar, and a push forward when moving forward
+  this.vy = (this.data.jump || 0.7) * k + (this.effectLevel && this.effectLevel('jump_boost') ? 0.1 * this.effectLevel('jump_boost') : 0);
+  if (fwd > 0) { this.vx += -Math.sin(yaw) * 0.4 * k; this.vz += -Math.cos(yaw) * 0.4 * k; }
+  this.game.sound('horse_jump', this.x, this.y, this.z);
+};
+// Llama/horse-like attributes: jump strength 0.4 to 1, more often the middle (AbstractHorse.generateJumpStrength)
+for (const t of ['horse', 'skeleton_horse', 'zombie_horse']) {
+  const f = MOB_INIT[t];
+  MOB_INIT[t] = function (m, o) {
+    if (f) f(m, o);
+    if (o.loading || o.parents) return;
+    const R = Math.random;
+    m.data.jump = 0.4 + R() * 0.2 + R() * 0.2 + R() * 0.2;
+  };
+}
+// mount hearts: vehicle hearts take the food bar's place (Gui.renderVehicleHealth), rows of 10 up to 30
+(function vehicleHearts() {
+  const heart = ['.oo...oo.', 'ohho.ohho', 'ohhhohhho', 'ohhhhhhho', '.ohhhhho.', '..ohhho..', '...oho...', '....o....', '.........'];
+  const pal = { o: '#1a0800', h: '#e0804e', e: '#3a1a10', w: '#ffd0a8' };
+  HUD_ICONS.vehicle = pixelIcon(heart.map((r, y) => y === 1 ? r.replace(/^(\.oh)h/, '$1w') : r), pal);
+  HUD_ICONS.vehicleHalf = pixelIcon(heart.map(r => r.split('').map((ch, x) => (ch === 'h' && x > 4) ? 'e' : ch).join('')), pal);
+  HUD_ICONS.vehicleEmpty = pixelIcon(heart.map(r => r.replace(/h/g, 'e')), pal);
+})();
+const mountOf = p => { const v = p && p.riding; return v instanceof Mob && !(v instanceof Vehicle) && v.maxHealth > 0 ? v : null; };
+const _refreshBarsVH = UI.prototype.refreshBars;
+UI.prototype.refreshBars = function () {
+  const p = this.game.player, v = mountOf(p), vk = v ? Math.ceil(v.health) + '/' + v.maxHealth : '';
+  if (vk !== this._vk) { this._vk = vk; this._bk = null; }
+  _refreshBarsVH.call(this);
+  const food = $('food'), bub = $('bubbles');
+  if (!food) return;
+  if (!v || !p.survival) { food.style.flexWrap = ''; if (bub) bub.style.bottom = ''; return; }
+  const n = Math.min(30, Math.floor((v.maxHealth + 0.5) / 2)), hp = Math.ceil(v.health);
+  let h = '';
+  for (let i = 0; i < n; i++) h += `<div class="icon18" style="background-image:url(${hp >= i * 2 + 2 ? HUD_ICONS.vehicle : hp === i * 2 + 1 ? HUD_ICONS.vehicleHalf : HUD_ICONS.vehicleEmpty})"></div>`;
+  food.innerHTML = h; food.style.flexWrap = 'wrap-reverse';
+  if (bub) bub.style.bottom = (20 + (Math.ceil(n / 10) - 1) * 18) + 'px';
+};
+// the jump meter takes the experience bar's place while riding something that jumps (grey while a camel rests)
+const _gameTickJB = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickJB.call(this);
+  const p = this.player, ui = this.ui, fill = $('xpfill'), lvl = $('xplevel');
+  if (!p || !fill) return;
+  const v = mountOf(p), jumper = v && RIDER_JUMPERS.has(v.type);
+  if (jumper) {
+    const cd = v.jumpCd > 0 && v.type === 'camel';
+    fill.style.background = cd ? '#9a9a9a' : '#6ab8ff'; fill.style.width = (cd ? 100 : (p.jumpBar || 0) * 100) + '%';
+    if (lvl) lvl.style.visibility = 'hidden';
+    ui._jumpBar = true;
+  } else if (ui._jumpBar) {
+    ui._jumpBar = false; fill.style.background = ''; if (lvl) lvl.style.visibility = ''; ui._bk = null; ui.refreshBars();
+  }
+  if (v && (this.world.tick % 10 === 0)) ui.refreshBars();
+};
+SND_CAT.camel_dash = 'neutral'; SUB_TEXT.camel_dash = 'Camel dashes'; SND_CAT.horse_jump = 'neutral'; SUB_TEXT.horse_jump = 'Horse jumps';
+const _audioPlayCD = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'camel_dash' && name !== 'horse_jump') return _audioPlayCD.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (dst && name === 'horse_jump') { this.noiseHit(dst, 'lowpass', 900, 0.7, 0.12, 0.3); return; }
+  if (dst) { this.noiseHit(dst, 'lowpass', 600, 0.8, 0.25, 0.45); this.tone(dst, 'triangle', 140, 90, 0.2, 0.12); }
+};
+
+/* @file 140_allays.js */
+/* ===================================================================
+   PART 30: allays and camels like Java's
+   - an allay takes the item it is given into its hand (an empty hand
+     takes it back, and what it gathered is thrown out), gathers that
+     item up to a full stack (with mobGriefing), brings it to a note
+     block played in the last 30 seconds or to you, and waits 3 seconds
+     before gathering again; it heals, the player it likes can't hurt
+     it, it dances by a playing jukebox and an amethyst shard given
+     while it dances makes a second allay (then 5 minutes' rest)
+   - camels sit down and stand up now and then when idle (20 seconds
+     at least in each pose), stand up when hurt or ridden off
+   =================================================================== */
+
+/* ---------------- allays ---------------- */
+const allayWants = (d, st) => !!d.liked && st.id === d.liked && (!d.hand || !d.hand.tag || !d.hand.tag.potion || st.tag && st.tag.potion === d.hand.tag.potion);
+MOB_INTERACT.allay = (m, p, held) => {
+  const d = m.data, g = m.game;
+  // Allay.mobInteract: a dancing allay given an amethyst shard duplicates (5 minutes before either can again)
+  if (held && held.id === I.AMETHYST_SHARD && d.dancing && !(d.dupCd > 0)) {
+    const c = createMob(g, 'allay', m.x, m.y, m.z); c.persistent = true; c.data.dupCd = 6000; d.dupCd = 6000; m.persistent = true; g.entities.push(c);
+    for (let k = 0; k < 5; k++) g.particles.heart(m.x + (Math.random() - 0.5) * 0.6, m.y + 0.6, m.z + (Math.random() - 0.5) * 0.6);
+    g.sound('amethyst', m.x, m.y, m.z); p.consumeHeld(1);
+    return true;
+  }
+  // one of the item for its hand: what it goes looking for, for the player who gave it
+  if (held && !d.hand) {
+    d.hand = copyStack(held, 1); d.liked = held.id; d.holding = d.holding && allayWants(d, d.holding) ? d.holding : null; p.consumeHeld(1);
+    g.particles.icon(m.x, m.y + 0.6, m.z, 'note', 2, [0.4, 0.9, 1]); g.sound('allay_given', m.x, m.y, m.z);
+    return true;
+  }
+  // an empty hand takes it back, and what it carried is thrown out
+  if (!held && (d.hand || d.liked)) {
+    if (d.holding) { const e = g.dropItem(m.x, m.y + 0.2, m.z, d.holding); if (e) { e.vx = (p.x - m.x) * 0.05; e.vz = (p.z - m.z) * 0.05; } }
+    if (d.hand) g.giveOrDrop(p, d.hand);
+    d.hand = null; d.liked = null; d.holding = null;
+    g.sound('allay_taken', m.x, m.y, m.z); g.ui.refreshHotbar();
+    return true;
+  }
+  return false;
+};
+// AllayAi: gather what it wants within 32 blocks while there is room (not for 3 seconds after giving), then bring it to the
+// note block played in the last 30 seconds or to the player, else stay near them
+GOALS.allay = function (m) {
+  const d = m.data, g = m.game, p = g.player;
+  if (d.pickT > 0) d.pickT--;
+  if (!d.liked || !p) return false;
+  const nb = d.noteBlock && d.noteT > 0 && g.world.getBlock(d.noteBlock[0], d.noteBlock[1], d.noteBlock[2]) === B.NOTE_BLOCK ? d.noteBlock : null;
+  if (d.noteBlock && !nb) { d.noteBlock = null; d.noteT = 0; }
+  if (nb) d.noteT--;
+  const fly = (x, y, z, sp) => { const dx = x - m.x, dy = y - m.y, dz = z - m.z, l = Math.hypot(dx, dy, dz) || 1; m.move = [dx / l, dz / l, sp, false, dy / l]; return l; };
+  const room = !d.holding || d.holding.count < maxStack(d.holding.id);
+  if (room && !(d.pickT > 0) && (!g.rule || g.rule('mobGriefing') !== false)) {
+    let best = null, bd = 32;
+    for (const e of g.entities) if (e instanceof ItemEntity && !e.dead && e.pickupDelay <= 0 && allayWants(d, e.stack)) { const k = m.distTo(e); if (k < bd) { bd = k; best = e; } }
+    if (best) {
+      if (fly(best.x, best.y + 0.3, best.z, m.T.run) < 1.2) {
+        const ms = maxStack(best.stack.id), have = d.holding ? d.holding.count : 0, take = Math.min(best.stack.count, ms - have);
+        d.holding = d.holding ? Object.assign(d.holding, { count: have + take }) : copyStack(best.stack, take);
+        best.stack.count -= take; if (best.stack.count <= 0) best.dead = true;
+        g.sound('pop', m.x, m.y, m.z);
+      }
+      return true;
+    }
+  }
+  if (d.holding) {
+    const tx = nb ? nb[0] + 0.5 : p.x, ty = nb ? nb[1] + 1.5 : p.y + 1.5, tz = nb ? nb[2] + 0.5 : p.z;
+    if (fly(tx, ty, tz, m.T.run) < 2.2) {
+      const st = d.holding, e = g.dropItem(m.x, m.y, m.z, st);
+      if (e) { const l = Math.hypot(tx - m.x, tz - m.z) || 1; e.vx = (tx - m.x) / l * 0.2; e.vz = (tz - m.z) / l * 0.2; e.pickupDelay = 10; }
+      d.holding = null; d.pickT = 60;
+      if (nb && st.id === I.CAKE && m.distTo(p) < 64 && g.adv) g.adv('ev', 'allay_cake');
+    }
+    return true;
+  }
+  const tx = nb ? nb[0] + 0.5 : p.x, ty = nb ? nb[1] + 2 : p.y + 2, tz = nb ? nb[2] + 0.5 : p.z;
+  if (Math.hypot(tx - m.x, ty - m.y, tz - m.z) > 6) { fly(tx, ty, tz, m.T.walk); return true; }
+  return false;
+};
+// Allay.aiStep: a heart back every half second; the dance by a playing jukebox (10 blocks)
+const _tickAL = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'allay' && !this.dead && !(this.deathTime > 0)) {
+    const d = this.data, g = this.game;
+    if (this.age % 10 === 0 && this.health < this.maxHealth) this.health = Math.min(this.maxHealth, this.health + 1);
+    if (d.dupCd > 0) d.dupCd--;
+    if (this.age % 20 === 0) {
+      const w = g.world, bx = Math.floor(this.x), by = Math.floor(this.y), bz = Math.floor(this.z);
+      let found = false;
+      for (let x = bx - 10; x <= bx + 10 && !found; x++) for (let y = by - 10; y <= by + 10 && !found; y++) for (let z = bz - 10; z <= bz + 10 && !found; z++)
+        if (w.getBlock(x, y, z) === B.JUKEBOX) { const be = w.getBE(x, y, z); if (be && be.disc && Math.hypot(x + 0.5 - this.x, y + 0.5 - this.y, z + 0.5 - this.z) <= 10) found = true; }
+      d.dancing = found;
+    }
+    if (d.dancing) { this.bodyYaw += 0.35; this.yaw = this.bodyYaw; }
+  }
+  return _tickAL.call(this);
+};
+// the player it likes can't hurt it
+const _hurtAL = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'allay' && this.data.hand && attacker && attacker === this.game.player) return false;
+  return _hurtAL.call(this, amount, source, attacker);
+};
+// what it holds and carries drops when it dies
+const _dropLootAL = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  _dropLootAL.call(this);
+  if (this.type !== 'allay' || this.noDrops) return;
+  if (this.data.hand) this.game.dropItem(this.x, this.y, this.z, this.data.hand);
+  if (this.data.holding) this.game.dropItem(this.x, this.y, this.z, this.data.holding);
+  this.data.hand = this.data.holding = null;
+};
+// the item shows in its hands
+const _animAL = MOB_ANIM.allay;
+MOB_ANIM.allay = (m, st) => { _animAL(m, st); st.holding = !!(m.data.holding || m.data.hand); st.dance = !!m.data.dancing; };
+
+/* ---------------- camels ---------------- */
+// CamelAi.RandomSitting: an idle camel that has kept its pose for 20 seconds sometimes sits down or stands up
+// (40 ticks to sit, 52 to stand, no walking meanwhile); hurt, it stands at once
+const _tickCM = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'camel' && !this.dead && !(this.deathTime > 0)) {
+    const d = this.data;
+    d.poseT = (d.poseT || 0) + 1;
+    if (d.poseChange > 0) d.poseChange--;
+    const idle = !this.rider && !this.leashed && this.onGround && !this.inWater && !(this.panic > 0) && !this.nav;
+    if (idle && d.poseT >= 400 && !(d.poseChange > 0) && Math.random() < 1 / 300) {
+      d.sitting = !d.sitting; d.poseT = 0; d.poseChange = d.sitting ? 40 : 52;
+      this.game.sound(d.sitting ? 'camel_sit' : 'camel_stand', this.x, this.y, this.z);
+    }
+  }
+  return _tickCM.call(this);
+};
+// Camel.refuseToMove: no walking while it sits or changes pose
+GOALS.camelSit = m => { if (m.data.sitting || m.data.poseChange > 0) { m.nav = null; m.move = null; return true; } return false; };
+if (MOB_TYPES.camel && !MOB_TYPES.camel.ai.includes('camelSit')) MOB_TYPES.camel.ai.unshift('camelSit');
+// a rider who moves makes it stand; so does a hit
+const _riddenTickCM = Mob.prototype.riddenTick;
+Mob.prototype.riddenTick = function () {
+  if (this.type === 'camel' && this.data.sitting) {
+    const inp = this.game.input;
+    if (inp.keys.has('KeyW') || inp.keys.has('KeyS') || inp.keys.has('KeyA') || inp.keys.has('KeyD') || inp.keys.has('Space')) { this.data.sitting = false; this.data.poseT = 0; this.data.poseChange = 52; this.game.sound('camel_stand', this.x, this.y, this.z); }
+    if (this.data.sitting || this.data.poseChange > 0) return;
+  }
+  return _riddenTickCM.call(this);
+};
+const _hurtCM = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'camel' && this.data.sitting) { this.data.sitting = false; this.data.poseT = 0; this.data.poseChange = 0; }
+  return _hurtCM.call(this, amount, source, attacker);
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t] of [['allay_given', 'Allay takes the item'], ['allay_taken', 'Allay gives the item back'], ['camel_sit', 'Camel sits'], ['camel_stand', 'Camel stands']]) { SND_CAT[n] = 'neutral'; SUB_TEXT[n] = t; }
+const _audioPlayAL = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^(allay_given|allay_taken|camel_sit|camel_stand)$/.test(name)) return _audioPlayAL.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  if (name === 'allay_given') [1318, 1760, 2093].forEach((f, i) => this.tone(dst, 'sine', f, f, 0.5, 0.05, this.ctx.currentTime + i * 0.06));
+  else if (name === 'allay_taken') [2093, 1760, 1318].forEach((f, i) => this.tone(dst, 'sine', f, f, 0.5, 0.05, this.ctx.currentTime + i * 0.06));
+  else { this.noiseHit(dst, 'lowpass', 400, 0.7, 0.3, 0.35); this.tone(dst, 'triangle', name === 'camel_sit' ? 120 : 90, name === 'camel_sit' ? 80 : 130, 0.25, 0.1); }
 };
 
 </script>

@@ -512,6 +512,30 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   for a few seconds.
 - An axe (in a vindicator's or a piglin brute's hand, say) or the warden hitting your raised
   shield knocks it out for 5 seconds.
+- **Horse inventories**: sneak and right click a tamed horse, donkey, mule, llama or skeleton
+  horse, or any camel (or press the inventory key while riding it), for its screen like Java's:
+  the saddle, the armor (or a llama's carpet), the chest and the animal itself turning to follow
+  the mouse.
+- **Horse armor** goes on a tamed horse with a right click or in its screen and protects it like
+  Java's (3, 5, 7 or 11 armor); it is drawn on the horse, leather horse armor in its dye.
+  **Carpets** on llamas show as blankets in their colour.
+- **Chests** on donkeys and mules hold 15 stacks, on llamas 3 a point of strength (strength is 1
+  to 3, now and then up to 5, and a young llama takes after its stronger parent). Everything an
+  animal carries drops when it dies.
+- **Riding**: hold jump to fill the jump bar (it takes the experience bar's place) and let go to
+  jump, higher the fuller it is; the mount's hearts take the food bar's place. A saddled camel
+  dashes forward the same way, then rests for a few seconds.
+- **Armadillos** shed a scute every 5 to 10 minutes and curl up when undead come close, when
+  whatever hurt them is near, or when a player sprints or rides past; curled up they take much
+  less damage. Young ones can't be brushed.
+- **Shears** take the pumpkin off a snow golem and the mushrooms off a bogged.
+- **Allays** take the item you give them into their hand (an empty hand takes it back), gather
+  that item up to a full stack (only with mobGriefing on), bring it to a note block played in the
+  last 30 seconds or to you, and rest 3 seconds before gathering again. They heal over time, the
+  player they like can't hurt them, they dance by a playing jukebox, and an amethyst shard given
+  to a dancing allay makes a second one (then neither can for 5 minutes).
+- **Camels** sit down and stand up now and then when left alone, and stand up when hurt or when
+  their rider moves.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
