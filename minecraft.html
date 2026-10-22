@@ -14193,10 +14193,6 @@ class Mob extends Entity {
       this.hurt(1, 'drown');
       if (T.teleports) this.teleportAway();
     }
-    if (this.type === 'snow_golem' && this.age % 20 === 0) {
-      const c = w.getChunk(Math.floor(this.x) >> 4, Math.floor(this.z) >> 4), bi = c && c.biomes ? c.biomes[((Math.floor(this.z) & 15) << 4) | (Math.floor(this.x) & 15)] : -1;
-      if ([BI.DESERT, BI.BADLANDS, BI.SAVANNA].includes(bi) || w.dim === 'nether' || (w.raining && !SNOWY_BIOMES.has(bi))) this.hurt(1, 'melt');
-    }
     if (this.inLava === false && this.T.lavaWalker) this.data.cold = !aabbHitsBlock(w, this.x - 0.3, this.y - 0.4, this.z - 0.3, this.x + 0.3, this.y + 0.2, this.z + 0.3, id => id === B.LAVA);
   }
   // ---------- physics ----------
@@ -22090,8 +22086,9 @@ Game.prototype.pushEntities = function () {
         if (Math.abs(dx) >= r || Math.abs(dz) >= r || e.y >= o.y + o.h || o.y >= e.y + e.h) continue;
         const d = Math.max(Math.abs(dx), Math.abs(dz));
         if (d < 0.01) { e.vx += (Math.random() - 0.5) * 0.02; continue; }
-        const k = 0.05 / Math.max(0.2, d), kb = e.T && e.T.kbRes ? 1 - e.T.kbRes : 1;
-        e.vx += dx / d * k * 0.5 * kb; e.vz += dz / d * k * 0.5 * kb;
+        // (Entity.push: knockback resistance doesn't hold anything back from being pushed)
+        const k = 0.05 / Math.max(0.2, d);
+        e.vx += dx / d * k * 0.5; e.vz += dz / d * k * 0.5;
       }
     }
   }
@@ -45309,7 +45306,7 @@ GOALS.piglin = function (m) {
       m.target = t; m._lastTarget = t;
       const cross = d.hand && d.hand.id === I.CROSSBOW;
       // BackUpIfTooClose(5, 0.75) with a crossbow
-      if (cross && m.distTo(t) < 5 && m.canSee(t)) { const dx = m.x - t.x, dz = m.z - t.z, l = Math.hypot(dx, dz) || 1; m.nav = null; m.lookAt(t.x, t.y + 1.5, t.z); m.move = [dx / l, dz / l, m.T.walk * 0.75, false]; if (m.shootCd > 0) m.shootCd--; return true; }
+      if (cross && m.distTo(t) < 5 && m.canSee(t)) { const dx = m.x - t.x, dz = m.z - t.z, l = Math.hypot(dx, dz) || 1; m.nav = null; m.lookAt(t.x, t.y + 1.5, t.z); m.move = [dx / l, dz / l, m.T.walk * 1.5625, false]; if (m.shootCd > 0) m.shootCd--; return true; }
       return cross ? GOALS.ranged(m) : GOALS.melee(m);
     }
   }
@@ -45437,13 +45434,13 @@ GOALS.hoglin = function (m) {
   // fleeing
   if (m._avoid) {
     if (m._avoid.dead || m.age > m._avoidT || (!m.baby && !(b.piglins > b.hoglins + 1) && m._avoid.type === 'piglin')) m._avoid = null;
-    else { const a = m._avoid; pgAway(m, [Math.floor(a.x), Math.floor(a.y), Math.floor(a.z)], 15, m.T.run * 1.3); return true; }
+    else { const a = m._avoid; pgAway(m, [Math.floor(a.x), Math.floor(a.y), Math.floor(a.z)], 15, m.T.run * 1.69); return true; }
   }
   if (m.target && (m.target.dead || m.target.deathTime > 0 || (m.target instanceof Player && !m.target.survival) || m.distTo(m.target) > 24)) m.target = null;
   if (!m.target && !(d.pacified > 0) && !(m.love > 0) && b.player && b.player.survival) m.target = b.player;
   if (m.target && !(d.pacified > 0) && !(m.love > 0)) return hgMelee(m);
   if (b.repel) { pgAway(m, b.repel, 8, m.T.run); return true; }
-  if (!m.baby && b.piglin && m.distTo(b.piglin) < 8 && (!m.nav || m.navDone())) { pgAway(m, [Math.floor(b.piglin.x), Math.floor(b.piglin.y), Math.floor(b.piglin.z)], 8, m.T.walk * 0.4); return true; }
+  if (!m.baby && b.piglin && m.distTo(b.piglin) < 8 && (!m.nav || m.navDone())) { pgAway(m, [Math.floor(b.piglin.x), Math.floor(b.piglin.y), Math.floor(b.piglin.z)], 8, m.T.walk); return true; }
   return false;
 };
 // MeleeAttack: 40 ticks between hits for grown ones, 15 for young
@@ -48775,6 +48772,494 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'breeze_land': this.noiseHit(dst, 'lowpass', 400, 0.8, 0.25, 0.35); break;
     case 'breeze_deflect': this.noiseHit(dst, 'highpass', 1800, 1.2, 0.15, 0.3); this.tone(dst, 'square', 700 * v, 500 * v, 0.1, 0.04); break;
   }
+};
+
+/* @file 160_golems.js */
+/* ===================================================================
+   Part 49: iron golems and snow golems like Java
+   - iron golems: speed 0.25 (MeleeAttackGoal at 1.0, strolling at 0.6), step height 1; IronGolem.doHurtTarget (half the
+     attack damage plus 0 to 14, so 7.5 to 21.5, then a lift of 0.4 less the target's knockback resistance, and the attack
+     sound); the target goals: DefendVillageTargetGoal, HurtByTargetGoal (never players for golems a player built, never
+     creepers), NearestAttackableTargetGoal for a player it is angry at (in sight, 1 in 5 checks) and for every Enemy but
+     creepers (no sight needed, 1 in 3 checks, 4 blocks up or down), kept within 16 blocks; NeutralMob anger (20 to 39
+     seconds, running down only while it isn't after a player); IronGolem.doPush (an enemy pushing into it is picked 1 time
+     in 20); OfferFlowerGoal (by day, 1 in 8000 checks, a villager within 6 blocks: a poppy held out for 20 seconds while
+     it looks at it); GolemRandomStrollInVillageGoal (1 in 240, mostly towards a villager that wants a golem or its village);
+     iron ingots heal 25 (IronGolem.mobInteract, with the repair sound); the damage sound when it gets more cracked; no
+     ambient sound; the attack animation counts down by ticks
+   - snow golems: speed 0.2, RangedAttackGoal (1.25: closer until seen for 5 ticks within 10 blocks, a snowball every 20
+     ticks) with SnowGolem.performRangedAttack (from the eyes towards 1.1 below the target's eyes, lifted a fifth of the
+     distance, 1.6, spread 12); every Enemy, creepers too, in sight within 16 (1 in 5 checks); a trail of snow under its
+     four corners (mobGriefing, where snow can lie); hurt every tick in the biomes it melts in (snow_golem_melts) and by
+     water and rain; no fall damage
+   - living things push iron golems like anything else (knockback resistance doesn't stop pushing)
+   =================================================================== */
+const IGT = MOB_TYPES.iron_golem, SGT = MOB_TYPES.snow_golem;
+Object.assign(IGT, { walk: 43.2 * (0.25 * 0.6) ** 2, run: 43.2 * 0.25 ** 2, follow: 16, noFall: 1e9,
+  ai: ['golemDefend', 'golemTarget', 'melee', 'golemVillage', 'golemStroll', 'golemFlower', 'look'] });
+Object.assign(SGT, { walk: 43.2 * 0.2 ** 2, run: 43.2 * (0.2 * 1.25) ** 2, follow: 16, noFall: 1e9, ai: ['golemTarget', 'snowRanged', 'wander', 'look'] });
+
+/* ---------------- targets ---------------- */
+// Enemy: monsters (and the like), creepers too for snow golems
+const golemEnemy = (m, e) => e instanceof Mob && e !== m && !e.dead && !(e.deathTime > 0) && e.T.cat === 'monster' && e.type !== 'ender_dragon' &&
+  (m.type === 'snow_golem' || e.type !== 'creeper');
+// NeutralMob.updatePersistentAnger: whatever it goes after becomes what it's angry at, for 20 to 39 seconds; the time runs down
+// only while it isn't after a player, and the anger ends with it or when a mob it was angry at is gone
+function igAnger(m) {
+  const t = m.target;
+  if ((!t || t.dead || t.deathTime > 0) && m._igAngerAt instanceof Mob) { m._igAngerAt = null; m._igAnger = 0; return; }
+  if (t && m._igAngerAt !== t) { m._igAngerAt = t; m._igAnger = 400 + Math.floor(Math.random() * 381); }
+  if (m._igAnger > 0 && !(t instanceof Player) && --m._igAnger === 0) { m._igAngerAt = null; m.target = null; }
+}
+GOALS.golemTarget = function (m) {
+  const g = m.game, p = g.player, iron = m.type === 'iron_golem';
+  if (iron) igAnger(m);
+  const t = m.target;
+  if (t) {
+    // TargetGoal.canContinueToUse: within the follow range; one it must see (players, and anything for snow golems) is let
+    // go after 60 ticks out of sight
+    const isP = t instanceof Player;
+    if (t.dead || t.deathTime > 0 || isP && (!t.survival || iron && m.data.playerMade) || m.distTo(t) > m.T.follow) m.target = null;
+    else if ((isP || !iron) && (m.age + m.id) % 2 === 0) {
+      if (m.canSee(t)) m._unseen = 0;
+      else if ((m._unseen = (m._unseen || 0) + 1) > 30) { m.target = null; m._unseen = 0; }
+    }
+    if (m.target) return false;
+  }
+  if ((m.age + m.id) % 2) return false;
+  const R = Math.random;
+  // a player an iron golem is angry at (randomInterval 10, in sight)
+  if (iron && p && m._igAngerAt === p && !p.dead && p.survival && !m.data.playerMade && R() < 0.2 && m.distTo(p) <= m.T.follow && m.canSee(p)) {
+    m.target = p; m._unseen = 0; return false;
+  }
+  // the nearest enemy (randomInterval 5 and no sight needed for iron golems, 10 and in sight for snow golems), in the box the
+  // follow range wide and 4 blocks up or down
+  if (R() >= (iron ? 1 / 3 : 0.2)) return false;
+  let best = null, bd = m.T.follow * m.T.follow;
+  for (const e of g.entities) {
+    if (!golemEnemy(m, e) || e.y > m.y + m.h + 4 || e.y + e.h < m.y - 4) continue;
+    const d2 = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2;
+    if (d2 <= bd && (iron || m.canSee(e))) { bd = d2; best = e; }
+  }
+  if (best) { m.target = best; m._unseen = 0; }
+  return false;
+};
+// HurtByTargetGoal for iron golems (snow golems have none)
+const _onHurtByGL = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  _onHurtByGL.call(this, a, source);
+  if (this.type !== 'iron_golem' || !a || a === this || a.dead || this.dead || this.deathTime > 0) return;
+  if (a instanceof Player ? !a.survival || this.data.playerMade : !(a instanceof Mob) || a.type === 'creeper') return;
+  this.target = a; this._unseen = 0;
+};
+// IronGolem.doPush: an enemy pushing into it is picked 1 time in 20
+const _pushGL = Game.prototype.pushEntities;
+Game.prototype.pushEntities = function () {
+  _pushGL.call(this);
+  for (const m of this.entities) {
+    if (m.type !== 'iron_golem' || m.dead || m.deathTime > 0 || m.data.noAI) continue;
+    for (const o of this.entities) {
+      if (!golemEnemy(m, o) || o.T.noPush || Math.abs(o.x - m.x) >= (o.w + m.w) / 2 || Math.abs(o.z - m.z) >= (o.w + m.w) / 2 || o.y >= m.y + m.h || m.y >= o.y + o.h) continue;
+      if (Math.random() < 0.05) m.target = o;
+    }
+  }
+};
+
+/* ---------------- iron golems ---------------- */
+// IronGolem.doHurtTarget: 7.5 to 21.5 damage, a lift of 0.4 (less the knockback resistance), the attack sound
+const _attackGL = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) {
+  if (this.type !== 'iron_golem') return _attackGL.call(this, t);
+  const g = this.game;
+  this.attackAnim = 10; this.data.attackT = 10;
+  let dmg = 7.5 + Math.floor(Math.random() * 15);
+  if (t instanceof Player) dmg = g.difficultyDmg(dmg);
+  const ok = t.hurt(dmg, this.type, this);
+  if (ok) {
+    let kr = 0;
+    if (t instanceof Player) { for (const s of t.armor) if (s && ITEMS[s.id].armor) kr += ITEMS[s.id].armor.kb || 0; }
+    else if (t.T) kr = t.T.kbRes || 0;
+    t.vy += 0.4 * Math.max(0, 1 - kr);
+    if (this.onAttack) this.onAttack(t);
+  }
+  if (!this.data.silent) g.sound('golem_attack', this.x, this.y + 1.4, this.z);
+  return ok;
+};
+// IronGolem.Crackiness: none, low (under 75%), medium (under 50%), high (under 25%)
+const igCrack = m => { const f = m.health / m.maxHealth; return f < 0.25 ? 3 : f < 0.5 ? 2 : f < 0.75 ? 1 : 0; };
+const _hurtGL = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type !== 'iron_golem') return _hurtGL.call(this, amount, source, attacker);
+  const c = igCrack(this), r = _hurtGL.call(this, amount, source, attacker);
+  if (r && !this.dead && !(this.deathTime > 0) && igCrack(this) !== c && !this.data.silent) this.game.sound('golem_damage', this.x, this.y + 1.4, this.z);
+  return r;
+};
+// IronGolem.mobInteract: an iron ingot heals 25 (not when already whole)
+const _interactGL = MOB_INTERACT.iron_golem;
+MOB_INTERACT.iron_golem = (m, p, held, name) => {
+  if (held && held.id === I.IRON_INGOT && !m.dead && !(m.deathTime > 0)) {
+    if (m.health >= m.maxHealth) return false;
+    m.health = Math.min(m.maxHealth, m.health + 25);
+    m.game.sound('golem_repair', m.x, m.y + 1.4, m.z);
+    p.consumeHeld(1);
+    return true;
+  }
+  return _interactGL ? _interactGL(m, p, held, name) : false;
+};
+// MoveBackToVillageGoal: away from its village, back towards it
+GOALS.golemVillage = function (m) {
+  if (m._igHome && m.nav && !m.navDone()) { m.followPath(); return true; }
+  m._igHome = false;
+  if (!m.home || Math.hypot(m.home[0] - m.x, m.home[2] - m.z) <= 24 || (m.age + m.id) % 2 || Math.random() >= 0.2) return false;
+  const s = igTowards(m, m.home[0], m.home[2]);
+  if (!s || !m.goTo(s[0] + 0.5, s[1], s[2] + 0.5, m.T.walk)) return false;
+  m._igHome = true;
+  return true;
+};
+// LandRandomPos.getPosTowards (10 across, 7 up or down, within 90 degrees of the way to the spot)
+function igTowards(m, tx, tz) {
+  const w = m.game.world, R = Math.random, a0 = Math.atan2(tz - m.z, tx - m.x) - Math.PI / 2;
+  for (let k = 0; k < 10; k++) {
+    const a = a0 + (2 * R() - 1) * Math.PI / 2, r = Math.sqrt(R()) * Math.SQRT2 * 10, dx = -r * Math.sin(a), dz = r * Math.cos(a);
+    if (Math.abs(dx) > 10 || Math.abs(dz) > 10) continue;
+    const x = Math.floor(m.x + dx), z = Math.floor(m.z + dz), y0 = Math.floor(m.y) + Math.floor(R() * 15) - 7;
+    if (!w.isLoadedAt(x, z)) continue;
+    for (let dy = 0; dy <= 7; dy++) for (const y of dy ? [y0 + dy, y0 - dy] : [y0]) if (NAV.stand(w, x, y, z, m) && w.getBlock(x, y, z) !== B.WATER) return [x, y, z];
+  }
+  return null;
+}
+// GolemRandomStrollInVillageGoal: 1 in 240; three times in ten anywhere, else towards a villager that wants a golem (most of the
+// time) or its village
+GOALS.golemStroll = function (m) {
+  if (m._igStroll && m.nav && !m.navDone()) { m.followPath(); return true; }
+  m._igStroll = false;
+  if ((m.noAct || 0) >= 100 || Math.random() * 240 >= 1) return false;
+  const g = m.game, R = Math.random, f = R();
+  let s = null;
+  if (R() >= 0.3) {
+    const villager = () => {
+      const t = g.world.tick, vs = g.entities.filter(e => e.type === 'villager' && !e.dead && Math.abs(e.x - m.x) < 32.7 && Math.abs(e.y - m.y) < 34 && Math.abs(e.z - m.z) < 32.7 && villagerWantsGolem(e, t));
+      return vs.length ? vs[Math.floor(R() * vs.length)] : null;
+    };
+    const home = () => m.home ? { x: m.home[0], z: m.home[2] } : null;
+    const to = f < 0.7 ? villager() || home() : home() || villager();
+    if (to) s = igTowards(m, to.x, to.z);
+  }
+  if (!s) s = m.randomSpot(10, 7);
+  if (!s || !m.goTo(s[0] + 0.5, s[1], s[2] + 0.5, m.T.walk)) return false;
+  m._igStroll = true;
+  return true;
+};
+// OfferFlowerGoal: by day, 1 in 8000 checks, a villager within 6 blocks (2 up or down) is held a poppy for 400 ticks
+GOALS.golemFlower = function (m) {
+  const g = m.game, d = m.data;
+  if (d.offer > 0) {
+    const v = m._igFlowerTo;
+    if (--d.offer <= 0 || !v || v.dead) { d.offer = 0; m._igFlowerTo = null; return false; }
+    m.nav = null; m.lookAt(v.x, emEyeOf(v), v.z);
+    return true;
+  }
+  if (!g.isDay() || (m.age + m.id) % 2 || Math.random() * 8000 >= 1) return false;
+  let best = null, bd = 36;
+  for (const e of g.entities) {
+    if (e.type !== 'villager' || e.dead || e.deathTime > 0) continue;
+    const r = 6 + (m.w + e.w) / 2;
+    if (Math.abs(e.x - m.x) > r || Math.abs(e.z - m.z) > r || e.y > m.y + m.h + 2 || e.y + e.h < m.y - 2) continue;
+    const d2 = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2;
+    if (d2 <= bd) { bd = d2; best = e; }
+  }
+  if (!best) return false;
+  m._igFlowerTo = best; d.offer = 400; m.nav = null;
+  return true;
+};
+// per tick: step height 1, no ambient sound, the attack animation and a flower offer cut short by any other goal
+const _tickGL = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type !== 'iron_golem' && this.type !== 'snow_golem') return _tickGL.call(this);
+  this.ambientT = 1e9;
+  if (this.type === 'iron_golem') {
+    this.stepH = 1;
+    const d = this.data;
+    if (d.attackT > 0) d.attackT--;
+    _tickGL.call(this);
+    if (d.offer > 0 && this.goal !== 'golemFlower' && !d.noAI) { d.offer = 0; this._igFlowerTo = null; }
+    return;
+  }
+  _tickGL.call(this);
+  if (!this.dead && !(this.deathTime > 0)) sgAiStep(this);
+};
+MOB_ANIM.iron_golem = (m, st) => { st.attackT = m.data.attackT > 0 ? Math.max(0, m.data.attackT - (st.age % 1)) : 0; st.offer = m.data.offer || 0; };
+// IronGolemFlowerLayer: the poppy in its right hand
+const _renderExtraGL = Mob.prototype.renderExtra;
+Mob.prototype.renderExtra = function (r, a, p, yaw, st, light, at) {
+  _renderExtraGL.call(this, r, a, p, yaw, st, light, at);
+  if (this.type !== 'iron_golem' || !(this.data.offer > 0) || !at) return;
+  const L = FACETEX[B.POPPY * 6], c = [-11, 27, -5];
+  for (const ang of [Math.PI / 4, -Math.PI / 4]) {
+    const ca = Math.cos(ang) * 4, sa = Math.sin(ang) * 4;
+    const pts = [[c[0] - ca, c[1], c[2] - sa, 0, 1], [c[0] + ca, c[1], c[2] + sa, 1, 1], [c[0] + ca, c[1] - 8, c[2] + sa, 1, 0], [c[0] - ca, c[1] - 8, c[2] - sa, 0, 0]];
+    for (const order of [[0, 1, 2, 3], [1, 0, 3, 2]]) for (const k of order) { const q = pts[k], w = at('right_arm', q); if (w) r.dv(w[0], w[1], w[2], q[3], q[4], L, 1, 1, 1, 1, light[0], light[1]); }
+  }
+};
+
+/* ---------------- snow golems ---------------- */
+// RangedAttackGoal(1.25, 20, 10): closer until the target is within 10 blocks and seen for 5 ticks, a snowball every 20 ticks
+// (none while it's out of sight)
+GOALS.snowRanged = function (m) {
+  const t = m.target;
+  if (!t || t.dead || t.deathTime > 0) { m._srOn = false; return false; }
+  if (!m._srOn) { m._srOn = true; m._srSee = 0; m._srT = -1; }
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2, sees = m.canSee(t);
+  m._srSee = sees ? m._srSee + 1 : 0;
+  if (d2 <= 100 && m._srSee >= 5) { m.nav = null; m.move = null; }
+  else if (!m.nav || m.navDone() || m.age % 10 === 0) m.goTo(t.x, t.y, t.z, m.T.run, 1); else m.followPath();
+  m.lookAt(t.x, emEyeOf(t), t.z);
+  if (--m._srT === 0) { if (sees) { sgThrow(m, t); m._srT = 20; } }
+  else if (m._srT < 0) m._srT = 20;
+  return true;
+};
+// SnowGolem.performRangedAttack: from 0.1 below its eyes towards 1.1 below the target's eyes, lifted a fifth of the distance
+function sgThrow(m, t) {
+  const g = m.game, sy = m.y + 1.6, dx = t.x - m.x, dz = t.z - m.z;
+  let vx = dx, vy = emEyeOf(t) - 1.1 + Math.hypot(dx, dz) * 0.2 - sy, vz = dz;
+  const l = Math.hypot(vx, vy, vz) || 1, s = 0.0172275 * 12;
+  vx = vx / l + jTriS(0, s); vy = vy / l + jTriS(0, s); vz = vz / l + jTriS(0, s);
+  g.spawnProjectile('snow', m.x, sy, m.z, vx * 1.6, vy * 1.6, vz * 1.6, m);
+  if (!m.data.silent) g.sound('snow_golem_shoot', m.x, sy, m.z);
+}
+// biomes snow golems melt in (#snow_golem_melts): the dry ones and all of the Nether
+const SG_MELTS = new Set([...DRY_BIOMES]);
+// SnowGolem.aiStep: melting (fire damage) in those biomes, water and rain hurt it (isSensitiveToWater), and with mobGriefing a
+// layer of snow where each of its four corners stands, if the block there is empty and snow can lie on what's below
+function sgAiStep(m) {
+  const g = m.game, w = g.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  if (w.dim === 'nether' || w.dim === 'overworld' && SG_MELTS.has(biomeAt(g, m.x, m.z))) m.hurt(1, 'melt');
+  if (m.dead || m.deathTime > 0) return;
+  if (m.inWater || g.rainingAt(bx, by, bz) || g.rainingAt(bx, Math.floor(m.y + m.h), bz)) m.hurt(1, 'drown');
+  if (m.dead || m.deathTime > 0 || !g.rule('mobGriefing')) return;
+  for (let i = 0; i < 4; i++) {
+    const x = Math.floor(m.x + (i % 2 * 2 - 1) * 0.25), z = Math.floor(m.z + ((i >> 1) % 2 * 2 - 1) * 0.25), below = w.getBlock(x, by - 1, z);
+    if (w.getBlock(x, by, z) !== B.AIR || below === B.ICE || below === B.PACKED_ICE || below === B.BARRIER || !w.canStay(B.SNOW, x, by, z, 0)) continue;
+    w.setBlock(x, by, z, B.SNOW, 0);
+    g.remeshNear(x, z);
+    if (g.vibrate) g.vibrate(x + 0.5, by + 0.5, z + 0.5, 'block_place', m);
+  }
+}
+
+/* ---------------- sounds ---------------- */
+const GL_SOUNDS = [['golem_attack', 'Iron Golem attacks', 'neutral'], ['golem_damage', 'Iron Golem cracks', 'neutral'],
+  ['golem_repair', 'Iron Golem repaired', 'neutral'], ['snow_golem_shoot', 'Snow Golem shoots', 'neutral']];
+for (const [n, t, c] of GL_SOUNDS) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+SOUND_EVENTS.unshift([/^entity\.iron_golem\.attack/, 'golem_attack'], [/^entity\.iron_golem\.damage/, 'golem_damage'],
+  [/^entity\.iron_golem\.repair/, 'golem_repair'], [/^entity\.snow_golem\.shoot/, 'snow_golem_shoot']);
+const GL_SOUND_SET = new Set(GL_SOUNDS.map(s => s[0]));
+const _audioPlayGL = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!GL_SOUND_SET.has(name)) return _audioPlayGL.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'golem_attack': this.tone(dst, 'square', 110 * v, 60 * v, 0.25, 0.2); this.noiseHit(dst, 'lowpass', 700, 1, 0.2, 0.35); break;
+    case 'golem_damage': this.noiseHit(dst, 'bandpass', 2600, 5, 0.35, 0.3); this.tone(dst, 'square', 180 * v, 120 * v, 0.3, 0.12); break;
+    case 'golem_repair': this.tone(dst, 'triangle', 500 * v, 900 * v, 0.2, 0.12); this.noiseHit(dst, 'bandpass', 3000, 6, 0.15, 0.2); break;
+    case 'snow_golem_shoot': this.noiseHit(dst, 'bandpass', 1600 * v, 1.2, 0.15, 0.3); break;
+  }
+};
+
+/* @file 161_animal_speeds.js */
+/* ===================================================================
+   Part 50: animals move like Java, and horses have their own stats
+   - speeds from Java's movement speed attributes and each goal's speed modifier (on the ground 43.2 x (speed x modifier)^2
+     blocks a second): pigs, cows, mooshrooms, sheep, chickens, goats, polar bears, pandas, llamas, horses, donkeys, mules,
+     skeleton and zombie horses, armadillos, sniffers, cats, ocelots and wolves stroll, panic, follow food, go to their
+     mates, follow their parents and owners and (polar bears, pandas, wolves) attack at Java's speeds, and so do villagers
+     (0.5 of their 0.5, fleeing at 0.75) and wandering traders, and piglins, brutes, hoglins, zoglins and zombified piglins;
+     their young are no faster than they are
+   - PanicGoal for farm animals and horses: for 40 ticks after a hit that causes panic (most do; falls, drowning and starving
+     don't) and while burning, it runs to random spots up to 5 blocks away (4 up or down), finishing each run
+   - ridden: pigs (carrot on a stick) at 0.25 x 0.225, striders at 0.175 x 0.55 (0.35 when cold), horses, donkeys, mules and
+     skeleton and zombie horses at their movement speed (43.2 x speed blocks a second: 9.7 for an average horse), camels at
+     0.09 (0.19 dashing)
+   - horses' own stats (AbstractHorse.randomizeAttributes): health 15 to 30, speed 0.1125 to 0.3375 and jump strength 0.4 to
+     1, both weighted to the middle; donkeys and mules move at 0.175 and jump 0.5; young ones get theirs from their parents
+     (AbstractHorse.createOffspringAttribute); a horse and a donkey make a mule; only tamed ones at full health breed; the
+     stats are kept in saves
+   =================================================================== */
+const jms = (base, mod) => 43.2 * (base * mod) ** 2;
+const ANIMAL_SPEEDS = {
+  pig: [0.25, { panic: 1.25, breed: 1, tempt: 1.2, followParent: 1.1, wander: 1 }],
+  cow: [0.2, { panic: 2, breed: 1, tempt: 1.25, followParent: 1.25, wander: 1 }],
+  sheep: [0.23, { panic: 1.25, breed: 1, tempt: 1.1, followParent: 1.1, wander: 1 }],
+  chicken: [0.25, { panic: 1.4, breed: 1, tempt: 1, followParent: 1.1, wander: 1 }],
+  goat: [0.2, { panic: 2, breed: 1, tempt: 1.25, followParent: 1.25, wander: 1 }],
+  polar_bear: [0.25, { panic: 2, followParent: 1.25, wander: 1, melee: 1.25 }],
+  panda: [0.15, { panic: 2, breed: 1, tempt: 1, followParent: 1.25, wander: 1, melee: 1.2 }],
+  llama: [0.175, { panic: 1.2, breed: 1, tempt: 1.25, followParent: 1, wander: 0.7 }],
+  horse: [m => m.data.spd || 0.225, { panic: 1.2, breed: 1, tempt: 1.25, followParent: 1, wander: 0.7 }],
+  donkey: [0.175, { panic: 1.2, breed: 1, tempt: 1.25, followParent: 1, wander: 0.7 }],
+  skeleton_horse: [0.2, { panic: 1.2, wander: 0.7 }],
+  armadillo: [0.14, { panic: 2, breed: 1, tempt: 1.25, followParent: 1.25, wander: 1 }],
+  sniffer: [0.1, { panic: 2, breed: 1, tempt: 1.25, followParent: 1.25, wander: 1 }],
+  // (cats and wolves panic only from fire and the like in Java, which isn't modelled; their panic keeps its old speed)
+  cat: [0.3, { breed: 0.8, tempt: 0.6, followOwner: 1, wander: 0.8 }],
+  ocelot: [0.3, { breed: 0.8, tempt: 0.6, wander: 0.8, avoidPlayer: 1.33 }],
+  wolf: [0.3, { breed: 1, followOwner: 1, wander: 1, melee: 1 }],
+  // villagers go about at 0.5 of their 0.5 (VillagerGoalPackages) and flee at 1.5 times that; wandering traders stroll at 0.35 and
+  // panic at 0.5
+  villager: [0.5, { panic: 0.75, wander: 0.5, breed: 0.5 }],
+  wandering_trader: [0.5, { panic: 0.5, wander: 0.35 }],
+};
+ANIMAL_SPEEDS.mooshroom = ANIMAL_SPEEDS.cow; ANIMAL_SPEEDS.trader_llama = ANIMAL_SPEEDS.llama; ANIMAL_SPEEDS.mule = ANIMAL_SPEEDS.donkey;
+ANIMAL_SPEEDS.zombie_horse = ANIMAL_SPEEDS.skeleton_horse;
+const asBase = (m, S) => typeof S[0] === 'function' ? S[0](m) : S[0];
+// the stroll and run speeds other goals go by
+for (const [t, S] of Object.entries(ANIMAL_SPEEDS)) {
+  const T = MOB_TYPES[t], b = typeof S[0] === 'function' ? 0.225 : S[0], k = S[1];
+  if (T) Object.assign(T, { walk: jms(b, k.wander || 1), run: jms(b, k.panic || k.avoidPlayer || k.melee || k.wander || 1) });
+}
+// each goal at its own speed (the engine's goals go at walk or run, a few times some factor)
+const AS_GOALS = { panic: ['run', 1], avoidPlayer: ['run', 1], followOwner: ['run', 1], melee: ['run', 1], tempt: ['walk', 1.25], breed: ['walk', 1], followParent: ['walk', 1.1], wander: ['walk', 1] };
+for (const [name, [field, k]] of Object.entries(AS_GOALS)) {
+  const base = GOALS[name];
+  if (!base) continue;
+  GOALS[name] = function (m) {
+    const S = ANIMAL_SPEEDS[m.type], mod = S && S[1][name];
+    if (mod === undefined) return base(m);
+    const T = m.T, v0 = T[field];
+    T[field] = jms(asBase(m, S), mod) / k;
+    try { return base(m); } finally { T[field] = v0; }
+  };
+}
+// the young aren't faster
+const _walkAS = Mob.prototype.walkPhysics;
+Mob.prototype.walkPhysics = function () {
+  if (!(this.baby && this.move && ANIMAL_SPEEDS[this.type])) return _walkAS.call(this);
+  const s = this.move[2];
+  this.move[2] = s / 1.15;
+  try { return _walkAS.call(this); } finally { if (this.move) this.move[2] = s; }
+};
+
+// the Nether's brains (PiglinAi, PiglinBruteAi, HoglinAi, ZoglinAi): strolling at 0.6 (piglins) or 0.4 (hoglins, zoglins), anything in
+// earnest at 1.0 (piglins back off with a crossbow at 0.75, hoglins retreat at 1.3: the piglin code goes by these two speeds);
+// zombified piglins are zombies at 0.23
+for (const [t, b, w] of [['piglin', 0.35, 0.6], ['piglin_brute', 0.35, 0.6], ['hoglin', 0.3, 0.4], ['zoglin', 0.25, 0.4], ['zombified_piglin', 0.23, 1]]) {
+  if (MOB_TYPES[t]) Object.assign(MOB_TYPES[t], { walk: jms(b, w), run: jms(b, 1) });
+}
+
+/* ---------------- panic ---------------- */
+// DamageTypeTags.PANIC_CAUSES: about everything but falls, drowning, starving, suffocation and the like
+const AS_CALM = new Set(['fall', 'drown', 'starve', 'cramming', 'suffocate', 'in_wall', 'void', 'kill', 'generic', 'fly_into_wall', 'dry', 'berry', 'thorns', 'block', 'anvil', 'stalactite', 'stalagmite']);
+const AS_PANIC = new Set(['pig', 'cow', 'mooshroom', 'sheep', 'chicken', 'goat', 'sniffer', 'llama', 'trader_llama', 'horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse']);
+const _hurtAS = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const r = _hurtAS.call(this, amount, source, attacker);
+  if (r && AS_PANIC.has(this.type) && !AS_CALM.has(source)) this._panicUntil = this.age + 40;
+  return r;
+};
+const _panicAS = GOALS.panic;
+GOALS.panic = function (m) {
+  if (!AS_PANIC.has(m.type)) return _panicAS(m);
+  m.panic = 0;
+  // canContinueToUse: until the run is done
+  if (m._panicRun) { if (m.nav && !m.navDone()) { m.followPath(); return true; } m._panicRun = false; }
+  if (!(m._panicUntil > m.age) && !(m.fireTicks > 0)) return false;
+  // DefaultRandomPos.getPos(5, 4)
+  const S = ANIMAL_SPEEDS[m.type], s = m.randomSpot(5, 4);
+  if (!s || !m.goTo(s[0] + 0.5, s[1], s[2] + 0.5, jms(asBase(m, S), S[1].panic || 1.2))) return false;
+  m._panicRun = true;
+  return true;
+};
+
+/* ---------------- riding ---------------- */
+// the ridden speeds in blocks a second (a mob's travel at speed s with the full forward input: 0.98 s / (1 - 0.546) a tick,
+// a pig's input is a whole 1); the riding code adds a tenth for pigs, takes 0.35 / 0.55 for cold striders and 1.6 for camels'
+// dash key
+const RIDDEN = {
+  pig: () => 0.25 * 0.225 / 0.454 * 20 / 1.1,
+  strider: () => 0.175 * 0.55 / 0.454 * 20,
+  horse: m => 43.17 * (m.data.spd || 0.225), donkey: () => 43.17 * 0.175, mule: () => 43.17 * 0.175,
+  skeleton_horse: () => 43.17 * 0.2, zombie_horse: () => 43.17 * 0.2,
+  camel: m => m.game.input && m.game.input.keys.has('ControlLeft') ? 43.17 * 0.19 / 1.6 : 43.17 * 0.09,
+};
+const _riddenAS = Mob.prototype.riddenTick;
+Mob.prototype.riddenTick = function () {
+  const f = RIDDEN[this.type];
+  if (!f) return _riddenAS.call(this);
+  const d = this.data, s0 = d.speed;
+  d.speed = f(this);
+  try { return _riddenAS.call(this); } finally { if (s0 === undefined) delete d.speed; else d.speed = s0; }
+};
+
+/* ---------------- horses' stats ---------------- */
+// AbstractHorse.generateMaxHealth / generateSpeed / generateJumpStrength, and the ranges createOffspringAttribute keeps to
+const HS_RANGE = { hp: [15, 30], spd: [0.1125, 0.3375], jump: [0.4, 1] };
+const hsHealth = R => 15 + Math.floor(R() * 8) + Math.floor(R() * 9);
+const hsSpeed = R => (0.45 + R() * 0.3 + R() * 0.3 + R() * 0.3) * 0.25;
+const hsJump = R => 0.4 + R() * 0.2 + R() * 0.2 + R() * 0.2;
+const HORSE_STATS = {
+  horse: R => ({ hp: hsHealth(R), spd: hsSpeed(R), jump: hsJump(R) }),
+  donkey: R => ({ hp: hsHealth(R), spd: 0.175, jump: 0.5 }),
+  mule: R => ({ hp: hsHealth(R), spd: 0.175, jump: 0.5 }),
+  skeleton_horse: R => ({ hp: 15, spd: 0.2, jump: hsJump(R) }),
+  zombie_horse: R => ({ hp: 15, spd: 0.2, jump: hsJump(R) }),
+};
+for (const t of Object.keys(HORSE_STATS)) {
+  const f = MOB_INIT[t];
+  MOB_INIT[t] = function (m, o) {
+    if (f) f(m, o);
+    const d = m.data;
+    if (o.loading) {
+      // kept in the save (older saves get new ones)
+      const s = o.data || {};
+      if (s.hpMax) m.maxHealth = m.health = s.hpMax;
+      else { const st = HORSE_STATS[t](Math.random); d.hpMax = st.hp; d.spd = st.spd; if (!(s.jump > 0)) d.jump = st.jump; m.maxHealth = m.health = st.hp; }
+      return;
+    }
+    let st = HORSE_STATS[t](Math.random);
+    if (o.parents) {
+      const [a, b] = o.parents, v = (e, k) => k === 'hp' ? e.maxHealth : (e.data[k] || (k === 'spd' ? 0.175 : 0.5));
+      st = {};
+      for (const k of ['hp', 'spd', 'jump']) st[k] = offspringStat(v(a, k), v(b, k), HS_RANGE[k][0], HS_RANGE[k][1]);
+    }
+    d.hpMax = st.hp; d.spd = st.spd; d.jump = st.jump;
+    m.maxHealth = m.health = st.hp;
+  };
+}
+// llamas keep the health they were given (Part 37) through saving and loading too
+for (const t of ['llama', 'trader_llama']) {
+  const f = MOB_INIT[t];
+  MOB_INIT[t] = function (m, o) {
+    if (f) f(m, o);
+    if (o.loading) { const s = o.data || {}; if (s.hpMax) m.maxHealth = m.health = s.hpMax; }
+    else m.data.hpMax = m.maxHealth;
+  };
+}
+// AbstractHorse.canParent / Horse.canMate: tamed, not ridden, at full health; a horse and a donkey make a mule
+const HORSE_KIN = new Set(['horse', 'donkey']);
+const _breedAS = GOALS.breed;
+GOALS.breed = function (m) {
+  if (!HORSE_KIN.has(m.type) && m.type !== 'mule') return _breedAS(m);
+  const ok = e => e.love > 0 && !e.baby && !e.dead && !(e.deathTime > 0) && e.data.tame && !e.rider && e.health >= e.maxHealth;
+  if (!ok(m) || m.type === 'mule') return false;
+  let mate = null, best = 8;
+  for (const e of m.game.entities) if (e !== m && e instanceof Mob && HORSE_KIN.has(e.type) && ok(e)) { const k = m.distTo(e); if (k < best) { best = k; mate = e; } }
+  if (!mate) return false;
+  if (mate.type === m.type) return _breedAS(m);
+  // BreedGoal with a horse and a donkey: the same courting, then a mule
+  m.lookAt(mate.x, mate.y + mate.h * 0.8, mate.z);
+  if (best > 1.6) { m.goTo(mate.x, mate.y, mate.z, jms(asBase(m, ANIMAL_SPEEDS[m.type]), 1), 1); return true; }
+  m.nav = null;
+  m.loveT = (m.loveT || 0) + 1;
+  if (m.loveT > 60 && m.id < mate.id) {
+    m.love = mate.love = 0; m.loveT = mate.loveT = 0; m.breedCd = mate.breedCd = 6000;
+    const baby = createMob(m.game, 'mule', (m.x + mate.x) / 2, m.y, (m.z + mate.z) / 2, { baby: true, parents: [m, mate] });
+    if (baby) { baby.growth = -24000; baby.persistent = true; m.game.entities.push(baby); }
+    for (let k = 0; k < 7; k++) m.game.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5));
+    if (m.game.rule('doMobLoot') !== false) m.game.spawnXP(m.x, m.y + 0.5, m.z, 1 + Math.floor(Math.random() * 7));
+  }
+  return true;
 };
 
 </script>

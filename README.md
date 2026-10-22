@@ -740,6 +740,19 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   water, and the ones with tridents hold them up and throw one every 2 seconds.
 - **Breezes like Java's**: they breathe in and leap to land behind you, then fire a wind charge;
   too close and they slide away. Arrows and other projectiles bounce off them, but not wind charges.
+- **Iron golems like Java's**: a hit does 7.5 to 21.5 damage and throws you up; they chase at Java's speed,
+  go after monsters even behind walls (never creepers), and stay angry at a player who hit them for 20 to 39
+  seconds. One you built never turns on you. Iron ingots repair them (25 health each), they creak as they crack,
+  and now and then they hold out a poppy to a villager.
+- **Snow golems like Java's**: they throw a snowball every second at monsters in sight (creepers too) and leave a
+  trail of snow (unless mobGriefing is off). They melt in deserts, badlands, savannas and the Nether, and water and
+  rain hurt them.
+- **Animals move like Java's**: pigs, cows, sheep, chickens, goats, horses, llamas, cats, wolves, villagers, piglins,
+  hoglins and more walk, run in panic, follow food and their parents at Java's speeds (a scared cow is fast), and babies are no faster
+  than adults. Hit an animal and it dashes about for a couple of seconds like in Java.
+- **Horses like Java's**: every horse has its own health (15 to 30), speed and jump, and foals get theirs from their
+  parents, so you can breed better horses. Riding one is as fast as in Java (about 10 blocks a second for an average
+  horse); a horse and a donkey make a mule, and only tamed ones at full health breed.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
