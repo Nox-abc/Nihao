@@ -26040,7 +26040,7 @@ Game.prototype.updateTarget = function () {
   const hit = raycast(this.world, e[0], e[1], e[2], d[0], d[1], d[2], reach, false);
   let best = hit ? hit.t : reach;
   for (const m of this.entities) {
-    if (!(m instanceof Mob || m instanceof Projectile && (m.kind === 'ghast' || m.kind === 'skull' || m.kind === 'wind')) || m.deathTime > 0 || m === p.riding) continue;
+    if (!(m instanceof Mob || m instanceof Projectile && (m.kind === 'ghast' || m.kind === 'skull' || m.kind === 'wind' || m.kind === 'bullet')) || m.deathTime > 0 || m === p.riding) continue;
     const hw = m.w / 2, box = m.hitBox ? m.hitBox() : [m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw];
     const rr = rayBox(e[0], e[1], e[2], d[0], d[1], d[2], box);
     // a frame on the face of the targeted block wins over the block
@@ -48156,6 +48156,624 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'vex_charge': this.tone(dst, 'square', 1400 * v, 2000 * v, 0.25, 0.04); break;
     case 'ravager_roar': this.tone(dst, 'sawtooth', 110 * v, 70 * v, 1.2, 0.2); this.noiseHit(dst, 'lowpass', 400, 0.7, 1.0, 0.3); break;
     case 'ravager_stunned': this.tone(dst, 'sawtooth', 160 * v, 120 * v, 0.6, 0.12); break;
+  }
+};
+
+/* @file 159_shulkers_drowned_breezes.js */
+/* ===================================================================
+   Part 48: shulkers, drowned and breezes like Java
+   - shulkers: ShulkerAttackGoal (the lid opens, a bullet 19 ticks later, then one every 20 to 110 ticks, the target let
+     go beyond 20 blocks), ShulkerPeekGoal (with no target: now and then a third open for 1 to 3 seconds), the target
+     goal that looks only 4 blocks up or down, HurtByTargetGoal alerting other shulkers (and ignoring hits from
+     shulkers); shut, they have 20 armor and arrows bounce off; under half health a hit has a 1 in 4 chance to send them
+     off (Shulker.teleportSomewhere); hit by a shulker bullet with the lid open they teleport and may leave a copy
+     behind, less likely the more shulkers there are; never knocked back or pulled down (their motion is always zero), a
+     new spot when the block under them goes; the box grows with the lid, they are solid to stand on, and the opening
+     lid lifts what stands on it (ShulkerModel's lid too)
+   - shulker bullets: ShulkerBullet, a block at a time along one axis towards the target, a new way every 10 to 50 ticks
+     or on reaching the target's row or a wall, speeding up; 4 damage and 10 seconds of Levitation; one hit breaks them;
+     they fall once the target is gone
+   - drowned: Drowned.okTarget (players only at night or in the water; the melee goal only for such a target),
+     DrownedTridentAttackGoal (RangedAttackGoal: closer until within 10 blocks and seen for 5 ticks, a trident every 40
+     ticks at 1.6 with the usual spread, held up the whole time), DrownedGoToWaterGoal (by day, back to water within 10
+     blocks), DrownedGoToBeachGoal and DrownedSwimUpGoal (at night, up and onto land); they sink and walk the bottom unless
+     they want to swim (Drowned.wantsToSwim)
+   - breezes: BreezeAi with Shoot (after landing, 2 to 16 blocks off: 16 ticks drawing breath, a wind charge at 0.7 if
+     facing the target, then 10 ticks of cooldown), LongJump (4 clear blocks above: 10 ticks inhaling, then a leap at one
+     of 40/55/60/75/80 degrees, no faster than 1.4, to a spot 4 to 8 blocks behind the target; no drag in the air) and
+     Slide (when it can't jump: away from a target within 4 blocks, else behind it or 4 to 8 blocks from it, at 0.6 of
+     its 0.63 speed); players and iron golems within 16 (kept to 24); projectiles other than wind charges bounce off
+     (Breeze.deflection); no fall damage
+   =================================================================== */
+const JDIRS = [[0, -1, 0, 'y'], [0, 1, 0, 'y'], [0, 0, -1, 'z'], [0, 0, 1, 'z'], [-1, 0, 0, 'x'], [1, 0, 0, 'x']];
+const jTriS = (a, b) => a + b * (Math.random() - Math.random());
+
+/* ---------------- shulkers ---------------- */
+Object.assign(MOB_TYPES.shulker, { armor: 0, follow: 16, kbRes: 1, ai: ['shulkerTarget', 'shulkerJava'] });
+// Shulker.isClosed: the lid fully down (raw peek 0), which adds 20 armor (COVERED_ARMOR_MODIFIER)
+const shClosed = m => !(m.data.peekRaw > 0);
+const _armorSH = Mob.prototype.armorPoints;
+Mob.prototype.armorPoints = function () { const a = _armorSH.call(this); return this.type === 'shulker' && shClosed(this) ? a + 20 : a; };
+// Shulker.setRawPeekAmount: open or close, with its sound
+function shSetPeek(m, v) {
+  m.data.peekRaw = v;
+  if (!m.data.silent) m.game.sound(v ? 'shulker_open' : 'shulker_close', m.x, m.y + 0.5, m.z);
+}
+// Shulker.getPhysicalPeek: how far the lid has lifted the box (0 to 1 block)
+const shPhysical = p => 0.5 - Math.sin((0.5 + p) * Math.PI) * 0.5;
+// Shulker.canStayAt for the floor: a full top face below and nothing in its own block
+function shCanStay(w, x, y, z) {
+  const b = w.getBlock(x, y - 1, z), here = w.getBlock(x, y, z);
+  return SOLID[b] === 1 && SHAPE[b] === SH.CUBE && (here === B.AIR || !SOLID[here]);
+}
+// Shulker.teleportSomewhere: up to 5 tries at a random spot up to 8 blocks off each way, empty, clear of others, that it can sit
+// on with the lid fully open (here only on floors)
+function shTeleport(m) {
+  if (m.data.noAI || m.dead) return false;
+  const g = m.game, w = g.world, R = Math.random, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  for (let i = 0; i < 5; i++) {
+    const x = bx + Math.floor(R() * 17) - 8, y = by + Math.floor(R() * 17) - 8, z = bz + Math.floor(R() * 17) - 8;
+    if (y <= 0 || w.getBlock(x, y, z) !== B.AIR || !shCanStay(w, x, y, z)) continue;
+    if (!g.vNoCollision(x + 1e-6, y + 1e-6, z + 1e-6, x + 1 - 1e-6, y + 2 - 1e-6, z + 1 - 1e-6)) continue;
+    if (g.entities.some(e => e !== m && !e.dead && e instanceof Mob && Math.abs(e.x - x - 0.5) < 0.5 + e.w / 2 && e.y < y + 1 && e.y + e.h > y && Math.abs(e.z - z - 0.5) < 0.5 + e.w / 2)) continue;
+    if (!m.data.silent) g.sound('shulker_teleport', m.x, m.y + 0.5, m.z);
+    m.x = x + 0.5; m.y = y; m.z = z + 0.5; m.vx = m.vy = m.vz = 0; m.savePrev(); m._shTp = (m._shTp || 0) + 1;
+    m.data.peekRaw = 0; m.data.peek = 0; m.target = null; m._shFight = false; m._shPeekT = 0;
+    if (!m.data.silent) g.sound('shulker_teleport', m.x, m.y + 0.5, m.z);
+    return true;
+  }
+  return false;
+}
+// ShulkerNearestAttackGoal (players, a 1 in 5 chance each goal check, the box only 4 blocks deep along the side it sits on, in sight)
+// and the usual TargetGoal keeping it (follow range 16, out of sight for 60 ticks)
+GOALS.shulkerTarget = function (m) {
+  const t = m.target;
+  if (t) {
+    if (t.dead || t.deathTime > 0 || t instanceof Player && !t.survival || m.distTo(t) > m.T.follow) { m.target = null; return false; }
+    if (t instanceof Player && (m.age + m.id) % 2 === 0) {
+      if (m.canSee(t)) m._unseen = 0;
+      else if ((m._unseen = (m._unseen || 0) + 1) > 30) { m.target = null; m._unseen = 0; }
+    }
+    return false;
+  }
+  const p = m.game.player;
+  if (OPTIONS.difficulty === 0 || (m.age + m.id) % 2 || Math.random() >= 0.2 || !p || p.dead || !p.survival) return false;
+  let range = m.T.follow;
+  if (p.effectLevel('invisibility')) range *= 0.07;
+  if (Math.abs(p.x - m.x) > range + 0.8 || Math.abs(p.z - m.z) > range + 0.8 || p.y + p.h < m.y - 4 || p.y > m.y + m.h + 4) return false;
+  if (m.distTo(p) <= range && m.canSee(p)) { m.target = p; m._unseen = 0; }
+  return false;
+};
+GOALS.shulkerJava = function (m) {
+  const d = m.data, R = Math.random, t = m.target;
+  m.nav = null; m.move = null; m.vx = m.vz = 0;
+  // ShulkerAttackGoal: lid open, the first bullet 19 ticks on (it counts down in the tick it starts), then every 20 to 110;
+  // past 20 blocks the target is let go
+  if (t && !t.dead && !(t.deathTime > 0) && OPTIONS.difficulty > 0) {
+    if (!m._shFight) { m._shFight = true; m._shAtk = 20; m._shPeekT = 0; shSetPeek(m, 100); }
+    m._shAtk--;
+    m.lookAt(t.x, emEyeOf(t), t.z);
+    if ((t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 < 400) {
+      if (m._shAtk <= 0) { m._shAtk = 20 + Math.floor(R() * 10) * 10; shShoot(m, t); }
+    } else m.target = null;
+    return true;
+  }
+  if (m._shFight) { m._shFight = false; shSetPeek(m, 0); }
+  // ShulkerPeekGoal: with no target, 1 in 20 goal checks (every other tick) it opens a third for 20, 40 or 60 ticks
+  if (m._shPeekT > 0) { if (--m._shPeekT === 0) shSetPeek(m, 0); }
+  else if ((m.age + m.id) % 2 === 0 && R() < 0.05 && shCanStay(m.game.world, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z))) { m._shPeekT = 20 * (1 + Math.floor(R() * 3)); shSetPeek(m, 30); }
+  // LookAtPlayerGoal: a player within 8 blocks
+  const p = m.game.player;
+  if (p && !p.dead && m.distTo(p) < 8) m.lookAt(p.x, emEyeOf(p), p.z);
+  return true;
+};
+// Shulker.tick: the lid eases a twentieth a tick towards the raw peek, the box grows with it and lifts what stands on top;
+// with nothing under it, it finds a new spot. Its motion is always zero (Shulker.getDeltaMovement): no falling, no knockback
+const SOLID_MOBS = new Set();
+const _tickSH = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type !== 'shulker') return _tickSH.call(this);
+  const x = this.x, y = this.y, z = this.z, tp = this._shTp;
+  _tickSH.call(this);
+  if (!this.vehicle && !this.dead && this._shTp === tp) { this.x = x; this.y = y; this.z = z; this.vx = this.vy = this.vz = 0; }
+  if (this.dead || this.deathTime > 0) { SOLID_MOBS.delete(this); return; }
+  SOLID_MOBS.add(this); this._smTick = this.game.world.tick;
+  const d = this.data, g = this.game, w = g.world, f = (d.peekRaw || 0) * 0.01, c = d.peek || 0;
+  if (c !== f) {
+    d.peek = c > f ? Math.max(f, c - 0.05) : Math.min(f, c + 0.05);
+    const h0 = shPhysical(c), h1 = shPhysical(d.peek), top = this.y + 1 + h0;
+    if (h1 > h0) for (const e of g.mobsAndPlayer()) {
+      if (e === this || e.dead || e.type === 'shulker' || e instanceof Player && e.mode === 3) continue;
+      const hw = e.w / 2;
+      if (Math.abs(e.x - this.x) < 0.5 + hw && Math.abs(e.z - this.z) < 0.5 + hw && e.y >= top - 0.01 && e.y <= this.y + 1 + h1 + 0.01) moveEntity(w, e, 0, h1 - h0, 0);
+    }
+  }
+  this.h = 1 + shPhysical(d.peek || 0);
+  if (!d.noAI && !shCanStay(w, Math.floor(this.x), Math.floor(this.y), Math.floor(this.z))) shTeleport(this);
+};
+// Shulker.canBeCollidedWith: other things bump into shulkers and stand on them
+const _collectSM = collectBoxes;
+let SM_MOVING = null;
+collectBoxes = function (world, x0, y0, z0, x1, y1, z1) {
+  const b = _collectSM(world, x0, y0, z0, x1, y1, z1);
+  if (SOLID_MOBS.size) for (const m of SOLID_MOBS) {
+    // gone with its chunk (it no longer ticks): forgotten
+    if (m.dead || m.game.world === world && world.tick - m._smTick > 5) { SOLID_MOBS.delete(m); continue; }
+    if (m === SM_MOVING || m.game.world !== world) continue;
+    const hw = m.w / 2;
+    if (m.x + hw > x0 && m.x - hw < x1 && m.y + m.h > y0 && m.y < y1 && m.z + hw > z0 && m.z - hw < z1) b.push([m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw]);
+  }
+  return b;
+};
+const _moveSM = moveEntity;
+moveEntity = function (world, e, dx, dy, dz) {
+  const prev = SM_MOVING;
+  SM_MOVING = e;
+  try { return _moveSM(world, e, dx, dy, dz); } finally { SM_MOVING = prev; }
+};
+// Shulker.hurt: shut, arrows don't get through; below half health a 1 in 4 chance to teleport; a shulker bullet hitting it open
+// sends it off and, unless there are many shulkers about, leaves a new one where it was (Shulker.hitByShulkerBullet)
+const _hurtSH = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type !== 'shulker' || this.dead || this.deathTime > 0) return _hurtSH.call(this, amount, source, attacker);
+  if (shClosed(this) && source === 'arrow') return false;
+  const wasOpen = !shClosed(this), x = this.x, y = this.y, z = this.z;
+  if (!_hurtSH.call(this, amount, source, attacker)) return false;
+  const g = this.game;
+  // HurtByTargetGoal(Shulker.class).setAlertOthers: shulkers within 16 blocks (10 up or down) with nothing to do turn on the
+  // attacker, unless that's a shulker too
+  if (attacker && attacker !== this && (attacker instanceof Player || attacker instanceof Mob) && attacker.type !== 'shulker' && !attacker.dead) {
+    if (!this.target) this.target = attacker;
+    for (const e of g.entities) if (e !== this && e.type === 'shulker' && !e.dead && !e.target && Math.abs(e.x - x) <= 16 && Math.abs(e.y - y) <= 10 && Math.abs(e.z - z) <= 16) e.target = attacker;
+  }
+  if (this.health < this.maxHealth * 0.5 && Math.random() < 0.25) shTeleport(this);
+  else if (source === 'bullet' && wasOpen && shTeleport(this)) {
+    const n = g.entities.filter(e => e.type === 'shulker' && !e.dead && Math.abs(e.x - x) <= 8.5 && Math.abs(e.y - y) <= 9 && Math.abs(e.z - z) <= 8.5).length;
+    if (!(Math.random() < (n - 1) / 5)) {
+      const c = createMob(g, 'shulker', x, y, z);
+      if (c) { if (this.data.color !== undefined) c.data.color = this.data.color; g.entities.push(c); }
+    }
+  }
+  return true;
+};
+// AbstractArrow.onHitEntity on a shut shulker: the hurt fails and the arrow turns back at a tenth of its speed
+const _impactSH = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (!e || e.type !== 'shulker' || this.kind !== 'arrow' || !shClosed(e) || e.dead) return _impactSH.call(this, e);
+  this.vx *= -0.1; this.vy *= -0.1; this.vz *= -0.1;
+  this.x += this.vx * 3; this.y += this.vy * 3; this.z += this.vz * 3;
+  if (Math.hypot(this.vx, this.vy, this.vz) < 3e-4) this.dead = true;
+  this.game.sound('arrow_hit', this.x, this.y, this.z);
+};
+// ShulkerModel.setupAnim: the lid lifts a whole block, turning as it goes and wobbling when more than half open
+MOB_MODELS.shulker.anim = function (P, st) {
+  const o = st.peek || 0, a = (0.5 + o) * PI, f2 = -1 + Math.sin(a);
+  P['lid#p'] = [0, 16 + Math.sin(a) * 8 + (a > PI ? Math.sin(st.age * 0.1) * 0.7 : 0), 0];
+  P.lid = [0, o > 0.3 ? f2 * f2 * f2 * f2 * PI * 0.125 : 0, 0];
+  P.head = [st.hp, -st.hy, 0];
+};
+
+/* ---------------- shulker bullets ---------------- */
+function shShoot(m, t) {
+  const g = m.game, pr = g.spawnProjectile('bullet', m.x, m.y + m.h / 2, m.z, 0, 0, 0, m);
+  if (!pr) return;
+  pr.jb = true; pr.target = t; pr.homing = null; pr.grav = 0; pr.life = 1e9; pr.w = pr.h = 0.3125;
+  pr.mdir = JDIRS[1];
+  sbDir(pr, 'y');
+  if (!m.data.silent) g.sound('shulker_shoot', m.x, m.y + 0.5, m.z);
+}
+// ShulkerBullet.selectNextMoveDirection: unless already within 2 blocks of the target's block, a step along an axis other than
+// the last that gets closer through air (or any way at random), at 0.15 a tick, for 10 to 50 ticks
+function sbDir(pr, axis) {
+  const w = pr.game.world, t = pr.target, R = Math.random;
+  let d0 = 0.5, tx, ty, tz;
+  if (!t) { tx = Math.floor(pr.x); ty = Math.floor(pr.y) - 1; tz = Math.floor(pr.z); }
+  else { d0 = t.h * 0.5; tx = Math.floor(t.x); ty = Math.floor(t.y + d0); tz = Math.floor(t.z); }
+  let gx = tx + 0.5, gy = ty + d0, gz = tz + 0.5, dir = null;
+  if ((tx + 0.5 - pr.x) ** 2 + (ty + 0.5 - pr.y) ** 2 + (tz + 0.5 - pr.z) ** 2 >= 4) {
+    const bx = Math.floor(pr.x), by = Math.floor(pr.y), bz = Math.floor(pr.z), list = [], air = (x, y, z) => w.getBlock(x, y, z) === B.AIR;
+    if (axis !== 'x') { if (bx < tx && air(bx + 1, by, bz)) list.push(JDIRS[5]); else if (bx > tx && air(bx - 1, by, bz)) list.push(JDIRS[4]); }
+    if (axis !== 'y') { if (by < ty && air(bx, by + 1, bz)) list.push(JDIRS[1]); else if (by > ty && air(bx, by - 1, bz)) list.push(JDIRS[0]); }
+    if (axis !== 'z') { if (bz < tz && air(bx, by, bz + 1)) list.push(JDIRS[3]); else if (bz > tz && air(bx, by, bz - 1)) list.push(JDIRS[2]); }
+    dir = JDIRS[Math.floor(R() * 6)];
+    if (!list.length) { for (let i = 5; !air(bx + dir[0], by + dir[1], bz + dir[2]) && i > 0; i--) dir = JDIRS[Math.floor(R() * 6)]; }
+    else dir = list[Math.floor(R() * list.length)];
+    gx = pr.x + dir[0]; gy = pr.y + dir[1]; gz = pr.z + dir[2];
+  }
+  pr.mdir = dir;
+  const dx = gx - pr.x, dy = gy - pr.y, dz = gz - pr.z, l = Math.hypot(dx, dy, dz);
+  if (l === 0) pr.tdx = pr.tdy = pr.tdz = 0;
+  else { pr.tdx = dx / l * 0.15; pr.tdy = dy / l * 0.15; pr.tdz = dz / l * 0.15; }
+  pr.steps = 10 + Math.floor(R() * 5) * 10;
+}
+const sbStand = id => SOLID[id] === 1 && SHAPE[id] === SH.CUBE;
+// ShulkerBullet.tick: steer a fifth of the way to the wanted motion (which grows 2.5% a tick), hit what lies along the move
+const _tickSB = Projectile.prototype.tick;
+Projectile.prototype.tick = function () {
+  if (this.kind !== 'bullet' || !this.jb) return _tickSB.call(this);
+  const g = this.game, w = g.world, t = this.target;
+  this.savePrev(); this.age++;
+  if (--this.life <= 0) { this.dead = true; return; }
+  // Projectile.checkLeftOwner: its shooter can't be hit until the bullet's box, stretched along its motion and 1 bigger each
+  // way, is clear of it
+  const o = this.owner;
+  if (!this._left) this._left = !o || o.dead || !(o.x + o.w / 2 > Math.min(this.x, this.x + this.vx) - 1.15625 && o.x - o.w / 2 < Math.max(this.x, this.x + this.vx) + 1.15625 &&
+    o.y + o.h > Math.min(this.y, this.y + this.vy) - 1.15625 && o.y < Math.max(this.y, this.y + this.vy) + 1.15625 &&
+    o.z + o.w / 2 > Math.min(this.z, this.z + this.vz) - 1.15625 && o.z - o.w / 2 < Math.max(this.z, this.z + this.vz) + 1.15625);
+  const live = !!t && !t.dead && !(t.deathTime > 0) && !(t instanceof Player && t.mode === 3);
+  if (!live) this.vy -= 0.04;
+  else {
+    const cl = v => Math.max(-1, Math.min(1, v));
+    this.tdx = cl(this.tdx * 1.025); this.tdy = cl(this.tdy * 1.025); this.tdz = cl(this.tdz * 1.025);
+    this.vx += (this.tdx - this.vx) * 0.2; this.vy += (this.tdy - this.vy) * 0.2; this.vz += (this.tdz - this.vz) * 0.2;
+  }
+  // ProjectileUtil.getHitResultOnMoveVector: the first block, else the nearest body (boxes 0.3 bigger) along this tick's move
+  const n = Math.max(1, Math.ceil(Math.hypot(this.vx, this.vy, this.vz) / 0.1));
+  let hitE = null, hitB = false;
+  for (let s = 1; s <= n && !hitE && !hitB; s++) {
+    const x = this.x + this.vx * s / n, y = this.y + this.vy * s / n, z = this.z + this.vz * s / n;
+    if (SOLID[w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z))]) { hitB = true; break; }
+    for (const e of g.mobsAndPlayer()) {
+      if (e.dead || e.deathTime > 0 || (e instanceof Player && e.mode === 3) || (e === o && !this._left)) continue;
+      const hw = e.w / 2 + 0.3;
+      if (Math.abs(e.x - x) < hw && Math.abs(e.z - z) < hw && y > e.y - 0.3 && y < e.y + e.h + 0.3) { hitE = e; break; }
+    }
+  }
+  if (hitE && hitE.type === 'breeze') {
+    this.vx *= -0.5; this.vy *= -0.5; this.vz *= -0.5; this.x += this.vx; this.y += this.vy; this.z += this.vz;
+    if (!hitE.data.silent) g.sound('breeze_deflect', hitE.x, hitE.y + 1, hitE.z);
+    return;
+  }
+  if (hitE || hitB) {
+    this.dead = true;
+    if (hitE) {
+      const own = this.owner instanceof Mob || this.owner instanceof Player ? this.owner : null;
+      if (hitE.hurt(4, 'bullet', own) && hitE.addEffect) hitE.addEffect('levitation', 200, 0);
+    } else g.sound('shulker_bullet_hit', this.x, this.y, this.z);
+    g.particles.poof(this.x, this.y, this.z, [0.9, 0.85, 0.6], 6);
+    return;
+  }
+  this.x += this.vx; this.y += this.vy; this.z += this.vz;
+  if (this.age % 2 === 0) g.particles.poof(this.x - this.vx * 0.5, this.y - this.vy * 0.5 + 0.15, this.z - this.vz * 0.5, [0.95, 0.9, 0.75], 1);
+  if (!live) return;
+  if (this.steps > 0 && --this.steps === 0) sbDir(this, this.mdir ? this.mdir[3] : null);
+  if (this.mdir) {
+    const bx = Math.floor(this.x), by = Math.floor(this.y), bz = Math.floor(this.z), a = this.mdir[3];
+    if (sbStand(w.getBlock(bx + this.mdir[0], by + this.mdir[1], bz + this.mdir[2]))) sbDir(this, a);
+    else if (a === 'x' && bx === Math.floor(t.x) || a === 'z' && bz === Math.floor(t.z) || a === 'y' && by === Math.floor(t.y)) sbDir(this, a);
+  }
+};
+// ShulkerBullet.hurt: any hit breaks it
+const _projHurtSB = Projectile.prototype.hurt;
+Projectile.prototype.hurt = function (amount, source, attacker) {
+  if (this.kind !== 'bullet' || !this.jb) return _projHurtSB.call(this, amount, source, attacker);
+  this.dead = true;
+  this.game.sound('shulker_bullet_hurt', this.x, this.y, this.z);
+  this.game.particles.crit(this.x, this.y, this.z);
+  return true;
+};
+// mob projectile damage scales with the difficulty
+MOB_SCALED.add('bullet');
+
+/* ---------------- drowned ---------------- */
+Object.assign(MOB_TYPES.drowned, { sinks: true, ai: ['drownedToWater', 'target', 'tridentThrow', 'melee', 'drownedNight', 'wander', 'look'] });
+// Drowned.okTarget: by day only targets in the water
+const drownedOk = (m, t) => !!t && (!m.game.isDay() || !!t.inWater);
+const _targetDR = GOALS.target;
+GOALS.target = function (m) {
+  if (m.type !== 'drowned' || m.target) return _targetDR(m);
+  const r = _targetDR(m);
+  if (m.target instanceof Player && !drownedOk(m, m.target)) {
+    m.target = null;
+    // the lower target goals: villagers, iron golems and axolotls in sight
+    let best = null, bd = 144;
+    for (const e of m.game.entities) {
+      if (!(e instanceof Mob) || e.dead || e.deathTime > 0 || !(m.T.attacks || []).includes(e.type)) continue;
+      const d2 = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2;
+      if (d2 < bd && m.canSee(e)) { bd = d2; best = e; }
+    }
+    if (best) m.target = best;
+  }
+  return r;
+};
+// DrownedAttackGoal: only for an ok target
+const _meleeDR = GOALS.melee;
+GOALS.melee = function (m) {
+  if (m.type === 'drowned' && m.target && !drownedOk(m, m.target)) return false;
+  return _meleeDR(m);
+};
+// DrownedTridentAttackGoal (RangedAttackGoal 1.0, 40, 10): towards the target until it's within 10 blocks and seen for 5 ticks,
+// a trident every 40 ticks (none while it's out of sight), held up the whole time
+GOALS.tridentThrow = function (m) {
+  const t = m.target, d = m.data;
+  if (!t || t.dead || t.deathTime > 0 || !d.hand || d.hand.id !== I.TRIDENT) { if (m._rgOn) { m._rgOn = false; d.throwing = 0; } return false; }
+  if (!m._rgOn) { m._rgOn = true; m._rgSee = 0; m._rgT = -1; }
+  d.throwing = 1;
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2, sees = m.canSee(t);
+  m._rgSee = sees ? m._rgSee + 1 : 0;
+  if (d2 <= 100 && m._rgSee >= 5) { m.nav = null; m.move = null; }
+  else if (!m.nav || m.navDone() || m.age % 10 === 0) m.goTo(t.x, t.y, t.z, m.T.run, 1); else m.followPath();
+  m.lookAt(t.x, emEyeOf(t), t.z);
+  if (--m._rgT === 0) { if (sees) { drownedThrow(m, t); m._rgT = 40; } }
+  else if (m._rgT < 0) m._rgT = 40;
+  return true;
+};
+// Drowned.performRangedAttack: from the eyes at a third of the target's height (lifted a fifth of the distance), 1.6, spread 14 - 4 x difficulty
+function drownedThrow(m, t) {
+  const g = m.game, sy = m.y + m.h * 0.88 - 0.1, dx = t.x - m.x, dy = t.y + t.h / 3 - sy, dz = t.z - m.z, hd = Math.hypot(dx, dz);
+  let vx = dx, vy = dy + hd * 0.2, vz = dz;
+  const l = Math.hypot(vx, vy, vz) || 1, s = 0.0172275 * (14 - OPTIONS.difficulty * 4);
+  vx = vx / l + jTriS(0, s); vy = vy / l + jTriS(0, s); vz = vz / l + jTriS(0, s);
+  const pr = g.spawnProjectile('trident', m.x, sy, m.z, vx * 1.6, vy * 1.6, vz * 1.6, m);
+  if (pr) { pr.stack = { id: I.TRIDENT, count: 1 }; pr.pickup = false; }
+  if (!m.data.silent) g.sound('drowned_shoot', m.x, sy, m.z);
+  m.attackAnim = 10;
+}
+// DrownedGoToWaterGoal: by day, out of the water, to one of 10 random water blocks up to 10 blocks off (2 up, 5 down)
+GOALS.drownedToWater = function (m) {
+  const g = m.game, w = g.world, R = Math.random;
+  if (!g.isDay() || m.inWater) { m._drGo = false; return false; }
+  if (m._drGo && !m.navDone()) { m.followPath(); return true; }
+  m._drGo = false;
+  if ((m.age + m.id) % 2) return false;
+  for (let i = 0; i < 10; i++) {
+    const x = Math.floor(m.x) + Math.floor(R() * 20) - 10, y = Math.floor(m.y) + 2 - Math.floor(R() * 8), z = Math.floor(m.z) + Math.floor(R() * 20) - 10;
+    if (w.getBlock(x, y, z) === B.WATER) { m.goTo(x + 0.5, y, z + 0.5, m.T.run, 1); m._drGo = true; return true; }
+  }
+  return false;
+};
+// DrownedGoToBeachGoal (at night, near the top of the water: onto a block with two of air above, up to 8 blocks off) and
+// DrownedSwimUpGoal (at night, more than 2 below sea level: up towards it, swimming)
+GOALS.drownedNight = function (m) {
+  const g = m.game, w = g.world, R = Math.random, sea = w.seaLevel() + 1;
+  if (g.isDay() || !m.inWater) { m._drSearch = false; m._drBeach = null; return false; }
+  if (m.y >= sea - 3) {
+    m._drSearch = false;
+    if (m._drBeach && !m.navDone()) { m.followPath(); return true; }
+    m._drBeach = null;
+    if (m._drNext > 0) { m._drNext--; return false; }
+    m._drNext = 200 + Math.floor(R() * 200);
+    let best = null, bd = 1e9;
+    const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+    for (let dy = -2; dy <= 2; dy++) for (let dz = -8; dz <= 8; dz++) for (let dx = -8; dx <= 8; dx++) {
+      const x = bx + dx, y = by + dy, z = bz + dz, id = w.getBlock(x, y, z);
+      if (!(SOLID[id] === 1 && SHAPE[id] === SH.CUBE) || w.getBlock(x, y + 1, z) !== B.AIR || w.getBlock(x, y + 2, z) !== B.AIR) continue;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < bd) { bd = d2; best = [x, y, z]; }
+    }
+    if (!best) return false;
+    m._drBeach = best; m.goTo(best[0] + 0.5, best[1] + 1, best[2] + 0.5, m.T.run, 1);
+    return true;
+  }
+  if (m.y < sea - 2) {
+    m._drSearch = true;
+    const tx = m._drUp ? m._drUp[0] : m.x + (R() - 0.5) * 4, tz = m._drUp ? m._drUp[1] : m.z + (R() - 0.5) * 4;
+    if (!m._drUp || m.age % 40 === 0) m._drUp = [tx, tz];
+    const dx = tx - m.x, dy = sea - 1 - m.y, dz = tz - m.z, l = Math.hypot(dx, dy, dz) || 1;
+    m.nav = null; m.move = [dx / l, dz / l, m.T.walk, false, dy / l];
+    return true;
+  }
+  m._drSearch = false;
+  return false;
+};
+// Drowned.wantsToSwim: heading for land, or a target in the water; otherwise they sink and walk the bottom
+const _swimPhysDR = Mob.prototype.swimPhysics;
+Mob.prototype.swimPhysics = function () {
+  if (this.type === 'drowned' && !this._drSearch && !(this.target && this.target.inWater)) return this.walkPhysics();
+  return _swimPhysDR.call(this);
+};
+
+/* ---------------- breezes ---------------- */
+// Breeze.createAttributes: speed 0.63 (it moves at 0.6 of that), follow range 24; no fall damage
+const BZ_SPEED = 43.2 * (0.63 * 0.6) ** 2;
+Object.assign(MOB_TYPES.breeze, { walk: BZ_SPEED, run: BZ_SPEED, follow: 24, noFall: 1e9, ai: ['breezeJava'] });
+// BreezeUtil.randomPointBehindTarget: 4 to 8 blocks behind where the target looks, give or take
+function bzBehind(t) {
+  const R = Math.random, d = t.look ? t.look() : [Math.sin(t.yaw), 0, Math.cos(t.yaw)], l = Math.hypot(d[0], d[2]) || 1;
+  const g = jGauss() * Math.PI / 4, c = Math.cos(g), s = Math.sin(g), bx = -d[0] / l, bz = -d[2] / l, r = 4 + R() * 4;
+  return [t.x + (bx * c - bz * s) * r, t.y, t.z + (bx * s + bz * c) * r];
+}
+function jGauss() { let u = 0, v = 0; while (u === 0) u = Math.random(); while (v === 0) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+// LongJump.snapToSurface: down 10 blocks to the ground (or up 10 to a roof), the block above what it hits
+function bzSnap(w, p) {
+  const x = Math.floor(p[0]), z = Math.floor(p[2]), y0 = Math.floor(p[1]);
+  for (let y = y0; y >= y0 - 10; y--) if (SOLID[w.getBlock(x, y, z)]) return [x, y + 1, z];
+  for (let y = y0 + 1; y <= y0 + 10; y++) if (SOLID[w.getBlock(x, y, z)]) return [x, y + 1, z];
+  return null;
+}
+const BZ_DANGER = new Set(['fire', 'soul_fire', 'lava', 'magma_block', 'campfire', 'soul_campfire', 'sweet_berry_bush', 'wither_rose', 'powder_snow', 'cactus'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+// LongJump.canRun: on the ground or in water, the target 4 to 24 blocks off, four free blocks above, and a landing spot it can see
+function bzJumpTarget(m, t) {
+  const g = m.game, w = g.world, dist = m.distTo(t);
+  if (dist > 24) { m.target = null; return null; }
+  if (dist - 4 <= 0) return null;
+  const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  for (let i = 1; i <= 4; i++) { const id = w.getBlock(bx, by + i, bz); if (id !== B.AIR && id !== B.WATER) return null; }
+  const spot = bzSnap(w, bzBehind(t));
+  if (!spot || BZ_DANGER.has(w.getBlock(spot[0], spot[1] - 1, spot[2]))) return null;
+  const ey = m.y + 1.3452;
+  if (!clipCollider(w, m.x, ey, m.z, spot[0] + 0.5, spot[1] + 0.5, spot[2] + 0.5) && !clipCollider(w, m.x, ey, m.z, spot[0] + 0.5, spot[1] + 4.5, spot[2] + 0.5)) return null;
+  return spot;
+}
+// LongJumpUtil.calculateJumpVectorForAngle (gravity 0.08), tried for the angles in a random order, no faster than 1.4, then 0.95 of it
+function bzJumpVector(m, spot) {
+  const tx = spot[0] + 0.5, ty = spot[1], tz = spot[2] + 0.5;
+  const ang = [40, 55, 60, 75, 80];
+  for (let i = ang.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ang[i], ang[j]] = [ang[j], ang[i]]; }
+  for (const a of ang) {
+    const hx = tx - m.x, hz = tz - m.z, hl = Math.hypot(hx, hz) || 1, vx = hx - hx / hl * 0.5, vy = ty - m.y, vz = hz - hz / hl * 0.5;
+    const f = a * Math.PI / 180, d1 = vx * vx + vz * vz, d2 = Math.sqrt(d1), d0 = Math.atan2(vz, vx);
+    const den = d2 * Math.sin(2 * f) - 2 * vy * Math.cos(f) ** 2;
+    const v2 = d1 * 0.08 / den;
+    if (!(v2 >= 0)) continue;
+    const v = Math.sqrt(v2);
+    if (v > 1.4) continue;
+    const h = v * Math.cos(f);
+    return [h * Math.cos(d0) * 0.95, v * Math.sin(f) * 0.95, h * Math.sin(d0) * 0.95];
+  }
+  return null;
+}
+// the target: BreezeAttackEntitySensor (every 20 ticks the nearest player or iron golem within 16, in sight) and
+// StopAttackingIfTargetInvalid / LongJump.outOfAggroRange (gone, dead, creative, or past 24 blocks)
+function bzTarget(m) {
+  const g = m.game, t = m.target;
+  if (t) {
+    if (t.dead || t.deathTime > 0 || t instanceof Player && (!t.survival || OPTIONS.difficulty === 0) || m.distTo(t) > 24) m.target = null;
+    return;
+  }
+  if ((m.age + m.id) % 20) return;
+  let best = null, bd = 256;
+  const p = g.player;
+  if (p && !p.dead && p.survival && OPTIONS.difficulty > 0) { const d2 = (p.x - m.x) ** 2 + (p.y - m.y) ** 2 + (p.z - m.z) ** 2; if (d2 < bd && m.canSee(p)) { bd = d2; best = p; } }
+  for (const e of g.entities) {
+    if (e.type !== 'iron_golem' || e.dead || e.deathTime > 0) continue;
+    const d2 = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2;
+    if (d2 < bd && m.canSee(e)) { bd = d2; best = e; }
+  }
+  if (best) m.target = best;
+}
+GOALS.breezeJava = function (m) {
+  const g = m.game, w = g.world, R = Math.random, d = m.data;
+  if (m._bzJumpCd > 0) m._bzJumpCd--;
+  if (m._bzShootCd > 0) m._bzShootCd--;
+  if (m._bzShootWin > 0) m._bzShootWin--;
+  bzTarget(m);
+  const t = m.target, pose = d.pose;
+  // LongJump: 10 ticks breathing in, the leap, then landing (2 ticks of cooldown if it was hurt lately, else 10) and a shot to come
+  if (pose === 'inhaling') {
+    m.nav = null; m.move = null;
+    if (m._bzSpot) m.lookAt(m._bzSpot[0] + 0.5, m._bzSpot[1] + 0.5, m._bzSpot[2] + 0.5);
+    if (++m._bzT > 10) {
+      const v = m._bzSpot && bzJumpVector(m, m._bzSpot);
+      if (!v) { d.pose = null; m._bzSpot = null; return true; }
+      d.pose = 'jumping'; m.vx = v[0]; m.vy = v[1]; m.vz = v[2]; m.onGround = false; m._bzLeave = m.inWater;
+      if (!d.silent) g.sound('breeze_jump', m.x, m.y, m.z);
+    }
+    return true;
+  }
+  if (pose === 'jumping') {
+    m.nav = null; m.move = null;
+    if (!m.inWater) m._bzLeave = false;
+    if (m.onGround || m.inWater && !m._bzLeave) {
+      d.pose = null; m._bzSpot = null;
+      if (!d.silent) g.sound('breeze_land', m.x, m.y, m.z);
+      // (a brain memory set for n ticks is there for n + 1)
+      m._bzJumpCd = m.age - (m.lastHurtAge === undefined ? -1e9 : m.lastHurtAge) <= 40 ? 3 : 11;
+      m._bzShootWin = 101;
+    }
+    return true;
+  }
+  // Shoot: 16 ticks breathing in, the wind charge from just above its middle towards a third of the target's height, 5 more
+  // ticks, then 10 of cooldown
+  if (pose === 'shooting') {
+    m.nav = null; m.move = null;
+    if (!t || !(m._bzShootWin > 0) && m._bzT < 16) { d.pose = null; m._bzShootCd = 11; m._bzShootWin = 0; return true; }
+    m.lookAt(t.x, t.y + t.h * 0.5, t.z);
+    if (++m._bzT === 16) bzShoot(m, t);
+    if (m._bzT >= 21) { d.pose = null; m._bzShootCd = 11; m._bzShootWin = 0; }
+    return true;
+  }
+  if (!t) {
+    // idle: RandomStroll (0.6) two times in three, else standing still for 30 to 60 ticks
+    if (m._bzIdle > 0) { m._bzIdle--; return true; }
+    if (m.nav && !m.navDone()) { m.followPath(); return true; }
+    if (R() < 2 / 3) { const s = m.randomSpot(10, 7); if (s) m.goTo(s[0] + 0.5, s[1], s[2] + 0.5, m.T.walk, 1); }
+    else m._bzIdle = 30 + Math.floor(R() * 31);
+    return true;
+  }
+  // the fight waits while it slides somewhere (a walk target)
+  if (m._bzSlide && m.nav && !m.navDone()) { m.followPath(); return true; }
+  m._bzSlide = false;
+  const d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2;
+  if (m._bzShootWin > 0 && !(d2 > 4 && d2 < 256)) m._bzShootWin = 0;
+  if (m._bzShootWin > 0 && !(m._bzShootCd > 0)) { d.pose = 'shooting'; m._bzT = 0; if (!d.silent) g.sound('breeze_inhale', m.x, m.y + 1, m.z); return true; }
+  if (!(m._bzJumpCd > 0) && !(m._bzShootWin > 0) && (m.onGround || m.inWater)) {
+    const spot = bzJumpTarget(m, t);
+    if (spot) { d.pose = 'inhaling'; m._bzT = 0; m._bzSpot = spot; if (!d.silent) g.sound('breeze_charge', m.x, m.y + 1, m.z); return true; }
+    if (!m.target) return true;
+  }
+  // Slide: away from a target within 4 blocks, else behind it or into the ring 4 to 8 blocks from it
+  if (m.onGround && !m.inWater && !(m._bzJumpCd > 0) && !(m._bzShootWin > 0)) {
+    let to = null;
+    if (d2 < 16) {
+      const ax = m.x - t.x, az = m.z - t.z, al = Math.hypot(ax, az) || 1, s = m.randomSpot(5, 5);
+      if (s && (s[0] + 0.5 - t.x) ** 2 + (s[2] + 0.5 - t.z) ** 2 > ax * ax + az * az && clipCollider(w, m.x, m.y + 1.3452, m.z, s[0] + 0.5, s[1] + 0.5, s[2] + 0.5)) to = [s[0] + 0.5, s[1], s[2] + 0.5];
+      else to = [m.x + ax / al * 5, m.y, m.z + az / al * 5];
+    }
+    if (!to) {
+      if (R() < 0.5) to = bzBehind(t);
+      else { const vx = t.x - m.x, vy = t.y - m.y, vz = t.z - m.z, vl = Math.hypot(vx, vy, vz) || 1, k = (vl - (8 - R() * 4)) / vl; to = [m.x + vx * k, m.y + vy * k, m.z + vz * k]; }
+    }
+    m.goTo(to[0], to[1], to[2], m.T.walk, 1);
+    m._bzSlide = true; m._bzJumpCd = 20;
+  }
+  return true;
+};
+// Shoot.tick: a BreezeWindCharge from 0.3 above its middle, 0.7 fast, spread 5 - 4 x difficulty
+function bzShoot(m, t) {
+  const g = m.game, sy = m.y + m.h / 2 + 0.3, dx = t.x - m.x, dy = t.y + t.h * 0.3 - (m.y + m.h / 2), dz = t.z - m.z;
+  const l = Math.hypot(dx, dy, dz) || 1, s = 0.0172275 * (5 - OPTIONS.difficulty * 4);
+  const vx = dx / l + jTriS(0, s), vy = dy / l + jTriS(0, s), vz = dz / l + jTriS(0, s);
+  g.spawnProjectile('wind', m.x, sy, m.z, vx * 0.7, vy * 0.7, vz * 0.7, m);
+  if (!m.data.silent) g.sound('breeze_shoot', m.x, sy, m.z);
+}
+// LivingEntity.travel with discardFriction while leaping: only gravity, no drag
+const _walkBZ = Mob.prototype.walkPhysics;
+Mob.prototype.walkPhysics = function () {
+  if (this.type !== 'breeze' || this.data.pose !== 'jumping') return _walkBZ.call(this);
+  this.physicsStep();
+  this.vy -= 0.08;
+};
+// Breeze.deflection: projectiles other than wind charges turn back at half speed
+const _impactBZ = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (!e || e.type !== 'breeze' || this.kind === 'wind' || e.dead || e.deathTime > 0) return _impactBZ.call(this, e);
+  this.vx *= -0.5; this.vy *= -0.5; this.vz *= -0.5; this.dir = [this.vx, this.vy, this.vz];
+  this.x += this.vx; this.y += this.vy; this.z += this.vz;
+  if (!e.data.silent) this.game.sound('breeze_deflect', e.x, e.y + 1, e.z);
+};
+// BreezeModel: head back while breathing in, forward on the shot, rods spinning fast in the air
+MOB_ANIM.breeze = (m, st) => { st.bzPose = m.data.pose || null; };
+const _animBZ = MOB_MODELS.breeze.anim;
+MOB_MODELS.breeze.anim = function (P, st) {
+  _animBZ.call(this, P, st);
+  const p = st.bzPose;
+  if (p === 'jumping') P.rods = [0, st.age * 0.45, 0];
+  if (p === 'inhaling' || p === 'shooting') { const h = P.head || [0, 0, 0]; P.head = [h[0] + (p === 'inhaling' ? -0.35 : 0.25), h[1], h[2]]; P.rods = [0, st.age * 0.3, 0]; }
+};
+GOALS.breeze = () => false; GOALS.shulker = () => false;
+
+/* ---------------- falling ---------------- */
+// iron golems, cats and ocelots take no fall damage but fall like anything else; only chickens and parrots flap down at 60%
+for (const t of ['iron_golem', 'cat', 'ocelot']) MOB_TYPES[t].noFall = 1e9;
+
+/* ---------------- sounds ---------------- */
+const SDB_SOUNDS = [['shulker_open', 'Shulker opens', 'hostile'], ['shulker_close', 'Shulker closes', 'hostile'], ['shulker_shoot', 'Shulker shoots', 'hostile'],
+  ['shulker_teleport', 'Shulker teleports', 'hostile'], ['shulker_bullet_hit', 'Shulker Bullet explodes', 'hostile'], ['shulker_bullet_hurt', 'Shulker Bullet breaks', 'hostile'],
+  ['drowned_shoot', 'Drowned throws Trident', 'hostile'], ['breeze_inhale', 'Breeze inhales', 'hostile'], ['breeze_shoot', 'Breeze shoots', 'hostile'],
+  ['breeze_charge', 'Breeze charges', 'hostile'], ['breeze_jump', 'Breeze jumps', 'hostile'], ['breeze_land', 'Breeze lands', 'hostile'], ['breeze_deflect', 'Breeze deflects', 'hostile']];
+for (const [n, t, c] of SDB_SOUNDS) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+const SDB_SOUND_SET = new Set(SDB_SOUNDS.map(s => s[0]));
+const _audioPlaySDB = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!SDB_SOUND_SET.has(name)) return _audioPlaySDB.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'shulker_open': this.tone(dst, 'triangle', 300 * v, 420 * v, 0.25, 0.06); this.noiseHit(dst, 'bandpass', 1200, 2, 0.15, 0.15); break;
+    case 'shulker_close': this.tone(dst, 'triangle', 420 * v, 260 * v, 0.2, 0.06); this.noiseHit(dst, 'bandpass', 900, 2, 0.12, 0.15); break;
+    case 'shulker_shoot': this.tone(dst, 'sine', 900 * v, 1500 * v, 0.2, 0.06); break;
+    case 'shulker_teleport': this.tone(dst, 'sine', 600 * v, 200 * v, 0.35, 0.07); this.tone(dst, 'triangle', 1200 * v, 400 * v, 0.3, 0.03); break;
+    case 'shulker_bullet_hit': this.noiseHit(dst, 'lowpass', 1500, 0.8, 0.25, 0.35); break;
+    case 'shulker_bullet_hurt': this.noiseHit(dst, 'highpass', 2500, 1, 0.1, 0.3); break;
+    case 'drowned_shoot': this.noiseHit(dst, 'bandpass', 1400, 1.2, 0.2, 0.3); this.tone(dst, 'sawtooth', 240 * v, 160 * v, 0.2, 0.05); break;
+    case 'breeze_inhale': case 'breeze_charge': this.noiseHit(dst, 'bandpass', 700, 0.8, 0.5, 0.25); this.tone(dst, 'sine', 300 * v, 600 * v, 0.5, 0.04); break;
+    case 'breeze_shoot': this.noiseHit(dst, 'lowpass', 900, 0.9, 0.3, 0.4); break;
+    case 'breeze_jump': this.noiseHit(dst, 'bandpass', 500, 0.7, 0.35, 0.35); this.tone(dst, 'sine', 200 * v, 500 * v, 0.3, 0.05); break;
+    case 'breeze_land': this.noiseHit(dst, 'lowpass', 400, 0.8, 0.25, 0.35); break;
+    case 'breeze_deflect': this.noiseHit(dst, 'highpass', 1800, 1.2, 0.15, 0.3); this.tone(dst, 'square', 700 * v, 500 * v, 0.1, 0.04); break;
   }
 };
 

@@ -731,6 +731,15 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   never more than the hit itself), and a second, stronger hit during the moment you're
   invulnerable deals the difference, like in Java. Cobwebs hold flying mobs as well, and mobs
   with Weaving get through them twice as fast, like players do.
+- **Shulkers like Java's**: they peek out now and then, and open up to shoot bullets that zigzag
+  towards you a block at a time and make you float. Shut, they're armoured and arrows bounce off;
+  hurt badly they may teleport, and one hit by a shulker bullet can leave a copy behind. You can
+  stand on them, and an opening shulker lifts you up.
+- **Drowned like Java's**: by day they only go after you in the water (and head back to it), at
+  night they come ashore. They sink and walk the bottom unless they're chasing something in the
+  water, and the ones with tridents hold them up and throw one every 2 seconds.
+- **Breezes like Java's**: they breathe in and leap to land behind you, then fire a wind charge;
+  too close and they slide away. Arrows and other projectiles bounce off them, but not wind charges.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
