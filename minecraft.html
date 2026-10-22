@@ -13468,7 +13468,9 @@ defSkin('entity/spider/spider', 64, 32, () => spiderSkin([52, 46, 42], [76, 66, 
 defSkin('entity/spider/cave_spider', 64, 32, () => spiderSkin([22, 58, 66], [40, 90, 96]));
 defSkin('entity/spider_eyes', 64, 32, () => skinParts(64, 32, [MM.spider.parts[0]], { head: (f, x, y) => f === 'front' && ((y === 2 || y === 3) && [1, 2, 5, 6].includes(x) || y === 5 && (x === 3 || x === 4)) ? [255, 60, 60] : null }, 332), ['entity/spider/spider_eyes']);
 defSkin('entity/enderman/enderman', 64, 32, () => skinParts(64, 32, MM.enderman.parts, {
-  head: (f, x, y, W, H, R) => nz(R() < 0.2 ? [40, 30, 46] : [18, 16, 22], R, 0.1), hat: () => null,
+  head: (f, x, y, W, H, R) => nz(R() < 0.2 ? [40, 30, 46] : [18, 16, 22], R, 0.1),
+  // the jaw: left behind at the neck when an angry enderman's head lifts
+  hat: (f, x, y, W, H, R) => f === 'bottom' || f !== 'top' && y >= H - 2 ? nz([16, 14, 20], R, 0.1) : null,
   '*': (f, x, y, W, H, R) => nz(R() < 0.15 ? [36, 28, 42] : [20, 18, 24], R, 0.1),
 }, 341));
 defSkin('entity/enderman/enderman_eyes', 64, 32, () => skinParts(64, 32, [MM.enderman.parts[0]], { head: (f, x, y) => f === 'front' && y === 4 && (x <= 2 || x >= 5) ? (x === 2 || x === 5 ? [230, 130, 255] : [200, 70, 240]) : null }, 342));
@@ -22087,7 +22089,6 @@ Mob.prototype.think = function () { _mobThink.call(this); const f = MOB_TICK[thi
 const _mobAttack = Mob.prototype.attackEntity;
 Mob.prototype.attackEntity = function (t) {
   const r = _mobAttack.call(this, t);
-  if (r && this.type === 'enderman' && Math.random() < 0.1) this.teleportAway(t);
   if (this.game.player === t) this.game.player.lastAttacker = this;
   return r;
 };
@@ -36721,22 +36722,28 @@ AUDIO.applyVolume = function () {
 // the rain loop is weather
 const _initVA = AUDIO.init;
 AUDIO.init = function () {
+  this.routeSounds();
   const had = !!this.ctx;
   const r = _initVA.call(this);
   if (!had && this.ctx && this.rainGain) { try { this.rainGain.disconnect(); this.rainGain.connect(this.catNode('weather')); } catch (e) { } }
   return r;
 };
-// every sound goes through its category's volume (and is skipped when that is off)
+// every sound goes through its category's volume (and is skipped when that is off); this goes on top of every
+// other AUDIO.play when the sound starts, so the sounds later parts add are routed and subtitled as well
 AUDIO.src = null;
-const _playVA = AUDIO.play;
-AUDIO.play = function (name, x, y, z, ...rest) {
-  if (!this.ctx) return _playVA.call(this, name, x, y, z, ...rest);
-  const cat = sndCategory(name, x, this.src);
-  if (cat !== 'master' && !(OPTIONS.vol[cat] > 0)) return;
-  if (OPTIONS.subtitles && x !== undefined) subtitleFor(name, x, y, z, this.src);
-  const s = this.sfx;
-  this.sfx = this.catNode(cat);
-  try { return _playVA.call(this, name, x, y, z, ...rest); } finally { this.sfx = s; }
+AUDIO.routeSounds = function () {
+  if (this._routed) return;
+  this._routed = true;
+  const inner = this.play;
+  this.play = function (name, x, y, z, ...rest) {
+    if (!this.ctx) return inner.call(this, name, x, y, z, ...rest);
+    const cat = sndCategory(name, x, this.src);
+    if (cat !== 'master' && !(OPTIONS.vol[cat] > 0)) return;
+    if (OPTIONS.subtitles && x !== undefined) subtitleFor(name, x, y, z, this.src);
+    const s = this.sfx;
+    this.sfx = this.catNode(cat);
+    try { return inner.call(this, name, x, y, z, ...rest); } finally { this.sfx = s; }
+  };
 };
 // note blocks, jukeboxes and goat horns are Jukebox/Note Blocks
 for (const k of ['note', 'horn', 'playDisc']) {
@@ -44986,6 +44993,1134 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     else if (name === 'panda_cant_breed') { this.tone(dst, 'triangle', 420 * v, 300 * v, 0.25, 0.06); }
     else { const f = (name === 'panda_aggressive_ambient' ? 160 : name === 'panda_worried_ambient' ? 380 : name === 'panda_hurt' ? 300 : name === 'panda_death' ? 200 : 240) * v; [0, 0.1].forEach(dt => this.tone(dst, 'sawtooth', f, f * 0.9, 0.08, 0.04, t0 + dt)); }
   } else if (name === 'dye_use') { this.noiseHit(dst, 'bandpass', 1100, 1, 0.12, 0.3); }
+};
+
+/* @file 150_piglins.js */
+/* ===================================================================
+   PART 39: piglins, piglin brutes, hoglins and zoglins like Java's
+   - piglins (PiglinAi): gold they see lying within 9 blocks (ingots,
+     gold tools, armour, blocks, apples, carrots...) they go and pick up
+     and hold up to admire for 6 seconds; an ingot is then bartered with
+     Java's table (Soul Speed books and boots, fire resistance potions,
+     water bottles, pearls, obsidian...) thrown towards the nearest
+     player; other gold goes on them or into their 8 slots (dropped when
+     they die); they pick up gold nuggets, eat pork, and take an ingot
+     handed to them. Hit while admiring, the gold is lost and they won't
+     admire for 20 seconds; young ones keep what they pick up
+   - they leave players wearing any gold armour alone, but whoever hurts
+     one, opens a chest, barrel, shulker box or ender chest where they
+     see it or breaks gold, gilded blackstone or a container near them
+     has the piglins within 16 blocks after them for 30 seconds
+     (universalAnger and forgiveDeadPlayers apply); they keep away from
+     soul fire, soul torches, lanterns and lit soul campfires, from
+     zombified piglins and zoglins, and young ones from wither skeletons
+   - grown piglins hunt hoglins every 30 to 120 seconds, run from them
+     when outnumbered and celebrate a kill (now and then with a dance);
+     crossbow piglins back away when their target comes within 5 blocks
+   - spawning: one in five young (no weapon), the rest with a crossbow or
+     a golden sword, each piece of gold armour one time in ten
+   - piglin brutes go for any player within 12 blocks, gold or not, and
+     keep to where they spawned
+   - hoglins go for players, throw what they hit upwards (3 to 8 damage
+     from adults, 0.5 from young), keep away from warped fungus, nether
+     portals and respawn anchors (and won't fight for 10 seconds after),
+     walk away from piglins and run when piglins outnumber them; young
+     ones run when hurt, the herd joins a fight; one in five spawns young
+   - zoglins go for anything but creepers and other zoglins
+   - piglins, brutes and hoglins outside the Nether shake, and after 15
+     seconds become zombified piglins and zoglins with what they wear
+   =================================================================== */
+
+/* ---------------- tags ---------------- */
+const pgItems = names => new Set(names.map(n => ITEM_BY_NAME[n] && ITEM_BY_NAME[n].id).filter(v => v !== undefined));
+const pgBlocks = names => new Set(names.map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+const PG_GOLD_ORES = ['gold_ore', 'deepslate_gold_ore', 'nether_gold_ore'];
+// ItemTags.PIGLIN_LOVED, PIGLIN_FOOD, IGNORED_BY_PIGLIN_BABIES and PIGLIN_SAFE_ARMOR
+const PIGLIN_LOVED = pgItems(['gold_block', 'gilded_blackstone', 'light_weighted_pressure_plate', 'gold_ingot', 'bell', 'clock', 'golden_carrot', 'glistering_melon_slice', 'golden_apple',
+  'enchanted_golden_apple', 'golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots', 'golden_horse_armor', 'golden_sword', 'golden_pickaxe', 'golden_shovel', 'golden_axe',
+  'golden_hoe', 'raw_gold', 'raw_gold_block', ...PG_GOLD_ORES]);
+const PIGLIN_FOOD = pgItems(['porkchop', 'cooked_porkchop']);
+const PIGLIN_BABY_IGNORES = pgItems(['leather']);
+const PIGLIN_SAFE_ARMOR = pgItems(['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']);
+// BlockTags.PIGLIN_REPELLENTS (a soul campfire only lit), HOGLIN_REPELLENTS and GUARDED_BY_PIGLINS
+const PIGLIN_REPEL = pgBlocks(['soul_fire', 'soul_torch', 'soul_wall_torch', 'soul_lantern', 'soul_campfire']);
+const HOGLIN_REPEL = pgBlocks(['warped_fungus', 'potted_warped_fungus', 'nether_portal', 'respawn_anchor']);
+const PIGLIN_GUARDED = pgBlocks(['gold_block', 'barrel', 'chest', 'ender_chest', 'gilded_blackstone', 'trapped_chest', 'raw_gold_block', ...PG_GOLD_ORES, 'shulker_box', ...COLORS.map(c => c + '_shulker_box')]);
+const wearsGold = p => !!(p && p.armor && p.armor.some(s => s && PIGLIN_SAFE_ARMOR.has(s.id)));
+const isPiglinKin = e => e && (e.type === 'piglin' || e.type === 'piglin_brute');
+// the nearest of the given blocks within r across and v up or down (a soul campfire only when lit)
+function pgNearestBlock(m, r, v, set) {
+  const w = m.game.world, x0 = Math.floor(m.x), y0 = Math.floor(m.y), z0 = Math.floor(m.z);
+  let best = null, bd = Infinity;
+  for (let dy = -v; dy <= v; dy++) for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+    const id = w.getBlock(x0 + dx, y0 + dy, z0 + dz);
+    if (!set.has(id) || (id === B.SOUL_CAMPFIRE && (w.getMeta(x0 + dx, y0 + dy, z0 + dz) & 4))) continue;
+    const d = dx * dx + dy * dy + dz * dz;
+    if (d < bd) { bd = d; best = [x0 + dx, y0 + dy, z0 + dz]; }
+  }
+  return best;
+}
+// walk to a spot up to r away from a point (SetWalkTargetAwayFrom)
+function pgAway(m, from, r, speed) {
+  if (m.nav && !m.navDone() && m._awayFrom === from) { m.followPath(); return; }
+  m._awayFrom = from;
+  const s = spotAway(m, { x: from[0] + 0.5, z: from[2] + 0.5 }, r, 7) || spotAway(m, { x: from[0] + 0.5, z: from[2] + 0.5 }, r, 7);
+  if (s) m.goTo(s[0] + 0.5, s[1], s[2] + 0.5, speed); else { const dx = m.x - from[0] - 0.5, dz = m.z - from[2] - 0.5, l = Math.hypot(dx, dz) || 1; m.move = [dx / l, dz / l, speed, false]; }
+}
+const pgWalk = (m, x, y, z, speed, near) => { if (!m.nav || m.navDone() || m.age % 10 === 0) { if (!m.goTo(x, y, z, speed, near)) { const dx = x - m.x, dz = z - m.z, l = Math.hypot(dx, dz) || 1; m.move = [dx / l, dz / l, speed, false]; } } else m.followPath(); };
+
+/* ---------------- what they sense ---------------- */
+// Java's sensors, once a second: the player in sight within 16 (and whether gold keeps it safe), the nearest zombified and nemesis in
+// sight, the grown piglins and hoglins in sight, a hoglin to hunt, the nearest repellent and the nearest wanted item within 32
+function pgSense(m) {
+  const b = m._pg || (m._pg = { t: -99, reach: 0 });
+  if (b.t >= 0 && m.age - b.t < 20) return b;
+  b.t = m.age;
+  const g = m.game, p = g.player;
+  b.player = b.target = b.zomb = b.nemesis = b.hunt = b.item = b.piglin = null; b.piglins = 0; b.hoglins = 0; b.allies = []; b.herd = [];
+  if (p && !p.dead && p.mode !== 3 && m.distTo(p) < 16 && m.canSee(p)) { b.player = p; if (p.survival && !wearsGold(p)) b.target = p; }
+  let zd = 99, nd = 99, hd = 99, pd = 99;
+  for (const e of g.entities) {
+    if (!(e instanceof Mob) || e === m || e.dead || e.deathTime > 0) continue;
+    const t = e.type;
+    if (t !== 'zombified_piglin' && t !== 'zoglin' && t !== 'wither_skeleton' && t !== 'wither' && t !== 'piglin' && t !== 'piglin_brute' && t !== 'hoglin') continue;
+    const d = m.distTo(e);
+    if (d > 16 || !m.canSee(e)) continue;
+    if (t === 'zombified_piglin' || t === 'zoglin') { if (d < zd) { zd = d; b.zomb = e; } }
+    else if (t === 'wither_skeleton' || t === 'wither') { if (d < nd) { nd = d; b.nemesis = e; } }
+    else if (t === 'hoglin') { if (!e.baby) { b.hoglins++; b.herd.push(e); if (d < hd && !e.data.noHunt) { hd = d; b.hunt = e; } } }
+    else if (!e.baby) { b.piglins++; b.allies.push(e); if (d < pd) { pd = d; b.piglin = e; } }
+  }
+  b.repel = pgNearestBlock(m, 8, 4, m.type === 'hoglin' ? HOGLIN_REPEL : PIGLIN_REPEL);
+  if (m.type === 'piglin') {
+    let id = 32;
+    for (const e of g.entities) if (e instanceof ItemEntity && !e.dead && e.stack && Math.abs(e.y - m.y) < 16) { const d = m.distTo(e); if (d < id && pgWants(m, e.stack) && m.canSee(e)) { id = d; b.item = e; } }
+  }
+  return b;
+}
+
+/* ---------------- piglins: gold ---------------- */
+// PiglinAi.wantsToPickup
+function pgWants(m, st) {
+  const d = m.data, id = st.id, it = ITEMS[id];
+  if (!it) return false;
+  if (m.baby && PIGLIN_BABY_IGNORES.has(id)) return false;
+  if (id === I.GOLD_INGOT) return !pgHoldsLoved(m) && !(d.noAdmire > 0 && m.target);
+  if (d.noAdmire > 0 && m.target) return false;
+  const room = pgRoom(m, st);
+  if (id === I.GOLD_NUGGET) return room;
+  if (PIGLIN_FOOD.has(id)) return !(d.ate > 0) && room;
+  if (!PIGLIN_LOVED.has(id)) return pgBetter(m, st);
+  return !pgHoldsLoved(m) && room;
+}
+const pgHoldsLoved = m => !!(m.data.hand2 && PIGLIN_LOVED.has(m.data.hand2.id));
+// Piglin.canAddToInventory: room in its 8 slots
+function pgRoom(m, st) {
+  const inv = m.data.inv || [];
+  if (inv.length < 8) return true;
+  return inv.some(s => s && s.id === st.id && s.count < (ITEMS[st.id].stack || 64));
+}
+function pgStore(m, st) {
+  const inv = m.data.inv || (m.data.inv = []), max = ITEMS[st.id].stack || 64;
+  for (const s of inv) if (s && s.id === st.id && !s.tag && !st.tag && s.count < max) { const k = Math.min(st.count, max - s.count); s.count += k; st.count -= k; if (!st.count) return; }
+  if (inv.length < 8) inv.push(copyStack(st, st.count));
+  else m.game.dropItem(m.x, m.y + 0.5, m.z, st);
+}
+// Mob.canReplaceCurrentItem / equipItemIfPossible, roughly: a weapon in an empty hand, armour in an empty slot
+const PG_SLOT = { helmet: 0, chestplate: 1, leggings: 2, boots: 3 };
+function pgSlot(st) { const n = ITEMS[st.id].name, m = n.match(/_(helmet|chestplate|leggings|boots)$/); return m ? PG_SLOT[m[1]] : -1; }
+function pgBetter(m, st) {
+  const s = pgSlot(st);
+  if (s >= 0) return !(m.data.armor && m.data.armor[s]);
+  const n = ITEMS[st.id].name;
+  return /_(sword|axe)$|^crossbow$/.test(n) && !m.data.hand;
+}
+function pgEquip(m, st) {
+  const s = pgSlot(st);
+  if (s >= 0 && !(m.data.armor && m.data.armor[s])) { const a = m.data.armor || (m.data.armor = [null, null, null, null]); a[s] = copyStack(st, 1); m.data.armorPts = a.reduce((t, q) => t + (q && ITEMS[q.id].armor ? ITEMS[q.id].armor.pts : 0), 0); return true; }
+  if (s < 0 && /_(sword|axe)$|^crossbow$/.test(ITEMS[st.id].name) && !m.data.hand) { m.data.hand = copyStack(st, 1); return true; }
+  return false;
+}
+// PiglinAi.pickUpItem: nuggets go in whole, everything else one at a time; gold is held up to admire, pork eaten, the rest worn or kept
+function pgPickUp(m, e) {
+  const g = m.game, d = m.data;
+  let st;
+  if (e.stack.id === I.GOLD_NUGGET) { st = copyStack(e.stack, e.stack.count); e.dead = true; }
+  else { st = copyStack(e.stack, 1); if (--e.stack.count <= 0) e.dead = true; }
+  g.sound('pop', m.x, m.y, m.z);
+  m.nav = null;
+  if (PIGLIN_LOVED.has(st.id)) { d.hand2 = st; d.admire = 119; m._pg && (m._pg.reach = 0); return; }
+  if (PIGLIN_FOOD.has(st.id) && !(d.ate > 0)) { d.ate = 200; g.sound('eat', m.x, m.y + 1.5, m.z); return; }
+  if (!pgEquip(m, st)) pgStore(m, st);
+}
+// PiglinAi.stopHoldingOffHandItem: an adult barters an ingot (unless it was hurt) or puts the gold on or away; a young one takes it in hand
+function pgStopHolding(m, barter) {
+  const d = m.data, st = d.hand2;
+  d.hand2 = null; d.admire = 0;
+  if (!st) return;
+  if (!m.baby) {
+    if (st.id === I.GOLD_INGOT) { if (barter) pgThrow(m, pgBarter()); return; }
+    if (!pgEquip(m, st)) pgStore(m, st);
+  } else if (!pgEquip(m, st)) {
+    const h = d.hand;
+    if (h && PIGLIN_LOVED.has(h.id)) pgStore(m, h); else if (h) pgThrow(m, [h]);
+    d.hand = st;
+  }
+}
+// gameplay/piglin_bartering
+const PG_BARTER = [['enchanted_book', 5, 1, 1, 'soul'], ['iron_boots', 8, 1, 1, 'soul'], ['potion', 8, 1, 1, 'fire_resistance'], ['splash_potion', 8, 1, 1, 'fire_resistance'],
+  ['potion', 10, 1, 1, 'water'], ['iron_nugget', 10, 10, 36], ['ender_pearl', 10, 2, 4], ['string', 20, 3, 9], ['quartz', 20, 5, 12], ['obsidian', 40, 1, 1], ['crying_obsidian', 40, 1, 3],
+  ['fire_charge', 40, 1, 1], ['leather', 40, 2, 4], ['soul_sand', 40, 2, 8], ['nether_brick', 40, 2, 8], ['spectral_arrow', 40, 6, 12], ['gravel', 40, 8, 16], ['blackstone', 40, 8, 16]];
+function pgBarter() {
+  const total = PG_BARTER.reduce((s, r) => s + r[1], 0);
+  let k = Math.floor(Math.random() * total), r = PG_BARTER[0];
+  for (const q of PG_BARTER) if ((k -= q[1]) < 0) { r = q; break; }
+  const [name, , mn, mx, extra] = r, it = ITEM_BY_NAME[name];
+  if (!it) return [];
+  const st = { id: it.id, count: mn + Math.floor(Math.random() * (mx - mn + 1)) };
+  // EnchantRandomlyFunction with Soul Speed: a level from 1 to 3
+  if (extra === 'soul') { const lv = 1 + Math.floor(Math.random() * 3); st.tag = name === 'enchanted_book' ? { stored: { soul_speed: lv } } : { ench: { soul_speed: lv } }; }
+  else if (extra) st.tag = { potion: extra };
+  return [st];
+}
+// BehaviorUtils.throwItem: from 0.3 below its eyes towards the nearest player it sees (else a spot about 4 blocks off), at 0.3
+function pgThrow(m, list) {
+  const g = m.game, b = m._pg || {}, p = b.player && !b.player.dead ? b.player : null;
+  let tx, tz, ty;
+  if (p) { tx = p.x; ty = p.y + 1; tz = p.z; } else { const s = m.randomSpot(4, 2); tx = s ? s[0] + 0.5 : m.x; ty = (s ? s[1] : m.y) + 1; tz = s ? s[2] + 0.5 : m.z; }
+  m.attackAnim = 6;
+  for (const st of list) {
+    const e = g.dropItem(m.x, m.eyeY() - 0.3, m.z, st);
+    if (!e) continue;
+    const dx = tx - m.x, dy = ty - m.y, dz = tz - m.z, l = Math.hypot(dx, dy, dz) || 1;
+    e.vx = dx / l * 0.3; e.vy = dy / l * 0.3; e.vz = dz / l * 0.3;
+  }
+}
+// PiglinAi.mobInteract: a grown piglin that isn't busy admiring takes one ingot from your hand
+MOB_INTERACT.piglin = function (m, p, held) {
+  const d = m.data;
+  if (!held || held.id !== I.GOLD_INGOT || m.baby || d.admire > 0 || d.noAdmire > 0) return false;
+  p.consumeHeld(1);
+  d.hand2 = { id: I.GOLD_INGOT, count: 1 }; d.admire = 119; m.nav = null; m.move = null;
+  return true;
+};
+
+/* ---------------- piglins: anger ---------------- */
+// PiglinAi.setAngerTarget: 30 seconds of anger at something; for players with universalAnger, at the nearest player instead
+function pgAnger(m, t) {
+  if (!t || t.dead || (t instanceof Player && (!t.survival || t.mode === 3))) return;
+  if (t instanceof Player && m.game.rule('universalAnger')) t = m.game.player;
+  m.data.angerT = 600; m._angryAt = t;
+  if (t instanceof Player) m.data.angry = 'player';
+}
+// broadcastAngerTarget: the grown piglins it sees (not at a hoglin unless they may hunt)
+function pgBroadcast(m, t) {
+  const b = pgSense(m);
+  for (const e of b.allies) if (e.type === 'piglin' && e !== m && !e.dead && (t.type !== 'hoglin' || !(e.data.huntT > 0))) { if (!e._angryAt || e._angryAt.dead || e.distTo(t) < e.distTo(e._angryAt)) pgAnger(e, t); }
+}
+// PiglinAi.angerNearbyPiglins: idle piglins within 16 blocks of the player (that see it, for containers) turn on it
+Game.prototype.angerPiglins = function (p, seeing) {
+  if (!p || p.mode === 3 || !p.survival) return;
+  for (const e of this.entities)
+    if (e.type === 'piglin' && !e.dead && !e.baby && Math.abs(e.x - p.x) < 16.3 && Math.abs(e.y - p.y) < 17 && Math.abs(e.z - p.z) < 16.3 && !e.target && !(e.data.admire > 0) && (!seeing || e.canSee(p))) pgAnger(e, p);
+};
+const _openContainerPG = Game.prototype.openContainer;
+Game.prototype.openContainer = function (hit, use) {
+  const r = _openContainerPG.call(this, hit, use);
+  if (use === 'chest' || use === 'barrel' || use === 'shulker') this.angerPiglins(this.player, true);
+  return r;
+};
+const _useBlockPG = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const r = _useBlockPG.call(this, p, hit, held);
+  if (r && hit && hit.id === B.ENDER_CHEST) this.angerPiglins(p, true);
+  return r;
+};
+// Block.playerWillDestroy: breaking a guarded block angers them, seen or not
+const _playerBreakPG = Game.prototype.playerBreak;
+Game.prototype.playerBreak = function (x, y, z) {
+  if (PIGLIN_GUARDED.has(this.world.getBlock(x, y, z))) this.angerPiglins(this.player, false);
+  return _playerBreakPG.call(this, x, y, z);
+};
+
+/* ---------------- piglins: the brain ---------------- */
+// PiglinAi.findNearestValidAttackTarget: not near a zombified one; whoever it is angry at; with universalAnger any player; a nemesis; a
+// player without gold
+function pgFindTarget(m, b) {
+  if (b.zomb && m.distTo(b.zomb) < 6) return null;
+  const a = m._angryAt;
+  if (m.data.angerT > 0 && a && !a.dead && !(a instanceof Player && (!a.survival || a.mode === 3)) && m.distTo(a) < 32) return a;
+  if (b.nemesis) return b.nemesis;
+  return b.target;
+}
+// isNearZombified, wantsToStopFleeing (from hoglins: once piglins are as many)
+function pgStopFleeing(m, b) {
+  const a = m._avoid;
+  if (!a || a.dead || m.age > m._avoidT) return true;
+  if (a.type === 'hoglin') return b.piglins + 1 >= b.hoglins;
+  return false;
+}
+GOALS.piglin = function (m) {
+  const d = m.data, b = pgSense(m), g = m.game;
+  // core: run from a zombified one within 6 for 5-7 seconds, young ones from a nemesis
+  if (b.zomb && m.distTo(b.zomb) < 6 && (!m._avoid || m._avoid !== b.zomb)) { m._avoid = b.zomb; m._avoidT = m.age + 100 + Math.floor(Math.random() * 41); }
+  if (m.baby && b.nemesis && !m._avoid) { m._avoid = b.nemesis; m._avoidT = m.age + 100 + Math.floor(Math.random() * 41); }
+  // core: a loved item seen makes it want to admire (and go for it)
+  if (!(d.admire > 0) && !d.hand2 && b.item && !b.item.dead && PIGLIN_LOVED.has(b.item.stack.id) && !(d.noWalkT > m.age)) d.admire = 119;
+  // core: a dead target is celebrated (after a hoglin, one time in ten with a dance) and anger fades
+  if (m._lastTarget && (m._lastTarget.dead || m._lastTarget.deathTime > 0)) {
+    const t = m._lastTarget;
+    // PiglinAi.wantsToDance: after a hoglin, one time in ten by the game time (so the piglins celebrating at once all dance or none)
+    if (!m.target || m.target === t) { m._celebrate = [t.x, t.y, t.z]; m._celebT = m.age + 300; d.dancing = t.type === 'hoglin' && mulberry32(g.world.tick)() < 0.1; }
+    if (t.type === 'hoglin') { d.huntT = 600 + Math.floor(Math.random() * 1801); for (const e of b.allies) if (e.type === 'piglin') e.data.huntT = d.huntT; }
+    if (m._angryAt === t && (!(t instanceof Player) || g.rule('forgiveDeadPlayers'))) { m._angryAt = null; d.angerT = 0; d.angry = null; }
+    m._lastTarget = null;
+  }
+  if (m.target && (m.target.dead || m.target.deathTime > 0)) m.target = null;
+  // StopAttackingIfTargetInvalid: a player it isn't angry at who now wears gold is left alone
+  if (m.target instanceof Player && m.target !== m._angryAt && wearsGold(m.target)) m.target = null;
+  // activity: admiring
+  if (d.admire > 0) {
+    m.target = null;
+    if (d.hand2) { m.nav = null; m.move = null; m.lookAt(m.x + Math.sin(m.bodyYaw), m.y + 0.5, m.z + Math.cos(m.bodyYaw)); return true; }
+    const it = b.item;
+    // StopAdmiringIfItemTooFarAway (9), StopAdmiringIfTiredOfTryingToReachItem (200, then 200 without walking to items)
+    if (!it || it.dead || m.distTo(it) > 9) { d.admire = 0; return false; }
+    if (++b.reach > 200) { d.admire = 0; d.noWalkT = m.age + 200; b.reach = 0; return false; }
+    pgWalk(m, it.x, it.y, it.z, m.T.run, 0.5);
+    return true;
+  }
+  // activity: fighting
+  // new fights start only from idling (not while fleeing)
+  const fleeing = m._avoid && !pgStopFleeing(m, b), t = m.target && !m.target.dead ? m.target : (m.baby || fleeing ? null : pgFindTarget(m, b));
+  if (t && !m.baby) {
+    if (b.zomb && m.distTo(b.zomb) < 6) { m.target = null; }
+    else {
+      m.target = t; m._lastTarget = t;
+      const cross = d.hand && d.hand.id === I.CROSSBOW;
+      // BackUpIfTooClose(5, 0.75) with a crossbow
+      if (cross && m.distTo(t) < 5 && m.canSee(t)) { const dx = m.x - t.x, dz = m.z - t.z, l = Math.hypot(dx, dz) || 1; m.nav = null; m.lookAt(t.x, t.y + 1.5, t.z); m.move = [dx / l, dz / l, m.T.walk * 0.75, false]; if (m.shootCd > 0) m.shootCd--; return true; }
+      return cross ? GOALS.ranged(m) : GOALS.melee(m);
+    }
+  }
+  m.target = null;
+  // activity: fleeing
+  if (m._avoid) {
+    if (pgStopFleeing(m, b)) m._avoid = null;
+    else { const a = m._avoid; pgAway(m, [Math.floor(a.x), Math.floor(a.y), Math.floor(a.z)], 12, m.T.run); return true; }
+  }
+  // StartHuntingHoglin: a grown piglin when none near has hunted lately
+  if (!m.baby && b.hunt && !(d.huntT > 0) && !(d.angerT > 0) && !b.allies.some(e => e.data.huntT > 0)) {
+    pgAnger(m, b.hunt); pgBroadcast(m, b.hunt);
+    d.huntT = 600 + Math.floor(Math.random() * 1801);
+    for (const e of b.allies) if (e.type === 'piglin') e.data.huntT = d.huntT;
+    return true;
+  }
+  // repellents within 8: walk 8 away
+  if (b.repel) { pgAway(m, b.repel, 8, m.T.run); return true; }
+  // activity: celebrating (to the spot, dancing near it)
+  if (m._celebrate && m.age < m._celebT) {
+    const c = m._celebrate, near = d.dancing ? 4 : 2;
+    if (Math.hypot(c[0] - m.x, c[2] - m.z) > near) pgWalk(m, c[0], c[1], c[2], d.dancing ? m.T.walk : m.T.run, near);
+    else { m.nav = null; if (d.dancing) m.move = null; }
+    return true;
+  } else if (m._celebrate) { m._celebrate = null; d.dancing = false; }
+  // idle: looks at a player holding gold (within 14)
+  const p = g.player;
+  if (p && !p.dead && p.mode !== 3 && m.distTo(p) < 14 && ((p.held && PIGLIN_LOVED.has(p.held.id)) || (p.offhand[0] && PIGLIN_LOVED.has(p.offhand[0].id)))) m.lookAt(p.x, p.y + 1.6, p.z);
+  return false;
+};
+// the piglin's own tick: admiring runs out (barter), anger and memories fade, things it touches are picked up, and it zombifies outside
+// the Nether
+function pgTick(m) {
+  const d = m.data, g = m.game;
+  pgZombify(m);
+  if (m.dead) return;
+  if (d.admire > 0 && --d.admire === 0 && d.hand2) pgStopHolding(m, true);
+  if (d.angerT > 0 && --d.angerT === 0) { m._angryAt = null; d.angry = null; }
+  if (d.angry === 'player' && !m._angryAt) m._angryAt = g.player;
+  if (d.huntT > 0) d.huntT--;
+  if (d.ate > 0) d.ate--;
+  if (d.noAdmire > 0) d.noAdmire--;
+  // Mob.aiStep: items it touches and wants (with mob griefing on)
+  if (g.rule('mobGriefing') && m.age % 2 === 0)
+    for (const e of g.entities) if (e instanceof ItemEntity && !e.dead && !(e.pickupDelay > 0) && Math.abs(e.x - m.x) < m.w / 2 + 1.1 && Math.abs(e.z - m.z) < m.w / 2 + 1.1 && e.y > m.y - 0.3 && e.y < m.y + m.h && pgWants(m, e.stack)) { pgPickUp(m, e); break; }
+}
+// PiglinAi.wasHurtBy: the gold it held is lost; a player stops it admiring for 20 seconds; a young one runs (and the others get angry);
+// grown ones run from outnumbering hoglins, otherwise fight back and call the others
+const _onHurtByPG = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  if (this.type !== 'piglin') {
+    _onHurtByPG.call(this, a, source);
+    if (this.type === 'piglin_brute' && a && !isPiglinKin(a)) pgAnger(this, a);
+    return;
+  }
+  if (!a || isPiglinKin(a)) return;
+  const d = this.data;
+  if (d.hand2) pgStopHolding(this, false);
+  this._celebrate = null; d.dancing = false; d.admire = 0;
+  if (a instanceof Player) d.noAdmire = 400;
+  if (a instanceof Player && (a.mode === 1 || a.mode === 3)) return;
+  const b = pgSense(this);
+  if (this.baby) { this._avoid = a; this._avoidT = this.age + 100; pgBroadcast(this, a); return; }
+  if (a.type === 'hoglin' && b.hoglins > b.piglins + 1) {
+    this._avoid = a; this._avoidT = this.age + 100 + Math.floor(Math.random() * 301); d.huntT = 600 + Math.floor(Math.random() * 1801);
+    for (const e of b.allies) if (e.type === 'piglin' && !e.baby) { e._avoid = a; e._avoidT = e.age + 100 + Math.floor(Math.random() * 301); }
+    return;
+  }
+  if (this._avoid) return;
+  pgAnger(this, a); this.target = this._angryAt || a; pgBroadcast(this, a);
+};
+// when it dies its 8 slots spill out, and what it held up
+const _dropLootPG = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  _dropLootPG.call(this);
+  if (this.type !== 'piglin' || this.noDrops) return;
+  for (const st of this.data.inv || []) if (st) this.game.dropItem(this.x, this.y + 0.5, this.z, st);
+  this.data.inv = [];
+  if (this.data.hand2) { this.game.dropItem(this.x, this.y + 0.5, this.z, this.data.hand2); this.data.hand2 = null; }
+};
+
+/* ---------------- spawning ---------------- */
+// Piglin.finalizeSpawn: one in five young (no weapon), the rest a crossbow or a golden sword; each piece of gold armour one time in ten;
+// no hunting for 30 to 120 seconds
+MOB_INIT.piglin = function (m, o) {
+  if (o.loading) return;
+  const R = Math.random, young = o.baby || R() < 0.2;
+  if (young) { if (!o.baby) m.growth = -1e9; }
+  else m.data.hand = R() < 0.5 ? { id: I.CROSSBOW, count: 1 } : { id: I.GOLDEN_SWORD, count: 1 };
+  if (!young) { const set = armorSet('golden'); if (set.some(s => s)) { const a = set.map(s => R() < 0.1 ? s : null); if (a.some(s => s)) { m.data.armor = a; m.data.armorPts = a.reduce((t, s) => t + (s && ITEMS[s.id].armor ? ITEMS[s.id].armor.pts : 0), 0); } } }
+  m.data.huntT = 600 + Math.floor(R() * 1801);
+};
+MOB_INIT.piglin_brute = function (m, o) { if (!o.loading) { m.data.hand = { id: I.GOLDEN_AXE, count: 1 }; m.data.home = [Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)]; } };
+// Hoglin.finalizeSpawn: one in five young
+const _initHG = MOB_INIT.hoglin;
+MOB_INIT.hoglin = function (m, o) { if (_initHG) _initHG(m, o); if (!o.loading && !o.parents && !o.baby && Math.random() < 0.2) m.growth = -24000; };
+MOB_TYPES.piglin.ai = ['piglin', 'wander', 'look'];
+MOB_TYPES.piglin.sounds = ['piglin_ambient', 'piglin_hurt', 'piglin_death'];
+
+/* ---------------- piglin brutes ---------------- */
+// PiglinBruteAi: whoever it is angry at, else any player in sight within 12 (gold or not), else a nemesis; it keeps within reach of home
+GOALS.piglinBrute = function (m) {
+  const d = m.data, b = pgSense(m);
+  if (m.target && (m.target.dead || m.target.deathTime > 0)) { if (m.target === m._angryAt) { m._angryAt = null; d.angerT = 0; } m.target = null; }
+  if (d.angerT > 0 && --d.angerT === 0) m._angryAt = null;
+  let t = m._angryAt && !m._angryAt.dead && !(m._angryAt instanceof Player && !m._angryAt.survival) ? m._angryAt : null;
+  if (!t && b.player && b.player.survival && m.distTo(b.player) < 12) t = b.player;
+  if (!t && b.nemesis) t = b.nemesis;
+  if (t) { m.target = t; return GOALS.melee(m); }
+  m.target = null;
+  const h = d.home;
+  if (h && Math.hypot(h[0] + 0.5 - m.x, h[2] + 0.5 - m.z) > 10) { pgWalk(m, h[0] + 0.5, h[1], h[2] + 0.5, m.T.walk, 2); return true; }
+  return false;
+};
+MOB_TYPES.piglin_brute.ai = ['piglinBrute', 'wander', 'look'];
+MOB_TYPES.piglin_brute.sounds = ['piglin_brute_ambient', 'piglin_brute_hurt', 'piglin_brute_death'];
+
+/* ---------------- hoglins and zoglins ---------------- */
+// HoglinAi: fight (not while pacified by a repellent or breeding) the nearest player it sees; run from a repellent within 8 (then 10
+// seconds pacified); grown ones edge away from grown piglins within 8; run from piglins that outnumber them
+GOALS.hoglin = function (m) {
+  const d = m.data, b = pgSense(m);
+  if (b.repel) { d.pacified = 200; m.target = null; }
+  if (d.pacified > 0) d.pacified--;
+  // fleeing
+  if (m._avoid) {
+    if (m._avoid.dead || m.age > m._avoidT || (!m.baby && !(b.piglins > b.hoglins + 1) && m._avoid.type === 'piglin')) m._avoid = null;
+    else { const a = m._avoid; pgAway(m, [Math.floor(a.x), Math.floor(a.y), Math.floor(a.z)], 15, m.T.run * 1.3); return true; }
+  }
+  if (m.target && (m.target.dead || m.target.deathTime > 0 || (m.target instanceof Player && !m.target.survival) || m.distTo(m.target) > 24)) m.target = null;
+  if (!m.target && !(d.pacified > 0) && !(m.love > 0) && b.player && b.player.survival) m.target = b.player;
+  if (m.target && !(d.pacified > 0) && !(m.love > 0)) return hgMelee(m);
+  if (b.repel) { pgAway(m, b.repel, 8, m.T.run); return true; }
+  if (!m.baby && b.piglin && m.distTo(b.piglin) < 8 && (!m.nav || m.navDone())) { pgAway(m, [Math.floor(b.piglin.x), Math.floor(b.piglin.y), Math.floor(b.piglin.z)], 8, m.T.walk * 0.4); return true; }
+  return false;
+};
+// MeleeAttack: 40 ticks between hits for grown ones, 15 for young
+function hgMelee(m) {
+  const t = m.target, cd0 = m.attackCd;
+  const r = GOALS.melee(m);
+  if (cd0 <= 1 && m.attackCd === 20) m.attackCd = m.baby ? 15 : 40;
+  return r;
+}
+// HoglinBase.hurtAndThrowTarget: grown ones deal half their damage plus up to all of it again and throw the target up and away (by attack
+// knockback 1 less its resistance, turned up to 10 degrees either way)
+const _attackHG = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) {
+  if (this.type !== 'hoglin' && this.type !== 'zoglin') return _attackHG.call(this, t);
+  const g = this.game, f = this.baby ? 0.5 : 6;
+  let dmg = !this.baby ? f / 2 + Math.floor(Math.random() * f) : f;
+  if (t instanceof Player) dmg = g.difficultyDmg(dmg);
+  this.attackAnim = 10; this.data.attackT = 10;
+  g.sound(this.type === 'zoglin' ? 'zoglin_attack' : 'hoglin_attack', this.x, this.y + 1, this.z);
+  if (this.type === 'hoglin' && !this.baby) hgOnHit(this, t);
+  const hit = t.hurt(dmg, this.type, this);
+  if (hit && !this.baby) {
+    const kb = 1 - (t.T ? t.T.kbRes || 0 : 0);
+    if (kb > 0) {
+      const dx = t.x - this.x, dz = t.z - this.z, l = Math.hypot(dx, dz) || 1, turn = (Math.floor(Math.random() * 21) - 10) * Math.PI / 180, j = kb * (Math.random() * 0.5 + 0.2);
+      const ux = dx / l * j, uz = dz / l * j;
+      t.vx += ux * Math.cos(turn) + uz * Math.sin(turn); t.vz += -ux * Math.sin(turn) + uz * Math.cos(turn); t.vy += kb * Math.random() * 0.5;
+    }
+  }
+  return hit;
+};
+// HoglinAi.onHitTarget: hitting piglins that outnumber them sends the herd off; otherwise the herd joins in
+function hgOnHit(m, t) {
+  const b = pgSense(m);
+  if (t.type === 'piglin' && b.piglins > b.hoglins + 1) { for (const e of [m, ...b.herd]) { e._avoid = t; e._avoidT = e.age + 100 + Math.floor(Math.random() * 301); e.target = null; } }
+  else for (const e of b.herd) if (!e.target || e.distTo(t) < e.distTo(e.target)) e.target = t;
+}
+// HoglinAi.wasHurtBy: a young one runs for 5-20 seconds, a grown one (not fleeing piglins) fights back and calls the herd
+const _onHurtByHG = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  if (this.type !== 'hoglin') return _onHurtByHG.call(this, a, source);
+  this.data.pacified = 0; this.love = 0;
+  if (!a || (a instanceof Player && (a.mode === 1 || a.mode === 3))) return;
+  if (this.baby) { this._avoid = a; this._avoidT = this.age + 100 + Math.floor(Math.random() * 301); return; }
+  if (a.type === 'hoglin' || (this._avoid && a.type === 'piglin')) return;
+  this.target = a;
+  for (const e of pgSense(this).herd) if (!e.target || e.distTo(a) < e.distTo(e.target)) e.target = a;
+};
+MOB_TYPES.hoglin.ai = ['hoglin', 'breed', 'followParent', 'wander', 'look'];
+MOB_TYPES.hoglin.sounds = ['hoglin_ambient', 'hoglin_hurt', 'hoglin_death'];
+// Zoglin: the nearest living thing it sees within 16 but creepers and zoglins
+GOALS.zoglin = function (m) {
+  const g = m.game;
+  if (m.target && (m.target.dead || m.target.deathTime > 0 || (m.target instanceof Player && !m.target.survival) || m.distTo(m.target) > 24)) m.target = null;
+  if (!m.target && (m.age + m.id) % 20 === 0) {
+    let best = null, bd = 16;
+    const p = g.player;
+    if (p && !p.dead && p.survival && m.distTo(p) < bd && m.canSee(p)) { bd = m.distTo(p); best = p; }
+    for (const e of g.entities) if (e instanceof Mob && e !== m && !e.dead && e.deathTime === 0 && e.type !== 'zoglin' && e.type !== 'creeper' && e.T.cat !== 'misc' && !(e instanceof Hanging)) { const d = m.distTo(e); if (d < bd && m.canSee(e)) { bd = d; best = e; } }
+    m.target = best;
+  }
+  return m.target ? hgMelee(m) : false;
+};
+if (MOB_TYPES.zoglin) { MOB_TYPES.zoglin.ai = ['zoglin', 'wander', 'look']; MOB_TYPES.zoglin.sounds = ['zoglin_ambient', 'zoglin_hurt', 'zoglin_death']; }
+
+/* ---------------- zombifying ---------------- */
+// AbstractPiglin / Hoglin.isConverting: outside the Nether, not immune, with AI; after 300 ticks it becomes a zombified piglin or zoglin
+// with what it wore and held, nauseous for 10 seconds
+function pgZombify(m) {
+  const d = m.data;
+  if (m.game.world.dim === 'nether' || d.zombieImmune || d.noAI || m.dead) { d.zombify = 0; return; }
+  d.zombify = (d.zombify || 0) + 1;
+  if (d.zombify <= 300) return;
+  const to = m.type === 'hoglin' ? 'zoglin' : 'zombified_piglin', z = createMob(m.game, to, m.x, m.y, m.z);
+  if (!z) return;
+  m.dead = true; m.noDrops = true;
+  z.yaw = z.bodyYaw = m.yaw; z.growth = m.growth;
+  if (to === 'zombified_piglin') { z.data.hand = d.hand || null; z.data.offhand = d.offhand || null; if (d.armor) { z.data.armor = d.armor; z.data.armorPts = d.armorPts; } }
+  if (m.customName) z.customName = m.customName;
+  if (m.persistent) z.persistent = true;
+  z.addEffect('nausea', 200, 0); z.savePrev(); m.game.entities.push(z);
+  m.game.sound(m.type === 'hoglin' ? 'hoglin_converted' : m.type === 'piglin_brute' ? 'piglin_brute_converted' : 'piglin_converted', m.x, m.y + 1, m.z);
+}
+MOB_TICK.piglin = pgTick;
+MOB_TICK.piglin_brute = pgZombify;
+MOB_TICK.hoglin = pgZombify;
+// shaking while converting (LivingEntityRenderer.isShaking)
+for (const t of ['piglin', 'piglin_brute', 'hoglin']) {
+  const f = MOB_ANIM[t];
+  MOB_ANIM[t] = (m, st) => {
+    if (f) f(m, st);
+    if (t === 'piglin') { st.admire = !!m.data.hand2; st.dance = !!m.data.dancing && !!m._celebrate; }
+    if (m.data.zombify > 0 && m.game.world.dim !== 'nether') st.shake = true;
+  };
+}
+// PiglinModel.setupAnim: the ears flap; dancing (arms out, bobbing), admiring (head down, the off arm raised), a melee weapon held
+// high when angry, a crossbow held aimed (AnimationUtils.animateCrossbowHold)
+const _animPiglinPG = MOB_MODELS.piglin.anim;
+MOB_MODELS.piglin.anim = function (P, st) {
+  _animPiglinPG(P, st);
+  if (st.zombie) return;
+  const age = st.age, g = age * 0.1 + st.swing * 0.5, h = 0.08 + st.amt * 0.4, arm = n => P[n] || [0, 0, 0];
+  P.left_ear = [0, 0, -Math.PI / 6 - Math.cos(g * 1.2) * h]; P.right_ear = [0, 0, Math.PI / 6 + Math.cos(g) * h];
+  if (st.dance) {
+    const i = age / 60, s40 = Math.sin(i * 40), az = Math.PI / 180 * (70 + Math.cos(i * 40) * 10);
+    P.right_ear = [0, 0, Math.PI / 6 + Math.PI / 180 * Math.sin(i * 30) * 10]; P.left_ear = [0, 0, -Math.PI / 6 - Math.PI / 180 * Math.cos(i * 30) * 10];
+    P['head#p'] = [Math.sin(i * 10), s40 + 0.4, 0];
+    P.right_arm = [arm('right_arm')[0], arm('right_arm')[1], az]; P.left_arm = [arm('left_arm')[0], arm('left_arm')[1], -az];
+    P['right_arm#p'] = [-5, s40 * 0.5 + 1.5, 0]; P['left_arm#p'] = [5, s40 * 0.5 + 1.5, 0];
+    P['body#p'] = [0, s40 * 0.35, 0];
+  } else if (st.admire) { P.head = [0.5, 0, 0]; P.left_arm = [-0.9, 0.5, 0]; }
+  else if (st.meleeHigh && !st.attack) P.right_arm = [-1.8, 0, 0];
+  else if (st.crossHold) { const hx = P.head ? P.head[0] : 0, hy = P.head ? P.head[1] : 0; P.right_arm = [-Math.PI / 2 + hx + 0.1, -0.3 + hy, 0]; P.left_arm = [-1.5 + hx, 0.6 + hy, 0]; }
+};
+for (const t of ['piglin', 'piglin_brute']) {
+  const f = MOB_ANIM[t];
+  MOB_ANIM[t] = (m, st) => {
+    if (f) f(m, st);
+    const h = m.data.hand, angry = !!m.target;
+    st.meleeHigh = angry && !!h && /_(sword|axe)$/.test(ITEMS[h.id].name);
+    st.crossHold = angry && !!h && h.id === I.CROSSBOW;
+  };
+}
+const _renderPG = Mob.prototype.render;
+Mob.prototype.render = function (r, a) {
+  const shake = this.data.zombify > 0 && (this.type === 'piglin' || this.type === 'piglin_brute' || this.type === 'hoglin') && this.game.world.dim !== 'nether';
+  if (!shake) return _renderPG.call(this, r, a);
+  // LivingEntityRenderer: a shaking body turns by cos(age * 3.25) * pi * 0.4 degrees
+  const by = this.bodyYaw, py = this.pyaw, k = Math.cos((this.age + a) * 3.25) * Math.PI * 0.4 * Math.PI / 180;
+  this.bodyYaw = by + k; this.pyaw = py + k;
+  try { return _renderPG.call(this, r, a); } finally { this.bodyYaw = by; this.pyaw = py; }
+};
+
+/* ---------------- sounds ---------------- */
+// PiglinAi.getSoundForCurrentActivity: angry when fighting, admiring, celebrating, jealous of gold you hold, retreating, else grunting
+const _tickPG = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'piglin' && this.ambientT <= 1 && !this.data.silent) {
+    this.ambientT = 240 + Math.random() * 480;
+    const p = this.game.player, d = this.data, jealous = p && !p.dead && this.distTo(p) < 14 && p.held && PIGLIN_LOVED.has(p.held.id);
+    const n = this.target ? 'piglin_angry' : d.hand2 ? 'piglin_admiring_item' : this._celebrate ? 'piglin_celebrate' : this._avoid ? 'piglin_retreat' : jealous ? 'piglin_jealous' : 'piglin_ambient';
+    this.game.sound(n, this.x, this.y + 1.5, this.z);
+  }
+  if ((this.type === 'hoglin' || this.type === 'zoglin' || this.type === 'piglin_brute') && this.target && this.ambientT <= 1 && !this.data.silent) {
+    this.ambientT = 240 + Math.random() * 480; this.game.sound(this.type + '_angry', this.x, this.y + 1, this.z);
+  }
+  return _tickPG.call(this);
+};
+const PG_SOUNDS = [['piglin_ambient', 'Piglin snorts'], ['piglin_angry', 'Piglin snorts angrily'], ['piglin_admiring_item', 'Piglin admires item'], ['piglin_celebrate', 'Piglin celebrates'],
+  ['piglin_jealous', 'Piglin snorts enviously'], ['piglin_retreat', 'Piglin retreats'], ['piglin_hurt', 'Piglin hurts'], ['piglin_death', 'Piglin dies'], ['piglin_converted', 'Piglin converts to Zombified Piglin'],
+  ['piglin_brute_ambient', 'Piglin Brute snorts'], ['piglin_brute_angry', 'Piglin Brute snorts angrily'], ['piglin_brute_hurt', 'Piglin Brute hurts'], ['piglin_brute_death', 'Piglin Brute dies'],
+  ['piglin_brute_converted', 'Piglin Brute converts to Zombified Piglin'], ['hoglin_ambient', 'Hoglin growls'], ['hoglin_angry', 'Hoglin growls angrily'], ['hoglin_attack', 'Hoglin attacks'],
+  ['hoglin_hurt', 'Hoglin hurts'], ['hoglin_death', 'Hoglin dies'], ['hoglin_converted', 'Hoglin converts to Zoglin'], ['zoglin_ambient', 'Zoglin growls'], ['zoglin_angry', 'Zoglin growls angrily'],
+  ['zoglin_attack', 'Zoglin attacks'], ['zoglin_hurt', 'Zoglin hurts'], ['zoglin_death', 'Zoglin dies']];
+for (const [n, t] of PG_SOUNDS) { SND_CAT[n] = 'hostile'; SUB_TEXT[n] = t; }
+const PG_SOUND_SET = new Set(PG_SOUNDS.map(s => s[0]));
+const _audioPlayPG = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!PG_SOUND_SET.has(name)) return _audioPlayPG.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, v = 0.9 + Math.random() * 0.2;
+  if (/converted/.test(name)) { this.tone(dst, 'sawtooth', 300 * v, 120 * v, 0.6, 0.08); this.noiseHit(dst, 'lowpass', 700, 1, 0.5, 0.3); return; }
+  if (/attack/.test(name)) { this.noiseHit(dst, 'lowpass', 500, 1, 0.15, 0.5); this.tone(dst, 'sawtooth', 150 * v, 90 * v, 0.15, 0.08); return; }
+  const base = name.startsWith('piglin_brute') ? 120 : name.startsWith('piglin') ? 170 : name.startsWith('hoglin') ? 95 : 80;
+  const f = base * v * (/hurt/.test(name) ? 1.3 : /death/.test(name) ? 0.8 : /angry/.test(name) ? 1.1 : /celebrate|admiring/.test(name) ? 1.4 : /jealous/.test(name) ? 1.2 : 1);
+  const n = /angry/.test(name) ? 3 : /celebrate/.test(name) ? 4 : 2;
+  for (let i = 0; i < n; i++) { this.tone(dst, 'sawtooth', f * (1 + i * 0.05), f * 0.85, 0.09, 0.06, t0 + i * 0.11); this.noiseHit(dst, 'lowpass', 600, 1, 0.07, 0.15, t0 + i * 0.11); }
+};
+
+/* @file 151_endermen.js */
+/* ===================================================================
+   Part 40: endermen and endermites like Java
+   - endermen: 40 health, 7 damage, walking at 0.3 speed and running
+     at 0.45 once they have a target; eyes at 2.55 blocks
+   - looking an enderman in the eyes (within 64 blocks, nothing solid
+     between the eyes, no carved pumpkin worn) turns it on the player
+     after a moment; with a target it screams, shakes, opens its jaw
+     and (the first time after being stared at) wails
+   - an angry enderman freezes while its player looks at it from within
+     16 blocks, teleports away when looked at from within 4, and jumps
+     closer every 1.5 seconds while the player is more than 16 away and
+     not looking; it stays angry 20 to 39 seconds after losing its
+     target and picks a fight with endermites it sees
+   - teleports go up to 32 blocks each way (16 back towards a target),
+     onto something solid that isn't water, with room and no liquid;
+     128 portal particles trail behind and the sound plays at both ends
+   - arrows, tridents, snowballs, eggs, fireballs, skulls, shulker
+     bullets, wind charges and splash potions never land: it teleports
+     away (64 tries) and arrows fly on; a splash water bottle still
+     stings. Other harm with no creature behind it (water, rain,
+     fire, falling, cactus, blasts) sends it off 9 times in 10, so it
+     flickers about in the rain
+   - by day, 30 seconds after its last change of target, in light 13
+     or more under open sky it lets go and teleports now and then
+   - it picks up blocks from Java's holdable list (a try 1 tick in 20,
+     reaching them in a straight line) and sets them down (1 tick in
+     2000) on a full block where they can stay, clear of entities;
+     mobGriefing turns both off. One carrying a block never despawns
+     and drops it on death; the block is held tilted at its chest
+   - endermites: 8 health, 0.25 speed, 2 damage; they live 2 minutes
+     unless named, call other endermites when hurt, and come with 1 in
+     20 thrown ender pearls (left where the thrower stood)
+   - portal particles are drawn in towards both
+   =================================================================== */
+
+/* ---------------- stats ---------------- */
+// EnderMan.createAttributes: speed 0.3, 0.45 with a target (the "attacking" modifier); mob ground speed is about 43.2 * speed^2 blocks a second
+Object.assign(MOB_TYPES.enderman, { walk: 43.2 * 0.3 * 0.3, run: 43.2 * 0.45 * 0.45, teleports: false, hatesWater: false, ai: ['enderman', 'wander', 'look'],
+  sounds: ['enderman_ambient', 'enderman_hurt', 'enderman_death'] });
+// Endermite.createAttributes: 8 health, speed 0.25, 2 damage
+Object.assign(MOB_TYPES.endermite, { walk: 43.2 * 0.25 * 0.25, run: 43.2 * 0.25 * 0.25, ai: ['target', 'melee', 'wander', 'look'],
+  sounds: ['endermite_ambient', 'endermite_hurt', 'endermite_death'] });
+// step height 1 (Attributes.STEP_HEIGHT)
+const _initEM = MOB_INIT.enderman;
+MOB_INIT.enderman = (m, o) => { if (_initEM) _initEM(m, o); m.stepH = 1; };
+// EndermanRenderer draws the model at full size
+delete MOB_MODELS.enderman.scale;
+const EM_EYE = 2.55;
+const _eyeYEM = Mob.prototype.eyeY;
+Mob.prototype.eyeY = function () { return this.type === 'enderman' ? this.y + EM_EYE : this.type === 'endermite' ? this.y + 0.13 : _eyeYEM.call(this); };
+
+// BlockTags.ENDERMAN_HOLDABLE: small flowers, the dirt tag, sand, red sand, gravel, mushrooms, TNT, cactus, clay, pumpkins, melons, nether fungi, nylium and roots
+ENDER_HOLDABLE.clear();
+for (const n of ['dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'oxeye_daisy', 'cornflower',
+  'lily_of_the_valley', 'wither_rose', 'torchflower', 'dirt', 'grass_block', 'podzol', 'coarse_dirt', 'mycelium', 'rooted_dirt', 'moss_block', 'mud', 'muddy_mangrove_roots',
+  'sand', 'red_sand', 'gravel', 'brown_mushroom', 'red_mushroom', 'tnt', 'cactus', 'clay', 'pumpkin', 'carved_pumpkin', 'melon',
+  'crimson_fungus', 'crimson_nylium', 'crimson_roots', 'warped_fungus', 'warped_nylium', 'warped_roots']) { const id = B[n.toUpperCase()]; if (id !== undefined) ENDER_HOLDABLE.add(id); }
+
+/* ---------------- sight ---------------- */
+// does a player count for targeting: alive, in survival or adventure, not on peaceful
+const emFair = t => !!t && !t.dead && !(t.deathTime > 0) && !(t instanceof Player && (!t.survival || t.mode === 3)) && OPTIONS.difficulty > 0;
+const emEyeOf = e => e instanceof Player ? e.y + e.eyeCur : e.eyeY ? e.eyeY() : e.y + e.h * 0.85;
+// Sensing.hasLineOfSight / LivingEntity.hasLineOfSight: eye to eye through collision shapes, within 128 blocks
+function emSees(m, e) {
+  const ey = emEyeOf(e), d2 = (e.x - m.x) ** 2 + (ey - m.y - EM_EYE) ** 2 + (e.z - m.z) ** 2;
+  return d2 <= 16384 && clipCollider(m.game.world, m.x, m.y + EM_EYE, m.z, e.x, ey, e.z);
+}
+// EnderMan.isLookingAtMe: the player's view within 0.025/d (cosine) of the enderman's eyes, with a clear line; a carved pumpkin hides the gaze
+function emLookedAt(m, p) {
+  if (!p || p.dead || p.mode === 3 || (p.armor[0] && p.armor[0].id === B.CARVED_PUMPKIN)) return false;
+  const e = p.eye(), lk = p.look(), dx = m.x - e[0], dy = m.y + EM_EYE - e[1], dz = m.z - e[2], d = Math.hypot(dx, dy, dz);
+  if (d < 1e-4 || (dx * lk[0] + dy * lk[1] + dz * lk[2]) / d <= 1 - 0.025 / d) return false;
+  return emSees(m, p);
+}
+// LivingEntity.getVisibilityPercent: sneaking 0.8, invisible 0.7 x the share of armor worn (at least 0.1)
+function emSeenRange(p, r) {
+  let v = 1;
+  if (p.sneaking) v *= 0.8;
+  if (p.effectLevel && p.effectLevel('invisibility')) v *= 0.7 * Math.max(0.1, p.armor.filter(Boolean).length / 4);
+  return Math.max(r * v, 2);
+}
+// NeutralMob.isAngryAt
+const emAngryAt = (m, e) => m.data.angerT > 0 && (m._angryAt === e || e instanceof Player && m.game.rule('universalAnger'));
+
+/* ---------------- teleporting ---------------- */
+// BlockState.blocksMotion: a solid collision box (not cobweb, carpets or thin snow)
+function emBlocksMotion(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (!id || SOLID[id] !== 1 || BLK[id].noCollide || BLK[id].liquid) return false;
+  if (SHAPE[id] === SH.CARPET) return false;
+  if (id === B.SNOW) return (w.getMeta(x, y, z) & 7) >= 2;
+  return true;
+}
+// EnderMan.teleport(x, y, z) then LivingEntity.randomTeleport: drop to the first block that blocks motion (not under water), stand on it if there is room and no liquid
+function emTeleportTo(m, x, y, z) {
+  const g = m.game, w = g.world, bx = Math.floor(x), bz = Math.floor(z);
+  if (m.dead || m.deathTime > 0 || !w.isLoadedAt(bx, bz)) return false;
+  let by = Math.floor(y);
+  if (by > CH_TOP) by = CH_TOP;
+  while (by > 0 && !emBlocksMotion(w, bx, by, bz)) by--;
+  if (!emBlocksMotion(w, bx, by, bz) || WATERY[w.getBlock(bx, by, bz)]) return false;
+  let py = Math.min(Math.floor(y), CH_TOP + 1), ty = y, found = false;
+  while (!found && py > 0) { if (emBlocksMotion(w, bx, py - 1, bz)) found = true; else { ty--; py--; } }
+  if (!found) return false;
+  const hw = m.w / 2;
+  if (aabbHitsBlock(w, x - hw, ty, z - hw, x + hw, ty + m.h, z + hw, id => SOLID[id] === 1 && !BLK[id].noCollide || BLK[id].liquid)) return false;
+  const ox = m.x, oy = m.y, oz = m.z;
+  // a rider is put back on its mount next tick: it only looks like a teleport
+  if (!m.vehicle) { m.x = m.px = x; m.y = m.py = ty; m.z = m.pz = z; }
+  m.nav = null; m.move = null;
+  emTrail(m, ox, oy, oz);
+  if (!m.data.silent) { g.sound('enderman_teleport', ox, oy + 1, oz); g.sound('enderman_teleport', m.x, m.y + 1, m.z); }
+  return true;
+}
+// EnderMan.teleport(): anywhere up to 32 blocks away and 32 up or down
+const emTeleport = m => emTeleportTo(m, m.x + (Math.random() - 0.5) * 64, m.y + Math.floor(Math.random() * 64) - 32, m.z + (Math.random() - 0.5) * 64);
+// EnderMan.teleportTowards: 16 blocks back along the line to the target, give or take
+function emTeleportTowards(m, t) {
+  let vx = m.x - t.x, vy = m.y + m.h * 0.5 - emEyeOf(t), vz = m.z - t.z;
+  const l = Math.hypot(vx, vy, vz);
+  if (l > 1e-4) { vx /= l; vy /= l; vz /= l; } else vx = vy = vz = 0;
+  return emTeleportTo(m, m.x + (Math.random() - 0.5) * 8 - vx * 16, m.y + Math.floor(Math.random() * 16) - 8 - vy * 16, m.z + (Math.random() - 0.5) * 8 - vz * 16);
+}
+// dodging a projectile: 64 tries
+function emDodge(m) { for (let k = 0; k < 64; k++) if (emTeleport(m)) return true; return false; }
+Mob.prototype.teleportAway = function (toward) { return toward ? emTeleportTowards(this, toward) : emTeleport(this); };
+
+/* ---------------- portal particles ---------------- */
+// PortalParticle: starts a short way out and is drawn back in, growing, brightening, purple
+function emPortal(g, x, y, z, dx, dy, dz) {
+  const p = g.player;
+  if (!p || (x - p.x) ** 2 + (y - p.y) ** 2 + (z - p.z) ** 2 > 1024) return;
+  const f = Math.random() * 0.6 + 0.4, life = 40 + Math.floor(Math.random() * 10);
+  g.particles.add({ x: x + dx, y: y + dy + 1, z: z + dz, vx: 0, vy: 0, vz: 0, life, layer: texL('particle_generic_' + Math.floor(Math.random() * 8)), u: 0, v: 0, us: 1,
+    size: 0, g: 0, col: [f * 0.9, f * 0.3, f], jp: [x, y, z, dx, dy, dz, 0.1 * (Math.random() * 0.2 + 0.5)] });
+}
+const _pTickEM = Particles.prototype.tick;
+Particles.prototype.tick = function () {
+  for (const p of this.list) {
+    const J = p.jp;
+    if (!J) continue;
+    const f = (p.max - p.life + 1) / p.max, f2 = 1 - (-f + f * f * 2), s = 1 - f;
+    p.x = J[0] + J[3] * f2; p.y = J[1] + J[4] * f2 + (1 - f); p.z = J[2] + J[5] * f2;
+    p.size = J[6] * (1 - s * s); p.bright = f > 0.75;
+  }
+  return _pTickEM.call(this);
+};
+// LivingEntity.handleEntityEvent(46): 128 particles along the jump
+function emTrail(m, ox, oy, oz) {
+  const g = m.game;
+  for (let j = 0; j < 128; j++) {
+    const t = j / 127;
+    emPortal(g, ox + (m.x - ox) * t + (Math.random() - 0.5) * m.w * 2, oy + (m.y - oy) * t + Math.random() * m.h, oz + (m.z - oz) * t + (Math.random() - 0.5) * m.w * 2,
+      (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2);
+  }
+}
+
+/* ---------------- targets ---------------- */
+// EnderMan.setTarget: a target makes it creepy and fast; losing it clears the stare
+function emSetTarget(m, t, src) { m.target = t; m._emSrc = t ? src : null; m._unseen = 0; if (!t) m.data.stared = 0; }
+// NeutralMob.updatePersistentAnger: angry at whatever it targets for 20 to 39 seconds, the time running only while not after a player
+function emAnger(m) {
+  const d = m.data, t = m.target;
+  if (d.angry === 'player' && !m._angryAt && d.angerT > 0) m._angryAt = m.game.player;
+  if ((!t || t.dead || t.deathTime > 0) && m._angryAt instanceof Mob) { emCalm(m); return; }
+  if (t && m._angryAt !== t) { m._angryAt = t; d.angry = t instanceof Player ? 'player' : null; d.angerT = 400 + Math.floor(Math.random() * 381); }
+  if (d.angerT > 0 && !(t instanceof Player) && --d.angerT <= 0) emCalm(m);
+}
+// NeutralMob.stopBeingAngry
+function emCalm(m) { m.data.angerT = 0; m.data.angry = null; m._angryAt = null; m._hurtBy = null; m._lfp = null; emSetTarget(m, null); }
+// the target selector (every other tick): EndermanLookForPlayerGoal, HurtByTargetGoal, then endermites
+function emTargets(m) {
+  const g = m.game, p = g.player, t0 = m.target;
+  // a target that can't be fought any more
+  if (t0 && !emFair(t0)) { m._lfp = null; emSetTarget(m, null); }
+  // EndermanLookForPlayerGoal: keep going while the pending player still provokes it, or the target lives
+  let L = m._lfp;
+  if (L) {
+    if (L.pend) { if (emFair(L.pend) && (emLookedAt(m, L.pend) || emAngryAt(m, L.pend))) m.lookAt(L.pend.x, emEyeOf(L.pend), L.pend.z); else { m._lfp = L = null; emSetTarget(m, null); } }
+    else if (!L.t || !emFair(L.t)) { m._lfp = L = null; emSetTarget(m, null); }
+  }
+  // start: the player within 64 blocks (less when sneaking or invisible) who stares at it or that it is angry at, in sight
+  if (!L && p && emFair(p) && m.distTo(p) <= emSeenRange(p, 64) && (emLookedAt(m, p) || emAngryAt(m, p) && emSees(m, p))) {
+    // the goal it replaces lets go of its target first (TargetGoal.stop), then this one notes the stare
+    m._lfp = L = { pend: p, aggro: 3, tp: 0, t: null };
+    emSetTarget(m, null);
+    m.data.stared = 1;
+  }
+  if (L) {
+    if (!m.target) L.t = null;
+    if (L.pend) { if (--L.aggro <= 0) { L.t = L.pend; L.pend = null; emSetTarget(m, L.t, 'look'); } }
+    else if (L.t && !m.vehicle) {
+      const d2 = (L.t.x - m.x) ** 2 + (L.t.y - m.y) ** 2 + (L.t.z - m.z) ** 2;
+      if (emLookedAt(m, L.t)) { if (d2 < 16) emTeleport(m); L.tp = 0; }
+      else if (d2 > 256 && L.tp++ >= 15 && emTeleportTowards(m, L.t)) L.tp = 0;
+    }
+    if (!L.pend && !L.t) m._lfp = null;
+    return;
+  }
+  // HurtByTargetGoal: whoever hurt it last, while seen in the last 15 seconds and within 64 blocks
+  if (m._emSrc === 'hurt') {
+    const t = m.target;
+    if (!emFair(t) || m.distTo(t) > 64) emSetTarget(m, null);
+    else if (emSees(m, t)) m._unseen = 0; else if (++m._unseen > 150) emSetTarget(m, null);
+    if (m.target) return;
+  }
+  if (m._hurtBy) {
+    const a = m._hurtBy; m._hurtBy = null;
+    if (emFair(a) && a !== m) { emSetTarget(m, a, 'hurt'); return; }
+  }
+  // NearestAttackableTargetGoal<Endermite>: one chance in 5, seen within 64 blocks (4 up or down past its height)
+  if (m._emSrc === 'mite') {
+    const t = m.target;
+    if (!emFair(t) || m.distTo(t) > 64) emSetTarget(m, null);
+    else if (emSees(m, t)) m._unseen = 0; else if (++m._unseen > 30) emSetTarget(m, null);
+    if (m.target) return;
+  }
+  if (m.target || Math.random() * 5 >= 1) return;
+  let best = null, bd = 64 * 64;
+  for (const e of g.entities) {
+    if (e.type !== 'endermite' || !emFair(e) || e.y < m.y - 4 - e.h || e.y > m.y + m.h + 4) continue;
+    const d2 = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2;
+    if (d2 < bd && emSees(m, e)) { bd = d2; best = e; }
+  }
+  if (best) emSetTarget(m, best, 'mite');
+}
+
+/* ---------------- blocks ---------------- */
+const EM_NOT_FULL = new Set(['soul_sand', 'mud', 'honey_block'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+// EndermanTakeBlockGoal and EndermanLeaveBlockGoal (no flags: they run alongside everything else)
+function emCarry(m) {
+  const g = m.game, w = g.world, d = m.data;
+  if (!g.rule('mobGriefing')) return;
+  if (!d.carry) {
+    if (Math.random() * 20 >= 1) return;
+    const x = Math.floor(m.x - 2 + Math.random() * 4), y = Math.floor(m.y + Math.random() * 3), z = Math.floor(m.z - 2 + Math.random() * 4), id = w.getBlock(x, y, z);
+    if (!ENDER_HOLDABLE.has(id)) return;
+    // Level.clip with outline shapes from the middle of its own column at that height must stop at that block
+    const ox = Math.floor(m.x) + 0.5, oz = Math.floor(m.z) + 0.5, dx = x + 0.5 - ox, dz = z + 0.5 - oz, l = Math.hypot(dx, dz);
+    if (l > 0) { const h = raycast(w, ox, y + 0.5, oz, dx / l, 0, dz / l, l, false); if (!h || h.x !== x || h.y !== y || h.z !== z) return; }
+    w.setBlock(x, y, z, 0, 0);
+    d.carry = BLOCK_NAMES[id];
+    g.remeshNear(x, z);
+  } else {
+    if (Math.random() * 2000 >= 1) return;
+    const x = Math.floor(m.x - 1 + Math.random() * 2), y = Math.floor(m.y + Math.random() * 2), z = Math.floor(m.z - 1 + Math.random() * 2);
+    const id = B[d.carry.toUpperCase()];
+    if (!id) { d.carry = null; return; }
+    const below = w.getBlock(x, y - 1, z);
+    if (w.getBlock(x, y, z) !== 0 || !below || below === B.BEDROCK || SOLID[below] !== 1 || SHAPE[below] !== SH.CUBE || BLK[below].noCollide || EM_NOT_FULL.has(below)) return;
+    if (!w.canStay(id, x, y, z, 0)) return;
+    // nothing else in the space (AABB.unitCubeFromLowerCorner)
+    const pl = g.player, inBox = e => e && e !== m && !e.dead && e.x + (e.w || 0.25) / 2 > x && e.x - (e.w || 0.25) / 2 < x + 1 && e.z + (e.w || 0.25) / 2 > z && e.z - (e.w || 0.25) / 2 < z + 1 && e.y < y + 1 && e.y + (e.h || 0.25) > y;
+    if (inBox(pl) && pl.mode !== 3 || g.entities.some(inBox)) return;
+    w.setBlock(x, y, z, id, 0);
+    d.carry = null;
+    g.remeshNear(x, z);
+  }
+}
+
+/* ---------------- the brain ---------------- */
+GOALS.enderman = function (m) {
+  emCarry(m);
+  if ((m.age + m.id) % 2 === 0) emTargets(m);
+  const t = m.target;
+  if (!t) return false;
+  // EndermanFreezeWhenLookedAt: stand and stare back at a player target within 16 blocks who is looking
+  if (t instanceof Player && (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 <= 256 && emLookedAt(m, t)) {
+    m.nav = null; m.move = null; m.lookAt(t.x, emEyeOf(t), t.z);
+    return true;
+  }
+  return GOALS.melee(m);
+};
+// HurtByTargetGoal (unless the look-for-player goal holds the target)
+const _onHurtByEM = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  if (this.type === 'enderman') {
+    const t = this.target, an = this.anger;
+    _onHurtByEM.call(this, a, source);
+    this.target = t; this.anger = an;
+    if (a && a !== this && !(a instanceof Player && a.mode === 1)) this._hurtBy = a;
+    return;
+  }
+  _onHurtByEM.call(this, a, source);
+  // HurtByTargetGoal.setAlertOthers: other endermites nearby without a target join in
+  if (this.type === 'endermite' && a && emFair(a))
+    for (const e of this.game.entities) if (e !== this && e.type === 'endermite' && !e.dead && !e.target && Math.abs(e.x - this.x) < 16.2 && Math.abs(e.y - this.y) < 10.3 && Math.abs(e.z - this.z) < 16.2) e.target = a;
+};
+
+/* ---------------- damage ---------------- */
+// the kinds Java tags is_projectile
+const EM_PROJ = new Set(['arrow', 'trident', 'snow', 'egg', 'pearl', 'ghast', 'fire', 'skull', 'bullet', 'wind']);
+// EnderMan.hurt: a projectile never lands (it teleports instead); a splash potion only stings if it is water, and it teleports anyway;
+// harm with no creature behind it makes it teleport 9 times in 10
+const _hurtEM = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type !== 'enderman' || this.dead || this.deathTime > 0) return _hurtEM.call(this, amount, source, attacker);
+  if (this._emProj) { const r = this._emProj > 0; this._emProj = 0; return r; }
+  const sp = this.game._emSplash;
+  if (sp && source === 'magic') {
+    const r = sp === 'water' ? _hurtEM.call(this, amount, source, attacker) : false;
+    return emDodge(this) || r;
+  }
+  const r = _hurtEM.call(this, amount, source, attacker);
+  const living = attacker instanceof Mob || attacker instanceof Player || (typeof EXPLOSION_KIND !== 'undefined' && EXPLOSION_KIND[source] === 'mob');
+  if (!living && !this.dead && this.deathTime === 0 && this.health > 0 && Math.random() < 0.9) emTeleport(this);
+  return r;
+};
+// ThrownPotion.onHit: a water bottle (splash or lingering) runs applyWater: fires out, and 1 harm to whatever water hurts
+// (endermen, blazes, striders, snow golems); the enderman knows the hit came from a thrown potion
+const _splashEM = Game.prototype.splashPotion;
+Game.prototype.splashPotion = function (x, y, z, st, owner) {
+  const key = st && st.tag ? st.tag.potion : null, water = !key || key === 'water';
+  this._emSplash = water ? 'water' : st.id === I.LINGERING_POTION ? null : 'potion';
+  try {
+    const r = _splashEM.call(this, x, y, z, water ? null : st, owner);
+    if (water) for (const m of this.mobsAndPlayer()) if ((m.type === 'strider' || m.type === 'snow_golem') && Math.hypot(m.x - x, m.y - y, m.z - z) < 4) m.hurt(1, 'magic', owner);
+    return r;
+  } finally { this._emSplash = null; }
+};
+// AbstractArrow and ThrownTrident.onHitEntity: an enderman that gets away lets the arrow fly on; one that can't sends it back
+const _impactEM = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  const g = this.game;
+  // ThrownEnderpearl.onHit: 1 in 20 leaves an endermite where the thrower stood
+  if (this.kind === 'pearl' && !this.dead) {
+    const o = this.owner;
+    if (o && o === g.player && !o.dead && Math.random() < 0.05 && g.rule('doMobSpawning')) { const em = g.spawnMob('endermite', o.x, o.y, o.z); if (em) em.yaw = em.bodyYaw = o.yaw; }
+  }
+  if (!e || e.type !== 'enderman' || e.dead || e.deathTime > 0 || !EM_PROJ.has(this.kind)) return _impactEM.call(this, e);
+  const ok = emDodge(e);
+  if (this.kind === 'arrow' || this.kind === 'trident') {
+    if (ok) { if (this.kind === 'trident') this.dealt = true; return; }
+    g.sound('arrow_hit', this.x, this.y, this.z);
+    if (this.kind === 'trident') { this.vx *= -0.01; this.vy *= -0.1; this.vz *= -0.01; this.stuck = true; this.dir = [0, -1, 0]; if (this.loyalty) this.returning = true; return; }
+    // ProjectileDeflection.REVERSE then a fifth of the speed
+    this.vx *= -0.1; this.vy *= -0.1; this.vz *= -0.1;
+    if (Math.hypot(this.vx, this.vy, this.vz) < 3e-4) this.dead = true;
+    return;
+  }
+  e._emProj = ok ? 1 : -1;
+  try { return _impactEM.call(this, e); } finally { e._emProj = 0; }
+};
+
+/* ---------------- each tick ---------------- */
+const _tickEM = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const T = this.T;
+  if (this.type === 'enderman') T.sounds[0] = this.target ? 'enderman_scream' : 'enderman_ambient';
+  _tickEM.call(this);
+  if (this.type === 'enderman') emTick(this);
+  else if (this.type === 'endermite') miteTick(this);
+};
+function emTick(m) {
+  const g = m.game, w = g.world, d = m.data;
+  if (m.dead || m.deathTime > 0) return;
+  // the client side: two portal particles a tick
+  for (let k = 0; k < 2; k++) emPortal(g, m.x + (Math.random() * 2 - 1) * 0.3, m.y + Math.random() * m.h - 0.25, m.z + (Math.random() * 2 - 1) * 0.3, (Math.random() - 0.5) * 2, -Math.random(), (Math.random() - 0.5) * 2);
+  if (d.noAI) return;
+  emAnger(m);
+  // targets changing: the time of the change, the stare clearing, and the wail once it turns creepy after being stared at
+  const t = m.target;
+  if (t !== m._emLast) {
+    if (t) {
+      m._tct = m.age;
+      if (!m._emLast && d.stared && m.age >= (m._stareSnd === undefined ? -1e9 : m._stareSnd) + 400) { m._stareSnd = m.age; if (!d.silent) g.sound('enderman_stare', m.x, m.y + EM_EYE, m.z); }
+    } else { m._tct = 0; if (!m._lfp) { d.stared = 0; m._emSrc = null; } }
+    m._emLast = t;
+  }
+  // LivingEntity.aiStep: water, rain and bubble columns hurt every tick (EnderMan.isSensitiveToWater)
+  const bx = Math.floor(m.x), bz = Math.floor(m.z);
+  if (m.inWater || g.rainingAt(bx, Math.floor(m.y), bz) || g.rainingAt(bx, Math.floor(m.y + m.h), bz) ||
+    B.BUBBLE_COLUMN !== undefined && aabbHitsBlock(w, m.x - 0.3, m.y, m.z - 0.3, m.x + 0.3, m.y + m.h, m.z + 0.3, id => id === B.BUBBLE_COLUMN)) m.hurt(1, 'drown');
+  if (m.dead || m.deathTime > 0) return;
+  // EnderMan.customServerAiStep: by day, in bright open light, 30 seconds after its last change of target
+  if (w.dim === 'overworld' && g.skyDarken() < 4 && m.age >= (m._tct || 0) + 600) {
+    const ey = Math.floor(m.y + EM_EYE), l = w.getLightRaw(bx, ey, bz), lv = Math.max((l >> 4) - g.skyDarken(), l & 15) / 15, f = lv / (4 - 3 * lv);
+    if (f > 0.5 && (w.getLightRaw(bx, Math.floor(m.y), bz) >> 4) >= 15 && Math.random() * 30 < (f - 0.4) * 2) { m._lfp = null; emSetTarget(m, null); emTeleport(m); }
+  }
+}
+// Endermite.aiStep: portal particles, and gone after 2400 ticks unless kept
+function miteTick(m) {
+  const g = m.game, d = m.data;
+  if (m.dead || m.deathTime > 0) return;
+  for (let k = 0; k < 2; k++) emPortal(g, m.x + (Math.random() * 2 - 1) * 0.2, m.y + Math.random() * m.h, m.z + (Math.random() * 2 - 1) * 0.2, (Math.random() - 0.5) * 2, -Math.random(), (Math.random() - 0.5) * 2);
+  if (!m.persistent && !m.customName) d.life = (d.life || 0) + 1;
+  if ((d.life || 0) >= 2400) { m.dead = true; m.removed = true; }
+}
+
+/* ---------------- keeping and dropping the block ---------------- */
+// EnderMan.requiresCustomPersistence: one carrying a block stays
+const _keepEM = Mob.prototype.keepWhenUnloaded;
+Mob.prototype.keepWhenUnloaded = function () { return _keepEM.call(this) || this.type === 'enderman' && !!this.data.carry; };
+const _vDespawnEM = Game.prototype.vDespawn;
+Game.prototype.vDespawn = function () {
+  const kept = [];
+  for (const e of this.entities) if (e.type === 'enderman' && e.data && e.data.carry && !e.persistent) { e.persistent = true; kept.push(e); }
+  try { return _vDespawnEM.call(this); } finally { for (const e of kept) e.persistent = false; }
+};
+// EnderMan.dropCustomDeathLoot: the block, as if broken with a silk touch axe
+const _dropLootEM = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  const r = _dropLootEM.call(this);
+  if (this.type === 'enderman' && this.data.carry && !this.noDrops) {
+    const id = B[this.data.carry.toUpperCase()];
+    if (id) for (const s of this.game.dropsFor(id, 0, { silk: true })) this.game.dropItem(this.x, this.y + 0.5, this.z, s);
+    this.data.carry = null;
+  }
+  return r;
+};
+
+/* ---------------- looks ---------------- */
+MOB_ANIM.enderman = (m, st) => {
+  st.carry = !!m.data.carry; st.creepy = st.aggressive = !!m.target;
+  // HumanoidModel.attackTime: a 6 tick swing
+  const e = 10 - (m.attackAnim || 0) + (st.age - m.age);
+  st.atk = m.attackAnim > 0 && e < 6 ? e / 6 : 0;
+};
+// EndermanModel.setupAnim over HumanoidModel's: limbs at half swing and held within 0.4 rad, arms up to carry, the head lifted off its jaw when creepy
+MOB_MODELS.enderman.anim = function (P, st) {
+  const c = Math.cos(st.swing * 0.6662), c2 = Math.cos(st.swing * 0.6662 + Math.PI), amt = st.amt, cl = v => Math.max(-0.4, Math.min(0.4, v)), t = st.atk || 0;
+  P.head = P.hat = [st.hp, -st.hy, 0];
+  let rax = c2 * amt, lax = c * amt, ray = 0, lay = 0, raz = 0, laz = 0, by = 0;
+  if (t > 0) {
+    // HumanoidModel.setupAttackAnimation (right arm)
+    by = Math.sin(Math.sqrt(t) * Math.PI * 2) * 0.2;
+    ray += by; lay += by; lax += by;
+    let f = 1 - t; f *= f; f *= f; f = 1 - f;
+    rax -= Math.sin(f * Math.PI) * 1.2 + Math.sin(t * Math.PI) * -(st.hp - 0.7) * 0.75;
+    ray += by * 2; raz += Math.sin(t * Math.PI) * -0.4;
+  }
+  // AnimationUtils.bobModelPart
+  const bz = Math.cos(st.age * 0.09) * 0.05 + 0.05, bx = Math.sin(st.age * 0.067) * 0.05;
+  raz += bz; rax += bx; laz -= bz; lax -= bx;
+  rax = cl(rax * 0.5); lax = cl(lax * 0.5);
+  if (st.carry) { rax = lax = -0.5; raz = 0.05; laz = -0.05; }
+  P.right_arm = [rax, ray, raz]; P.left_arm = [lax, lay, laz];
+  P.right_leg = [cl(c * 1.4 * amt * 0.5), 0.005, 0.005]; P.left_leg = [cl(c2 * 1.4 * amt * 0.5), -0.005, -0.005];
+  if (by) P.body = [0, by, 0];
+  if (st.creepy) P['head#y'] = -18;
+};
+// EndermanRenderer.getRenderOffset: a creepy one trembles (gaussian, 0.02 blocks)
+const emGauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const _renderEM = Mob.prototype.render;
+Mob.prototype.render = function (r, a) {
+  if (this.type !== 'enderman' || !this.target || this.deathTime > 0) return _renderEM.call(this, r, a);
+  const ox = emGauss() * 0.02, oz = emGauss() * 0.02;
+  this.x += ox; this.px += ox; this.z += oz; this.pz += oz;
+  try { return _renderEM.call(this, r, a); } finally { this.x -= ox; this.px -= ox; this.z -= oz; this.pz -= oz; }
+};
+// CarriedBlockLayer: in model space, out 0.6875 down and 0.75 forward, tipped 20 degrees, turned 45, half size
+function emCarriedXf(q) {
+  // Ry(90), scale(-0.5, -0.5, 0.5), translate(0.25, 0.1875, 0.25), Ry(45), Rx(20), translate(0, 0.6875, -0.75)
+  let x = -0.5 * q[2] + 0.25, y = -0.5 * q[1] + 0.1875, z = -0.5 * q[0] + 0.25;
+  const c = Math.SQRT1_2, x2 = x * c + z * c, z2 = -x * c + z * c;
+  const c20 = Math.cos(Math.PI / 9), s20 = Math.sin(Math.PI / 9), y3 = y * c20 - z2 * s20, z3 = y * s20 + z2 * c20;
+  return [x2 * 16, (y3 + 0.6875) * 16, (z3 - 0.75) * 16];
+}
+function emDrawCarried(r, id, at, light) {
+  const P = q => at(null, emCarriedXf(q));
+  if (SHAPE[id] === SH.CROSS) {
+    // the cross model: two planes along the diagonals, seen from both sides
+    const L = FACETEX[id * 6];
+    for (const [a, b] of [[[0, 0], [1, 1]], [[0, 1], [1, 0]]]) {
+      const pts = [[a[0], 0, a[1], 0, 1], [b[0], 0, b[1], 1, 1], [b[0], 1, b[1], 1, 0], [a[0], 1, a[1], 0, 0]].map(v => [P([v[0], v[1], v[2]]), v[3], v[4]]);
+      if (pts.some(v => !v[0])) return;
+      for (const order of [[0, 1, 2, 3], [1, 0, 3, 2]]) for (const k of order) { const v = pts[k]; r.dv(v[0][0], v[0][1], v[0][2], v[1], v[2], L, 1, 1, 1, 1, light[0], light[1]); }
+    }
+    return;
+  }
+  // a cube (grass tinted on top, its side the pre-tinted item side, like drawBlockCube)
+  for (let f = 0; f < 6; f++) {
+    const layer = id === B.GRASS_BLOCK ? (f === 2 ? TEX_GRASS_TOP : f === 3 ? TEX_DIRT : texL('grass_block_side_item')) : faceLayer(id, 0, f), fs = FSHADE[f];
+    let tr = 1, tg = 1, tb = 1;
+    if (id === B.GRASS_BLOCK && f === 2) { tr = 145 / 255; tg = 189 / 255; tb = 89 / 255; }
+    for (let k = 0; k < 4; k++) {
+      const v = FV[f][k], w = P([v[0], v[1], v[2]]);
+      if (!w) return;
+      r.dv(w[0], w[1], w[2], v[3] / 16, v[4] / 16, layer, fs * tr, fs * tg, fs * tb, 1, light[0], light[1]);
+    }
+  }
+}
+const _renderExtraEM = Mob.prototype.renderExtra;
+Mob.prototype.renderExtra = function (r, a, p, yaw, st, light, at) {
+  if (this.type !== 'enderman' || !this.data.carry) return _renderExtraEM.call(this, r, a, p, yaw, st, light, at);
+  const c = this.data.carry;
+  this.data.carry = null;
+  try { _renderExtraEM.call(this, r, a, p, yaw, st, light, at); } finally { this.data.carry = c; }
+  const id = B[c.toUpperCase()];
+  if (id && at) emDrawCarried(r, id, at, light);
+};
+
+/* ---------------- sounds ---------------- */
+const EM_SOUNDS = [['enderman_ambient', 'Enderman vwoops'], ['enderman_scream', 'Enderman screams'], ['enderman_stare', 'Enderman wails'], ['enderman_hurt', 'Enderman hurts'],
+  ['enderman_death', 'Enderman dies'], ['enderman_teleport', 'Enderman teleports'], ['endermite_ambient', 'Endermite scuttles'], ['endermite_hurt', 'Endermite hurts'], ['endermite_death', 'Endermite dies']];
+for (const [n, t] of EM_SOUNDS) { SND_CAT[n] = 'hostile'; SUB_TEXT[n] = t; }
+const EM_SOUND_SET = new Set(EM_SOUNDS.map(s => s[0]));
+const _audioPlayEM = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!EM_SOUND_SET.has(name)) return _audioPlayEM.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  if (name === 'enderman_teleport') return _audioPlayEM.call(this, 'teleport', x, y, z, ...rest);
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'enderman_ambient': for (let i = 0; i < 2; i++) { this.tone(dst, 'sawtooth', 210 * v, 95 * v, 0.32, 0.07, t0 + i * 0.38); this.tone(dst, 'sine', 420 * v, 160 * v, 0.3, 0.05, t0 + i * 0.38); } break;
+    case 'enderman_scream': for (let i = 0; i < 5; i++) { this.tone(dst, 'sawtooth', (700 + i * 90) * v, (1100 - i * 60) * v, 0.18, 0.05, t0 + i * 0.09); this.noiseHit(dst, 'bandpass', 2200, 2, 0.12, 0.06, t0 + i * 0.09); } break;
+    case 'enderman_stare': this.tone(dst, 'sawtooth', 70 * v, 320 * v, 1.6, 0.07); this.tone(dst, 'sine', 140 * v, 640 * v, 1.6, 0.06); this.noiseHit(dst, 'lowpass', 500, 1, 1.4, 0.12); break;
+    case 'enderman_hurt': this.tone(dst, 'sawtooth', 520 * v, 260 * v, 0.22, 0.08); this.noiseHit(dst, 'bandpass', 1500, 1.5, 0.15, 0.1); break;
+    case 'enderman_death': this.tone(dst, 'sawtooth', 600 * v, 55 * v, 1.8, 0.08); this.tone(dst, 'sine', 300 * v, 40 * v, 1.8, 0.06); this.noiseHit(dst, 'lowpass', 800, 1, 1.2, 0.12); break;
+    case 'endermite_ambient': for (let i = 0; i < 4; i++) this.tone(dst, 'square', (2100 + Math.random() * 500) * v, 1800 * v, 0.03, 0.03, t0 + i * 0.06); break;
+    case 'endermite_hurt': this.tone(dst, 'square', 2400 * v, 1500 * v, 0.1, 0.05); break;
+    case 'endermite_death': for (let i = 0; i < 3; i++) this.tone(dst, 'square', (2200 - i * 400) * v, (1600 - i * 400) * v, 0.08, 0.04, t0 + i * 0.09); break;
+  }
 };
 
 </script>

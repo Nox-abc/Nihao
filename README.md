@@ -652,6 +652,28 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Rabbits, sheep and polar bears**: rabbit coats by biome, rabbits raiding ripe carrots; lambs
   get the dye colour their parents mix into, killed sheep drop their wool, jeb_ shines in every
   colour; polar bears guard their cubs, hunt foxes and rear up before they strike.
+- **Piglins like Java's**: gold you drop near a piglin gets picked up and admired for about 6
+  seconds; an ingot (also one handed over) is then traded for something from Java's bartering
+  table, thrown your way. Hit one while it admires and the gold is gone. Wear at least one piece
+  of gold armor or they attack you; opening chests and other containers or breaking gold near
+  them makes every piglin around angry for 30 seconds. They hunt hoglins and celebrate, keep
+  away from soul fire and zombified piglins, and young piglins never carry weapons.
+- **Piglin brutes, hoglins and zoglins**: brutes attack any player, gold or not, and stay near
+  where they spawned. Hoglins toss whatever they hit into the air, avoid warped fungus, portals
+  and respawn anchors, and flee from groups of piglins; zoglins attack everything but creepers.
+  Outside the Nether all of them shake and turn into zombified piglins or zoglins after 15
+  seconds.
+- **Endermen like Java's**: look one in the eyes (a carved pumpkin on your head prevents it) and
+  it screams, shakes and comes after you, much faster than you can run. While you keep watching
+  it from close by it stands still, and if you are within 4 blocks it teleports away; when you
+  run more than 16 blocks off it teleports after you. It stays angry for half a minute after
+  losing you. Arrows, snowballs and other projectiles never hit it (it teleports first), water
+  and rain hurt it and make it teleport around, and by day it eventually gives up. Endermen pick
+  up and put down dirt, sand, flowers, pumpkins, TNT and the other blocks Java lets them carry,
+  hold them in front of them, and drop them when killed.
+- **Endermites** come with 1 in 20 thrown ender pearls, live 2 minutes unless named, and
+  endermen go after them.
+- Splash water bottles put out burning mobs and hurt endermen, blazes, striders and snow golems.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
