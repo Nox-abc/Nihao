@@ -14338,8 +14338,6 @@ class Mob extends Entity {
     const g = this.game, T = this.T, id = held ? held.id : 0, name = held ? ITEMS[id].name : '';
     if (MOB_INTERACT[this.type] && MOB_INTERACT[this.type](this, p, held, name)) return true;
     if (id === I.NAME_TAG && held.tag && held.tag.name) { this.customName = held.tag.name; this.persistent = true; p.consumeHeld(1); return true; }
-    if (id === I.LEAD && this.T.cat !== 'monster' && !this.leashed) { this.leashed = p; p.consumeHeld(1); g.sound('click', this.x, this.y, this.z); return true; }
-    if (this.leashed === p && !held) { this.leashed = null; g.dropItem(this.x, this.y + 0.5, this.z, { id: I.LEAD, count: 1 }); return true; }
     // breeding and feeding
     if (T.breed && T.breed.includes(name)) {
       if (this.baby) { this.growth = Math.min(0, this.growth + 2400); p.consumeHeld(1); g.particles.poof(this.x, this.y + this.h, this.z, [0.4, 0.9, 0.4], 6); return true; }
@@ -22512,7 +22510,7 @@ class WanderingTrader extends Mob {
   tick() {
     super.tick();
     if (this.dead) return;
-    if (--this.data.despawn <= 0 && !this.customName) { this.dead = true; for (const e of this.game.entities) if (e.type === 'trader_llama' && this.distTo(e) < 20) e.dead = true; }
+    if (--this.data.despawn <= 0 && !this.customName) { this.dead = true; for (const e of this.game.entities) if (e.type === 'trader_llama' && e.leashed === this) { e.leashed = null; delete e.data.leash; e.dead = true; } }
     // drinks invisibility at night
     const t = this.game.world.time % 24000;
     if (typeof traderDrinks === 'function') traderDrinks(this);
@@ -29547,6 +29545,7 @@ Object.assign(Game.prototype, {
         const m = createMob(this, type, x + 0.5, y, z + 0.5);
         if (!m) return;
         m.yaw = m.bodyYaw = R() * Math.PI * 2;
+        if (inPack > 0 && T.baby && Math.random() <= vBabyOdds(type)) m.growth = -24000;
         this.entities.push(m);
         counts[cat] = (counts[cat] || 0) + 1; local[cat] = (local[cat] || 0) + 1; spawned++; inPack++;
         if (this._vCharges) { const cost = V_BCOST[this.vBiome(x, y, z)]; if (cost && cost[type]) this._vCharges.push([x, y, z, cost[type][0]]); }
@@ -29599,7 +29598,7 @@ Object.assign(Game.prototype, {
       if (!(e instanceof Mob) || e.dead) continue;
       if (peaceful && e.T.cat === 'monster' && e.type !== 'shulker') { e.dead = true; e.removed = true; continue; }
       // wandering traders and their llamas leave after two days
-      if ((e.type === 'wandering_trader' || e.type === 'trader_llama') && e.data.leaveIn !== undefined && !e.customName && !(e.type === 'trader_llama' && e.leashed === p) && --e.data.leaveIn <= 0) { e.dead = true; e.removed = true; continue; }
+      if ((e.type === 'wandering_trader' || e.type === 'trader_llama') && e.data.leaveIn !== undefined && !e.customName && !(e.type === 'trader_llama' && (e.data.tame || e.rider || e.leashed && e.leashed.type !== 'wandering_trader')) && --e.data.leaveIn <= 0) { e.dead = true; e.removed = true; continue; }
       const cat = vMobCat(e.type);
       // idle time (noActionTime): back to 0 when hurt, when kept, and within 32 blocks of the player
       e.noAct = e.hurtTime > 0 ? 0 : (e.noAct || 0) + 1;
@@ -29684,9 +29683,9 @@ Object.assign(Game.prototype, {
               const mob = createMob(this, type, d, y, e);
               if (mob) {
                 mob.yaw = mob.bodyYaw = yaw;
-                // a group shares its horse coat; after the first, one in twenty is a baby
+                // a group shares its horse coat; after the first, some are young (vBabyOdds)
                 if (first && type === 'horse' && first.data.variant !== undefined) mob.data.variant = first.data.variant;
-                if (group > 0 && T.baby && Math.random() <= 0.05) mob.growth = -24000;
+                if (group > 0 && T.baby && Math.random() <= vBabyOdds(type)) mob.growth = -24000;
                 first = first || mob; group++;
                 this.entities.push(mob);
                 done = true;
@@ -29752,7 +29751,7 @@ Object.assign(Game.prototype, {
     const t = this.spawnMob('wandering_trader', s[0] + 0.5, s[1], s[2] + 0.5);
     if (!t) return;
     t.data.leaveIn = 48000;
-    for (let k = 0; k < 2; k++) { const q = spot(s[0], s[2], 4); if (!q) continue; const l = this.spawnMob('trader_llama', q[0] + 0.5, q[1], q[2] + 0.5); if (l) { l.leashed = t; l.data.leaveIn = 48000; } }
+    for (let k = 0; k < 2; k++) { const q = spot(s[0], s[2], 4); if (!q) continue; const l = this.spawnMob('trader_llama', q[0] + 0.5, q[1], q[2] + 0.5); if (l) { leashTo(l, t); l.data.leaveIn = 48000; } }
     m.traderChance = 25;
     this.ui.chat('A wandering trader has appeared nearby', '#9ec8ff');
   },
@@ -43909,6 +43908,1084 @@ Mob.load = function (game, o) {
     if (r) { game.entities.push(r); mobMount(r, m); }
   }
   return m;
+};
+
+/* @file 148_leads.js */
+/* ===================================================================
+   PART 37: leads and llamas like Java's
+   - a lead holds an animal the way Java's does: within 6 blocks it
+     walks to 2 blocks from whoever holds it, from 6 to 10 it is pulled
+     along (harder the further off it is), past 10 the lead snaps and
+     drops; the rope is drawn, sagging from its lower end
+   - leads go on Java's mobs: animals, golems, allays, dolphins, hoglins
+     and zoglins, not on villagers, traders, bats, fish, squid, tadpoles
+     or turtles; right click it with anything to let it go
+   - right click a fence while leading animals (or use a lead on it)
+     to tie everything you lead within 7 blocks to a knot on it; right
+     click the knot to tie more there or to take it off (the animals go
+     free and drop their leads); hitting the knot or breaking the fence
+     does the same. A sitting pet is not pulled
+   - leads are saved: to you, to a fence (the knot is tied again when
+     the world loads) or to a wandering trader
+   - llamas: one with no lead joins the end of a caravan within 9 blocks
+     whose first llama is on a lead or tied up (10 llamas at most), keeps
+     2 blocks behind the one in front and runs to catch up; spits (1
+     damage) once at whatever hurts it and at wild wolves within 10
+     blocks every 2 seconds; a herd shares one coat; health 15 to 30
+     weighted to the middle, a young one's near its parents'; only hay
+     bales tempt them
+   - trader llamas are on leads tied to their trader, spit at anything
+     that hurts it and stay behind when you lead them away or tie them
+   =================================================================== */
+
+/* ---------------- what can be led ---------------- */
+// Mob.canBeLeashed: no monsters (but hoglins and zoglins), AbstractVillager, AmbientCreature or WaterAnimal (but dolphins), and Turtle
+// says no; nothing already on a lead
+const LEASH_FOES = new Set(['hoglin', 'zoglin']);
+const LEASH_NEVER = new Set(['villager', 'wandering_trader', 'turtle', 'bat', 'squid', 'glow_squid', 'tadpole']);
+function canLeash(m) {
+  if (!(m instanceof Mob) || m instanceof Hanging || m.dead || m.deathTime > 0 || m.leashed || m.data.leash !== undefined) return false;
+  if (LEASH_FOES.has(m.type)) return true;
+  const T = m.T;
+  return T.cat !== 'monster' && T.cat !== 'misc' && T.cat !== 'ambient' && !T.fish && !LEASH_NEVER.has(m.type);
+}
+// what a lead is saved as: you, the block of the fence it is tied to, or the uuid of the mob holding it
+const leashKey = (g, h) => h instanceof Player ? 'player' : h instanceof LeashKnot ? [h.data.bx, h.data.by, h.data.bz] : g.entUUID(h);
+// Leashable.setLeashedTo: a mob riding something gets off first
+function leashTo(m, holder) {
+  if (m.vehicle && typeof mobDismount === 'function') mobDismount(m);
+  m.leashed = holder; m.data.leash = leashKey(m.game, holder);
+}
+// Leashable.dropLeash: the lead falls where the mob stands
+function unleash(m, drop) {
+  const had = m.leashed || m.data.leash !== undefined;
+  m.leashed = null; delete m.data.leash; m._leashGo = null; m._leashStay = false;
+  if (had && drop) m.game.dropItem(m.x, m.y, m.z, { id: I.LEAD, count: 1 });
+}
+// the knot on the fence at x, y, z (LeashFenceKnotEntity.getOrCreateKnot)
+function knotAt(g, x, y, z, make) {
+  for (const e of g.entities) if (e instanceof LeashKnot && !e.dead && e.data.bx === x && e.data.by === y && e.data.bz === z) return e;
+  if (!make) return null;
+  const k = createMob(g, 'leash_knot', x + 0.5, y + 0.375, z + 0.5, { bx: x, by: y, bz: z, f: 2 });
+  g.entities.push(k);
+  return k;
+}
+// Leashable.restoreLeashFromSave: the holder found again (a knot tied again once its fence is loaded); given up after 5 seconds
+function restoreLeash(m) {
+  const g = m.game, L = m.data.leash;
+  let h = null;
+  if (L === 'player') h = g.player && !g.player.dead ? g.player : null;
+  else if (Array.isArray(L)) { if (!g.world.isLoadedAt(L[0], L[2])) return; h = knotAt(g, L[0], L[1], L[2], true); }
+  else if (typeof L === 'string') h = g.entities.find(e => e instanceof Mob && e !== m && !e.dead && e.data.uuid === L) || null;
+  if (h) { m.leashed = h; return; }
+  if (m.age > 100) unleash(m, true);
+}
+
+/* ---------------- on a lead ---------------- */
+// Leashable.tickLeash with PathfinderMob's ranges, after the mob has moved: gone holder or past 10 blocks, the lead drops; from 6 to 10
+// the mob is pulled (each part of the direction squared, times 0.4) and does not walk by itself; closer, it walks to 2 blocks from the
+// holder unless it is panicking
+function tickLeash(m) {
+  const g = m.game, h = m.leashed;
+  if (h.unloaded) { m.leashed = null; return; }
+  if (m.deathTime > 0 || h.dead || h.deathTime > 0 || h.removed) { unleash(m, true); return; }
+  if (m.data.leash === undefined) m.data.leash = leashKey(g, h);
+  const dx = h.x - m.x, dy = h.y - m.y, dz = h.z - m.z, f = Math.hypot(dx, dy, dz);
+  m._leashGo = null; m._leashStay = false;
+  // TamableAnimal: a sitting pet stays put and only lets go past 10 blocks
+  if (m.data.tame && m.data.sitting) { if (f > 10) unleash(m, true); return; }
+  if (f > 10) { unleash(m, true); m._noMove = true; }
+  else if (f > 6) {
+    const ux = dx / f, uy = dy / f, uz = dz / f;
+    m.vx += Math.sign(ux) * ux * ux * 0.4; m.vy += Math.sign(uy) * uy * uy * 0.4; m.vz += Math.sign(uz) * uz * uz * 0.4;
+    // checkSlowFallDistance
+    if (m.vy > -0.5 && m.fallDist > 1) m.fallDist = 1;
+    m._noMove = true;
+  } else if (!(m.panic > 0)) {
+    m._noMove = false;
+    if (f > 2) { const k = (f - 2) / f; m._leashGo = [m.x + dx * k, m.y + dy * k, m.z + dz * k]; } else m._leashStay = true;
+  }
+  // Mob.updateControlFlags every 5 ticks lets it walk again
+  if (m.age % 5 === 0) m._noMove = false;
+}
+// goals that steer the mob every tick win over the lead's pull towards its holder
+const LEASH_OWN = new Set(['tempt', 'breed', 'melee', 'panic', 'panicTame', 'llamaSpit', 'llamaCaravan']);
+const _thinkLD = Mob.prototype.think;
+Mob.prototype.think = function () {
+  _thinkLD.call(this);
+  if (this._noMove && (this.leashed || this.data.leash === undefined)) { this.move = null; this.nav = null; if (!this.leashed) this._noMove = false; return; }
+  if (!this.leashed || LEASH_OWN.has(this.goal)) return;
+  const go = this._leashGo;
+  if (go) {
+    if (!this.nav || this.navDone() || this.age % 5 === 0) { if (!this.goTo(go[0], go[1], go[2], this.T.walk, 0.5)) { const ex = go[0] - this.x, ez = go[2] - this.z, l = Math.hypot(ex, ez) || 1; this.move = [ex / l, ez / l, this.T.walk, false]; } }
+    else this.followPath();
+    this.goal = 'lead';
+  } else if (this._leashStay && (this.goal === 'wander' || !this.goal)) { this.nav = null; this.move = null; }
+};
+const _tickLD = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickLD.call(this);
+  if (this.dead) return;
+  if (this.data.leash !== undefined && !this.leashed) restoreLeash(this);
+  if (this.leashed) tickLeash(this);
+};
+
+/* ---------------- putting leads on and taking them off ---------------- */
+// Mob.interact: the one leading it lets go (with anything in hand; no lead back in creative); checkAndHandleImportantInteractions: a
+// lead goes on anything that may be led
+const _interactLD = Mob.prototype.interact;
+Mob.prototype.interact = function (p, held) {
+  if (this.leashed === p && !this.dead) { unleash(this, p.mode !== 1); return true; }
+  if (held && held.id === I.LEAD && canLeash(this)) { leashTo(this, p); p.consumeHeld(1); return true; }
+  return _interactLD.call(this, p, held);
+};
+// LeadItem.bindPlayerMobs: everything the player leads within 7 blocks of the fence is tied to one knot on it
+Game.prototype.tieLeashed = function (p, x, y, z) {
+  if (p.mode === 3) return false;
+  let knot = null;
+  for (const e of this.entities) {
+    if (!(e instanceof Mob) || e.dead || e.leashed !== p) continue;
+    const hw = e.w / 2;
+    if (e.x + hw < x - 7 || e.x - hw > x + 7 || e.y + e.h < y - 7 || e.y > y + 7 || e.z + hw < z - 7 || e.z - hw > z + 7) continue;
+    if (!knot) { knot = knotAt(this, x, y, z, true); this.sound('leash_knot_place', x + 0.5, y + 0.5, z + 0.5); }
+    leashTo(e, knot);
+  }
+  return !!knot;
+};
+// FenceBlock.useWithoutItem: right clicking a fence ties up what you lead; LeadItem.useOn: so does a lead used on one, even sneaking
+const _useBlockLD = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit && BLK[hit.id] && BLK[hit.id].fence && this.tieLeashed(p, hit.x, hit.y, hit.z)) return true;
+  return _useBlockLD.call(this, p, hit, held);
+};
+const _useItemSpecialLD = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (held && held.id === I.LEAD && hit && BLK[hit.id] && BLK[hit.id].fence) { this.tieLeashed(p, hit.x, hit.y, hit.z); return true; }
+  return _useItemSpecialLD.call(this, p, hit, held, it);
+};
+
+/* ---------------- the knot on the fence ---------------- */
+defMob('leash_knot', { w: 0.375, h: 0.5, hp: 1, walk: 0, run: 0, cat: 'misc', ai: [], persistent: true, sounds: null, noPush: true });
+class LeashKnot extends Hanging {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    if (this.data.bx === undefined) { this.data.bx = Math.floor(x); this.data.by = Math.floor(y); this.data.bz = Math.floor(z); this.data.f = 2; }
+    this.breakSound = 'leash_knot_break';
+    this.place();
+  }
+  // at x + 0.5, y + 0.375, z + 0.5 of its fence, 0.375 across and 0.5 high
+  place() { this.x = this.data.bx + 0.5; this.y = this.data.by + 0.375; this.z = this.data.bz + 0.5; this.savePrev(); }
+  center() { return [this.x, this.y + 0.25, this.z]; }
+  hitBox() { return [this.x - 0.1875, this.y, this.z - 0.1875, this.x + 0.1875, this.y + 0.5, this.z + 0.1875]; }
+  wallPos() { return [this.data.bx, this.data.by, this.data.bz]; }
+  // not saved: the mobs tied to it tie it again when they load
+  keepWhenUnloaded() { return false; }
+  survives() { const d = BLK[this.game.world.getBlock(this.data.bx, this.data.by, this.data.bz)]; return !!(d && d.fence); }
+  dropSelf() { }
+  lightAt() { const l = this.game.world.getLightRaw(this.data.bx, this.data.by, this.data.bz); return [l >> 4, l & 15]; }
+  // LeashFenceKnotEntity.interact: ties what you lead here, or comes off (creative players get no leads back)
+  interact(p) {
+    if (p.mode === 3) return false;
+    const g = this.game, x = this.data.bx, y = this.data.by, z = this.data.bz;
+    let tied = false;
+    for (const e of g.entities) {
+      if (!(e instanceof Mob) || e.dead || e.leashed !== p) continue;
+      if (Math.abs(e.x - x - 0.5) > 7.5 || Math.abs(e.y - y) > 7.5 || Math.abs(e.z - z - 0.5) > 7.5) continue;
+      leashTo(e, this); tied = true;
+    }
+    if (!tied) {
+      this.dead = true;
+      if (p.mode === 1) for (const e of g.entities) if (e instanceof Mob && e.leashed === this) unleash(e, false);
+    }
+    return true;
+  }
+  // HangingEntity.hurt: any hit takes it off
+  hurt(amount, source) {
+    if (this.dead || source === 'fire' || source === 'lava' || source === 'in_fire' || source === 'drown' || source === 'fall') return false;
+    this.breakOff(true);
+    return true;
+  }
+  die() { this.breakOff(true); }
+  // LeashKnotRenderer: the 6 x 8 x 6 knot turned upside down on the post
+  render(r, a) {
+    drawMob(r, KNOT_MODEL, [{ key: 'entity/lead_knot' }], [this.x, this.y - 1.5, this.z], Math.PI, null, this.hurtTime > 0 ? [1, 0.45, 0.45, 1] : [1, 1, 1, 1], this.lightAt(), 1, 0);
+  }
+}
+MOB_CLASSES.leash_knot = LeashKnot;
+const KNOT_MODEL = { parts: [{ n: 'knot', p: [0, 0, 0], c: [[0, 0, -3, -8, -3, 6, 8, 6]] }] };
+// entity/lead_knot: twisted rope in the lead's tan
+defSkin('entity/lead_knot', 32, 32, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const g = c.getContext('2d'), img = g.createImageData(32, 32), d = img.data, R = mulberry32(37);
+  for (let y = 0; y < 14; y++) for (let x = 0; x < 24; x++) {
+    const o = (y * 32 + x) * 4, t = (x + y * 2) % 5, k = (t === 0 ? 0.66 : t === 1 ? 0.84 : 1) * (0.9 + R() * 0.1);
+    d[o] = 176 * k; d[o + 1] = 136 * k; d[o + 2] = 88 * k; d[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+});
+// a white spot in the model atlas for things drawn in plain colour
+defSkin('misc/white', 4, 4, () => { const c = document.createElement('canvas'); c.width = c.height = 4; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 4, 4); return c; });
+
+/* ---------------- the rope ---------------- */
+// Entity.getLeashOffset (eye height, width ahead), with the mobs that change it
+const LEASH_AT = { llama: [0.75, 0.5], trader_llama: [0.75, 0.5], bee: [0.5, 0.2], allay: [0.6, 0.1], axolotl: [0.6, 0.4], frog: [0.75, 0.4], wolf: [0.6, 0.4], parrot: [0.5, 0.4] };
+// Entity.getRopeHoldPosition: a player's main hand side (0.22 out, a metre below the top, a little ahead or behind when crouching),
+// a knot's middle, otherwise 0.7 of the eye height
+function ropeHold(h, a) {
+  const p = h.ipos(a);
+  if (h instanceof Player) {
+    const yaw = h.yaw, side = OPTIONS.mainHand === 1 && h === h.game.player ? -1 : 1, swim = h.pose === 'swimming';
+    const up = swim ? 0.2 : (h.h || 1.8) - 1, fw = swim ? -0.15 : h.pose === 'crouching' ? -0.2 : 0.07;
+    return [p[0] + Math.cos(yaw) * 0.22 * side - Math.sin(yaw) * fw, p[1] + up, p[2] - Math.sin(yaw) * 0.22 * side - Math.cos(yaw) * fw];
+  }
+  if (h instanceof LeashKnot) return [p[0], p[1] + 0.2, p[2]];
+  return [p[0], p[1] + (h.eyeY ? h.eyeY() - h.y : (h.h || 1) * 0.85) * 0.7, p[2]];
+}
+// MobRenderer.renderLeash: 24 steps from the mob to the holder, rising as f^2 to a higher holder or falling as 1 - (1 - f)^2 to a lower
+// one; two crossed ribbons 0.025 thick, brown with every other step darker, lit between the light at the two ends
+function drawLeash(r, m, h, a) {
+  const vt = VTEX['misc/white'];
+  if (!vt) return;
+  const A = ATLAS.S, U = (vt.reg.x + vt.reg.w / 2) / A, V = (vt.reg.y + vt.reg.h / 2) / A;
+  const p = m.ipos(a), k = LEASH_AT[m.type] || [1, 0.4], yaw = m.pyaw + (m.bodyYaw - m.pyaw) * a, fw = m.w * k[1];
+  const s = [p[0] + Math.sin(yaw) * fw, p[1] + (m.eyeY() - m.y) * k[0], p[2] + Math.cos(yaw) * fw], e = ropeHold(h, a);
+  const j = e[0] - s[0], q = e[1] - s[1], l = e[2] - s[2], n = 0.0125 / (Math.hypot(j, l) || 1e-4), ox = l * n, oz = j * n;
+  const L0 = m.lightAt(), L1 = h.lightAt ? h.lightAt() : L0;
+  for (const rev of [false, true]) {
+    let prev = null;
+    for (let u = 0; u <= 24; u++) {
+      const f = u / 24, x = s[0] + j * f, y = s[1] + (q > 0 ? q * f * f : q - q * (1 - f) * (1 - f)), z = s[2] + l * f;
+      const sh = u % 2 === (rev ? 1 : 0) ? 0.7 : 1, sky = L0[0] + (L1[0] - L0[0]) * f, blk = L0[1] + (L1[1] - L0[1]) * f;
+      const cur = rev ? [[x - ox, y, z + oz], [x + ox, y + 0.025, z - oz], sh, sky, blk] : [[x - ox, y + 0.025, z + oz], [x + ox, y, z - oz], sh, sky, blk];
+      if (prev) {
+        const quad = [[prev[0], prev], [prev[1], prev], [cur[1], cur], [cur[0], cur]];
+        for (const order of [[0, 1, 2, 3], [1, 0, 3, 2]]) for (const i of order) { const [v, w] = quad[i]; r.dv(v[0], v[1], v[2], U, V, -1, 0.5 * w[2], 0.4 * w[2], 0.3 * w[2], 1, w[3], w[4]); }
+      }
+      prev = cur;
+    }
+  }
+}
+const _renderLD = Mob.prototype.render;
+Mob.prototype.render = function (r, a) {
+  _renderLD.call(this, r, a);
+  const h = this.leashed;
+  if (h && !h.dead && !this.dead && (!(h instanceof Player) || h.mode !== 3 || h !== this.game.player)) drawLeash(r, this, h, a);
+};
+
+/* ---------------- llamas ---------------- */
+// Java's ground speed in m/s for a llama (movement speed 0.175) at a speed modifier: 0.98 s^2 / (1 - 0.546) a tick
+const llamaMs = k => 43.2 * (0.175 * k) ** 2;
+// AbstractHorse.createOffspringAttribute: around the parents' average, spread by their difference plus 30% of the range
+function offspringStat(a, b, min, max) {
+  a = Math.max(min, Math.min(max, a)); b = Math.max(min, Math.min(max, b));
+  const e = Math.abs(a - b) + 0.3 * (max - min), h = (a + b) / 2 + e * ((Math.random() + Math.random() + Math.random()) / 3 - 0.5);
+  return h > max ? 2 * max - h : h < min ? 2 * min - h : h;
+}
+for (const t of ['llama', 'trader_llama']) {
+  const f = MOB_INIT[t];
+  MOB_INIT[t] = function (m, o) {
+    if (f) f(m, o);
+    if (o.loading) return;
+    const R = Math.random, grp = m.game._spawnGroup;
+    if (o.parents) {
+      // Llama.getBreedOffspring: either parent's coat
+      const [a, b] = o.parents;
+      m.data.variant = (R() < 0.5 ? a : b).data.variant || 'creamy';
+      m.maxHealth = m.health = offspringStat(a.maxHealth, b.maxHealth, 15, 30);
+    } else {
+      // AbstractHorse.generateMaxHealth: 15 + 0..7 + 0..8; Llama.finalizeSpawn: a herd takes the coat of its first llama
+      m.maxHealth = m.health = 15 + Math.floor(R() * 8) + Math.floor(R() * 9);
+      if (grp) { if (grp.llama) m.data.variant = grp.llama; else grp.llama = m.data.variant; }
+    }
+  };
+  // Java's goals in order: FollowCaravan, RangedAttack (spit) before Panic, Breed, Tempt (hay bales), FollowParent, stroll, look
+  const T = MOB_TYPES[t];
+  T.ai = t === 'llama' ? ['llamaCaravan', 'llamaSpit', 'panic', 'breed', 'tempt', 'followParent', 'wander', 'look'] : ['llamaCaravan', 'llamaSpit', 'panic', 'wander', 'look'];
+  if (t === 'llama') T.tempt = ['hay_block'];
+  T.sounds = ['llama_ambient', 'llama_hurt', 'llama_death'];
+}
+const isLlama = e => e && (e.type === 'llama' || e.type === 'trader_llama') && !e.dead && e.deathTime === 0;
+// LlamaFollowCaravanGoal.firstIsLeashed: the caravan's first llama is on a lead or tied, at most 9 back
+function caravanLed(m, n) { if (n > 8) return false; const h = m._cHead; return !!h && (h.leashed ? true : caravanLed(h, n + 1)); }
+function leaveCaravan(m) { if (m._cHead && m._cHead._cTail === m) m._cHead._cTail = null; m._cHead = null; m._cSpeed = 2.1; }
+GOALS.llamaCaravan = function (m) {
+  const g = m.game;
+  if (!m._cHead) {
+    // canUse (goals are picked every other tick): the nearest caravan end in reach, else the nearest led llama with nobody behind
+    if (m.leashed || m.age % 2) return false;
+    const near = g.entities.filter(e => e !== m && isLlama(e) && Math.abs(e.x - m.x) < 9 + (e.w + m.w) / 2 && Math.abs(e.y - m.y) < 4 + e.h && Math.abs(e.z - m.z) < 9 + (e.w + m.w) / 2);
+    let best = null, bd = Infinity;
+    for (const e of near) if (e._cHead && !e._cTail) { const d = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2; if (d <= bd) { bd = d; best = e; } }
+    if (!best) for (const e of near) if (e.leashed && !e._cTail) { const d = (e.x - m.x) ** 2 + (e.y - m.y) ** 2 + (e.z - m.z) ** 2; if (d <= bd) { bd = d; best = e; } }
+    if (!best || bd < 4 || (!best.leashed && !caravanLed(best, 1))) return false;
+    m._cHead = best; best._cTail = m; m._cSpeed = 2.1; m._cCheck = 0;
+  } else {
+    // canContinueToUse: the one in front alive and the caravan still led; more than 26 blocks behind it runs faster, up to 3x, then gives up
+    const h = m._cHead;
+    if (!isLlama(h) || m.leashed || !caravanLed(m, 0)) { leaveCaravan(m); return false; }
+    if ((h.x - m.x) ** 2 + (h.y - m.y) ** 2 + (h.z - m.z) ** 2 > 676) {
+      if (m._cSpeed <= 3) { m._cSpeed *= 1.2; m._cCheck = 20; }
+      else if (m._cCheck === 0) { leaveCaravan(m); return false; }
+    }
+    if (m._cCheck > 0) m._cCheck--;
+  }
+  // tick: towards a spot 2 blocks short of the llama in front (not while tied to a fence)
+  const h = m._cHead, dx = h.x - m.x, dy = h.y - m.y, dz = h.z - m.z, d = Math.hypot(dx, dy, dz), k = Math.max(d - 2, 0) / (d || 1);
+  if (k > 0) {
+    const tx = m.x + dx * k, ty = m.y + dy * k, tz = m.z + dz * k, sp = llamaMs(m._cSpeed);
+    if (!m.nav || m.navDone() || m.age % 10 === 0) { if (!m.goTo(tx, ty, tz, sp, 0.5)) { const l = Math.hypot(dx, dz) || 1; m.move = [dx / l, dz / l, sp, false]; } }
+    else m.followPath();
+  } else m.nav = null;
+  return true;
+};
+// LlamaHurtByTargetGoal: whoever hurt it, followed up to 40 blocks, forgotten after 3 seconds unseen or once it has spat;
+// TraderLlamaDefendWanderingTraderGoal: whoever hurt its trader
+const _onHurtByLD = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  _onHurtByLD.call(this, a, source);
+  if (!a || a === this || (a instanceof Player && (a.mode === 1 || a.mode === 3))) return;
+  if (isLlama(this) && !(a instanceof Mob && a.type === this.type)) { this.target = a; this._spit = { once: true, range: 40, unseen: 0 }; }
+  if (this.type === 'wandering_trader') for (const e of this.game.entities) if (isLlama(e) && e.type === 'trader_llama' && e.leashed === this) { e.target = a; e._spit = { once: false, range: 40, unseen: 0 }; }
+};
+// LlamaAttackWolfGoal: a wild wolf within 10 blocks (follow range 40 x 0.25), looked for one time in 16 a tick
+function llamaWolf(m) {
+  if (Math.random() >= 1 / 16) return null;
+  let best = null, bd = 10;
+  for (const e of m.game.entities) if (e.type === 'wolf' && !e.dead && e.deathTime === 0 && !e.data.tame && Math.abs(e.y - m.y) < 4 + e.h) { const d = m.distTo(e); if (d < bd) { bd = d; best = e; } }
+  return best;
+}
+// RangedAttackGoal(1.25, 40, 40, 20): closes in until it has seen the target for 5 ticks within 20 blocks, spits every 40 ticks
+GOALS.llamaSpit = function (m) {
+  let t = m.target;
+  const S = m._spit;
+  if (t && (!S || t.dead || t.deathTime > 0 || (t instanceof Player && (!t.survival || t.dead)) || m.distTo(t) > S.range)) t = m.target = null;
+  if (!t) { const w = llamaWolf(m); if (w) { t = m.target = w; m._spit = { once: false, range: 10, unseen: 0, wolf: true }; } }
+  if (!t) { m._spitT = -1; m._seeT = 0; return false; }
+  const sp = m._spit, d = m.distTo(t), see = m.canSee(t);
+  m._seeT = see ? (m._seeT || 0) + 1 : 0;
+  if (!sp.wolf) { sp.unseen = see ? 0 : sp.unseen + 1; if (sp.unseen > 60) { m.target = null; m._spitT = -1; return false; } }
+  if (d <= 20 && m._seeT >= 5) m.nav = null;
+  else if (!m.nav || m.navDone() || m.age % 10 === 0) { if (!m.goTo(t.x, t.y, t.z, llamaMs(1.25), 1)) { const ex = t.x - m.x, ez = t.z - m.z, l = Math.hypot(ex, ez) || 1; m.move = [ex / l, ez / l, llamaMs(1.25), false]; } }
+  else m.followPath();
+  m.lookAt(t.x, t.y + (t.eyeH || t.h * 0.85), t.z);
+  m._spitT = (m._spitT === undefined ? -1 : m._spitT) - 1;
+  if (m._spitT === 0) { if (see) { llamaSpitAt(m, t); m._spitT = 40; if (sp.once) m.target = null; } }
+  else if (m._spitT < 0) m._spitT = 40;
+  return true;
+};
+// Llama.spit: from just ahead of the mouth at its eyes less 0.1, aimed at a third of the target's height plus a fifth of the
+// distance, at 1.5 with an inaccuracy of 10
+function llamaSpitAt(m, t) {
+  const g = m.game, f = (m.w + 1) * 0.5, yaw = m.bodyYaw;
+  const sx = m.x + Math.sin(yaw) * f, sy = m.eyeY() - 0.1, sz = m.z + Math.cos(yaw) * f;
+  const dx = t.x - sx, dy = t.y + t.h / 3 - sy, dz = t.z - sz, up = Math.hypot(dx, dz) * 0.2, l = Math.hypot(dx, dy + up, dz) || 1;
+  const tri = () => 0.172275 * (Math.random() - Math.random());
+  const pr = g.spawnProjectile('spit', sx, sy, sz, (dx / l + tri()) * 1.5, ((dy + up) / l + tri()) * 1.5, (dz / l + tri()) * 1.5, m);
+  pr.w = pr.h = 0.25; pr.life = 400;
+  g.sound('llama_spit', m.x, m.y, m.z);
+  g.particles.poof(sx, sy, sz, [0.92, 0.92, 0.86], 5);
+}
+// LlamaSpit: slowed by 0.99 and pulled down 0.06 a tick, gone in water or on hitting a block; 1 damage (scaled for players)
+const _projTickLD = Projectile.prototype.tick;
+Projectile.prototype.tick = function () {
+  if (this.kind !== 'spit') return _projTickLD.call(this);
+  this.savePrev(); this.age++;
+  const g = this.game, w = g.world;
+  if (--this.life <= 0) { this.dead = true; return; }
+  const sp = Math.hypot(this.vx, this.vy, this.vz), n = Math.max(1, Math.ceil(sp / 0.25)), living = g.livingList();
+  for (let s = 0; s < n; s++) {
+    this.x += this.vx / n; this.y += this.vy / n; this.z += this.vz / n;
+    if (SOLID[w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z))]) { this.dead = true; return; }
+    for (const e of living) {
+      if (e === this.owner || e.dead || e.deathTime > 0 || (e instanceof Player && e.mode === 3) || (e.T && e.T.cat === 'misc' && !(e instanceof LeashKnot))) continue;
+      const hw = (e.w || 0.6) / 2 + 0.125;
+      if (Math.abs(e.x - this.x) < hw && Math.abs(e.z - this.z) < hw && this.y > e.y - 0.125 && this.y < e.y + e.h + 0.125) {
+        e.hurt(e instanceof Player ? [0, 1, 1, 1.5][OPTIONS.difficulty] : 1, 'spit', this.owner);
+        this.dead = true; g.particles.poof(this.x, this.y, this.z, [0.92, 0.92, 0.86], 4);
+        return;
+      }
+    }
+  }
+  if (w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.WATER) { this.dead = true; return; }
+  this.vx *= 0.99; this.vy = this.vy * 0.99 - 0.06; this.vz *= 0.99;
+  if (Math.hypot(this.vx, this.vy, this.vz) > 0.01) this.dir = [this.vx, this.vy, this.vz];
+};
+BLOCKABLE.add('spit');
+// LlamaSpitRenderer: seven 2-pixel cubes in a cross, turned to its flight
+const SPIT_MODEL = { parts: [{ n: 'main', p: [0, 0, 0], c: [[0, 0, -4, 0, 0, 2, 2, 2], [0, 0, 0, -4, 0, 2, 2, 2], [0, 0, 0, 0, -4, 2, 2, 2], [0, 0, 0, 0, 0, 2, 2, 2], [0, 0, 2, 0, 0, 2, 2, 2], [0, 0, 0, 2, 0, 2, 2, 2], [0, 0, 0, 0, 2, 2, 2, 2]] }] };
+const _projRenderLD = Projectile.prototype.render;
+Projectile.prototype.render = function (r, a) {
+  if (this.kind !== 'spit') return _projRenderLD.call(this, r, a);
+  const p = this.ipos(a), d = this.dir || [this.vx, this.vy, this.vz];
+  drawMob(r, SPIT_MODEL, [{ key: 'entity/llama/spit' }], [p[0], p[1] + 0.15 - 1.5, p[2]], Math.atan2(d[0], d[2]), null, [1, 1, 1, 1], this.lightAt(), 1, 0);
+};
+defSkin('entity/llama/spit', 64, 32, () => {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 32;
+  const g = c.getContext('2d'), img = g.createImageData(64, 32), d = img.data, R = mulberry32(53);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 8; x++) { const o = (y * 64 + x) * 4, k = 0.86 + R() * 0.14; d[o] = 226 * k; d[o + 1] = 228 * k; d[o + 2] = 214 * k; d[o + 3] = 255; }
+  g.putImageData(img, 0, 0);
+  return c;
+});
+
+/* ---------------- sounds ---------------- */
+const LD_SOUNDS = [['leash_knot_place', 'Leash knot tied'], ['leash_knot_break', 'Leash knot breaks'], ['llama_spit', 'Llama spits'], ['llama_ambient', 'Llama bleats'], ['llama_hurt', 'Llama hurts'], ['llama_death', 'Llama dies']];
+for (const [n, t] of LD_SOUNDS) { SND_CAT[n] = /leash/.test(n) ? 'neutral' : 'neutral'; SUB_TEXT[n] = t; }
+const LD_SOUND_SET = new Set(LD_SOUNDS.map(s => s[0]));
+const _audioPlayLD = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!LD_SOUND_SET.has(name)) return _audioPlayLD.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, v = 0.9 + Math.random() * 0.2;
+  if (name === 'leash_knot_place') { this.noiseHit(dst, 'bandpass', 900, 2, 0.08, 0.35); this.noiseHit(dst, 'bandpass', 700, 2, 0.08, 0.3, t0 + 0.07); }
+  else if (name === 'leash_knot_break') { this.noiseHit(dst, 'bandpass', 1300, 3, 0.06, 0.4); this.noiseHit(dst, 'lowpass', 500, 1, 0.1, 0.25, t0 + 0.05); }
+  else if (name === 'llama_spit') { this.noiseHit(dst, 'highpass', 2500, 1, 0.12, 0.45); this.tone(dst, 'sine', 500 * v, 200 * v, 0.08, 0.06); }
+  else { const f = (name === 'llama_hurt' ? 330 : name === 'llama_death' ? 220 : 260) * v; this.tone(dst, 'sawtooth', f, f * 0.85, name === 'llama_death' ? 0.5 : 0.3, 0.05); this.tone(dst, 'triangle', f * 2, f * 1.7, 0.25, 0.03, t0 + 0.02); }
+};
+
+/* @file 149_animals2.js */
+/* ===================================================================
+   PART 38: rabbits, pandas, sheep and polar bears like Java's
+   - rabbits: white (4 in 5) or white splotched in snowy places, gold in
+     deserts, elsewhere brown, salt and pepper or black (5:4:1); a group
+     shares one coat and its later rabbits are young; a young one takes
+     a parent's coat (one in 20 its birthplace's); they keep away from
+     players (8 blocks, less sneaking), wolves (10) and monsters (4), and
+     with mob griefing on they nibble ripe carrots in farms a stage at a
+     time, then are full for a couple of seconds
+   - pandas carry a main and a hidden gene (brown and weak only show in
+     pairs) passed on like Java's, sometimes mutating; they pick up
+     bamboo and cake (or take it from you) and sit up to eat it, lazy
+     ones lie on their backs and dawdle, playful ones and cubs roll
+     over, cubs sneeze (weak ones often) making nearby pandas jump and
+     now and then leaving a slime ball, worried ones keep away from
+     players and monsters, stand up whenever they are not eating and
+     cover their eyes in thunderstorms, weak ones have half the health;
+     they won't breed without bamboo nearby and shake their heads
+     instead; hit one and it bites back once (aggressive ones keep at it
+     and bring the other aggressive ones), bamboo calms one down; only
+     fire and the like make them panic; Java's poses and sounds
+   - sheep: a lamb gets the dye its parents' colours craft into (white
+     and red make pink...), else a parent's; a sheep killed drops its
+     wool unless shorn; "jeb_" fades through every colour; short grass
+     at its feet is eaten before the grass block; Java's head bob while
+     eating, its shearing and dye sounds
+   - polar bears: the bears after the first of a group are cubs; a cub
+     hurt runs off and brings the adults within 20 blocks; adults with a
+     cub near go for players within 10 blocks, any bear hunts foxes; an
+     adult rears up and roars before it swipes and doesn't run away;
+     cod (3 in 4) or salmon as drops; bear sounds
+   - groups: the bears, rabbits and ocelots after the first are young,
+     one in five pandas and donkeys, no wolves, foxes or axolotls, one
+     in twenty of the rest, also in groups spawning later on
+   =================================================================== */
+
+/* ---------------- young in groups ---------------- */
+// AgeableMobGroupData: the chance that a group's later members spawn young
+const V_BABY_ODDS = { polar_bear: 1, rabbit: 1, ocelot: 1, panda: 0.2, donkey: 0.2, mule: 0.2, wolf: 0, fox: 0, axolotl: 0 };
+const vBabyOdds = type => V_BABY_ODDS[type] !== undefined ? V_BABY_ODDS[type] : 0.05;
+
+/* ---------------- running away ---------------- */
+// DefaultRandomPos.getPosAway: a standable spot up to r out (vr up or down), within a quarter turn of straight away from what it flees
+function spotAway(m, from, r, vr) {
+  const w = m.game.world, base = Math.atan2(m.x - from.x, m.z - from.z);
+  for (let k = 0; k < 10; k++) {
+    const a = base + (Math.random() * 2 - 1) * Math.PI / 2, d = Math.sqrt(Math.random()) * Math.SQRT2 * r;
+    const dx = Math.sin(a) * d, dz = Math.cos(a) * d;
+    if (Math.abs(dx) > r || Math.abs(dz) > r) continue;
+    const x = Math.floor(m.x + dx), z = Math.floor(m.z + dz);
+    if (!w.isLoadedAt(x, z)) continue;
+    for (let dy = vr; dy >= -vr; dy--) { const y = Math.floor(m.y) + dy; if (NAV.stand(w, x, y, z, m) && w.getBlock(x, y, z) !== B.WATER) return [x, y, z]; }
+  }
+  return null;
+}
+// AvoidEntityGoal: the nearest thing it can see of each kind in turn (a sneaking player is noticed at 0.8 of the range, an invisible one
+// at 0.07), a spot away from it that takes it further off, run to at the given speed (ranges [test, blocks])
+function avoidGoal(m, fears, speed) {
+  if (m._flee) {
+    if (!m.nav || m.navDone() || m._flee.dead) { m._flee = null; return false; }
+    m.followPath();
+    return true;
+  }
+  if (m.age % 2) return false;
+  const g = m.game;
+  for (const [is, range] of fears) {
+    let best = null, bd = Infinity;
+    for (const e of is === 'player' ? [g.player] : g.entities) {
+      if (!e || e === m || e.dead || e.deathTime > 0 || (is === 'player' ? !(e.survival && e.mode !== 3) : !is(e))) continue;
+      let r = range;
+      if (e instanceof Player) { if (e.sneaking || e.pose === 'crouching') r *= 0.8; if (e.effectLevel('invisibility')) r *= 0.07; r = Math.max(r, 2); }
+      const d = m.distTo(e);
+      if (d < r && d < bd && Math.abs(e.y - m.y) < 3 + e.h && m.canSee(e)) { bd = d; best = e; }
+    }
+    if (!best) continue;
+    const s = spotAway(m, best, 16, 7);
+    if (!s || (s[0] + 0.5 - best.x) ** 2 + (s[2] + 0.5 - best.z) ** 2 < (m.x - best.x) ** 2 + (m.z - best.z) ** 2) continue;
+    if (!m.goTo(s[0] + 0.5, s[1], s[2] + 0.5, speed)) continue;
+    m._flee = best;
+    return true;
+  }
+  return false;
+}
+
+/* ---------------- rabbits ---------------- */
+// Rabbit.getRandomRabbitType
+function rabbitTypeAt(g, x, y, z) {
+  const bi = g.vBiome ? g.vBiome(Math.floor(x), Math.floor(y), Math.floor(z)) : biomeAt(g, x, z), i = Math.floor(Math.random() * 100);
+  if (SNOWY_BIOMES.has(bi)) return i < 80 ? 'white' : 'white_splotched';
+  if (bi === BI.DESERT) return 'gold';
+  return i < 50 ? 'brown' : i < 90 ? 'salt' : 'black';
+}
+const _initRB = MOB_INIT.rabbit;
+MOB_INIT.rabbit = function (m, o) {
+  if (_initRB) _initRB(m, o);
+  if (o.loading) return;
+  const R = Math.random, grp = m.game._spawnGroup;
+  if (o.parents) {
+    // Rabbit.getBreedOffspring: either parent's coat, one time in 20 its birthplace's
+    const [a, b] = o.parents;
+    m.data.variant = R() < 1 / 20 ? rabbitTypeAt(m.game, m.x, m.y, m.z) : (R() < 0.5 ? b : a).data.variant || 'brown';
+  } else {
+    // Rabbit.finalizeSpawn: a group shares its first rabbit's coat
+    m.data.variant = grp && grp.rabbit || rabbitTypeAt(m.game, m.x, m.y, m.z);
+    if (grp) grp.rabbit = m.data.variant;
+  }
+};
+// Rabbit's AvoidEntityGoals: players 8 blocks, wolves 10, monsters 4, all at 2.2
+const RABBIT_FEARS = [['player', 8], [e => e.type === 'wolf', 10], [e => e.T && e.T.cat === 'monster', 4]];
+GOALS.rabbitAvoid = m => avoidGoal(m, RABBIT_FEARS, m.T.run);
+// Rabbit.customServerAiStep: moreCarrotTicks counts down by 0 to 2 a tick
+const _tickRB = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  _tickRB.call(this);
+  if (this.type === 'rabbit' && this.data.carrotT > 0) this.data.carrotT = Math.max(0, this.data.carrotT - Math.floor(Math.random() * 3));
+};
+// RaidGardenGoal (MoveToBlockGoal, 16 blocks, the layers at and under its feet): with mob griefing on, every 5 to 10 seconds a rabbit
+// that is not full looks for a ripe carrot on farmland and walks onto it at 0.7; Java's goal gives up at its next check (the walk goes
+// on), so the carrot is nibbled when the rabbit already stands on it as the goal starts: a stage off it, then full for about 40 ticks
+GOALS.rabbitRaid = function (m) {
+  const g = m.game, w = g.world;
+  if (m._raid) {
+    rabbitNibble(m);
+    if (--m._raid.t <= 0 || !m._raid.can) { m._raid = null; return false; }
+    return true;
+  }
+  if ((m._raidNext || 0) > 0) { m._raidNext--; return false; }
+  if (m.age % 2 || !g.rule('mobGriefing')) return false;
+  m._raidNext = Math.ceil((200 + Math.floor(Math.random() * 200)) / 2) * 2;
+  if (m.data.carrotT > 0) return false;
+  const s = nearestBlockFrom(m, 16, 1, (x, y, z) => w.getBlock(x, y, z) === B.FARMLAND && w.getBlock(x, y + 1, z) === B.CARROTS && (w.getMeta(x, y + 1, z) & 7) >= 7);
+  if (!s) return false;
+  m._raid = { x: s[0], y: s[1] + 1, z: s[2], can: true, t: 1 };
+  m.goTo(s[0] + 0.5, s[1] + 1, s[2] + 0.5, m.T.walk * 0.7 / 0.6);
+  rabbitNibble(m);
+  return true;
+};
+function rabbitNibble(m) {
+  const R = m._raid, g = m.game, w = g.world;
+  if (!R.can || (R.x + 0.5 - m.x) ** 2 + (R.y + 0.5 - m.y) ** 2 + (R.z + 0.5 - m.z) ** 2 >= 1) return;
+  m.lookAt(R.x + 0.5, R.y + 1, R.z + 0.5);
+  if (w.getBlock(R.x, R.y, R.z) === B.CARROTS) {
+    const age = w.getMeta(R.x, R.y, R.z) & 7;
+    g.particles.blockBreak(R.x, R.y, R.z, B.CARROTS);
+    if (age === 0) { w.setBlock(R.x, R.y, R.z, 0, 0); g.dropItem(R.x + 0.5, R.y + 0.2, R.z + 0.5, { id: I.CARROT, count: 1 }); }
+    else w.setMeta(R.x, R.y, R.z, age - 1);
+    g.remeshNear(R.x, R.z);
+    m.data.carrotT = 40;
+  }
+  R.can = false; m._raidNext = 20;
+}
+MOB_TYPES.rabbit.ai = ['panic', 'breed', 'tempt', 'rabbitAvoid', 'rabbitRaid', 'wander', 'look'];
+
+/* ---------------- sheep ---------------- */
+// Sheep.getOffspringColor: what the parents' two dyes craft into (the two-dye recipes), else either parent's colour
+const SHEEP_DYE_MIX = new Map(DYE_MIX.filter(r => r[1].length === 2).map(([c, parts]) => [parts.slice().sort().join('|'), c]));
+const dyeMix = (a, b) => SHEEP_DYE_MIX.get([a, b].sort().join('|'));
+const _initSH = MOB_INIT.sheep;
+MOB_INIT.sheep = function (m, o) {
+  if (_initSH) _initSH(m, o);
+  if (o.loading || !o.parents) return;
+  const a = o.parents[0].data.color || 'white', b = o.parents[1].data.color || 'white';
+  m.data.color = dyeMix(a, b) || (Math.random() < 0.5 ? a : b);
+};
+// SheepFurLayer: jeb_ fades from colour to colour (in DyeColor order) every 25 ticks, each sheep at its own place in the cycle
+const DYE_ORDER = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'];
+const _skinSH = MOB_SKINS.sheep;
+MOB_SKINS.sheep = m => {
+  const s = _skinSH(m);
+  if (m.customName === 'jeb_' && s[1]) {
+    const j = Math.floor(m.age / 25) + (m.id || 0), ta = dyeTint(DYE_ORDER[j % 16]), tb = dyeTint(DYE_ORDER[(j + 1) % 16]), h = (m.age % 25) / 25;
+    s[1] = Object.assign({}, s[1], { tint: ta.map((v, i) => v + (tb[i] - v) * h) });
+  }
+  return s;
+};
+// EatBlockGoal: one chance in 1000 (50 for a lamb) at each of its checks, every other tick, on short grass or a grass block; 40 ticks with
+// the head down, eaten 4 before the end: the short grass at its feet first
+GOALS.eatGrass = function (m) {
+  const d = m.data, g = m.game, w = g.world;
+  if (d.eat > 0) {
+    d.eat--; m.nav = null;
+    if (d.eat === 4) {
+      const x = Math.floor(m.x), y = Math.floor(m.y), z = Math.floor(m.z), grief = g.rule('mobGriefing');
+      if (w.getBlock(x, y, z) === B.SHORT_GRASS) { if (grief) { g.particles.blockBreak(x, y, z, B.SHORT_GRASS); w.setBlock(x, y, z, 0, 0); g.remeshNear(x, z); } sheepAte(m); }
+      else if (w.getBlock(x, y - 1, z) === B.GRASS_BLOCK) { if (grief) { g.particles.blockBreak(x, y - 1, z, B.GRASS_BLOCK); w.setBlock(x, y - 1, z, B.DIRT, 0); g.remeshNear(x, z); } sheepAte(m); }
+    }
+    return true;
+  }
+  if (m.age % 2 || Math.random() * (m.baby ? 50 : 1000) >= 1) return false;
+  const x = Math.floor(m.x), y = Math.floor(m.y), z = Math.floor(m.z);
+  if (w.getBlock(x, y, z) !== B.SHORT_GRASS && w.getBlock(x, y - 1, z) !== B.GRASS_BLOCK) return false;
+  d.eat = 40; m.nav = null;
+  return true;
+};
+// Sheep.ate: the fleece grows back and a lamb grows up a minute sooner
+function sheepAte(m) { m.data.sheared = false; if (m.baby) m.growth = Math.min(0, m.growth + 1200); }
+// SheepModel: the head lowers over 4 ticks, bobs (pi/5 + 0.22 sin) and comes up again
+MOB_ANIM.sheep = (m, st) => { st.eatT = m.data.eat > 0 ? m.data.eat : 0; st.pt = st.age - m.age; };
+MOB_MODELS.sheep.anim = function (P, st) {
+  animQuad(P, st);
+  const t = st.eatT || 0, f = st.pt || 0;
+  if (t <= 0) return;
+  const pos = t >= 4 && t <= 36 ? 1 : t < 4 ? (t - f) / 4 : -((t - 40) - f) / 4;
+  const ang = t > 4 && t <= 36 ? Math.PI / 5 + 0.21991149 * Math.sin((t - 4 - f) / 32 * 28.7) : Math.PI / 5;
+  P['head#p'] = [0, 6 + pos * 9, -8]; P.head = [ang, P.head ? P.head[1] : 0, 0];
+};
+// Sheep.shear (with Java's spread) and DyeItem on a sheep (with its sound)
+const _interactSH = MOB_INTERACT.sheep;
+MOB_INTERACT.sheep = function (m, p, held, name) {
+  if (held && held.id === I.SHEARS && !m.data.sheared && !m.baby) { dispShear(m.game, m); p.damageHeld(1); return true; }
+  if (held && ITEMS[held.id].dye && !m.data.sheared && m.data.color !== ITEMS[held.id].dye) m.game.sound('dye_use', m.x, m.y, m.z);
+  return _interactSH(m, p, held, name);
+};
+// the loot table entities/sheep/<colour>: its wool, unless shorn
+const _dropLootSH = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  const wool = this.type === 'sheep' && !this.data.sheared && !this.baby && !this.noDrops && B[(this.data.color || 'white').toUpperCase() + '_WOOL'];
+  _dropLootSH.call(this);
+  if (wool) this.game.dropItem(this.x, this.y + 0.5, this.z, { id: wool, count: 1 });
+};
+
+/* ---------------- polar bears ---------------- */
+MOB_TYPES.polar_bear.ai = ['target', 'pbTarget', 'pbMelee', 'panic', 'followParent', 'wander', 'look'];
+MOB_TYPES.polar_bear.hunts = ['fox'];
+MOB_TYPES.polar_bear.sounds = ['polar_bear_ambient', 'polar_bear_hurt', 'polar_bear_death'];
+// PolarBearHurtByTargetGoal: an adult goes for whoever hurt it (and stays angry 20 to 39 seconds); a cub runs off and the adults within
+// 20 blocks that have nothing to fight go for its attacker instead. Only cubs (and burning bears) panic
+const _onHurtByPB = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  if (this.type !== 'polar_bear') return _onHurtByPB.call(this, a, source);
+  if (this.baby) this.panic = 80 + Math.random() * 40;
+  if (!a || a === this || (a instanceof Player && (a.mode === 1 || a.mode === 3))) return;
+  if (!this.baby) { this.target = a; this.anger = 400 + Math.floor(Math.random() * 380); return; }
+  for (const e of this.game.entities)
+    if (e.type === 'polar_bear' && e !== this && !e.dead && !e.baby && !e.target && Math.abs(e.x - this.x) < 20 && Math.abs(e.y - this.y) < 10 && Math.abs(e.z - this.z) < 20) { e.target = a; e.anger = 400 + Math.floor(Math.random() * 380); }
+};
+// PolarBearAttackPlayersGoal: an adult with a cub within 8 blocks (4 up or down) goes for a player it sees within 10, now and then
+GOALS.pbTarget = function (m) {
+  const p = m.game.player;
+  if (m._cubFight) {
+    const t = m.target;
+    if (t !== p || !p || p.dead || !p.survival || m.distTo(p) > 10) { if (t === p) m.target = null; m._cubFight = false; }
+    else { m._unseen = m.canSee(p) ? 0 : (m._unseen || 0) + 1; if (m._unseen > 60) { m.target = null; m._cubFight = false; } else m.anger = Math.max(m.anger, 20); }
+    return false;
+  }
+  if (m.baby || m.target || !p || p.dead || !p.survival || p.mode === 3 || Math.random() >= 1 / 20) return false;
+  if (!m.game.entities.some(e => e.type === 'polar_bear' && e.baby && !e.dead && Math.abs(e.x - m.x) < 8 + e.w && Math.abs(e.y - m.y) < 4 + e.h && Math.abs(e.z - m.z) < 8 + e.w)) return false;
+  let r = 10;
+  if (p.sneaking || p.pose === 'crouching') r *= 0.8;
+  if (p.effectLevel('invisibility')) r *= 0.07;
+  if (m.distTo(p) < Math.max(r, 2) && m.canSee(p)) { m.target = p; m.anger = 20; m._cubFight = true; m._unseen = 0; }
+  return false;
+};
+// PolarBearMeleeAttackGoal: close in at 1.25; near (within the target's width + 3) but out of reach it rears up for the last 10 ticks of
+// each 20-tick wait, roaring (every 2 seconds at most), and drops down to swipe
+GOALS.pbMelee = function (m) {
+  const t = m.target;
+  if (!t) { m._standing = false; return false; }
+  const cd0 = m.attackCd, r = GOALS.melee(m);
+  if (!r) { m._standing = false; return false; }
+  const swung = cd0 <= 1 && m.attackCd === 20, d2 = (t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2;
+  if (swung) m._standing = false;
+  else if (d2 < (t.w + 3) ** 2) {
+    if (m.attackCd <= 0) { m._standing = false; m.attackCd = 20; }
+    if (m.attackCd <= 10) { m._standing = true; if (!(m._warnT > 0)) { m.game.sound('polar_bear_warning', m.x, m.y + 1, m.z); m._warnT = 40; } }
+  } else { m.attackCd = 20; m._standing = false; }
+  return true;
+};
+// the stand animation counts 0 to 6 and back, a step a tick; the model uses its square
+const _tickPB = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'polar_bear' && this.baby && this.ambientT <= 1 && !this.data.silent) { this.ambientT = 240 + Math.random() * 480; this.game.sound('polar_bear_ambient_baby', this.x, this.y + this.h / 2, this.z); }
+  _tickPB.call(this);
+  if (this.type !== 'polar_bear') return;
+  if (this._warnT > 0) this._warnT--;
+  if (!this.target) this._standing = false;
+  this._standO = this._stand || 0;
+  this._stand = Math.max(0, Math.min(6, this._standO + (this._standing ? 1 : -1)));
+};
+MOB_ANIM.polar_bear = (m, st) => { const a = st.age - m.age, g = ((m._standO || 0) + ((m._stand || 0) - (m._standO || 0)) * a) / 6; st.stand = g * g; };
+// PolarBearModel: the body tips back 0.35 pi, the front legs and head rise
+MOB_MODELS.polar_bear.anim = function (P, st) {
+  animQuad(P, st);
+  const g = st.stand || 0, h = 1 - g;
+  if (!g) return;
+  P.body = [Math.PI / 2 - g * Math.PI * 0.35, 0, 0]; P['body#p'] = [-2, 9 * h + 11 * g, 12];
+  const fy = 14 * h - 6 * g, fz = -8 * h - 4 * g;
+  P['right_front_leg#p'] = [-3.5, fy, fz]; P['left_front_leg#p'] = [3.5, fy, fz];
+  P.right_front_leg = [(P.right_front_leg ? P.right_front_leg[0] : 0) - g * Math.PI * 0.45, 0, 0];
+  P.left_front_leg = [(P.left_front_leg ? P.left_front_leg[0] : 0) - g * Math.PI * 0.45, 0, 0];
+  P['head#p'] = [0, st.baby ? 10 * h - 9 * g : 10 * h - 14 * g, -16 * h - 7 * g];
+  P.head = [(P.head ? P.head[0] : 0) + g * Math.PI * 0.15, P.head ? P.head[1] : 0, 0];
+};
+// the loot table: cod 0-2 (3 in 4) or salmon 0-2, cooked if it burned
+const _dropLootPB = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  if (this.type !== 'polar_bear') return _dropLootPB.call(this);
+  const T = this.T, keep = T.drops;
+  T.drops = [Math.random() < 0.75 ? drop('cod', 0, 2, { cook: 'cooked_cod' }) : drop('salmon', 0, 2, { cook: 'cooked_salmon' })];
+  try { return _dropLootPB.call(this); } finally { T.drops = keep; }
+};
+
+/* ---------------- pandas: genes ---------------- */
+const PANDA_RECESSIVE = new Set(['brown', 'weak']);
+// Panda.Gene.getRandom: lazy, worried, playful and aggressive one in 16 each, weak 5, brown 2, normal 5
+function pandaGene() { const i = Math.floor(Math.random() * 16); return i === 0 ? 'lazy' : i === 1 ? 'worried' : i === 2 ? 'playful' : i === 4 ? 'aggressive' : i < 9 ? 'weak' : i < 11 ? 'brown' : 'normal'; }
+// Panda.Gene.getVariantFromGenes: a recessive main gene shows only when the hidden one is the same
+const pandaLook = (main, hidden) => PANDA_RECESSIVE.has(main) ? (main === hidden ? main : 'normal') : main;
+// Panda.setAttributes: weak ones have 10 health
+function pandaSetup(m) {
+  const d = m.data;
+  if (!d.gene) { d.gene = d.variant || 'normal'; d.hidden = PANDA_RECESSIVE.has(d.gene) ? d.gene : pandaGene(); }
+  d.variant = pandaLook(d.gene, d.hidden || 'normal');
+  m.maxHealth = d.variant === 'weak' ? 10 : 20;
+  if (m.health > m.maxHealth) m.health = m.maxHealth;
+}
+MOB_INIT.panda = function (m, o) {
+  if (o.loading) return;
+  const d = m.data, R = Math.random;
+  if (o.parents) {
+    // Panda.setGeneFromParents: one of each parent's two genes, either way round; one time in 32 each changes at random
+    const [a, b] = o.parents, one = q => R() < 0.5 ? q.data.gene || 'normal' : q.data.hidden || 'normal';
+    if (R() < 0.5) { d.gene = one(a); d.hidden = one(b); } else { d.gene = one(b); d.hidden = one(a); }
+    if (R() < 1 / 32) d.gene = pandaGene();
+    if (R() < 1 / 32) d.hidden = pandaGene();
+  } else { d.gene = pandaGene(); d.hidden = pandaGene(); }
+  pandaSetup(m);
+};
+const _afterLoadPD = Mob.prototype.afterLoad;
+Mob.prototype.afterLoad = function () { if (_afterLoadPD) _afterLoadPD.call(this); if (this.type === 'panda') { const hp = this.health; pandaSetup(this); this.health = Math.min(hp, this.maxHealth); } };
+const pandaIs = (m, g) => m.data.variant === g;
+// Panda.isScared: a worried panda in a thunderstorm, out of water
+const pandaScared = m => pandaIs(m, 'worried') && m.game.thundering() && !m.inWater;
+// Panda.canPerformAction: not lying on its back, scared, eating, rolling or sitting
+const pandaCan = m => !m.data.onBack && !pandaScared(m) && !m.data.eating && !m.data.rolling && !m.data.sitting;
+// PANDA_ITEMS: bamboo and cake lying about, ready to be picked up
+const pandaItems = (m, r) => m.game.entities.filter(e => e instanceof ItemEntity && !e.dead && e.stack && (e.stack.id === I.BAMBOO || e.stack.id === I.CAKE) && !(e.pickupDelay > 0)
+  && Math.abs(e.x - m.x) < r + m.w / 2 && Math.abs(e.y - m.y) < r + m.h && Math.abs(e.z - m.z) < r + m.w / 2);
+function pandaSit(m, on) { m.data.sitting = on; }
+// Panda.tryToSit
+function pandaTryToSit(m) { if (!m.inWater) { m.nav = null; m.move = null; pandaSit(m, true); } }
+function pandaEat(m, on) { m.data.eating = on; if (!on) m.data.eatT = 0; }
+MOB_TYPES.panda.tempt = ['bamboo'];
+MOB_TYPES.panda.sounds = ['panda_ambient', 'panda_hurt', 'panda_death'];
+MOB_TYPES.panda.ai = ['target', 'panic', 'breed', 'pandaAttack', 'tempt', 'pandaAvoid', 'pandaSit', 'followParent', 'pandaRoll', 'wander', 'look'];
+
+/* ---------------- pandas: goals ---------------- */
+// PandaAttackGoal (1.2) only while it can do things
+GOALS.pandaAttack = m => pandaCan(m) && GOALS.melee(m);
+// PandaAvoidGoal: worried pandas keep away from players (8) and monsters (4) at 2.0
+const PANDA_FEARS = [['player', 8], [e => e.T && e.T.cat === 'monster', 4]];
+GOALS.pandaAvoid = m => (m._flee || (pandaIs(m, 'worried') && pandaCan(m))) && avoidGoal(m, PANDA_FEARS, m.T.run);
+// PandaSitGoal: a grown panda that can, with bamboo or cake within 6 blocks or something in its paws, goes to the first of them within 8 at
+// 1.2 (picking it up), sits and eats; it gives up now and then (lazy ones keep at it), dropping what it holds and waiting 10-160 seconds
+// (10-60 if lazy) before it looks again
+GOALS.pandaSit = function (m) {
+  const d = m.data;
+  if (m._sitGoal) {
+    if (m.age % 2 === 0 && (m.inWater || (!pandaIs(m, 'lazy') && Math.random() < 1 / 300) || Math.random() < 1 / 1000)) { pandaSitStop(m); return false; }
+    if (!d.sitting && d.hand) pandaTryToSit(m);
+    else if (!d.hand && m.nav && !m.navDone()) m.followPath();
+    return true;
+  }
+  if ((m._sitCd || 0) > m.age || m.baby || m.inWater || !pandaCan(m) || d.unhappy > 0 || m.age % 2) return false;
+  if (!d.hand && !pandaItems(m, 6).length) return false;
+  const near = pandaItems(m, 8);
+  if (near.length && !d.hand) m.goTo(near[0].x, near[0].y, near[0].z, m.T.walk * 1.44, 0.5);
+  else if (d.hand) pandaTryToSit(m);
+  m._sitCd = 0; m._sitGoal = true;
+  return true;
+};
+function pandaSitStop(m) {
+  const d = m.data;
+  m._sitGoal = false;
+  if (d.hand) { m.game.dropItem(m.x, m.y + 0.5, m.z, d.hand); d.hand = null; m._sitCd = m.age + (pandaIs(m, 'lazy') ? 10 + Math.floor(Math.random() * 50) : 10 + Math.floor(Math.random() * 150)) * 20; }
+  pandaSit(m, false);
+}
+// PandaRollGoal: a cub or playful panda on the ground rolls over when the ground ahead drops away, or now and then (playful ones often)
+GOALS.pandaRoll = function (m) {
+  if (!(m.baby || pandaIs(m, 'playful')) || !m.onGround || !pandaCan(m) || m.age % 2) return false;
+  const s = Math.sin(m.yaw), c = Math.cos(m.yaw), i = Math.abs(s) > 0.5 ? Math.sign(s) : 0, j = Math.abs(c) > 0.5 ? Math.sign(c) : 0;
+  const w = m.game.world, air = w.getBlock(Math.floor(m.x) + i, Math.floor(m.y) - 1, Math.floor(m.z) + j) === 0;
+  if (!air && !(pandaIs(m, 'playful') && Math.random() < 1 / 30) && !(Math.random() < 1 / 250)) return false;
+  m.data.rolling = true; m._rollC = 0;
+  return true;
+};
+// PandaBreedGoal: in love with a partner near, but without bamboo within 8 blocks (feet to 2 above) it shakes its head instead (every
+// 30 seconds at most), looking at the nearest player
+const _breedPD = GOALS.breed;
+GOALS.breed = function (m) {
+  if (m.type !== 'panda') return _breedPD(m);
+  if (!(m.love > 0) || m.data.unhappy > 0 || m.baby) return false;
+  if (!m.game.entities.some(e => e !== m && e.type === 'panda' && e.love > 0 && !e.baby && !e.dead && m.distTo(e) < 8)) return false;
+  if (!pandaBamboo(m)) { if ((m._unhappyCd || 0) <= m.age) { m.data.unhappy = 32; m._unhappyCd = m.age + 600; } return false; }
+  return _breedPD(m);
+};
+function pandaBamboo(m) {
+  const w = m.game.world, x = Math.floor(m.x), y = Math.floor(m.y), z = Math.floor(m.z);
+  for (let i = 0; i < 3; i++) for (let dx = -7; dx <= 7; dx++) for (let dz = -7; dz <= 7; dz++) if (w.getBlock(x + dx, y + i, z + dz) === B.BAMBOO) return true;
+  return false;
+}
+
+/* ---------------- pandas: every tick ---------------- */
+const _thinkPD = Mob.prototype.think;
+Mob.prototype.think = function () {
+  _thinkPD.call(this);
+  if (this.type !== 'panda') return;
+  // a goal that takes over ends the sitting (and drops what it held)
+  if (this._sitGoal && this.goal !== 'pandaSit') pandaSitStop(this);
+  // PandaHurtByTargetGoal lets go once it has bitten (unless aggressive) or been given bamboo
+  if (this.target && (this._gotBamboo || this._didBite)) { this.target = null; this.anger = 0; }
+  // PandaMoveControl: no walking while it can't do things
+  if (!pandaCan(this)) this.move = null;
+};
+// lazy pandas move at 0.07 instead of 0.15 (Java's speed goes with its square)
+const _walkPD = Mob.prototype.walkPhysics;
+Mob.prototype.walkPhysics = function () {
+  if (this.type === 'panda' && this.move && pandaIs(this, 'lazy')) this.move = [this.move[0], this.move[1], this.move[2] * 0.2178, this.move[3], this.move[4]];
+  return _walkPD.call(this);
+};
+const _tickPD = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type !== 'panda') return _tickPD.call(this);
+  const d = this.data, g = this.game;
+  // the ambient sound follows its nature
+  if (this.ambientT <= 1 && !d.silent) { this.ambientT = 240 + Math.random() * 480; g.sound(pandaIs(this, 'aggressive') ? 'panda_aggressive_ambient' : pandaIs(this, 'worried') ? 'panda_worried_ambient' : 'panda_ambient', this.x, this.y + 0.6, this.z); }
+  _tickPD.call(this);
+  if (this.dead || this.deathTime > 0) return;
+  // Mob.aiStep: a grown panda with free paws picks up bamboo or cake it touches (the whole stack), with mob griefing on
+  if (!this.baby && !d.hand && g.rule('mobGriefing')) {
+    const it = pandaItems(this, 1)[0];
+    if (it && Math.abs(it.y - this.y) < 1) { d.hand = { id: it.stack.id, count: it.stack.count }; it.dead = true; g.sound('pop', this.x, this.y, this.z); }
+  }
+  // Panda.tick: worried pandas sit (and stop eating) in thunderstorms, and otherwise stand unless eating
+  if (pandaIs(this, 'worried')) { if (g.thundering() && !this.inWater) { pandaSit(this, true); pandaEat(this, false); } else if (!d.eating) pandaSit(this, false); }
+  if (!this.target) { this._gotBamboo = false; this._didBite = false; }
+  if (d.unhappy > 0) {
+    const p = g.player;
+    if (p && !p.dead && this.distTo(p) < 8) this.lookAt(p.x, p.y + 1.6, p.z);
+    if (d.unhappy === 29 || d.unhappy === 14) g.sound('panda_cant_breed', this.x, this.y + 0.6, this.z);
+    d.unhappy--;
+  }
+  if (d.sneeze > 0) { d.sneeze++; if (d.sneeze > 21) { d.sneeze = 0; pandaAfterSneeze(this); } else if (d.sneeze === 2) g.sound('panda_pre_sneeze', this.x, this.y + 0.6, this.z); }
+  if (d.rolling) pandaHandleRoll(this); else this._rollC = 0;
+  // PandaLieOnBackGoal and PandaSneezeGoal have no flags: they run beside the others
+  if (d.onBack) { if (this.age % 2 === 0 && (this.inWater || (!pandaIs(this, 'lazy') && Math.random() < 1 / 300) || Math.random() < 1 / 1000)) { d.onBack = false; this._lieCd = this.age + 200; } }
+  else if (pandaIs(this, 'lazy') && (this._lieCd || 0) < this.age && pandaCan(this) && this.age % 2 === 0 && Math.random() < 1 / 200) d.onBack = true;
+  if (this.baby && !d.sneeze && pandaCan(this) && this.age % 2 === 0 && Math.random() < (pandaIs(this, 'weak') ? 1 / 250 : 1 / 3000)) d.sneeze = 1;
+  // Panda.updateSitAmount and the rest: 0.15 up, 0.19 down a tick
+  const ease = (v, on) => on ? Math.min(1, v + 0.15) : Math.max(0, v - 0.19);
+  this._sitA0 = this._sitA || 0; this._sitA = ease(this._sitA0, d.sitting);
+  pandaHandleEating(this);
+  this._lieA0 = this._lieA || 0; this._lieA = ease(this._lieA0, d.onBack);
+  this._rollA0 = this._rollA || 0; this._rollA = ease(this._rollA0, d.rolling);
+};
+// Panda.handleEating: sitting with food it starts eating one tick in 80; crumbs and chewing every 5 ticks; after 80 ticks it may stop,
+// and after 100 the food is gone and it stands up
+function pandaHandleEating(m) {
+  const d = m.data, g = m.game;
+  if (!d.eating && d.sitting && !pandaScared(m) && d.hand && Math.floor(Math.random() * 80) === 1) pandaEat(m, true);
+  else if (!d.hand || !d.sitting) pandaEat(m, false);
+  if (!d.eating) return;
+  d.eatT = d.eatT || 0;
+  if (d.eatT % 5 === 0) {
+    g.sound('panda_eat', m.x, m.y + 0.6, m.z);
+    const f = Math.sin(m.bodyYaw), c = Math.cos(m.bodyYaw);
+    if (d.hand) g.particles.blockBreak(Math.floor(m.x + f * 0.6), Math.floor(m.y + 0.9), Math.floor(m.z + c * 0.6), d.hand.id === I.CAKE ? B.CAKE : B.BAMBOO);
+  }
+  if (d.eatT > 80 && Math.floor(Math.random() * 20) === 1) {
+    if (d.eatT > 100 && d.hand && (d.hand.id === I.BAMBOO || d.hand.id === I.CAKE)) { d.hand = null; pandaSit(m, false); }
+    pandaEat(m, false);
+    return;
+  }
+  d.eatT++;
+}
+// Panda.handleRoll: a push ahead (0.2, 0.1 for cubs) and up at the start, hops at 7, 15 and 23, done after 32
+function pandaHandleRoll(m) {
+  m._rollC = (m._rollC || 0) + 1;
+  if (m._rollC > 32) { m.data.rolling = false; return; }
+  if (m._rollC === 1) { const k = m.baby ? 0.1 : 0.2; m._rollD = [m.vx + Math.sin(m.yaw) * k, m.vz + Math.cos(m.yaw) * k]; m.vx = m._rollD[0]; m.vz = m._rollD[1]; m.vy = 0.27; }
+  else if (m._rollC !== 7 && m._rollC !== 15 && m._rollC !== 23) { if (m._rollD) { m.vx = m._rollD[0]; m.vz = m._rollD[1]; } }
+  else { m.vx = 0; m.vz = 0; if (m.onGround) m.vy = 0.27; }
+}
+// Panda.afterSneeze: a sneeze cloud ahead, grown pandas within 10 blocks that can jump, and one time in 700 a slime ball
+function pandaAfterSneeze(m) {
+  const g = m.game, f = (m.w + 1) * 0.5;
+  g.particles.poof(m.x + Math.sin(m.bodyYaw) * f, m.eyeY() - 0.1, m.z + Math.cos(m.bodyYaw) * f, [0.55, 0.85, 0.35], 4);
+  g.sound('panda_sneeze', m.x, m.y + 0.6, m.z);
+  for (const e of g.entities) if (e.type === 'panda' && !e.dead && !e.baby && e.onGround && !e.inWater && pandaCan(e) && Math.abs(e.x - m.x) < 10 + e.w && Math.abs(e.y - m.y) < 10 + e.h && Math.abs(e.z - m.z) < 10 + e.w) e.vy = 0.42;
+  if (Math.floor(Math.random() * 700) === 0 && g.rule('doMobLoot') !== false) g.dropItem(m.x, m.y, m.z, { id: I.SLIME_BALL, count: 1 });
+}
+// Panda.hurt makes it stand; PandaPanicGoal: only fire, lava, cactus, freezing and lightning make it panic
+const _hurtPD = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const r = _hurtPD.call(this, amount, source, attacker);
+  if (r && this.type === 'panda') { pandaSit(this, false); if (/^(fire|in_fire|lava|cactus|freeze|magma|lightning)$/.test(source)) this.panic = 80 + Math.random() * 40; }
+  return r;
+};
+const _onHurtByPD = Mob.prototype.onHurtBy;
+Mob.prototype.onHurtBy = function (a, source) {
+  _onHurtByPD.call(this, a, source);
+  if (this.type !== 'panda') return;
+  if (!/^(fire|in_fire|lava|cactus|freeze|magma|lightning)$/.test(source)) this.panic = 0;
+  // HurtByTargetGoal with alertOthers: the aggressive pandas around go for the attacker too
+  if (!a || (a instanceof Player && (a.mode === 1 || a.mode === 3))) return;
+  for (const e of this.game.entities)
+    if (e.type === 'panda' && e !== this && !e.dead && pandaIs(e, 'aggressive') && !e.target && Math.abs(e.x - this.x) < 16 && Math.abs(e.y - this.y) < 10 && Math.abs(e.z - this.z) < 16) { e.target = a; e.anger = 400 + Math.random() * 400; }
+};
+// Panda.doHurtTarget: a bite; one that isn't aggressive is done after one
+const _attackPD = Mob.prototype.attackEntity;
+Mob.prototype.attackEntity = function (t) {
+  if (this.type === 'panda') { this.game.sound('panda_bite', this.x, this.y + 0.6, this.z); if (!pandaIs(this, 'aggressive')) this._didBite = true; }
+  return _attackPD.call(this, t);
+};
+// Panda.mobInteract: scared ones ignore you, one on its back rolls over; bamboo grows a cub a tenth of the way up, puts one that may breed
+// in love, and otherwise is taken to eat at once (an angry panda given bamboo calms down)
+MOB_INTERACT.panda = function (m, p, held) {
+  const d = m.data;
+  if (pandaScared(m)) return false;
+  if (d.onBack) { d.onBack = false; return true; }
+  if (!held || held.id !== I.BAMBOO) return false;
+  if (m.target) m._gotBamboo = true;
+  if (m.baby) { p.consumeHeld(1); m.growth = Math.min(0, m.growth + Math.floor(-m.growth / 20 * 0.1) * 20); m.game.particles.poof(m.x, m.y + m.h, m.z, [0.4, 0.9, 0.4], 6); return true; }
+  if (m.love <= 0 && m.breedCd <= 0) return false;
+  if (d.sitting || m.inWater) return false;
+  pandaTryToSit(m); pandaEat(m, true);
+  if (d.hand && p.mode !== 1) m.game.dropItem(m.x, m.y + 0.5, m.z, d.hand);
+  d.hand = { id: held.id, count: 1 }; p.consumeHeld(1);
+  return true;
+};
+// what it holds drops with it
+const _dropLootPD = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  _dropLootPD.call(this);
+  if (this.type === 'panda' && this.data.hand && !this.noDrops) { this.game.dropItem(this.x, this.y + 0.5, this.z, this.data.hand); this.data.hand = null; }
+};
+
+/* ---------------- pandas: how they look ---------------- */
+// PandaRenderer.setupRotations as one turn about the X axis and a shift, in Java's entity frame (y up, z back): the roll (a full turn over
+// 32 ticks, lifted so it turns over its back), then sitting up (a quarter turn about a point a block up, lifted 0.8), then lying on its back
+function pandaTurn(m, a) {
+  let th = 0, ty = 0, tz = 0;
+  const tr = (y, z) => { const c = Math.cos(th * Math.PI / 180), s = Math.sin(th * Math.PI / 180); ty += y * c - (z || 0) * s; tz += y * s + (z || 0) * c; }, rot = deg => { th += deg; };
+  const i = m.data.rolling ? m._rollC || 0 : 0;
+  if (i > 0) {
+    const j = i + 1, h = m.baby ? 0.3 : 0.8, ang = (cur, nxt, max) => j < max ? cur + (nxt - cur) * a : cur;
+    if (i < 8) { const v = ang(90 * i / 7, 90 * j / 7, 8); tr((h + 0.2) * (v / 90)); rot(-v); }
+    else if (i < 16) { const v = ang(90 + 90 * (i - 8) / 7, 90 + 90 * (j - 8) / 7, 16); tr(h + 0.2 + (h - 0.2) * (v - 90) / 90); rot(-v); }
+    else if (i < 24) { const v = ang(180 + 90 * (i - 16) / 7, 180 + 90 * (j - 16) / 7, 24); tr(h + h * (270 - v) / 90); rot(-v); }
+    else if (i < 32) { const v = ang(270 + 90 * (i - 24) / 7, 270 + 90 * (j - 24) / 7, 32); tr(h * ((360 - v) / 90)); rot(-v); }
+  }
+  const o = (m._sitA0 || 0) + ((m._sitA || 0) - (m._sitA0 || 0)) * a;
+  if (o > 0) { tr(0.8 * o); rot(90 * o); tr(-o); if (pandaScared(m) && m.baby) tr(0.8, 0.55); }
+  const q = (m._lieA0 || 0) + ((m._lieA || 0) - (m._lieA0 || 0)) * a;
+  if (q > 0) { tr((m.baby ? 0.5 : 1.3) * q); rot(180 * q); }
+  return [th, ty, tz, o];
+}
+MOB_ANIM.panda = (m, st) => {
+  const a = st.age - m.age, d = m.data;
+  st.sitA = (m._sitA0 || 0) + ((m._sitA || 0) - (m._sitA0 || 0)) * a;
+  st.lieA = (m._lieA0 || 0) + ((m._lieA || 0) - (m._lieA0 || 0)) * a;
+  st.rollA = m.baby ? 0 : (m._rollA0 || 0) + ((m._rollA || 0) - (m._rollA0 || 0)) * a;
+  st.unhappy = d.unhappy > 0; st.sneeze = Math.max(0, (d.sneeze || 0) - 1); st.eat = !!d.eating; st.scared = pandaScared(m);
+};
+// PandaModel.setupAnim
+MOB_MODELS.panda.anim = function (P, st) {
+  animQuad(P, st);
+  const age = st.age, head = P.head;
+  P.body = [Math.PI / 2, 0, 0];
+  if (st.unhappy) {
+    head[1] = 0.35 * Math.sin(0.6 * age); head[2] = 0.35 * Math.sin(0.6 * age);
+    P.right_front_leg = [-0.75 * Math.sin(0.3 * age), 0, 0]; P.left_front_leg = [0.75 * Math.sin(0.3 * age), 0, 0];
+  }
+  const i = st.sneeze;
+  if (i > 0) { if (i < 15) head[0] = -Math.PI / 4 * i / 14; else if (i < 20) head[0] = -Math.PI / 4; }
+  const zr = (n, z) => { P[n] = [P[n] ? P[n][0] : 0, 0, z]; };
+  if (st.sitA > 0) {
+    P.body = [rotlerp(st.sitA, Math.PI / 2, 1.7407963), 0, 0];
+    head[0] = rotlerp(st.sitA, head[0], Math.PI / 2);
+    zr('right_front_leg', -0.27079642); zr('left_front_leg', 0.27079642); zr('right_hind_leg', 0.5707964); zr('left_hind_leg', -0.5707964);
+    if (st.eat) { head[0] = Math.PI / 2 + 0.2 * Math.sin(age * 0.6); const l = -0.4 - 0.2 * Math.sin(age * 0.6); P.right_front_leg[0] = l; P.left_front_leg[0] = l; }
+    if (st.scared) { head[0] = 2.1707964; P.right_front_leg[0] = -0.9; P.left_front_leg[0] = -0.9; }
+  }
+  if (st.lieA > 0) {
+    P.right_hind_leg = [-0.6 * Math.sin(age * 0.15), 0, P.right_hind_leg[2] || 0]; P.left_hind_leg = [0.6 * Math.sin(age * 0.15), 0, P.left_hind_leg[2] || 0];
+    P.right_front_leg = [0.3 * Math.sin(age * 0.25), 0, P.right_front_leg[2] || 0]; P.left_front_leg = [-0.3 * Math.sin(age * 0.25), 0, P.left_front_leg[2] || 0];
+    head[0] = rotlerp(st.lieA, head[0], Math.PI / 2);
+  }
+  if (st.rollA > 0) {
+    head[0] = rotlerp(st.rollA, head[0], 2.0561945);
+    P.right_hind_leg = [-0.5 * Math.sin(age * 0.5), 0, P.right_hind_leg[2] || 0]; P.left_hind_leg = [0.5 * Math.sin(age * 0.5), 0, P.left_hind_leg[2] || 0];
+    P.right_front_leg = [0.5 * Math.sin(age * 0.5), 0, P.right_front_leg[2] || 0]; P.left_front_leg = [-0.5 * Math.sin(age * 0.5), 0, P.left_front_leg[2] || 0];
+  }
+  P.head = head;
+};
+const PANDA_ITEM_M = axisRot('x', 0);
+const _customRenderPD = Mob.prototype.customRender;
+Mob.prototype.customRender = function (r, a, p, st) {
+  if (this.type !== 'panda') return _customRenderPD ? _customRenderPD.call(this, r, a, p, st) : false;
+  const [th, ty, tz] = pandaTurn(this, a), yaw = this.pyaw + (this.bodyYaw - this.pyaw) * a;
+  // Java's turn about X becomes the opposite turn here (our z points ahead), the shift likewise
+  st.swimRot = -th * Math.PI / 180; st.swimShift = 0;
+  const pos = [p[0] - Math.sin(yaw) * tz, p[1] + ty + (this.yOffset || 0), p[2] - Math.cos(yaw) * tz];
+  const hurt = this.hurtTime > 0 || this.deathTime > 0, tilt = this.deathTime > 0 ? Math.min(1, (this.deathTime + a) / 15) * Math.PI / 2 : 0, light = this.lightAt();
+  const at = drawMob(r, MOB_MODELS.panda, this.skins(), pos, yaw, st, hurt ? [1, 0.45, 0.45, 1] : [1, 1, 1, 1], light, 1, tilt);
+  // PandaHoldsItemLayer: sitting (not scared), what it holds is at its paws, bobbing as it eats
+  const d = this.data;
+  if (d.hand && d.sitting && !st.scared && at) {
+    const e = st.eat ? Math.sin(st.age * 0.6) : 0, gy = 1.4 - (st.eat ? 0.09 * e : 0), fz = -0.6 - (st.eat ? 0.2 * e + 0.2 : 0);
+    drawPosedItem(r, this.game, d.hand, at, null, PANDA_ITEM_M, [1.6, gy * 16, fz * 16], light);
+  }
+  return true;
+};
+
+/* ---------------- sounds ---------------- */
+const AN2_SOUNDS = [['polar_bear_ambient', 'Polar Bear groans'], ['polar_bear_ambient_baby', 'Polar Bear hums'], ['polar_bear_warning', 'Polar Bear roars'], ['polar_bear_hurt', 'Polar Bear hurts'],
+  ['polar_bear_death', 'Polar Bear dies'], ['panda_ambient', 'Panda pants'], ['panda_aggressive_ambient', 'Panda huffs'], ['panda_worried_ambient', 'Panda whimpers'], ['panda_eat', 'Panda eats'],
+  ['panda_bite', 'Panda bites'], ['panda_cant_breed', 'Panda bleats'], ['panda_sneeze', 'Panda sneezes'], ['panda_pre_sneeze', 'Panda\'s nose tickles'], ['panda_hurt', 'Panda hurts'],
+  ['panda_death', 'Panda dies'], ['dye_use', 'Dye stains']];
+for (const [n, t] of AN2_SOUNDS) { SND_CAT[n] = n === 'dye_use' ? 'player' : 'neutral'; SUB_TEXT[n] = t; }
+const AN2_SOUND_SET = new Set(AN2_SOUNDS.map(s => s[0]));
+const _audioPlayAN2 = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!AN2_SOUND_SET.has(name)) return _audioPlayAN2.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, v = 0.9 + Math.random() * 0.2;
+  if (name.startsWith('polar_bear_')) {
+    if (name === 'polar_bear_warning') { this.noiseHit(dst, 'lowpass', 500, 1, 0.6, 0.6); this.tone(dst, 'sawtooth', 110 * v, 80 * v, 0.6, 0.12); }
+    else if (name === 'polar_bear_ambient_baby') { this.tone(dst, 'triangle', 300 * v, 260 * v, 0.3, 0.05); }
+    else { const f = (name === 'polar_bear_hurt' ? 180 : name === 'polar_bear_death' ? 100 : 140) * v; this.tone(dst, 'sawtooth', f, f * 0.8, 0.45, 0.08); this.noiseHit(dst, 'lowpass', 400, 1, 0.3, 0.2); }
+  } else if (name.startsWith('panda_')) {
+    if (name === 'panda_eat') this.noiseHit(dst, 'bandpass', 1400, 2, 0.08, 0.3);
+    else if (name === 'panda_bite') { this.noiseHit(dst, 'bandpass', 900, 2, 0.06, 0.4); this.tone(dst, 'square', 200, 120, 0.05, 0.05); }
+    else if (name === 'panda_sneeze') { this.noiseHit(dst, 'highpass', 1600, 1, 0.18, 0.5); this.tone(dst, 'sine', 700 * v, 400 * v, 0.12, 0.06); }
+    else if (name === 'panda_pre_sneeze') { [0, 0.12, 0.24].forEach(dt => this.tone(dst, 'sine', 500 * v + dt * 900, 560 * v + dt * 900, 0.08, 0.03, t0 + dt)); }
+    else if (name === 'panda_cant_breed') { this.tone(dst, 'triangle', 420 * v, 300 * v, 0.25, 0.06); }
+    else { const f = (name === 'panda_aggressive_ambient' ? 160 : name === 'panda_worried_ambient' ? 380 : name === 'panda_hurt' ? 300 : name === 'panda_death' ? 200 : 240) * v; [0, 0.1].forEach(dt => this.tone(dst, 'sawtooth', f, f * 0.9, 0.08, 0.04, t0 + dt)); }
+  } else if (name === 'dye_use') { this.noiseHit(dst, 'bandpass', 1100, 1, 0.12, 0.3); }
 };
 
 </script>

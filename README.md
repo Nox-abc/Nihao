@@ -638,6 +638,20 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Skeleton trap horses**: lightning in a thunderstorm sometimes leaves a skeleton horse
   behind. Walk within 10 blocks of it and lightning flashes: four skeleton horsemen with
   enchanted bows and iron helmets appear.
+- **Leads like Java's**: a led animal walks to within 2 blocks of you, gets pulled along from 6
+  blocks and the lead snaps (and drops) past 10. The rope is drawn between you. Right click a
+  fence while leading animals to tie them to a knot on it; right click the knot to tie more or to
+  set them free. Leads are saved with the world, even on fences.
+- **Llamas**: a llama joins the back of a caravan behind a llama on a lead (up to 10), spits at
+  whatever hurts it and at wild wolves, and a herd shares one coat. Trader llamas are tied to
+  their wandering trader and defend it.
+- **Pandas with genes and moods**: each panda carries two genes (brown and weak only show in
+  pairs) that cubs inherit. They sit up to eat bamboo and cake, lazy ones lie on their backs,
+  playful ones roll over, cubs sneeze, worried ones hide from players and thunderstorms, and
+  aggressive ones fight back together. They won't breed without bamboo nearby.
+- **Rabbits, sheep and polar bears**: rabbit coats by biome, rabbits raiding ripe carrots; lambs
+  get the dye colour their parents mix into, killed sheep drop their wool, jeb_ shines in every
+  colour; polar bears guard their cubs, hunt foxes and rear up before they strike.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
