@@ -753,6 +753,16 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Horses like Java's**: every horse has its own health (15 to 30), speed and jump, and foals get theirs from their
   parents, so you can breed better horses. Riding one is as fast as in Java (about 10 blocks a second for an average
   horse); a horse and a donkey make a mule, and only tamed ones at full health breed.
+- **The Ender Dragon like Java's**: it circles the island along Java's flight paths, swoops past to shoot dragon
+  fireballs that leave clouds of dragon's breath, and lands on the portal to roar and breathe on you; hit it hard
+  while it sits and it takes off again. Its head takes full damage, the rest of it a quarter; arrows bounce off it
+  while it perches; its wings throw you away and its bite hurts. The nearest crystal heals it with a beam, and
+  breaking that crystal hurts it and makes it come after you. It smashes through blocks other than obsidian, end
+  stone and the like.
+- **Fish like Java's**: cod, salmon, tropical fish and pufferfish swim at Java's speeds, dart away from players and
+  when hit, and flop about on land until they dry out. Cod, salmon and tropical fish form schools that follow a
+  leader. Pufferfish puff up halfway when something comes near and fully after two seconds, sting with poison
+  while puffed, and shrink back once left alone.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

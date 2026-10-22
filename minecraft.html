@@ -49262,6 +49262,848 @@ GOALS.breed = function (m) {
   return true;
 };
 
+/* @file 162_dragon.js */
+/* ===================================================================
+   Part 51: the Ender Dragon like Java
+   - EnderDragon.aiStep's flight: each phase gives a place to fly to; the dragon turns towards it (yRotA eased 0.8 a tick, at
+     most 50 degrees at a time, by the phase's turn speed), pushes on at 0.06 (less when it isn't facing the way), climbs or
+     dives a hundredth of the slope (no steeper than the phase's fly speed) and keeps 0.8 to 0.95 of its speed (0.91 up and
+     down); it goes through everything, breaking what isn't dragon-proof (with mobGriefing) and slowing in what is
+   - the phases (DragonPhaseInstance): holding pattern round 24 path nodes (EnderDragon.findPath, A* over the ring of 12, the
+     middle 8 and the inner 4, the outer ring left out once the crystals are gone), each node reached deciding whether to
+     land (1 in crystals + 3), strafe the nearest player (DragonStrafePlayerPhase: a dragon fireball when it has seen them for
+     5 ticks and faces them within 10 degrees) or fly on, sometimes turning about; landing approach and landing on the
+     portal (fly speed 1.5); sitting: scanning for a player within 20 blocks (and 10 up or down) to roar at for 40 ticks
+     (SittingAttacking) and breathe on (SittingFlaming: a cloud of dragon's breath 5 across, 3 damage a second, for 10
+     seconds), taking off after 4 breaths, after 5 seconds with nobody near (charging a player within 150 at fly speed 3), or
+     after taking a quarter of its health sitting; arrows don't hurt it while it sits (they catch fire instead); one summoned
+     outside the fight hovers where it is
+   - EnderDragon.hurt: only players (and explosions) hurt it; anything but the head takes a quarter plus 1; the crystal it is
+     healing from, broken, costs it 10 and sends it after the player who did it
+   - its wings throw what they touch away (4 over the distance) and cost 5 (not while sitting), its head and neck bite for 10
+     (scaled by difficulty)
+   - EndCrystal: the nearest crystal within 32 blocks heals it a point every 10 ticks (looked for 1 tick in 10), with one beam
+   - dragon fireballs (AbstractHurtingProjectile, 0.1 a tick on its heading, 0.95 drag) burst into a cloud of dragon's breath
+     3 across growing to 7 over 30 seconds (6 damage a second) at whatever they hit, or at a living thing within 4 blocks
+   - dying (DragonDeathPhase): it heads for the portal, rises and spins for 10 seconds, bursting over the last second
+   =================================================================== */
+const DRG = Math.PI / 180;
+const drWrap = d => { d %= 360; if (d >= 180) d -= 360; if (d < -180) d += 360; return d; };
+const drClamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// EnderDragon.nodeAdjacency
+const DRAGON_ADJ = [6146, 8197, 8202, 16404, 32808, 32848, 65696, 131392, 131712, 263424, 526848, 525313, 1581057, 3166214, 2138120, 6373424, 4358208,
+  12910976, 9044480, 9706496, 15216640, 13688832, 11763712, 8257536];
+// BlockTags.DRAGON_IMMUNE and DRAGON_TRANSPARENT
+const DRAGON_IMMUNE = new Set(['barrier', 'bedrock', 'end_portal', 'end_portal_frame', 'end_gateway', 'command_block', 'repeating_command_block', 'chain_command_block',
+  'structure_block', 'jigsaw', 'moving_piston', 'obsidian', 'crying_obsidian', 'end_stone', 'iron_bars', 'respawn_anchor', 'reinforced_deepslate'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+const DRAGON_THROUGH = new Set(['light', 'fire', 'soul_fire'].map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+
+/* ---------------- the path nodes ---------------- */
+// the top of the ground (MOTION_BLOCKING_NO_LEAVES), the void counting as 0
+function drTop(w, x, z) { for (let y = 255; y > 0; y--) { const id = w.getBlock(x, y, z); if (id && SOLID[id] && !BLK[id].leaves) return y + 1; } return 0; }
+// EnderDragon.findClosestNode's nodes: 60 blocks out (5 over the ground), 40 out (15 over), 20 out (5 over), never under 10
+function drNodes(m) {
+  if (m._nodes && m._nodesOk) return m._nodes;
+  const w = m.game.world, out = [];
+  let ok = true;
+  for (let i = 0; i < 24; i++) {
+    const [r, k, step, up] = i < 12 ? [60, i, Math.PI / 12, 5] : i < 20 ? [40, i - 12, Math.PI / 8, 15] : [20, i - 20, Math.PI / 4, 5];
+    const a = 2 * (-Math.PI + step * k), x = Math.floor(r * Math.cos(a) + 1e-9), z = Math.floor(r * Math.sin(a) + 1e-9);
+    let y = 70;
+    if (w.isLoadedAt(x, z)) y = Math.max(10, drTop(w, x, z) + up); else ok = false;
+    out.push([x, y, z]);
+  }
+  m._nodes = out; m._nodesOk = ok;
+  return out;
+}
+// the crystals still on the spikes (EndDragonFight.getCrystalsAlive)
+function drCrystals(m) {
+  const g = m.game, st = g.meta && g.meta.end;
+  if (m !== g.dragon || g.world.dim !== 'end' || !st || !st.crystals) return 0;
+  return st.crystals.filter(Boolean).length;
+}
+function drClosest(m, x, y, z) {
+  const N = drNodes(m), from = drCrystals(m) === 0 ? 12 : 0;
+  let best = 10000, bi = 0;
+  for (let k = from; k < 24; k++) { const d = (N[k][0] - Math.floor(x)) ** 2 + (N[k][1] - Math.floor(y)) ** 2 + (N[k][2] - Math.floor(z)) ** 2; if (d < best) { best = d; bi = k; } }
+  return bi;
+}
+// EnderDragon.findPath: A* from node to node along the adjacency, then on to a last point if given; a path that can't reach
+// ends at the node that got nearest
+function drPath(m, from, to, last) {
+  const N = drNodes(m), skip = drCrystals(m) === 0 ? 12 : 0, dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const gS = new Array(24).fill(Infinity), came = new Array(24).fill(-1), closed = new Array(24).fill(false), open = new Set([from]);
+  gS[from] = 0;
+  let nearest = from;
+  while (open.size) {
+    let cur = -1, cf = Infinity;
+    for (const k of open) { const f = gS[k] + dist(N[k], N[to]); if (f < cf) { cf = f; cur = k; } }
+    open.delete(cur);
+    if (cur === to) return drBuild(N, came, from, to, last);
+    if (dist(N[cur], N[to]) < dist(N[nearest], N[to])) nearest = cur;
+    closed[cur] = true;
+    for (let k = skip; k < 24; k++) {
+      if (!(DRAGON_ADJ[cur] & (1 << k)) || closed[k]) continue;
+      const t = gS[cur] + dist(N[cur], N[k]);
+      if (!open.has(k) || t < gS[k]) { came[k] = cur; gS[k] = t; open.add(k); }
+    }
+  }
+  if (nearest === from) return null;
+  return drBuild(N, came, from, nearest, last);
+}
+function drBuild(N, came, from, end, last) {
+  const list = [];
+  for (let k = end; k >= 0; k = came[k]) { list.unshift(N[k]); if (k === from) break; }
+  if (last) list.push(last);
+  return { nodes: list, i: 0 };
+}
+const drDone = p => !p || p.i >= p.nodes.length;
+// the next node to fly at, somewhere up to 20 blocks over it
+function drNext(m, ph) {
+  const p = ph.path;
+  if (drDone(p)) return;
+  const n = p.nodes[p.i++];
+  ph.at = [n[0], n[1] + Math.random() * 20, n[2]];
+}
+// the portal's top (EndPodiumFeature.getLocation under the heightmap)
+function drPodium(m) { const w = m.game.world; return [0.5, w.isLoadedAt(0, 0) ? drTop(w, 0, 0) : (m.game.endFountainY || 61) + 4, 0.5]; }
+const drD2 = (m, t) => t ? (t[0] - m.x) ** 2 + (t[1] - m.y) ** 2 + (t[2] - m.z) ** 2 : 0;
+// the nearest player in survival or adventure within a range of a point
+function drPlayer(m, x, y, z, r, test) {
+  const p = m.game.player;
+  if (!p || p.dead || !p.survival || m.game.world.dim !== m._dim) return null;
+  if ((p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2 > r * r) return null;
+  return !test || test(p) ? p : null;
+}
+
+/* ---------------- the phases ---------------- */
+const drTurn = m => { const f = Math.hypot(m.vx, m.vz) + 1; return 0.7 / Math.min(f, 40) / f; };
+const DR_PHASES = {
+  holding: {
+    begin(m, ph) { ph.path = null; ph.at = null; },
+    tick(m, ph) {
+      const d = ph.at ? drD2(m, ph.at) : 0;
+      if (d < 100 || d > 22500 || m._hcol) drHoldingNext(m, ph);
+    },
+  },
+  strafe: {
+    begin(m, ph) { ph.charge = 0; ph.at = null; ph.path = null; ph.target = null; },
+    tick(m, ph) {
+      const t = ph.target;
+      if (!t || t.dead) { drPhase(m, 'holding'); return; }
+      if (ph.path && drDone(ph.path)) { const dx = t.x - m.x, dz = t.z - m.z, up = Math.min(0.4 + Math.hypot(dx, dz) / 80 - 1, 10); ph.at = [t.x, t.y + up, t.z]; }
+      const d = ph.at ? drD2(m, ph.at) : 0;
+      if (d < 100 || d > 22500) drStrafeNext(m, ph);
+      if ((t.x - m.x) ** 2 + (t.y - m.y) ** 2 + (t.z - m.z) ** 2 < 4096 && m.canSee(t)) {
+        ph.charge++;
+        const ax = t.x - m.x, az = t.z - m.z, al = Math.hypot(ax, az) || 1, f = Math.acos(drClamp((Math.sin(m.yr * DRG) * ax - Math.cos(m.yr * DRG) * az) / al, -1, 1)) / DRG + 0.5;
+        if (ph.charge >= 5 && f >= 0 && f < 10) {
+          // the fireball from just behind the head, at the middle of the target
+          const hd = m._parts.head, vx = Math.sin(m.yr * DRG), vz = -Math.cos(m.yr * DRG);
+          const sx = hd[0] - vx, sy = hd[1] + 1, sz = hd[2] - vz;
+          drFireball(m, sx, sy, sz, t.x - sx, t.y + t.h * 0.5 - sy, t.z - sz);
+          ph.charge = 0;
+          if (ph.path) ph.path.i = ph.path.nodes.length;
+          drPhase(m, 'holding');
+        }
+      } else if (ph.charge > 0) ph.charge--;
+    },
+  },
+  landing_approach: {
+    begin(m, ph) { ph.path = null; ph.at = null; },
+    tick(m, ph) {
+      const d = ph.at ? drD2(m, ph.at) : 0;
+      if (d < 100 || d > 22500 || m._hcol) {
+        if (drDone(ph.path)) {
+          const from = drClosest(m, m.x, m.y, m.z), pod = drPodium(m), pl = drPlayer(m, pod[0], pod[1], pod[2], 128);
+          let to;
+          if (pl) { const l = Math.hypot(pl.x, pl.z) || 1; to = drClosest(m, -pl.x / l * 40, 105, -pl.z / l * 40); } else to = drClosest(m, 40, pod[1], 0);
+          ph.path = drPath(m, from, to, [Math.floor(pod[0]), pod[1], Math.floor(pod[2])]);
+          if (ph.path) ph.path.i++;
+        }
+        drNext(m, ph);
+        if (drDone(ph.path)) drPhase(m, 'landing');
+      }
+    },
+  },
+  landing: {
+    flySpeed: 1.5, turn: m => { const f = Math.hypot(m.vx, m.vz) + 1; return Math.min(f, 40) / f; },
+    begin(m, ph) { ph.at = null; },
+    tick(m, ph) {
+      if (!ph.at) ph.at = drPodium(m);
+      if (drD2(m, ph.at) < 1) { m._flames = 0; drPhase(m, 'sit_scanning'); }
+    },
+  },
+  sit_scanning: {
+    sitting: true,
+    begin(m, ph) { ph.t = 0; },
+    tick(m, ph) {
+      ph.t++;
+      const pl = drPlayer(m, m.x, m.y, m.z, 20, p => Math.abs(p.y - m.y) <= 10);
+      if (pl) {
+        if (ph.t > 25) { drPhase(m, 'sit_attacking'); return; }
+        // turn to face it (to within 10 degrees)
+        const ax = pl.x - m.x, az = pl.z - m.z, al = Math.hypot(ax, az) || 1, f = Math.acos(drClamp((Math.sin(m.yr * DRG) * ax - Math.cos(m.yr * DRG) * az) / al, -1, 1)) / DRG + 0.5;
+        if (f < 0 || f > 10) {
+          const hd = m._parts.head, d0 = pl.x - hd[0], d1 = pl.z - hd[2];
+          const d2 = drClamp(drWrap(180 - Math.atan2(d0, d1) / DRG - m.yr), -100, 100);
+          m.yRotA *= 0.8;
+          let f2 = Math.hypot(d0, d1) + 1;
+          const f3 = f2;
+          if (f2 > 40) f2 = 40;
+          m.yRotA += d2 * (0.7 / f2 / f3);
+          m.yr += m.yRotA;
+        }
+      } else if (ph.t >= 100) {
+        const far = drPlayer(m, m.x, m.y, m.z, 150);
+        if (far) { drPhase(m, 'charging'); m._ph.at = [far.x, far.y, far.z]; }
+        else drPhase(m, 'takeoff');
+      }
+    },
+  },
+  sit_attacking: {
+    sitting: true,
+    begin(m, ph) { ph.t = 0; if (!m.data.silent) m.game.sound('dragon_growl', m.x, m.y, m.z); },
+    tick(m, ph) { if (ph.t++ >= 40) drPhase(m, 'sit_flaming'); },
+  },
+  sit_flaming: {
+    sitting: true,
+    begin(m, ph) { ph.t = 0; m._flames = (m._flames || 0) + 1; },
+    end(m, ph) { if (ph.cloud) { ph.cloud.dead = true; ph.cloud = null; } },
+    tick(m, ph) {
+      ph.t++;
+      const hd = m._parts.head, ax = hd[0] - m.x, az = hd[2] - m.z, al = Math.hypot(ax, az) || 1;
+      if (ph.t % 2 === 0 && ph.t < 10) for (let k = 0; k < 8; k++) m.game.particles.poof(hd[0] + ax / al * (1 + k * 0.3) + (Math.random() - 0.5) * 0.5, hd[1] + 0.5, hd[2] + az / al * (1 + k * 0.3) + (Math.random() - 0.5) * 0.5, [0.75, 0.35, 0.9], 1);
+      if (ph.t >= 200) { drPhase(m, m._flames >= 4 ? 'takeoff' : 'sit_scanning'); return; }
+      if (ph.t === 10) {
+        // the breath lands 2.5 blocks ahead of the head, on whatever is below it
+        const w = m.game.world, x = hd[0] + ax / al * 2.5, z = hd[2] + az / al * 2.5, y0 = hd[1] + 0.5;
+        let y = y0;
+        while (!SOLID[w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z))]) { if (--y < 0) { y = y0; break; } }
+        ph.cloud = drBreathCloud(m, x, Math.floor(y) + 1, z, 5, 0, 200, 0);
+        if (!m.data.silent) m.game.sound('dragon_breath', x, y, z);
+      }
+    },
+  },
+  takeoff: {
+    begin(m, ph) { ph.first = true; ph.path = null; ph.at = null; },
+    tick(m, ph) {
+      if (!ph.first && ph.path) {
+        const pod = drPodium(m);
+        if ((pod[0] - m.x) ** 2 + (pod[1] - m.y) ** 2 + (pod[2] - m.z) ** 2 >= 100) drPhase(m, 'holding');
+        return;
+      }
+      ph.first = false;
+      const from = drClosest(m, m.x, m.y, m.z), hd = m._parts.head, lx = hd[0] - m.x, lz = hd[2] - m.z, l = Math.hypot(lx, lz) || 1;
+      let to = drClosest(m, -lx / l * 40, 105, -lz / l * 40);
+      if (drCrystals(m) > 0) to = ((to % 12) + 12) % 12; else to = ((to - 12) & 7) + 12;
+      ph.path = drPath(m, from, to, null);
+      if (ph.path) { ph.path.i++; drNext(m, ph); }
+    },
+  },
+  charging: {
+    flySpeed: 3,
+    begin(m, ph) { ph.at = null; ph.t = 0; },
+    tick(m, ph) {
+      if (!ph.at) { drPhase(m, 'holding'); return; }
+      if (ph.t > 0 && ph.t++ >= 10) { drPhase(m, 'holding'); return; }
+      const d = drD2(m, ph.at);
+      if (d < 100 || d > 22500 || m._hcol) ph.t++;
+    },
+  },
+  // DragonHoverPhase: a dragon outside a fight (summoned) stays where it is
+  hover: {
+    begin(m, ph) { ph.at = null; },
+    tick(m, ph) { if (!ph.at) ph.at = [m.x, m.y, m.z]; },
+  },
+  dying: {
+    begin(m, ph) { ph.at = null; },
+    tick(m, ph) {
+      if (!ph.at) { const pod = drPodium(m); ph.at = [pod[0], pod[1], pod[2]]; }
+      const d = drD2(m, ph.at);
+      // DragonDeathPhase: on to the portal at 1 health, the death proper once there (or lost, or stuck)
+      if (d >= 100 && d <= 22500 && !m._hcol) m.health = 1; else m.health = 0;
+    },
+  },
+};
+function drPhase(m, name) {
+  const old = m._ph;
+  if (old && DR_PHASES[old.name].end) DR_PHASES[old.name].end(m, old);
+  const ph = { name };
+  m._ph = ph; m._sitDmg = 0;
+  DR_PHASES[name].begin(m, ph);
+}
+// DragonHoldingPatternPhase.findNewTarget
+function drHoldingNext(m, ph) {
+  if (ph.path && drDone(ph.path)) {
+    const pod = drPodium(m), cr = drCrystals(m);
+    if (Math.floor(Math.random() * (cr + 3)) === 0) { drPhase(m, 'landing_approach'); return; }
+    const pl = drPlayer(m, pod[0], pod[1], pod[2], 150);
+    const d0 = pl ? ((pl.x - pod[0]) ** 2 + (pl.y - pod[1]) ** 2 + (pl.z - pod[2]) ** 2) / 512 : 64;
+    if (pl && (Math.floor(Math.random() * Math.floor(d0 + 2)) === 0 || Math.floor(Math.random() * (cr + 2)) === 0)) { drStrafe(m, pl); return; }
+  }
+  if (drDone(ph.path)) {
+    const from = drClosest(m, m.x, m.y, m.z);
+    let to = from;
+    if (Math.random() < 1 / 8) { m._cw = !m._cw; to = from + 6; }
+    to += m._cw ? 1 : -1;
+    if (drCrystals(m) > 0) to = ((to % 12) + 12) % 12; else to = ((to - 12) & 7) + 12;
+    ph.path = drPath(m, from, to, null);
+    if (ph.path) ph.path.i++;
+  }
+  drNext(m, ph);
+}
+// DragonStrafePlayerPhase.setTarget and findNewTarget
+function drStrafe(m, t) {
+  drPhase(m, 'strafe');
+  const ph = m._ph;
+  ph.target = t;
+  const from = drClosest(m, m.x, m.y, m.z), to = drClosest(m, t.x, t.y, t.z), dx = Math.floor(t.x) - m.x, dz = Math.floor(t.z) - m.z;
+  const up = Math.min(0.4 + Math.hypot(dx, dz) / 80 - 1, 10);
+  ph.path = drPath(m, from, to, [Math.floor(t.x), Math.floor(t.y + up), Math.floor(t.z)]);
+  if (ph.path) { ph.path.i++; drNext(m, ph); }
+}
+function drStrafeNext(m, ph) {
+  if (drDone(ph.path)) {
+    const from = drClosest(m, m.x, m.y, m.z);
+    let to = from;
+    if (Math.random() < 1 / 8) { m._cw = !m._cw; to = from + 6; }
+    to += m._cw ? 1 : -1;
+    if (drCrystals(m) > 0) to = ((to % 12) + 12) % 12; else to = ((to - 12) & 7) + 12;
+    ph.path = drPath(m, from, to, null);
+    if (ph.path) ph.path.i++;
+  }
+  drNext(m, ph);
+}
+
+/* ---------------- dragon's breath ---------------- */
+// AreaEffectCloud: 20 ticks to settle, then every 5 ticks Instant Damage (at half strength) to what stands within the radius,
+// each thing again after 20 ticks; it grows by its rate and goes after its time
+class DragonBreath extends Entity {
+  constructor(game, x, y, z, owner, r, grow, life, amp) { super(game, x, y, z); this.owner = owner; this.r = r; this.grow = grow; this.life = life; this.amp = amp; this.hit = new Map(); this.w = r * 2; this.h = 0.5; }
+  tick() {
+    this.age++;
+    if (this.age >= 20 + this.life) { this.dead = true; return; }
+    this.r += this.grow;
+    const g = this.game, n = this.age < 20 ? 1 : Math.ceil(Math.PI * this.r * this.r * 0.25);
+    for (let k = 0; k < Math.min(n, 12); k++) {
+      const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * (this.age < 20 ? 0.2 : this.r);
+      g.particles.poof(this.x + Math.cos(a) * d, this.y + 0.1, this.z + Math.sin(a) * d, [0.75 + Math.random() * 0.15, 0.3, 0.85], 1);
+    }
+    if (this.age < 20 || this.age % 5) return;
+    for (const m of g.mobsAndPlayer()) {
+      if (m.dead || m.deathTime > 0 || m === this.owner || m instanceof Player && !m.survival) continue;
+      if ((m.x - this.x) ** 2 + (m.z - this.z) ** 2 > this.r * this.r || m.y > this.y + 0.5 || m.y + m.h < this.y) continue;
+      if ((this.hit.get(m) || 0) > this.age) continue;
+      this.hit.set(m, this.age + 20);
+      // MobEffects.HARM through a cloud: half of 6 << amplifier
+      const amt = Math.floor(0.5 * (6 << this.amp) + 0.5);
+      if (m.T && m.T.undead) { if (m.heal) m.heal(Math.floor(0.5 * (4 << this.amp) + 0.5)); }
+      else m.hurt(amt, 'magic', this.owner instanceof Mob ? this.owner : null);
+    }
+  }
+  render() { }
+}
+function drBreathCloud(m, x, y, z, r, grow, life, amp) { const c = new DragonBreath(m.game, x, y, z, m, r, grow, life, amp); m.game.entities.push(c); return c; }
+// DragonFireball: starts at 0.1 along its way and speeds up like other hurting projectiles
+function drFireball(m, x, y, z, dx, dy, dz) {
+  const l = Math.hypot(dx, dy, dz) || 1, pr = m.game.spawnProjectile('void', x, y, z, dx / l * 0.1, dy / l * 0.1, dz / l * 0.1, m);
+  if (!pr) return;
+  pr.jd = true; pr.grav = 0; pr.life = 1200; pr.w = pr.h = 1;
+  if (!m.data.silent) m.game.sound('dragon_shoot', x, y, z);
+}
+const _tickDF = Projectile.prototype.tick;
+Projectile.prototype.tick = function () {
+  if (this.kind !== 'void' || !this.jd) return _tickDF.call(this);
+  const g = this.game, w = g.world;
+  this.savePrev(); this.age++;
+  if (--this.life <= 0 || !this.owner || this.owner.dead) { this.dead = true; return; }
+  // the move: the first block, else the nearest living thing (not the dragon) along it
+  const n = Math.max(1, Math.ceil(Math.hypot(this.vx, this.vy, this.vz) / 0.25));
+  let hit = null;
+  for (let s = 1; s <= n && !hit; s++) {
+    const x = this.x + this.vx * s / n, y = this.y + this.vy * s / n, z = this.z + this.vz * s / n;
+    if (SOLID[w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z))]) { hit = [x, y, z]; break; }
+    for (const e of g.mobsAndPlayer()) {
+      if (e === this.owner || e.dead || e.deathTime > 0 || e instanceof Player && e.mode === 3) continue;
+      const hw = e.w / 2 + 0.3 + 0.5;
+      if (Math.abs(e.x - x) < hw && Math.abs(e.z - z) < hw && y > e.y - 0.8 && y < e.y + e.h + 0.3) { hit = [x, y, z]; break; }
+    }
+  }
+  if (hit) {
+    this.dead = true;
+    // DragonFireball.onHit: the cloud where it burst, or at a living thing within 4 blocks of it
+    let at = hit;
+    for (const e of g.mobsAndPlayer()) {
+      if (e === this.owner || e.dead || e instanceof Player && e.mode === 3) continue;
+      if (Math.abs(e.x - hit[0]) <= 4.5 && Math.abs(e.z - hit[2]) <= 4.5 && e.y < hit[1] + 2.5 && e.y + e.h > hit[1] - 2.5 && (e.x - hit[0]) ** 2 + (e.y - hit[1]) ** 2 + (e.z - hit[2]) ** 2 < 16) { at = [e.x, e.y, e.z]; break; }
+    }
+    drBreathCloud(this.owner, at[0], at[1], at[2], 3, 4 / 600, 600, 1);
+    g.sound('dragon_fireball_explode', hit[0], hit[1], hit[2]);
+    for (let k = 0; k < 20; k++) g.particles.poof(hit[0] + (Math.random() - 0.5) * 2, hit[1] + Math.random(), hit[2] + (Math.random() - 0.5) * 2, [0.75, 0.3, 0.9], 1);
+    return;
+  }
+  this.x += this.vx; this.y += this.vy; this.z += this.vz;
+  const l = Math.hypot(this.vx, this.vy, this.vz) || 1, k = 0.95;
+  this.vx = (this.vx + this.vx / l * 0.1) * k; this.vy = (this.vy + this.vy / l * 0.1) * k; this.vz = (this.vz + this.vz / l * 0.1) * k;
+  if (this.age % 2 === 0) g.particles.poof(this.x, this.y, this.z, [0.75, 0.35, 0.9], 1);
+};
+// they can't be hit back
+const _hurtDF = Projectile.prototype.hurt;
+Projectile.prototype.hurt = function (amount, source, attacker) { if (this.kind === 'void' && this.jd) return false; return _hurtDF.call(this, amount, source, attacker); };
+
+/* ---------------- the dragon ---------------- */
+function drInit(m) {
+  m._jv = true; m._dim = m.game.world.dim;
+  m.yr = drWrap(180 - m.yaw / DRG);
+  m.yRotA = 0; m.flapT = 0; m.inWall = false; m._hcol = false; m.deathT = 0; m._cw = false;
+  m._parts = { head: [m.x, m.y, m.z], neck: [m.x, m.y, m.z], body: [m.x, m.y, m.z], w1: [m.x, m.y, m.z], w2: [m.x, m.y, m.z] };
+  if (m.hist.length === 0) for (let k = 0; k < 64; k++) m.hist.push([m.yaw / DRG, m.y]);
+  drPhase(m, m.dying ? 'dying' : m === m.game.dragon ? 'holding' : 'hover');
+}
+// the latency buffer: [yaw in degrees, y] k ticks ago
+const drLat = (m, k) => m.hist[Math.min(k, m.hist.length - 1)] || [m.yaw / DRG, m.y];
+// EnderDragon's parts: where the head, neck, body and wings are this tick
+function drParts(m) {
+  const P = m._parts, sit = DR_PHASES[m._ph.name].sitting;
+  const f15 = (drLat(m, 5)[1] - drLat(m, 10)[1]) * 10 * DRG, f16 = Math.cos(f15), f2 = Math.sin(f15);
+  const yr = m.yr * DRG, s = Math.sin(yr), c = Math.cos(yr);
+  P.body = [m.x + s * 0.5, m.y, m.z - c * 0.5];
+  P.w1 = [m.x + c * 4.5, m.y + 2, m.z + s * 4.5]; P.w2 = [m.x - c * 4.5, m.y + 2, m.z - s * 4.5];
+  const f4 = Math.sin(yr - m.yRotA * 0.01), f19 = Math.cos(yr - m.yRotA * 0.01), f5 = sit ? -1 : drLat(m, 5)[1] - drLat(m, 0)[1];
+  P.head = [m.x + f4 * 6.5 * f16, m.y + f5 + f2 * 6.5, m.z - f19 * 6.5 * f16];
+  P.neck = [m.x + f4 * 5.5 * f16, m.y + f5 + f2 * 5.5, m.z - f19 * 5.5 * f16];
+}
+// part boxes (EnderDragonPart sizes: head 1, neck 3, body 5 by 3, wings 4 by 2)
+const drBox = (p, w, h) => [p[0] - w / 2, p[1], p[2] - w / 2, p[0] + w / 2, p[1] + h, p[2] + w / 2];
+const drTouch = (b, e) => e.x + e.w / 2 > b[0] && e.x - e.w / 2 < b[3] && e.y + e.h > b[1] && e.y < b[4] && e.z + e.w / 2 > b[2] && e.z - e.w / 2 < b[5];
+// EnderDragon.checkWalls: blocks in the box go unless they're dragon-proof (then it's "in a wall")
+function drWalls(m, b) {
+  const g = m.game, w = g.world, grief = g.rule('mobGriefing');
+  let wall = false, broke = false;
+  for (let x = Math.floor(b[0]); x <= Math.floor(b[3]); x++) for (let y = Math.floor(b[1]); y <= Math.floor(b[4]); y++) for (let z = Math.floor(b[2]); z <= Math.floor(b[5]); z++) {
+    const id = w.getBlock(x, y, z);
+    if (!id || DRAGON_THROUGH.has(id)) continue;
+    if (grief && !DRAGON_IMMUNE.has(id)) { w.setBlock(x, y, z, 0, 0); g.remeshNear(x, z); broke = true; } else wall = true;
+  }
+  if (broke) g.particles.explosion((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
+  return wall;
+}
+EnderDragon.prototype.tick = function () {
+  if (!this._jv) drInit(this);
+  this.savePrev(); this.age++;
+  const g = this.game, ph0 = this._ph;
+  if (this.hurtTime > 0) this.hurtTime--;
+  if (this.invuln > 0) this.invuln--;
+  // EnderDragon.tickDeath: up 0.1 a tick, turning 20 degrees, for 200 ticks
+  if (this.health <= 0 || this.deathT > 0) {
+    if (this.deathT === 0) { this.dying = 1; if (!this.data.silent) g.sound('dragon_death', this.x, this.y, this.z); }
+    this.deathT++; this.dying = this.deathT;
+    this.hist.unshift([this.yaw / DRG, this.y]); if (this.hist.length > 64) this.hist.length = 64;
+    this.y += 0.1; this.yr += 20; this.yaw = Math.atan2(Math.sin(this.yr * DRG), -Math.cos(this.yr * DRG)); this.bodyYaw = this.yaw;
+    if (this.deathT >= 180 && this.deathT <= 200) g.particles.explosion(this.x + (Math.random() - 0.5) * 8, this.y + 2 + (Math.random() - 0.5) * 4, this.z + (Math.random() - 0.5) * 8);
+    else if (this.deathT % 3 === 0) g.particles.poof(this.x + (Math.random() - 0.5) * 8, this.y + 2 + (Math.random() - 0.5) * 4, this.z + (Math.random() - 0.5) * 8, [0.8, 0.5, 1.0]);
+    if (this.deathT >= 200) { this.dead = true; g.onDragonDefeated(this); }
+    return;
+  }
+  // EndCrystal healing: the nearest within 32 blocks, looked for one tick in ten
+  if (this._crystal && this._crystal.dead) this._crystal = null;
+  if (this._crystal && this.age % 10 === 0 && this.health < this.maxHealth) this.health = Math.min(this.maxHealth, this.health + 1);
+  if (Math.random() < 0.1) {
+    let best = null, bd = Infinity;
+    for (const e of g.entities) {
+      if (!(e instanceof EndCrystal) || e.dead || Math.abs(e.x - this.x) > 40 || Math.abs(e.y - this.y) > 36 || Math.abs(e.z - this.z) > 40) continue;
+      const d = (e.x - this.x) ** 2 + (e.y - this.y) ** 2 + (e.z - this.z) ** 2;
+      if (d < bd) { bd = d; best = e; }
+    }
+    this._crystal = best;
+  }
+  this.healers = this._crystal ? [this._crystal] : [];
+  // flapping: faster the slower it goes, slower climbing; sitting, steady
+  const sit = !!DR_PHASES[this._ph.name].sitting;
+  let fl = 0.2 / (Math.hypot(this.vx, this.vz) * 10 + 1);
+  fl *= Math.pow(2, this.vy);
+  const of = this.flapT;
+  this.flapT += sit ? 0.1 : this.inWall ? fl * 0.5 : fl;
+  // EnderDragon.processFlappingMovement: the flap sound on each downbeat
+  if (Math.cos(of * 2 * Math.PI) <= -0.3 && Math.cos(this.flapT * 2 * Math.PI) >= -0.3 && !this.data.silent) g.sound('dragon_flap', this.x, this.y, this.z);
+  this.yr = drWrap(this.yr);
+  this.hist.unshift([this.yaw / DRG, this.y]); if (this.hist.length > 64) this.hist.length = 64;
+  // the phase, and the flight it asks for
+  const P = DR_PHASES[this._ph.name];
+  P.tick(this, this._ph);
+  if (this._ph !== ph0 && this._ph.name !== ph0.name) DR_PHASES[this._ph.name].tick(this, this._ph);
+  const Q = DR_PHASES[this._ph.name], T = this._ph.name === 'landing' || this._ph.name === 'dying' || !Q.sitting ? this._ph.at : null;
+  this._hcol = false;
+  if (T && !Q.sitting) {
+    const d0 = T[0] - this.x, d2 = T[2] - this.z, f5 = Q.flySpeed || 0.6, d4 = Math.hypot(d0, d2);
+    let d1 = T[1] - this.y;
+    const d3 = d0 * d0 + d1 * d1 + d2 * d2;
+    if (d4 > 0) d1 = drClamp(d1 / d4, -f5, f5);
+    this.vy += d1 * 0.01;
+    const l31 = Math.sqrt(d3) || 1, ax = d0 / l31, ay = (T[1] - this.y) / l31, az = d2 / l31;
+    const sx = Math.sin(this.yr * DRG), sz = -Math.cos(this.yr * DRG), l32 = Math.hypot(sx, this.vy, sz), bx = sx / l32, by = this.vy / l32, bz = sz / l32;
+    const f6 = Math.max((bx * ax + by * ay + bz * az + 0.5) / 1.5, 0);
+    if (Math.abs(d0) > 1e-5 || Math.abs(d2) > 1e-5) {
+      const f7 = drClamp(drWrap(180 - Math.atan2(d0, d2) / DRG - this.yr), -50, 50);
+      this.yRotA *= 0.8; this.yRotA += f7 * (Q.turn ? Q.turn(this) : drTurn(this));
+      this.yr += this.yRotA * 0.1;
+    }
+    const f19 = 2 / (d3 + 1), acc = 0.06 * (f6 * f19 + (1 - f19));
+    this.vx += Math.sin(this.yr * DRG) * acc; this.vz += -Math.cos(this.yr * DRG) * acc;
+    const k = this.inWall ? 0.8 : 1;
+    this.x += this.vx * k; this.y += this.vy * k; this.z += this.vz * k;
+    const lv = Math.hypot(this.vx, this.vy, this.vz) || 1, dot = (this.vx * bx + this.vy * by + this.vz * bz) / lv, d5 = 0.8 + 0.15 * (dot + 1) / 2;
+    this.vx *= d5; this.vy *= 0.91; this.vz *= d5;
+  }
+  this.yaw = Math.atan2(Math.sin(this.yr * DRG), -Math.cos(this.yr * DRG)); this.bodyYaw = this.yaw;
+  drParts(this);
+  // wings throw, head and neck bite (not right after it was hurt)
+  const pts = this._parts;
+  if (this.hurtTime === 0) {
+    const bc = [pts.body[0], pts.body[2]], wb = p => { const b = drBox(p, 4, 2); return [b[0] - 4, b[1] - 4, b[2] - 4, b[3] + 4, b[4], b[5] + 4]; };
+    for (const box of [wb(pts.w1), wb(pts.w2)]) for (const e of g.mobsAndPlayer()) {
+      if (e === this || e.dead || e.deathTime > 0 || e instanceof Player && !e.survival || e instanceof EndCrystal || !drTouch(box, e)) continue;
+      const dx = e.x - bc[0], dz = e.z - bc[1], d = Math.max(dx * dx + dz * dz, 0.1);
+      e.vx += dx / d * 4; e.vy += 0.2; e.vz += dz / d * 4;
+      if (!sit && !(e._drHit > e.age - 3)) { e._drHit = e.age; e.hurt(e instanceof Player ? g.difficultyDmg(5) : 5, 'ender_dragon', this); }
+    }
+    const hb = drBox(pts.head, 1, 1), nb = drBox(pts.neck, 3, 3), grow = b => [b[0] - 1, b[1] - 1, b[2] - 1, b[3] + 1, b[4] + 1, b[5] + 1];
+    for (const box of [grow(hb), grow(nb)]) for (const e of g.mobsAndPlayer()) {
+      if (e === this || e.dead || e.deathTime > 0 || e instanceof Player && !e.survival || e instanceof EndCrystal || !drTouch(box, e)) continue;
+      e.hurt(e instanceof Player ? g.difficultyDmg(10) : 10, 'ender_dragon', this);
+    }
+  }
+  this.inWall = drWalls(this, drBox(pts.head, 1, 1)) | drWalls(this, drBox(pts.neck, 3, 3)) | drWalls(this, drBox(pts.body, 5, 3));
+  if (this.age % 160 === 0 && !this.data.silent) g.sound('ender_dragon', this.x, this.y, this.z);
+};
+// EnderDragon.hurt (by part): nothing while dying; the phase's say (arrows on a sitting dragon), a quarter plus 1 off the head,
+// only from players and explosions; a sitting dragon that has lost a quarter of its health takes off
+EnderDragon.prototype.hurt = function (amount, source, attacker) {
+  if (!this._jv) drInit(this);
+  if (this.dead || this.deathT > 0 || this._ph.name === 'dying' || this.invuln > 0) return false;
+  const sit = !!DR_PHASES[this._ph.name].sitting;
+  if (sit && source === 'arrow') { const pr = DRAGON_HIT.proj; if (pr) pr.fireTicks = Math.max(pr.fireTicks || 0, 20); return false; }
+  if (!drOnHead(this, source, attacker)) amount = amount / 4 + Math.min(amount, 1);
+  if (amount < 0.01) return false;
+  // (DamageTypeTags.ALWAYS_HURTS_ENDER_DRAGONS: any explosion)
+  if (!(attacker instanceof Player) && !DRAGON_HIT.boom) return false;
+  const h0 = this.health;
+  this.health -= amount; this.hurtTime = 10; this.invuln = 10;
+  if (!this.data.silent) this.game.sound('dragon_hurt', this.x, this.y, this.z);
+  if (this.health <= 0 && !sit) { this.health = 1; drPhase(this, 'dying'); }
+  if (sit) {
+    this._sitDmg = (this._sitDmg || 0) + h0 - Math.max(0, this.health);
+    if (this._sitDmg > 0.25 * this.maxHealth) { this._sitDmg = 0; drPhase(this, 'takeoff'); }
+  }
+  return true;
+};
+// was the hit on the head? A projectile where it landed, a player swinging along the line of the look, an explosion near it
+const DRAGON_HIT = { proj: null };
+function drOnHead(m, source, attacker) {
+  const hd = m._parts.head, c = [hd[0], hd[1] + 0.5, hd[2]];
+  if (DRAGON_HIT.proj) { const p = DRAGON_HIT.proj; return Math.abs(p.x - c[0]) < 1.3 && Math.abs(p.y - c[1]) < 1.3 && Math.abs(p.z - c[2]) < 1.3; }
+  if (attacker instanceof Player && source === 'player') {
+    const e = attacker.eye ? attacker.eye() : [attacker.x, attacker.y + 1.62, attacker.z], L = attacker.look();
+    const vx = c[0] - e[0], vy = c[1] - e[1], vz = c[2] - e[2], t = vx * L[0] + vy * L[1] + vz * L[2];
+    if (t < 0) return false;
+    return Math.hypot(vx - L[0] * t, vy - L[1] * t, vz - L[2] * t) < 0.9 && t < 7;
+  }
+  if (DRAGON_HIT.boom) { const b = DRAGON_HIT.boom; return (b[0] - c[0]) ** 2 + (b[1] - c[1]) ** 2 + (b[2] - c[2]) ** 2 < b[3] * b[3] * 4; }
+  return false;
+}
+const _impactDR = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (!(e instanceof EnderDragon)) return _impactDR.call(this, e);
+  DRAGON_HIT.proj = this;
+  try { return _impactDR.call(this, e); } finally { DRAGON_HIT.proj = null; }
+};
+const _explodeDR = Game.prototype.explode;
+Game.prototype.explode = function (x, y, z, power, fire, source) {
+  DRAGON_HIT.boom = [x, y, z, power];
+  try { return _explodeDR.apply(this, arguments); } finally { DRAGON_HIT.boom = null; }
+};
+// a broken crystal it was healing from costs it 10 (an explosion at the head), and the phase may go after whoever broke it
+const _onCrystalDR = Game.prototype.onCrystalDestroyed;
+Game.prototype.onCrystalDestroyed = function (c) {
+  _onCrystalDR.call(this, c);
+  const s = this.dragon;
+  if (!s || s.dead || !s._jv || s.deathT > 0) return;
+  if (c === s._crystal) {
+    const hd = s._parts.head;
+    DRAGON_HIT.boom = [hd[0], hd[1], hd[2], 1];
+    try { s.hurt(10, 'crystal', null); } finally { DRAGON_HIT.boom = null; }
+  }
+  // DragonHoldingPatternPhase.onCrystalDestroyed: strafe the player who did it (or the nearest)
+  if (s._ph && s._ph.name === 'holding') { const p = this.player; if (p && !p.dead && p.survival && (p.x - c.x) ** 2 + (p.y - c.y) ** 2 + (p.z - c.z) ** 2 < 64 * 64) drStrafe(s, p); }
+};
+// the old breath (used by nothing now)
+EnderDragon.prototype.breath = function () { };
+// the model: Java's flap time, and a sitting dragon's head kept low
+const _renderDR = EnderDragon.prototype.render;
+EnderDragon.prototype.render = function (r, a) {
+  if (!this._jv) return _renderDR.call(this, r, a);
+  const age = this.age;
+  // the model takes flap = age / 40: feed it flapT through the age it sees
+  this.age = this.flapT * 40 - a;
+  try { return _renderDR.call(this, r, a); } finally { this.age = age; }
+};
+
+/* ---------------- sounds ---------------- */
+const DR_SOUNDS = [['dragon_flap', 'Dragon wings flap', 'hostile'], ['dragon_growl', 'Dragon roars', 'hostile'], ['dragon_breath', 'Dragon breathes', 'hostile'],
+  ['dragon_shoot', 'Dragon shoots', 'hostile'], ['dragon_fireball_explode', 'Fireball explodes', 'hostile']];
+for (const [n, t, c] of DR_SOUNDS) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+SOUND_EVENTS.unshift([/^entity\.ender_dragon\.flap/, 'dragon_flap'], [/^entity\.ender_dragon\.growl/, 'dragon_growl'], [/^entity\.ender_dragon\.shoot/, 'dragon_shoot'],
+  [/^entity\.dragon_fireball\.explode/, 'dragon_fireball_explode']);
+const DR_SOUND_SET = new Set(DR_SOUNDS.map(s => s[0]));
+const _audioPlayDR = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!DR_SOUND_SET.has(name)) return _audioPlayDR.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, name === 'dragon_flap' ? 1.6 : 2.5);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'dragon_flap': this.noiseHit(dst, 'lowpass', 300 * v, 0.7, 0.35, 0.4); break;
+    case 'dragon_growl': this.tone(dst, 'sawtooth', 110 * v, 60 * v, 1.4, 0.45); this.noiseHit(dst, 'lowpass', 600, 0.8, 1.2, 0.4); break;
+    case 'dragon_breath': this.noiseHit(dst, 'bandpass', 900 * v, 0.6, 1.2, 0.35); break;
+    case 'dragon_shoot': this.tone(dst, 'sawtooth', 300 * v, 120 * v, 0.4, 0.3); this.noiseHit(dst, 'bandpass', 1200, 1, 0.3, 0.3); break;
+    case 'dragon_fireball_explode': this.noiseHit(dst, 'lowpass', 900, 0.8, 0.6, 0.5); this.tone(dst, 'sine', 220 * v, 90 * v, 0.5, 0.2); break;
+  }
+};
+
+/* @file 163_fish.js */
+/* ===================================================================
+   Part 52: fish like Java
+   - AbstractFish: movement speed 0.7; in the water FishMoveControl eases the speed an eighth of the way to 0.7 x the goal's
+     speed each tick, lifts or sinks it a tenth of that along the slope and turns it at once; travel adds 0.01 of the forward
+     input (never more than 1) and keeps 0.9 (so 1.4 blocks a second strolling); a little up while the eyes are under, as
+     much down when it has nothing to chase
+   - its goals: PanicGoal (1.25, for 40 ticks after a hit that causes panic), AvoidEntityGoal (players within 8 blocks it can
+     see, not in creative and not on Peaceful: a spot away up to 16 blocks off, at 1.6, or 1.4 once within 7), FishSwimGoal (a random spot in
+     the water up to 10 blocks across and 7 up or down, 1 in 20 checks while idle, not for fish following a leader)
+   - schools (AbstractSchoolingFish, FollowFlockLeaderGoal): cod (up to 4), salmon (5) and tropical fish (9); now and then
+     a fish without a school looks within 8 blocks for a leader with room (or becomes one) and the rest follow it, closing
+     in every 10 ticks, until it is more than 11 blocks away or gone
+   - out of the water it flops: every landing throws it 0.4 up and a little sideways, with the flop sound
+   - pufferfish: something scary within 2 blocks (players not in creative, mobs but fish, squid, dolphins, turtles,
+     guardians and tadpoles) puffs it up halfway at once and fully after 40 ticks; once alone it goes back down a step after
+     60 ticks and flat at 100; puffed it stings what touches it (1 + the puff, scaled by difficulty for players;
+     poison for 3 seconds per puff); its box (and model) is half, 0.7 or the full size
+   =================================================================== */
+const FISH = new Set(['cod', 'salmon', 'pufferfish', 'tropical_fish']);
+const FISH_SCHOOL = { cod: 4, salmon: 5, tropical_fish: 9 };
+for (const t of FISH) MOB_TYPES[t].ai = FISH_SCHOOL[t] ? ['fishPanic', 'fishAvoid', 'fishSwim', 'fishFollow'] : ['fishPanic', 'fishAvoid', 'fishSwim'];
+// a random water block (BehaviorUtils.getRandomSwimmablePos / DefaultRandomPos in the water)
+function fishSpot(m, r, vr, away) {
+  const w = m.game.world, R = Math.random;
+  for (let k = 0; k < 10; k++) {
+    let x = Math.floor(m.x + (R() * 2 - 1) * r), z = Math.floor(m.z + (R() * 2 - 1) * r);
+    const y = Math.floor(m.y + (R() * 2 - 1) * vr);
+    if (away) { const dx = x + 0.5 - away.x, dz = z + 0.5 - away.z; if (dx * dx + dz * dz < (m.x - away.x) ** 2 + (m.z - away.z) ** 2) continue; }
+    if (!w.isLoadedAt(x, z) || w.getBlock(x, y, z) !== B.WATER) continue;
+    return [x + 0.5, y + 0.5, z + 0.5];
+  }
+  return null;
+}
+// the way to a spot: done when within a block, or stuck for 2 seconds
+function fishGo(m, to, mod) {
+  m._fishTo = [to[0], to[1], to[2], mod];
+}
+function fishArrived(m, to) {
+  if (!to) return true;
+  if ((to[0] - m.x) ** 2 + (to[1] - m.y) ** 2 + (to[2] - m.z) ** 2 < 1) return true;
+  if (m.age % 40 === 0) { const moved = m._fishLast ? Math.hypot(m.x - m._fishLast[0], m.z - m._fishLast[1]) : 1; m._fishLast = [m.x, m.z]; if (moved < 0.3) return true; }
+  return false;
+}
+// PanicGoal(1.25)
+GOALS.fishPanic = function (m) {
+  if (!m.inWater) return false;
+  if (m._fGoal === 'panic' && !fishArrived(m, m._fGoalTo)) { fishGo(m, m._fGoalTo, 1.25); return true; }
+  if (!(m._panicUntil > m.age)) { if (m._fGoal === 'panic') m._fGoal = null; return false; }
+  const s = fishSpot(m, 5, 4);
+  if (!s) return false;
+  m._fGoal = 'panic'; m._fGoalTo = s; fishGo(m, s, 1.25);
+  return true;
+};
+// AvoidEntityGoal(Player, 8, 1.6, 1.4)
+GOALS.fishAvoid = function (m) {
+  const p = m.game.player;
+  // (combat targeting: not players who can't be hurt, nobody on Peaceful)
+  if (!m.inWater || !p || p.dead || !p.survival || OPTIONS.difficulty === 0) { if (m._fGoal === 'avoid') m._fGoal = null; return false; }
+  const d2 = (p.x - m.x) ** 2 + (p.y - m.y) ** 2 + (p.z - m.z) ** 2;
+  if (m._fGoal === 'avoid' && !fishArrived(m, m._fGoalTo)) { fishGo(m, m._fGoalTo, d2 < 49 ? 1.4 : 1.6); return true; }
+  if (m._fGoal === 'avoid') m._fGoal = null;
+  if (d2 > 64 || (m.age + m.id) % 2 || !m.canSee(p)) return false;
+  const s = fishSpot(m, 16, 7, p);
+  if (!s || (s[0] - p.x) ** 2 + (s[1] - p.y) ** 2 + (s[2] - p.z) ** 2 < d2) return false;
+  m._fGoal = 'avoid'; m._fGoalTo = s; fishGo(m, s, d2 < 49 ? 1.4 : 1.6);
+  return true;
+};
+// FishSwimGoal (RandomSwimmingGoal 1.0, interval 40): leaders and loners only
+GOALS.fishSwim = function (m) {
+  if (!m.inWater || m._leader) { if (m._fGoal === 'swim') m._fGoal = null; return false; }
+  if (m._fGoal === 'swim' && !fishArrived(m, m._fGoalTo)) { fishGo(m, m._fGoalTo, 1); return true; }
+  if (m._fGoal === 'swim') m._fGoal = null;
+  if ((m.noAct || 0) >= 100 || (m.age + m.id) % 2 || Math.random() * 20 >= 1) return false;
+  const s = fishSpot(m, 10, 7);
+  if (!s) return false;
+  m._fGoal = 'swim'; m._fGoalTo = s; fishGo(m, s, 1);
+  return true;
+};
+// FollowFlockLeaderGoal
+const fishLeads = m => (m._school || 1) > 1;
+GOALS.fishFollow = function (m) {
+  const L = m._leader;
+  if (L) {
+    // canContinueToUse: the leader alive and within 11 blocks
+    if (L.dead || L.deathTime > 0 || (L.x - m.x) ** 2 + (L.y - m.y) ** 2 + (L.z - m.z) ** 2 > 121) { L._school = Math.max(1, (L._school || 1) - 1); m._leader = null; return false; }
+    if (!(m._fRecalc > 0)) { m._fRecalc = 10; m._fFollowTo = [L.x, L.y, L.z]; }
+    m._fRecalc--;
+    if (!fishArrived(m, m._fFollowTo)) fishGo(m, m._fFollowTo, 1);
+    return true;
+  }
+  if (fishLeads(m) || !m.inWater) return false;
+  if (m._fNext > 0) { m._fNext--; return false; }
+  // FollowFlockLeaderGoal.nextStartTick: 100 to 110 goal checks
+  m._fNext = 2 * (100 + Math.floor(Math.random() * 200) % 20);
+  const max = FISH_SCHOOL[m.type], near = m.game.entities.filter(e => e.type === m.type && !e.dead && !(e.deathTime > 0) && Math.abs(e.x - m.x) <= 8.5 && Math.abs(e.y - m.y) <= 8.5 && Math.abs(e.z - m.z) <= 8.5 && (fishLeads(e) && (e._school || 1) < max || !e._leader));
+  const leader = near.find(e => fishLeads(e) && (e._school || 1) < max) || m;
+  for (const f of near) {
+    if (f === leader || f._leader || fishLeads(f)) continue;
+    if ((leader._school || 1) >= max) break;
+    f._leader = leader; leader._school = (leader._school || 1) + 1;
+  }
+  return !!m._leader;
+};
+
+/* ---------------- swimming ---------------- */
+// FishMoveControl and AbstractFish.travel in the water
+const _swimFI = Mob.prototype.swimPhysics;
+Mob.prototype.swimPhysics = function () {
+  if (!FISH.has(this.type)) return _swimFI.call(this);
+  const d = this._fishTo;
+  if (this.headInWater) this.vy += 0.005;
+  if (d) {
+    this._fspd = (this._fspd || 0) + (0.7 * d[3] - (this._fspd || 0)) * 0.125;
+    const dx = d[0] - this.x, dy = d[1] - this.y, dz = d[2] - this.z, l = Math.hypot(dx, dy, dz);
+    if (dy !== 0 && l > 0) this.vy += this._fspd * (dy / l) * 0.1;
+    if (dx || dz) { this.yaw = Math.atan2(dx, dz); this.bodyYaw = this.yaw; }
+  } else this._fspd = 0;
+  const a = 0.01 * Math.min(this._fspd * 0.98, 1);
+  this.vx += Math.sin(this.yaw) * a; this.vz += Math.cos(this.yaw) * a;
+  this.physicsStep();
+  this.vx *= 0.9; this.vy *= 0.9; this.vz *= 0.9;
+  if (!this.target) this.vy -= 0.005;
+  const spd = Math.hypot(this.x - this.px, this.z - this.pz);
+  this.walkAmt += (Math.min(1, spd * 4) - this.walkAmt) * 0.4; this.walk += spd * 4;
+};
+// each think starts without a way to go (a goal sets it again)
+const _thinkFI = Mob.prototype.think;
+Mob.prototype.think = function () {
+  if (FISH.has(this.type)) this._fishTo = null;
+  return _thinkFI.call(this);
+};
+// AbstractFish.aiStep: flopping on land; AbstractSchoolingFish.tick: a school of one again when alone
+const _tickFI = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (!FISH.has(this.type)) return _tickFI.call(this);
+  if (this.type === 'pufferfish') pufferTick(this);
+  const was = this.onGround;
+  _tickFI.call(this);
+  if (this.dead || this.deathTime > 0) return;
+  if (!this.inWater && this.onGround && !was && !this.data.noAI) {
+    this.vx += (Math.random() * 2 - 1) * 0.05; this.vy += 0.4; this.vz += (Math.random() * 2 - 1) * 0.05; this.onGround = false;
+    if (!this.data.silent) this.game.sound('fish_flop', this.x, this.y, this.z);
+  }
+  if (fishLeads(this) && Math.floor(Math.random() * 200) === 1 && !this.game.entities.some(e => e !== this && e._leader === this && !e.dead)) this._school = 1;
+  if (this.type === 'pufferfish') pufferSting(this);
+};
+// a fish that dies or goes leaves its school
+const _dieFI = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  if (FISH.has(this.type) && this._leader) { this._leader._school = Math.max(1, (this._leader._school || 1) - 1); this._leader = null; }
+  return _dieFI.call(this, source, attacker);
+};
+// panic after hits (DamageTypeTags.PANIC_CAUSES, as for farm animals)
+const _hurtFI = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  const r = _hurtFI.call(this, amount, source, attacker);
+  if (r && FISH.has(this.type) && !AS_CALM.has(source)) this._panicUntil = this.age + 40;
+  return r;
+};
+
+/* ---------------- pufferfish ---------------- */
+const PUFFER_CALM = new Set(['turtle', 'guardian', 'elder_guardian', 'cod', 'pufferfish', 'salmon', 'tropical_fish', 'dolphin', 'squid', 'glow_squid', 'tadpole']);
+const pufferScary = e => e instanceof Player ? !e.dead && e.mode !== 1 && e.mode !== 3 : e instanceof Mob && !e.dead && !(e.deathTime > 0) && !PUFFER_CALM.has(e.type) && e.T.cat !== 'misc';
+const PUFF_SCALE = [0.5, 0.7, 1];
+function pufferSize(m) { const s = PUFF_SCALE[m.data.puff2 || 0]; m.w = m.h = 0.7 * s; }
+// Pufferfish.tick with PufferfishPuffGoal (its check every other tick: something scary within 2 blocks)
+function pufferTick(m) {
+  const d = m.data, g = m.game;
+  if (!d.noAI && (m.age + m.id) % 2 === 0) {
+    const hw = m.w / 2 + 2, scared = g.mobsAndPlayer().some(e => e !== m && pufferScary(e) && Math.abs(e.x - m.x) < hw + e.w / 2 && Math.abs(e.z - m.z) < hw + e.w / 2 && e.y < m.y + m.h + 2 && e.y + e.h > m.y - 2);
+    if (scared && !(m._inflate > 0)) { m._inflate = 1; m._deflate = 0; }
+    else if (!scared) m._inflate = 0;
+  }
+  const st = d.puff2 || 0;
+  if (m._inflate > 0) {
+    if (st === 0) { d.puff2 = 1; if (!d.silent) g.sound('puffer_blow_up', m.x, m.y, m.z); }
+    else if (m._inflate > 40 && st === 1) { d.puff2 = 2; if (!d.silent) g.sound('puffer_blow_up', m.x, m.y, m.z); }
+    m._inflate++;
+  } else if (st !== 0) {
+    if ((m._deflate || 0) > 60 && st === 2) { d.puff2 = 1; if (!d.silent) g.sound('puffer_blow_out', m.x, m.y, m.z); }
+    else if ((m._deflate || 0) > 100 && st === 1) { d.puff2 = 0; if (!d.silent) g.sound('puffer_blow_out', m.x, m.y, m.z); }
+    m._deflate = (m._deflate || 0) + 1;
+  }
+  pufferSize(m);
+}
+// Pufferfish.aiStep / playerTouch: stings what touches it (its box 0.3 bigger for mobs)
+function pufferSting(m) {
+  const st = m.data.puff2 || 0, g = m.game;
+  if (!st) return;
+  for (const e of g.mobsAndPlayer()) {
+    if (e === m || !pufferScary(e)) continue;
+    const pad = e instanceof Player ? 0 : 0.3, hw = m.w / 2 + pad;
+    if (Math.abs(e.x - m.x) >= hw + e.w / 2 || Math.abs(e.z - m.z) >= hw + e.w / 2 || e.y >= m.y + m.h + pad || e.y + e.h <= m.y - pad) continue;
+    if (e.hurt(e instanceof Player ? g.difficultyDmg(1 + st) : 1 + st, 'pufferfish', m)) {
+      if (e.addEffect) e.addEffect('poison', 60 * st, 0);
+      if (!m.data.silent) g.sound('puffer_sting', e.x, e.y, e.z);
+    }
+  }
+}
+// the old puffing goes
+if (typeof MOB_TICK !== 'undefined') MOB_TICK.pufferfish = () => { };
+const _renderScaleFI = Mob.prototype.renderScale;
+Mob.prototype.renderScale = function (a) {
+  if (this.type === 'pufferfish') return PUFF_SCALE[this.data.puff2 || 0];
+  return _renderScaleFI ? _renderScaleFI.call(this, a) : 1;
+};
+const _initPF = MOB_INIT.pufferfish;
+MOB_INIT.pufferfish = function (m, o) { if (_initPF) _initPF(m, o); m.data.puff2 = (o.data && o.data.puff2) || 0; pufferSize(m); };
+
+/* ---------------- sounds ---------------- */
+const FI_SOUNDS = [['fish_flop', 'Fish flops', 'neutral'], ['puffer_blow_up', 'Pufferfish inflates', 'neutral'], ['puffer_blow_out', 'Pufferfish deflates', 'neutral'],
+  ['puffer_sting', 'Pufferfish stings', 'neutral']];
+for (const [n, t, c] of FI_SOUNDS) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+SOUND_EVENTS.unshift([/^entity\.(cod|salmon|tropical_fish|puffer_fish)\.flop/, 'fish_flop'], [/^entity\.puffer_fish\.blow_up/, 'puffer_blow_up'],
+  [/^entity\.puffer_fish\.blow_out/, 'puffer_blow_out'], [/^entity\.puffer_fish\.sting/, 'puffer_sting']);
+const FI_SOUND_SET = new Set(FI_SOUNDS.map(s => s[0]));
+const _audioPlayFI = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!FI_SOUND_SET.has(name)) return _audioPlayFI.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2;
+  switch (name) {
+    case 'fish_flop': this.noiseHit(dst, 'lowpass', 900 * v, 1, 0.08, 0.3); break;
+    case 'puffer_blow_up': this.tone(dst, 'sine', 300 * v, 700 * v, 0.25, 0.15); break;
+    case 'puffer_blow_out': this.tone(dst, 'sine', 700 * v, 250 * v, 0.3, 0.12); break;
+    case 'puffer_sting': this.noiseHit(dst, 'highpass', 2500, 1.5, 0.08, 0.3); this.tone(dst, 'square', 900 * v, 500 * v, 0.08, 0.05); break;
+  }
+};
+
 </script>
 </body>
 </html>
