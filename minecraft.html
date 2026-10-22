@@ -40171,6 +40171,262 @@ AUDIO.play = function (name, x, y, z, ...rest) {
   else { this.noiseHit(dst, 'lowpass', 400, 0.7, 0.3, 0.35); this.tone(dst, 'triangle', name === 'camel_sit' ? 120 : 90, name === 'camel_sit' ? 80 : 130, 0.25, 0.1); }
 };
 
+/* @file 141_pets.js */
+/* ===================================================================
+   PART 30: cats keep creepers and phantoms off, skeletons fear wolves,
+   wild wolves fear llamas, cats bring morning gifts; parrots and
+   axolotls like Java's
+   - creepers run from cats and ocelots, skeletons from wolves (6
+     blocks), untamed wolves from llamas (24 blocks, by strength)
+   - phantoms break off their swoop near a cat, which hisses at them
+   - a tamed cat by its owner's bed may leave a gift in the morning
+   - parrots: tamed with seeds one time in 10, killed by cookies, ride
+     their owner's shoulders (until a jump, water, flying, sleep or a
+     hit), dance by a playing jukebox and imitate monsters nearby
+   - axolotls play dead when hurt in water (and heal), give the player
+     Regeneration when they finish off what the player was fighting,
+     and dry out after 5 minutes out of water
+   =================================================================== */
+
+/* ---------------- running away ---------------- */
+// AvoidEntityGoal: the nearest one seen within range sends the mob to a spot farther away (DefaultRandomPos.getPosAway),
+// faster while it is within 7 blocks
+const AVOID = {
+  creeper: { from: new Set(['cat', 'ocelot']), r: 6, walk: 1, run: 1.2 },
+  wolf: { from: new Set(['llama', 'trader_llama']), r: 24, walk: 1.5, run: 1.5, ok: (m, e) => !m.data.tame && (e.data.strength || 1) >= Math.floor(Math.random() * 5) },
+};
+for (const t of ['skeleton', 'stray', 'bogged', 'wither_skeleton']) AVOID[t] = { from: new Set(['wolf']), r: 6, walk: 1, run: 1.2 };
+GOALS.avoid = function (m) {
+  const a = AVOID[m.type];
+  if (!a) return false;
+  // SwellGoal comes first: a creeper already swelling, or right by its target, goes on
+  if (m.type === 'creeper' && (m.data.fuse > 0 || m.data.ignited || m.target && m.distTo(m.target) < 3)) { m._avoid = null; return false; }
+  if (m._avoid && !m._avoid.dead && m.age % 10 && !m.navDone()) return m.followPath() || true;
+  m._avoid = null;
+  let best = null, bd = a.r;
+  for (const e of m.game.entities) if (e instanceof Mob && !e.dead && a.from.has(e.type)) { const d = m.distTo(e); if (d < bd && m.canSee(e)) { bd = d; best = e; } }
+  if (!best || a.ok && !a.ok(m, best)) return false;
+  for (let k = 0; k < 10; k++) {
+    const ang = Math.atan2(m.x - best.x, m.z - best.z) + (Math.random() - 0.5) * 2, r = 6 + Math.random() * 10;
+    const x = m.x + Math.sin(ang) * r, z = m.z + Math.cos(ang) * r;
+    if (Math.hypot(x - best.x, z - best.z) <= bd) continue;
+    m.goTo(x, m.y, z, m.T.walk * (bd < 7 ? a.run : a.walk), 2);
+    m._avoid = best;
+    return true;
+  }
+  return false;
+};
+for (const [t, after] of [['creeper', 'target'], ['skeleton', 'target'], ['stray', 'target'], ['bogged', 'target'], ['wither_skeleton', 'target'], ['wolf', 'sit']]) {
+  const T = MOB_TYPES[t];
+  if (!T || T.ai.includes('avoid')) continue;
+  const i = T.ai.indexOf(after);
+  T.ai.splice(i < 0 ? 0 : i + 1, 0, 'avoid');
+}
+// PhantomSweepAttackGoal.canContinueToUse: a cat within 16 blocks ends the swoop, and the cats hiss
+const _phantomCT = GOALS.phantom;
+GOALS.phantom = function (m) {
+  if (m.data.swoop > 0) {
+    const cats = m.game.entities.filter(e => e.type === 'cat' && !e.dead && Math.abs(e.x - m.x) <= 16.5 && Math.abs(e.y - m.y) <= 16.5 && Math.abs(e.z - m.z) <= 16.5);
+    if (cats.length) {
+      m.data.swoop = -60;
+      for (const c of cats) if (!(c._hissT > c.age)) { c._hissT = c.age + 40; m.game.sound('cat_hiss', c.x, c.y + 0.5, c.z); }
+    }
+  }
+  return _phantomCT.call(this, m);
+};
+
+/* ---------------- morning gifts ---------------- */
+// CatRelaxOnOwnerGoal: when its owner has slept the night through, a tamed cat close by (not told to sit) brings one
+// thing from gameplay/cat_morning_gift seven times in ten
+const CAT_GIFTS = [['rabbit_hide', 10], ['rabbit_foot', 10], ['chicken', 10], ['feather', 10], ['rotten_flesh', 10], ['string', 10], ['phantom_membrane', 2]];
+const _sleepTickCG = Game.prototype.sleepTick;
+Game.prototype.sleepTick = function () {
+  const t0 = this.world.time;
+  _sleepTickCG.call(this);
+  if (this.sleeping !== 100 || this.world.time === t0) return;
+  const p = this.player;
+  for (const c of this.entities) {
+    if (c.type !== 'cat' || c.dead || !c.data.tame || !c.data.owner || c.data.sitting || c.distTo(p) > 10 || Math.random() >= 0.7) continue;
+    let k = Math.random() * 62, name = CAT_GIFTS[0][0];
+    for (const [n, wt] of CAT_GIFTS) if ((k -= wt) < 0) { name = n; break; }
+    const a = c.bodyYaw || 0;
+    this.dropItem(c.x - Math.sin(a) * 0.8, c.y + 0.2, c.z + Math.cos(a) * 0.8, { id: itemOf(name), count: 1 });
+  }
+};
+
+/* ---------------- parrots ---------------- */
+// #parrot_food tames one time in ten; #parrot_poisonous_food (cookies) kills
+const PARROT_FOOD = new Set(['wheat_seeds', 'melon_seeds', 'pumpkin_seeds', 'beetroot_seeds', 'torchflower_seeds', 'pitcher_pod'].filter(n => ITEM_BY_NAME[n] !== undefined));
+if (MOB_TYPES.parrot) { MOB_TYPES.parrot.tempt = [...PARROT_FOOD]; MOB_TYPES.parrot.tameItem = [...PARROT_FOOD]; }
+MOB_INTERACT.parrot = (m, p, held, name) => {
+  const g = m.game;
+  if (held && !m.data.tame && PARROT_FOOD.has(name)) {
+    p.consumeHeld(1); g.sound('eat', m.x, m.y, m.z);
+    if (Math.random() < 0.1) { m.data.tame = true; m.data.owner = 'player'; m.data.sitting = true; m.persistent = true; for (let k = 0; k < 7; k++) g.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5)); }
+    else g.particles.poof(m.x, m.y + m.h, m.z, [0.3, 0.3, 0.3], 7);
+    return true;
+  }
+  if (held && name === 'cookie') {
+    p.consumeHeld(1); if (m.addEffect) m.addEffect('poison', 900, 0);
+    m.invuln = 0; m.hurt(1e9, 'player', p);
+    return true;
+  }
+  return false;
+};
+// LandOnOwnersShoulderGoal: a tamed parrot not told to sit, touching its owner and 5 seconds off a shoulder, hops onto the
+// free one (left first) and leaves the world until the player jumps, swims, flies, sleeps or is hurt
+const PARROT_IMITATES = new Set(['blaze', 'bogged', 'breeze', 'cave_spider', 'creeper', 'drowned', 'elder_guardian', 'ender_dragon', 'endermite', 'evoker', 'ghast', 'guardian',
+  'hoglin', 'husk', 'illusioner', 'magma_cube', 'phantom', 'piglin', 'piglin_brute', 'pillager', 'ravager', 'shulker', 'silverfish', 'skeleton', 'slime', 'spider', 'stray', 'vex',
+  'vindicator', 'warden', 'witch', 'wither', 'wither_skeleton', 'zoglin', 'zombie', 'zombie_villager']);
+const _tickPR = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'parrot' && !this.dead && !(this.deathTime > 0)) {
+    const g = this.game, p = g.player, d = this.data;
+    this.rideCd = (this.rideCd || 0) + 1;
+    if (d.tame && d.owner && p && !p.dead && !d.sitting && !this.leashed && this.rideCd > 100 && !p.flying && !p.inWater && !g.sleeping && p.mode !== 3 &&
+      Math.abs(this.x - p.x) < (this.w + p.w) / 2 && Math.abs(this.z - p.z) < (this.w + p.w) / 2 && this.y < p.y + p.h && this.y + this.h > p.y) {
+      const sh = p.shoulders || (p.shoulders = [null, null]), side = !sh[0] ? 0 : !sh[1] ? 1 : -1;
+      if (side >= 0) { sh[side] = this.save(); this.dead = true; this.noDrops = true; g.sound(this.T.sounds ? this.T.sounds[0] : 'pop', p.x, p.y + 1.5, p.z); return; }
+    }
+    // the dance by a playing jukebox (3.46 blocks)
+    if (this.age % 20 === 0) {
+      const w = g.world, bx = Math.floor(this.x), by = Math.floor(this.y), bz = Math.floor(this.z);
+      let on = false;
+      for (let x = bx - 4; x <= bx + 4 && !on; x++) for (let y = by - 4; y <= by + 4 && !on; y++) for (let z = bz - 4; z <= bz + 4 && !on; z++)
+        if (w.getBlock(x, y, z) === B.JUKEBOX) { const be = w.getBE(x, y, z); on = !!(be && be.disc) && Math.hypot(x + 0.5 - this.x, y + 0.5 - this.y, z + 0.5 - this.z) < 3.46; }
+      d.dancing = on;
+    }
+    // Parrot.imitateNearbyMobs: now and then the sound of a monster within 20 blocks
+    if (Math.random() < 1 / 400) parrotImitate(this);
+  }
+  return _tickPR.call(this);
+};
+function parrotImitate(m) {
+  if (Math.random() < 0.5) return;
+  const list = m.game.entities.filter(e => e instanceof Mob && !e.dead && PARROT_IMITATES.has(e.type) && Math.abs(e.x - m.x) <= 20 && Math.abs(e.y - m.y) <= 20 && Math.abs(e.z - m.z) <= 20);
+  const e = list[Math.floor(Math.random() * list.length)], s = e && e.T.sounds && e.T.sounds[0];
+  if (s) m.game.sound(s, m.x, m.y, m.z);
+}
+// Player.removeEntitiesOnShoulder: falling more than half a block, water, flying, sleeping or a hit puts them back
+Game.prototype.dropShoulderParrots = function () {
+  const p = this.player, sh = p && p.shoulders;
+  if (!sh || (!sh[0] && !sh[1])) return;
+  for (let k = 0; k < 2; k++) {
+    const o = sh[k];
+    if (!o) continue;
+    sh[k] = null;
+    const m = Mob.load(this, Object.assign({}, o, { x: p.x, y: p.y + 0.7, z: p.z }));
+    if (m) { m.rideCd = 0; m.data.sitting = false; this.entities.push(m); }
+  }
+};
+const _playerTickPR = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const r = _playerTickPR.call(this, inp);
+  const sh = this.shoulders;
+  if (sh && (sh[0] || sh[1]) && (this.fallDist > 0.5 || this.inWater || this.flying || this.game.sleeping || this.dead)) this.game.dropShoulderParrots();
+  return r;
+};
+const _playerHurtPR = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  const r = _playerHurtPR.call(this, amount, source, attacker);
+  if (r && this.shoulders && (this.shoulders[0] || this.shoulders[1])) this.game.dropShoulderParrots();
+  return r;
+};
+// kept with the player in the save
+const _playerDataPR = Game.prototype.playerData;
+Game.prototype.playerData = function () { const d = _playerDataPR.call(this), sh = this.player.shoulders; if (sh && (sh[0] || sh[1])) d.shoulders = sh; return d; };
+const _startWorldPR = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta, saved) {
+  const r = _startWorldPR.call(this, meta, saved);
+  if (meta.player && meta.player.shoulders && this.player) this.player.shoulders = meta.player.shoulders.slice(0, 2);
+  return r;
+};
+// ParrotOnShoulderLayer: sitting on the shoulders in third person (0.4 blocks out, lower when sneaking)
+const _renderPlayerModelPR = Game.prototype.renderPlayerModel;
+Game.prototype.renderPlayerModel = function (r, p, alpha) {
+  const out = _renderPlayerModelPR.call(this, r, p, alpha);
+  const sh = p && p.shoulders;
+  if (!sh || (!sh[0] && !sh[1]) || p.mode === 3) return out;
+  const pp = p.ipos(alpha), yaw = p.yaw + Math.PI, cy = Math.cos(yaw), sy = Math.sin(yaw), L = p.lightAt();
+  for (let k = 0; k < 2; k++) {
+    const o = sh[k];
+    if (!o) continue;
+    const ex = (k === 0 ? 6.4 : -6.4) * 0.9375 / 16, ey = 24 * 0.9375 / 16 - (p.sneaking ? 0.2 : 0);
+    const pos = [pp[0] + ex * cy, pp[1] + ey, pp[2] - ex * sy], fake = { data: o.d || {}, type: 'parrot' };
+    drawMob(r, MOB_MODELS.parrot, MOB_SKINS.parrot(fake), pos, yaw, { swing: 0, amt: 0, age: p.age + alpha, hy: 0, hp: 0, sit: true, onGround: true }, [1, 1, 1, 1], L, 1);
+  }
+  return out;
+};
+// the dance: bobbing and swaying
+const _animPR = MOB_ANIM.parrot;
+MOB_ANIM.parrot = (m, st) => { if (_animPR) _animPR(m, st); st.dance = !!m.data.dancing; };
+const _posePR = MOB_MODELS.parrot.anim;
+MOB_MODELS.parrot.anim = (P, st) => {
+  _posePR(P, st);
+  if (!st.dance) return;
+  const t = st.age * 0.6;
+  P['body#p'] = [Math.sin(t) * 0.8, 16.5 + Math.abs(Math.cos(t)) * 0.6, -3];
+  P.head = [P.head ? P.head[0] : 0, P.head ? P.head[1] : 0, Math.sin(t) * 0.35];
+};
+
+/* ---------------- axolotls ---------------- */
+// Axolotl.hurt: a hit in water from something may make it play dead for 10 seconds (Regeneration I meanwhile); nothing
+// hunts it then (canBeSeenAsEnemy)
+const _hurtAX = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'axolotl' && !this.dead && !(this.deathTime > 0) && !(this.data.playDead > 0) && this.inWater && attacker &&
+    Math.random() < 1 / 3 && (Math.floor(Math.random() * 3) < amount || this.health / this.maxHealth < 0.5) && amount < this.health) {
+    const r = _hurtAX.call(this, amount, source, attacker);
+    if (r && !this.dead && !(this.deathTime > 0)) {
+      this.data.playDead = 200; if (this.addEffect) this.addEffect('regeneration', 200, 0);
+      for (const e of this.game.entities) if (e.target === this) e.target = null;
+    }
+    return r;
+  }
+  return _hurtAX.call(this, amount, source, attacker);
+};
+GOALS.playDead = m => { if (m.data.playDead > 0) { m.data.playDead--; m.nav = null; m.move = null; m.target = null; return true; } return false; };
+if (MOB_TYPES.axolotl && !MOB_TYPES.axolotl.ai.includes('playDead')) MOB_TYPES.axolotl.ai.unshift('playDead');
+const _animAX = MOB_ANIM.axolotl, _poseAX = MOB_MODELS.axolotl.anim;
+MOB_ANIM.axolotl = (m, st) => { if (_animAX) _animAX(m, st); st.playDead = m.data.playDead > 0; };
+MOB_MODELS.axolotl.anim = (P, st) => { _poseAX(P, st); if (st.playDead) P.body = [0, 0, Math.PI / 2]; };
+// AxolotlAi.onStopAttacking: what it was fighting dies to the player within 20 blocks: Regeneration for the player (100
+// ticks more, up to 2 minutes) and no more Mining Fatigue
+const _dieAX = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  const first = !(this.deathTime > 0);
+  _dieAX.call(this, source, attacker);
+  const g = this.game, p = g.player;
+  if (!first || !p || attacker !== p) return;
+  if (!g.entities.some(e => e.type === 'axolotl' && !e.dead && e.target === this && Math.abs(e.x - p.x) <= 20 && Math.abs(e.y - p.y) <= 20 && Math.abs(e.z - p.z) <= 20)) return;
+  const cur = p.effects && p.effects.get('regeneration');
+  if (!cur || cur.ticks < 2400) p.addEffect('regeneration', Math.min(2400, 100 + (cur ? cur.ticks : 0)), 0);
+  if (p.effects && p.effects.has('mining_fatigue')) p.effects.delete('mining_fatigue');
+};
+// Axolotl.handleAirSupply: out of water (and rain) for 5 minutes, then 2 damage a second
+const _tickAX = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  if (this.type === 'axolotl' && !this.dead && !(this.deathTime > 0)) {
+    const g = this.game, wet = this.inWater || g.world.raining && g.topY && g.topY(Math.floor(this.x), Math.floor(this.z)) <= Math.floor(this.y);
+    if (wet) this.data.air = 6000;
+    else {
+      this.data.air = (this.data.air === undefined ? 6000 : this.data.air) - 1;
+      if (this.data.air <= -20) { this.data.air = 0; this.invuln = 0; this.hurt(2, 'dry', null); }
+    }
+  }
+  return _tickAX.call(this);
+};
+
+/* ---------------- sounds ---------------- */
+SND_CAT.cat_hiss = 'neutral'; SUB_TEXT.cat_hiss = 'Cat hisses';
+const _audioPlayHS = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'cat_hiss') return _audioPlayHS.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (dst) this.noiseHit(dst, 'highpass', 2500, 0.8, 0.45, 0.5);
+};
+
 </script>
 </body>
 </html>

@@ -536,6 +536,16 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   to a dancing allay makes a second one (then neither can for 5 minutes).
 - **Camels** sit down and stand up now and then when left alone, and stand up when hurt or when
   their rider moves.
+- **Cats** keep creepers away (creepers run from cats and ocelots), phantoms break off their dive
+  near a cat (which hisses at them), and a tamed cat by your bed may leave you a gift in the
+  morning. Skeletons run from wolves, and wild wolves run from llamas (the stronger the llama, the
+  more surely).
+- **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
+  shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
+  jukebox and now and then imitate the monsters around them.
+- **Axolotls** play dead when hurt in water (healing meanwhile, and nothing hunts them), give you
+  Regeneration when you finish off what they were fighting, and dry out after 5 minutes out of
+  water.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
