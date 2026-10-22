@@ -8650,6 +8650,7 @@ TEXGEN.push(function texBlocks() {
   T('sculk_sensor_side', (d, r) => fillF(d, (x, y) => y < 2 ? [20, 90, 100] : mul([14, 52, 60], 0.8 + r() * 0.3)));
   T('sculk_sensor_bottom', (d, r) => fillF(d, () => mul([12, 44, 50], 0.8 + r() * 0.3)));
   T('sculk_sensor_tendril_inactive', (d, r) => { clear(d); for (let y = 4; y < 16; y++) { sp(d, 7, y, [20, 100, 110]); sp(d, 8, y - 1, [30, 140, 150]); } });
+  T('sculk_sensor_tendril_active', (d, r) => { clear(d); for (let y = 2; y < 16; y++) { sp(d, 7, y, [60, 220, 230]); sp(d, 8, y - 1, [120, 250, 255]); } });
   T('calibrated_sculk_sensor_top', (d, r) => fillF(d, (x, y) => (x > 3 && x < 12 && y > 3 && y < 12) ? (r() < 0.2 ? [200, 120, 240] : [70, 40, 100]) : mul([14, 52, 60], 0.8 + r() * 0.3)));
   T('calibrated_sculk_sensor_input_side', (d, r) => fillF(d, (x, y) => y < 2 ? [130, 80, 170] : mul([14, 52, 60], 0.8 + r() * 0.3)));
   T('suspicious_sand_0', over('sand', (d) => { for (const [x, y] of [[6, 9], [7, 9], [8, 10], [7, 10], [9, 9]]) sp(d, x, y, [140, 110, 70]); }));
@@ -12686,6 +12687,9 @@ Object.assign(MOB_MODELS, {
     P_('left_front_leg', [4, 14, -12], [[48, 21, -3, -1.01, -1.9, 4, 11, 4, 0, 1]]), P_('right_front_leg', [-4, 14, -12], [[48, 21, -1, -1.01, -1.9, 4, 11, 4]]),
     P_('tail', [0, 4, 14], [[42, 36, -1.5, 0, 0, 3, 14, 4]], [PI / 6, 0, 0]),
     P_('saddle', [0, 11, 5], [[26, 0, -5, -9, -9, 10, 9, 9, 0.5]]),
+    P_('head_saddle', [0, 0, 0], [[1, 1, -3, -11, -1.9, 6, 5, 6, 0.22]], null, 'head_parts'), P_('mouth_saddle_wrap', [0, 0, 0], [[19, 0, -2, -11, -4, 4, 5, 2, 0.2]], null, 'head_parts'),
+    P_('left_saddle_mouth', [0, 0, 0], [[29, 5, 2, -9, -6, 1, 2, 2]], null, 'head_parts'), P_('right_saddle_mouth', [0, 0, 0], [[29, 5, -3, -9, -6, 1, 2, 2]], null, 'head_parts'),
+    P_('left_saddle_line', [0, 0, 0], [[32, 2, 3.1, -6, -8, 0, 3, 16]], [-PI / 6, 0, 0], 'head_parts'), P_('right_saddle_line', [0, 0, 0], [[32, 2, -3.1, -6, -8, 0, 3, 16]], [-PI / 6, 0, 0], 'head_parts'),
     P_('left_chest', [6, 6, 2], [[26, 21, -4, 0, -2, 8, 8, 3]], [0, HPI, 0]), P_('right_chest', [-6, 6, 2], [[26, 21, -4, 0, -2, 8, 8, 3]], [0, HPI, 0])],
     anim(P, st) {
       const eat = st.eat || 0, rear = st.rear || 0;
@@ -12695,7 +12699,8 @@ Object.assign(MOB_MODELS, {
       P.right_hind_leg = [a, 0, 0]; P.left_hind_leg = [b, 0, 0]; P.right_front_leg = [b - rear * 0.9, 0, 0]; P.left_front_leg = [a - rear * 0.9, 0, 0];
       if (rear) { P.body = [-rear * PI / 4, 0, 0]; P['right_front_leg#p'] = [-4, 14 - rear * 10, -12 + rear * 4]; P['left_front_leg#p'] = [4, 14 - rear * 10, -12 + rear * 4]; P['head_parts#p'] = [0, 4 - rear * 11, -12 + rear * 6]; }
       P.tail = [PI / 6 + st.amt * 0.75 + Math.sin(st.age * 0.1) * 0.05, 0, 0];
-      if (!st.saddle) P['saddle#hide'] = 1;
+      if (!st.saddle) for (const n of ['saddle', 'head_saddle', 'mouth_saddle_wrap', 'left_saddle_mouth', 'right_saddle_mouth']) P[n + '#hide'] = 1;
+      if (!st.saddle || !st.ridden) P['left_saddle_line#hide'] = P['right_saddle_line#hide'] = 1;
       if (!st.chest) P['left_chest#hide'] = P['right_chest#hide'] = 1;
       if (st.longEars) { P['left_ear#p'] = [0, -2, 0.5]; P['right_ear#p'] = [0, -2, 0.5]; }
     } },
@@ -13370,13 +13375,18 @@ function horseSkin(base, mane, extra) {
     upper_mouth: (f, x, y, W, H, R) => f === 'front' && y === 3 && (x === 0 || x === 3) ? [30, 26, 24] : nz(shd(base, 0.85), R),
     mane: (f, x, y, W, H, R) => nz(mane, R, 0.08), tail: (f, x, y, W, H, R) => nz(mane, R, 0.08),
     saddle: (f, x, y, W, H, R) => nz(y < 3 || f === 'top' ? [120, 70, 40] : [90, 52, 30], R),
+    // the bridle: a strap round the head behind the eyes and one round the nose, a bit at each side of the mouth, reins
+    head_saddle: (f, x, y, W, H, R) => (f !== 'bottom' && f !== 'front' && f !== 'back' && (f === 'top' ? y === 3 : x === (f === 'left' ? 3 : 2))) || y === H - 1 && f !== 'top' && f !== 'bottom' ? nz([84, 50, 30], R, 0.05) : null,
+    mouth_saddle_wrap: (f, x, y, W, H, R) => f === 'bottom' || y === 2 ? nz([84, 50, 30], R, 0.05) : null,
+    left_saddle_mouth: (f, x, y, W, H, R) => nz([150, 150, 156], R, 0.04), right_saddle_mouth: (f, x, y, W, H, R) => nz([150, 150, 156], R, 0.04),
+    left_saddle_line: (f, x, y, W, H, R) => y === 1 ? nz([84, 50, 30], R, 0.05) : null, right_saddle_line: (f, x, y, W, H, R) => y === 1 ? nz([84, 50, 30], R, 0.05) : null,
     left_chest: (f, x, y, W, H, R) => nz([150, 100, 50], R), right_chest: (f, x, y, W, H, R) => nz([150, 100, 50], R),
     '*': (f, x, y, W, H, R, ci) => extra ? extra(f, x, y, W, H, R, ci) || nz(base, R, 0.05) : nz(f === 'bottom' || (y >= H - 2 && H > 8) ? shd(base, 0.6) : base, R, 0.05),
   }, 151);
 }
 for (const k in HORSE_COLS) defSkin('entity/horse/horse_' + k, 64, 64, () => horseSkin(HORSE_COLS[k], shd(HORSE_COLS[k], k === 'white' ? 0.85 : 0.55)));
 for (const [k, fn] of [['white', (f, x, y, W, H) => y >= H - 4 && H >= 10 && f !== 'top'], ['whitefield', (f, x, y) => vnoise(x / 2 + FACE_I[f] * 13, y / 2, 61) > 0.55], ['whitedots', (f, x, y) => hash2(x * 3 + FACE_I[f] * 31, y * 5, 62) > 0.86], ['blackdots', (f, x, y) => hash2(x * 5 + FACE_I[f] * 29, y * 3, 63) > 0.86]])
-  defSkin('entity/horse/horse_markings_' + k, 64, 64, () => skinParts(64, 64, MM.horse.parts.filter(p => !['saddle', 'left_chest', 'right_chest'].includes(p.n)), { '*': (f, x, y, W, H, R) => fn(f, x, y, W, H) ? (k === 'blackdots' ? [30, 28, 28] : [244, 244, 240]) : null }, 155));
+  defSkin('entity/horse/horse_markings_' + k, 64, 64, () => skinParts(64, 64, MM.horse.parts.filter(p => !['saddle', 'left_chest', 'right_chest', 'head_saddle', 'mouth_saddle_wrap', 'left_saddle_mouth', 'right_saddle_mouth', 'left_saddle_line', 'right_saddle_line'].includes(p.n)), { '*': (f, x, y, W, H, R) => fn(f, x, y, W, H) ? (k === 'blackdots' ? [30, 28, 28] : [244, 244, 240]) : null }, 155));
 defSkin('entity/horse/donkey', 64, 64, () => horseSkin([130, 120, 110], [70, 62, 56], (f, x, y, W, H, R) => f === 'bottom' ? nz([200, 190, 180], R) : null));
 defSkin('entity/horse/mule', 64, 64, () => horseSkin([90, 60, 40], [50, 34, 24]));
 defSkin('entity/horse/horse_skeleton', 64, 64, () => horseSkin([214, 210, 196], [190, 186, 172], (f, x, y, W, H, R, ci) => (f === 'left' || f === 'right') && H === 10 && y % 3 === 1 && x > 2 && x < W - 3 ? nz([90, 86, 80], R) : null));
@@ -15314,10 +15324,10 @@ const MOB_ANIM = {
   goat: (m, st) => { st.ram = m.data.ramT > 0 ? 0.6 : 0; st.noLeftHorn = m.data.leftHorn === false; st.noRightHorn = m.data.rightHorn === false; },
   armadillo: (m, st) => { st.roll = m.data.roll || 0; },
   sniffer: (m, st) => { st.dig = m.data.dig > 0 ? 1 : 0; },
-  horse: (m, st) => { st.saddle = m.data.saddle; st.chest = m.data.chest; st.rear = m.rear > 0 ? m.rear-- / 20 : 0; },
-  donkey: (m, st) => { st.saddle = m.data.saddle; st.chest = m.data.chest; st.longEars = true; },
-  mule: (m, st) => { st.saddle = m.data.saddle; st.chest = m.data.chest; st.longEars = true; },
-  skeleton_horse: (m, st) => { st.saddle = m.data.saddle; }, zombie_horse: (m, st) => { st.saddle = m.data.saddle; },
+  horse: (m, st) => { st.saddle = m.data.saddle; st.ridden = !!(m.rider || m.passenger); st.chest = m.data.chest; st.rear = m.rear > 0 ? m.rear-- / 20 : 0; },
+  donkey: (m, st) => { st.saddle = m.data.saddle; st.ridden = !!(m.rider || m.passenger); st.chest = m.data.chest; st.longEars = true; },
+  mule: (m, st) => { st.saddle = m.data.saddle; st.ridden = !!(m.rider || m.passenger); st.chest = m.data.chest; st.longEars = true; },
+  skeleton_horse: (m, st) => { st.saddle = m.data.saddle; st.ridden = !!(m.rider || m.passenger); }, zombie_horse: (m, st) => { st.saddle = m.data.saddle; st.ridden = !!(m.rider || m.passenger); },
   llama: (m, st) => { st.chest = m.data.chest; }, trader_llama: (m, st) => { st.chest = m.data.chest; },
   camel: (m, st) => { st.sit = m.data.sitting; st.saddle = m.data.saddle; st.ridden = !!(m.rider || m.passenger); },
   bat: (m, st) => { st.rest = m.data.resting; },
@@ -15805,7 +15815,7 @@ class Player extends Entity {
     // footsteps
     if (this.onGround && !this.sneaking && Math.floor(this.walkDist * 1.4) !== Math.floor(this.pwalkDist * 1.4)) {
       const b = w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z));
-      if (b) { g.sound('step_' + BLK[b].sound, this.x, this.y, this.z); if (!this.sneaking && this.survival) g.vibrate(this.x, this.y, this.z, 'step', this); }
+      if (b) { g.sound('step_' + BLK[b].sound, this.x, this.y, this.z); if (!this.spectator) g.vibrate(this.x, this.y, this.z, 'step', this); }
     }
     if (this.inWater && !this.wasInWater && prevVy < -0.3) { g.sound('splash', this.x, this.y, this.z); g.particles.splash(this.x, this.y + 0.5, this.z); }
     this.wasInWater = this.inWater;
@@ -22175,9 +22185,9 @@ Projectile.prototype.type = undefined;
 
 // vibrations from the world: block changes, player steps (walking makes noise, sneaking doesn't)
 const _playerBreak = Game.prototype.playerBreak;
-Game.prototype.playerBreak = function (x, y, z) { const id = this.world.getBlock(x, y, z); _playerBreak.call(this, x, y, z); if (this.world.getBlock(x, y, z) !== id) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block', this.player); };
+Game.prototype.playerBreak = function (x, y, z) { const id = this.world.getBlock(x, y, z); _playerBreak.call(this, x, y, z); if (this.world.getBlock(x, y, z) !== id) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block', this.player, id); };
 const _toggleDoor = Game.prototype.toggleDoor;
-Game.prototype.toggleDoor = function (x, y, z) { _toggleDoor.call(this, x, y, z); this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block', this.player); };
+Game.prototype.toggleDoor = function (x, y, z) { _toggleDoor.call(this, x, y, z); const w = this.world, m = w.getMeta(x, y, z), id = w.getBlock(x, y, z), open = BLK[id].door ? !!(w.getMeta(x, (m & 8) ? y - 1 : y, z) & 4) : !!(m & 4); this.vibrate(x + 0.5, y + 0.5, z + 0.5, open ? 'block_open' : 'block_close', this.player); };
 Game.prototype.setDoorOpen = function (x, y, z, open) {
   const w = this.world, id = w.getBlock(x, y, z), m = w.getMeta(x, y, z), by = (m & 8) ? y - 1 : y;
   if (!BLK[id].door || w.getBlock(x, by, z) !== id) return;
@@ -39618,7 +39628,7 @@ Game.prototype.ringBell = function (x, y, z, by) {
   for (const e of b.near) if (!e.dead && Math.hypot(e.x - cx, e.y - cy, e.z - cz) < 32) e.data.heardBell = w.tick;
   b.t = 0; b.res = 0; b.shaking = true;
   this.sound('bell', cx, cy, cz);
-  if (this.vibrate) this.vibrate(cx, cy, cz, 'block', by || null);
+  if (this.vibrate) this.vibrate(cx, cy, cz, 'block_change', by || null, B.BELL);
   if (by && by === this.player && by.stat) by.stat('bell_ring');
   return true;
 };
@@ -50845,6 +50855,7 @@ MOB_SKINS.allay = () => [{ key: 'entity/allay/allay', trans: true }];
 
 /* ---------------- saddles ---------------- */
 // the newer packs' saddles, over the saddle part (when the pack has them; the older ones paint it on the horse)
+const HORSE_TACK = ['saddle', 'head_saddle', 'mouth_saddle_wrap', 'left_saddle_mouth', 'right_saddle_mouth', 'left_saddle_line', 'right_saddle_line'];
 for (const t of ['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse']) {
   defSkin('saddle/' + t, 64, 64, () => { const [c] = packCanvas(64, 64); return c; });
   SKINS['saddle/' + t].packOnly = true;
@@ -50852,7 +50863,7 @@ for (const t of ['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse']) {
   MOB_SKINS[t] = m => {
     const s = f(m), sk = VTEX['saddle/' + t];
     if (!m.data.saddle || !sk || !sk.pack) return s;
-    return s.map(x => Object.assign({}, x, { skip: ['saddle'] })).concat([{ key: 'saddle/' + t, only: ['saddle'] }]);
+    return s.map(x => Object.assign({}, x, { skip: HORSE_TACK })).concat([{ key: 'saddle/' + t, only: HORSE_TACK }]);
   };
 }
 // a camel's saddle, bridle and reins (the newer camel texture leaves them out)
@@ -51209,7 +51220,7 @@ Game.prototype.pistonEvent = function (x, y, z, type, param) {
     w.setBlock(x, y, z, id, m | 8, false);
     w.notify(x, y, z);
     this.sound('piston_out', x + 0.5, y + 0.5, z + 0.5);
-    if (this.vibrate) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block', null);
+    if (this.vibrate) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block_activate', null);
   } else {
     // the head still on its way out lands at once (and is gone); the piston itself becomes a moving block
     const h = mvGet(w, hx, hy, hz);
@@ -51227,7 +51238,7 @@ Game.prototype.pistonEvent = function (x, y, z, type, param) {
     } else w.setBlock(hx, hy, hz, 0, 0, false);
     w.notify(x, y, z); w.notify(hx, hy, hz);
     this.sound('piston_in', x + 0.5, y + 0.5, z + 0.5);
-    if (this.vibrate) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block', null);
+    if (this.vibrate) this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block_deactivate', null);
   }
   this.remeshNear(x, z);
   return true;
@@ -51384,6 +51395,705 @@ Game.prototype.renderSpawnerMobs = function (r, alpha) {
     // a retracting piston: its head slides back into the base
     if (m.src && !m.ext) { mvDrawBlock(w, r, B.PISTON_HEAD, m.dir | (m.sticky ? 16 : 0), m.x, m.y, m.z, ox, oy, oz); mvDrawBlock(w, r, m.id, m.meta | 8, m.x, m.y, m.z, m.x, m.y, m.z); }
     else if (m.id) mvDrawBlock(w, r, m.id, m.meta, m.x, m.y, m.z, ox, oy, oz);
+  }
+};
+
+/* @file 167_deep_dark.js */
+/* ===================================================================
+   Part 56: the deep dark like Java's (VibrationSystem, SculkSensorBlock,
+   CalibratedSculkSensorBlock, SculkShriekerBlock, WardenSpawnTracker,
+   Warden and WardenAi)
+   - game events carry Java's vibration frequencies (steps 1 ... explosions
+     and deaths 15) and reach listeners within their range, counted between
+     block positions; a vibration travels a block a tick and is stopped only
+     when wool blocks every line from its block to the listener's; sneaking
+     hides steps, landings and shots, spectators make none, and wool or
+     carpet that is stepped on, placed or broken muffles it
+   - sculk sensors (8 blocks) and calibrated sensors (16, and only the
+     frequency fed into the side that faced the player placing them) stay
+     active for 30 (10) ticks, then rest for 10; their power falls off with
+     distance, comparators read the frequency, and amethyst blocks next to
+     them resonate
+   - a shrieker shrieks when a sensor within 8 blocks clicks for a player's
+     vibration, or when a player stands on it; naturally placed ones warn:
+     each player's warning level rises once per 10 seconds, falls once per
+     10 minutes of quiet, and at 4 a warden digs out within 5 blocks; no
+     warning with a warden within 24 blocks; the answer comes after the
+     90-tick shriek, with darkness within 40 blocks
+   - the warden: anger per suspect (vibrations 35, projectiles 10 then 35,
+     hits 100, sniffing out the nearest within 6 blocks 35), falling 1 a
+     second, angry suspects and players first; it roars at a new target for
+     84 ticks, then fights: a punch every 18 ticks puts its sonic boom off
+     for 2 seconds; the boom goes through walls within 15 blocks, not in
+     the first 10 seconds of a fight and at most every 5 seconds; it ignores
+     vibrations for 2 seconds after hearing one, follows a disturbance for
+     5 seconds, sheds darkness every 6 seconds, emerges for 134 ticks and
+     digs away after a minute without anger
+   =================================================================== */
+const GE_FREQ = { step: 1, swim: 1, flap: 1, projectile_land: 2, hit_ground: 2, splash: 2, item_interact_finish: 3, projectile_shoot: 3, instrument_play: 3,
+  entity_action: 4, elytra_glide: 4, unequip: 4, entity_dismount: 5, equip: 5, entity_interact: 6, shear: 6, entity_mount: 6, entity_damage: 7, drink: 8, eat: 8,
+  container_close: 9, block_close: 9, block_deactivate: 9, block_detach: 9, container_open: 10, block_open: 10, block_activate: 10, block_attach: 10, prime_fuse: 10,
+  note_block_play: 10, block_change: 11, block_destroy: 12, fluid_pickup: 12, block_place: 13, fluid_place: 13, entity_place: 14, lightning_strike: 14, teleport: 14,
+  entity_die: 15, explode: 15 };
+for (let f = 1; f <= 15; f++) GE_FREQ['resonate_' + f] = f;
+// events without a frequency: shriekers listen for the tendrils clicking, wardens for both
+const GE_ZERO = new Set(['sculk_sensor_tendrils_clicking', 'shriek']);
+// the names older code uses
+const GE_OLD = { block: 'block_destroy', place: 'block_place' };
+// GameEventTags.IGNORE_VIBRATIONS_SNEAKING
+const GE_SNEAK = new Set(['hit_ground', 'projectile_shoot', 'step', 'swim', 'item_interact_start', 'item_interact_finish']);
+// BlockTags.OCCLUDES_VIBRATION_SIGNALS (wool) and DAMPENS_VIBRATIONS (wool and wool carpets), ItemTags.DAMPENS_VIBRATIONS (the same as items)
+const VIB_OCCLUDE = new Uint8Array(MAXB), VIB_DAMPEN = new Uint8Array(MAXB), SCULK_LISTENS = new Uint8Array(MAXB);
+const dampensName = n => n.endsWith('_wool') || (n.endsWith('_carpet') && n !== 'moss_carpet' && n !== 'pale_moss_carpet');
+for (let i = 1; i < MAXB; i++) {
+  const d = BLK[i];
+  if (!d || !d.name) continue;
+  if (d.name.endsWith('_wool')) VIB_OCCLUDE[i] = 1;
+  if (dampensName(d.name)) VIB_DAMPEN[i] = 1;
+}
+SCULK_LISTENS[B.SCULK_SENSOR] = SCULK_LISTENS[B.CALIBRATED_SCULK_SENSOR] = SCULK_LISTENS[B.SCULK_SHRIEKER] = 1;
+// sensor meta: phase in bits 0-1 (0 waiting, 1 active, 2 cooling down), a calibrated sensor's facing in bits 2-3, power in bits 4-7;
+// shrieker meta: bit 0 can summon, bit 1 shrieking
+const SENSOR_ACTIVE = 1, SENSOR_COOL = 2, SHRIEKING = 2;
+const sensorPhase = m => m & 3;
+// CalibratedSculkSensorBlock: FACING is the way the player looked when placing it; the input is the side behind that, towards the player
+const calibratedBack = m => FACE_OF_LOOK[(m >> 2) & 3] ^ 1;
+const calibratedInput = (w, x, y, z) => RS.inputFrom(w, x, y, z, calibratedBack(w.getMeta(x, y, z)));
+
+/* ---------------- listeners nearby ---------------- */
+// the sensors and shriekers of a chunk, found once and forgotten when one is placed or broken there
+World.prototype.sculkIn = function (cx, cz) {
+  const c = this.getChunk(cx, cz);
+  if (!c || !c.blocks) return null;
+  if (c._sculk && c._sculkBl === c.blocks) return c._sculk;
+  const out = [], bl = c.blocks;
+  for (const id of [B.SCULK_SENSOR, B.CALIBRATED_SCULK_SENSOR, B.SCULK_SHRIEKER]) for (let i = bl.indexOf(id); i >= 0; i = bl.indexOf(id, i + 1)) out.push([cx * 16 + (i & 15), i >> 8, cz * 16 + ((i >> 4) & 15), id]);
+  c._sculk = out; c._sculkBl = bl;
+  return out;
+};
+const _setBlockDD = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  if (SCULK_LISTENS[id] || SCULK_LISTENS[this.getBlock(x, y, z)]) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._sculk = null; }
+  return _setBlockDD.call(this, x, y, z, id, meta, notify);
+};
+// BlockGetter.traverseBlocks from one point to another, the first and last block included: does it run into wool?
+function vibLine(w, fx, fy, fz, tx, ty, tz) {
+  const sx = fx + (fx - tx) * 1e-7, sy = fy + (fy - ty) * 1e-7, sz = fz + (fz - tz) * 1e-7;
+  const dx = tx + (tx - fx) * 1e-7 - sx, dy = ty + (ty - fy) * 1e-7 - sy, dz = tz + (tz - fz) * 1e-7 - sz;
+  let i = Math.floor(sx), j = Math.floor(sy), k = Math.floor(sz);
+  if (VIB_OCCLUDE[w.getBlock(i, j, k)]) return true;
+  const si = Math.sign(dx), sj = Math.sign(dy), sk = Math.sign(dz), M = Number.MAX_VALUE, fr = v => v - Math.floor(v);
+  const ti = si ? si / dx : M, tj = sj ? sj / dy : M, tk = sk ? sk / dz : M;
+  let ai = ti * (si > 0 ? 1 - fr(sx) : fr(sx)), aj = tj * (sj > 0 ? 1 - fr(sy) : fr(sy)), ak = tk * (sk > 0 ? 1 - fr(sz) : fr(sz));
+  while (ai <= 1 || aj <= 1 || ak <= 1) {
+    if (ai < aj) { if (ai < ak) { i += si; ai += ti; } else { k += sk; ak += tk; } }
+    else if (aj < ak) { j += sj; aj += tj; }
+    else { k += sk; ak += tk; }
+    if (VIB_OCCLUDE[w.getBlock(i, j, k)]) return true;
+  }
+  return false;
+}
+// VibrationSystem.isOccluded: from the centre of the event's block, nudged a hair each of the six ways, to the centre of the listener's block; stopped only if all six meet wool
+function vibOccluded(w, x0, y0, z0, x1, y1, z1) {
+  const fx = Math.floor(x0) + 0.5, fy = Math.floor(y0) + 0.5, fz = Math.floor(z0) + 0.5, tx = Math.floor(x1) + 0.5, ty = Math.floor(y1) + 0.5, tz = Math.floor(z1) + 0.5;
+  for (let f = 0; f < 6; f++) if (!vibLine(w, fx + DX[f] * 1e-5, fy + DY[f] * 1e-5, fz + DZ[f] * 1e-5, tx, ty, tz)) return false;
+  return true;
+}
+// SculkShriekerBlockEntity.tryGetPlayer: the player behind a vibration
+function vibPlayer(e) {
+  if (!e) return null;
+  if (e instanceof Player) return e;
+  if (e.rider instanceof Player) return e.rider;
+  if (e instanceof Projectile && e.owner instanceof Player) return e.owner;
+  if (e instanceof ItemEntity && e.thrower instanceof Player) return e.thrower;
+  return null;
+}
+
+/* ---------------- game events ---------------- */
+// state: the block it happened to (worked out for steps, landings and placing when not given)
+Game.prototype.vibrate = function (x, y, z, kind, src, state) {
+  const w = this.world;
+  if (!w) return;
+  kind = GE_OLD[kind] || kind;
+  const freq = GE_FREQ[kind] || 0;
+  if (!freq && !GE_ZERO.has(kind)) return;
+  // VibrationSystem.User.isValidVibration
+  if (src) {
+    if (src instanceof Player && src.spectator) return;
+    if (src.sneaking && GE_SNEAK.has(kind)) return;
+    // the warden dampens its own; so does a wool or carpet item
+    if (src instanceof Warden) return;
+    if (src instanceof ItemEntity && src.stack && ITEMS[src.stack.id] && dampensName(ITEMS[src.stack.id].name || '')) return;
+  }
+  if (state === undefined) state = kind === 'step' || kind === 'hit_ground' ? w.getBlock(Math.floor(x), Math.floor(y - 1e-3), Math.floor(z)) : kind === 'block_place' ? w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)) : 0;
+  if (state && VIB_DAMPEN[state]) return;
+  const v = { kind, freq, x, y, z, src, tick: w.tick }, bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+  // sculk sensors (8 blocks, calibrated ones 16) and shriekers (8)
+  for (let cx = (bx - 16) >> 4; cx <= (bx + 16) >> 4; cx++) for (let cz = (bz - 16) >> 4; cz <= (bz + 16) >> 4; cz++) {
+    const list = w.sculkIn(cx, cz);
+    if (!list) continue;
+    for (const s of list) {
+      const shrieker = s[3] === B.SCULK_SHRIEKER;
+      if (shrieker ? kind !== 'sculk_sensor_tendrils_clicking' : !freq) continue;
+      const range = shrieker ? 8 : BLK[s[3]].sensor || 8, dx = s[0] - bx, dy = s[1] - by, dz = s[2] - bz;
+      if (dx * dx + dy * dy + dz * dz > range * range) continue;
+      // a sensor ignores its own placing and breaking
+      if (!dx && !dy && !dz && (kind === 'block_place' || kind === 'block_destroy')) continue;
+      this.vibOffer(s[0], s[1], s[2], v, Math.hypot(s[0] + 0.5 - x, s[1] + 0.5 - y, s[2] + 0.5 - z), shrieker ? 'shrieker' : 'sensor');
+    }
+  }
+  // wardens, 16 blocks from their eyes
+  for (const e of this._wardens || []) {
+    if (e.dead) continue;
+    const ey = e.y + e.h * 0.85, dx = Math.floor(e.x) - bx, dy = Math.floor(ey) - by, dz = Math.floor(e.z) - bz;
+    if (dx * dx + dy * dy + dz * dz <= 256) e.vibOffer(v, Math.hypot(e.x - x, ey - y, e.z - z));
+  }
+};
+// VibrationSelector: a listener takes the closest vibration of a tick (the higher frequency on a tie), and none while one is on its way;
+// it arrives a block a tick, at the earliest the next tick
+Game.prototype.vibOffer = function (x, y, z, v, d, kind) {
+  const w = this.world, M = w.vibs || (w.vibs = new Map()), k = x + ',' + y + ',' + z, cur = M.get(k);
+  if (cur && !(cur.tick === v.tick && (d < cur.dist || (d === cur.dist && v.freq > cur.v.freq)))) return;
+  const id = w.getBlock(x, y, z), m = w.getMeta(x, y, z);
+  if (kind === 'sensor') {
+    if (sensorPhase(m) !== 0) return;
+    // a calibrated sensor fed a signal only hears that frequency
+    if (id === B.CALIBRATED_SCULK_SENSOR) { const inp = calibratedInput(w, x, y, z); if (inp > 0 && inp !== v.freq) return; }
+  } else if ((m & SHRIEKING) || !vibPlayer(v.src)) return;
+  if (vibOccluded(w, v.x, v.y, v.z, x + 0.5, y + 0.5, z + 0.5)) return;
+  M.set(k, { v, dist: d, tick: v.tick, at: v.tick + Math.max(1, Math.floor(d)), x, y, z, kind });
+  this.vibrationParticle(v.x, v.y, v.z, x + 0.5, y + 0.6, z + 0.5);
+};
+// vibrations arriving, the players' warning levels, and standing on a shrieker
+Game.prototype.tickVibrations = function () {
+  const w = this.world, M = w.vibs;
+  if (M && M.size) for (const [k, r] of [...M]) {
+    if (r.at > w.tick) continue;
+    M.delete(k);
+    // the power goes by the distance between the two blocks
+    if (r.kind === 'sensor') this.sensorActivate(r.x, r.y, r.z, r.v.src, r.v.freq, Math.hypot(Math.floor(r.v.x) - r.x, Math.floor(r.v.y) - r.y, Math.floor(r.v.z) - r.z));
+    else this.tryShriek(r.x, r.y, r.z, vibPlayer(r.v.src));
+  }
+  this._wardens = this.entities.filter(e => e instanceof Warden && !e.dead);
+  for (const e of this._wardens) if (e._vib && e._vib.at <= w.tick) { const r = e._vib; e._vib = null; e.hearVibration(r.v); }
+  const p = this.player, t = p && p.wst;
+  if (t) { if (t.since >= 12000) { t.level = Math.max(0, t.level - 1); t.since = 0; } else t.since++; if (t.cd > 0) t.cd--; }
+  // SculkShriekerBlock.stepOn: the player, what the player rides, and items the player threw
+  if (p && !p.dead && !p.spectator) { const e = p.riding || p; if (e.onGround) this.stepShrieker(e, p); }
+  if (w.tick % 4 === 0) for (const e of this.entities) if (e instanceof ItemEntity && e.thrower === p && e.onGround && !e.dead) this.stepShrieker(e, p);
+};
+Game.prototype.stepShrieker = function (e, p) {
+  const x = Math.floor(e.x), y = Math.floor(e.y - 0.2), z = Math.floor(e.z);
+  if (this.world.getBlock(x, y, z) === B.SCULK_SHRIEKER) this.tryShriek(x, y, z, p);
+};
+const _gameTickDD = Game.prototype.gameTick;
+Game.prototype.gameTick = function () { _gameTickDD.call(this); if (this.world) this.tickVibrations(); };
+
+/* ---------------- sculk sensors ---------------- */
+// SculkSensorBlock.activate: the power falls off with distance; the frequency waits for a comparator
+Game.prototype.sensorActivate = function (x, y, z, src, freq, dist) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  if (!BLK[id] || !BLK[id].sensor) return;
+  const m = w.getMeta(x, y, z);
+  if (sensorPhase(m) !== 0) return;
+  // VibrationSystem.getRedstoneStrengthForDistance
+  const range = BLK[id].sensor, power = Math.max(1, 15 - Math.floor(15 / range * (dist || 0)));
+  w.setBlock(x, y, z, id, (m & 12) | SENSOR_ACTIVE | (power << 4), false);
+  (w.sculkFreq || (w.sculkFreq = new Map())).set(x + ',' + y + ',' + z, freq || 0);
+  w.schedule(x, y, z, id === B.CALIBRATED_SCULK_SENSOR ? 10 : 30, 'sculk_cool');
+  w.redstoneChanged(x, y, z); w.redstoneChanged(x, y - 1, z);
+  // amethyst next to it rings on with the same frequency
+  for (let f = 0; f < 6; f++) {
+    const ax = x + DX[f], ay = y + DY[f], az = z + DZ[f];
+    if (w.getBlock(ax, ay, az) !== B.AMETHYST_BLOCK) continue;
+    this.vibrate(ax + 0.5, ay + 0.5, az + 0.5, 'resonate_' + Math.max(1, freq || 0), src, B.AMETHYST_BLOCK);
+    this.sound('amethyst_resonate', ax + 0.5, ay + 0.5, az + 0.5);
+  }
+  // the tendrils clicking, which shriekers and wardens hear
+  this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'sculk_sensor_tendrils_clicking', src, id);
+  this.sound('sculk_click', x + 0.5, y + 0.5, z + 0.5);
+  for (let k = 0; k < 4; k++) this.particles.add({ x: x + Math.random(), y: y + 0.6, z: z + Math.random(), vx: 0, vy: 0.03, vz: 0, life: 15, layer: texL('particle_vibration'), u: 0, v: 0, us: 1, size: 0.05, g: 0, col: [1, 1, 1], bright: true });
+  this.remeshNear(x, z);
+};
+// redstone: the power while active, the block below strongly; a calibrated sensor gives none back into its input side
+const _emitDD = RS.emit;
+RS.emit = function (w, x, y, z, f, strong) {
+  if (RS_SRC[w.getBlock(x, y, z)] === S_SENSOR) {
+    const m = w.getMeta(x, y, z), p = sensorPhase(m) === SENSOR_ACTIVE ? (m >> 4) || 15 : 0;
+    if (w.getBlock(x, y, z) === B.CALIBRATED_SCULK_SENSOR && f === calibratedBack(m)) return 0;
+    return strong ? (f === 3 ? p : 0) : p;
+  }
+  return _emitDD.call(this, w, x, y, z, f, strong);
+};
+// comparators read the last frequency while it is active
+const _containerSignalDD = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (BLK[id] && BLK[id].sensor) return sensorPhase(w.getMeta(x, y, z)) === SENSOR_ACTIVE ? (w.sculkFreq && w.sculkFreq.get(x + ',' + y + ',' + z)) || 0 : 0;
+  return _containerSignalDD.call(this, w, x, y, z);
+};
+const _onScheduledDD = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  // SculkSensorBlock.deactivate: 10 ticks of rest with no power
+  if (kind === 'sculk_cool' || kind === 'sensor_off') {
+    if (BLK[id].sensor && sensorPhase(w.getMeta(x, y, z)) === SENSOR_ACTIVE) { w.setBlock(x, y, z, id, (w.getMeta(x, y, z) & 12) | SENSOR_COOL, false); w.schedule(x, y, z, 10, 'sculk_ready'); w.redstoneChanged(x, y, z); w.redstoneChanged(x, y - 1, z); this.remeshNear(x, z); }
+    return;
+  }
+  if (kind === 'sculk_ready') { if (BLK[id].sensor && sensorPhase(w.getMeta(x, y, z)) === SENSOR_COOL) { w.setBlock(x, y, z, id, w.getMeta(x, y, z) & 12, false); this.sound('sculk_click_stop', x + 0.5, y + 0.5, z + 0.5); this.remeshNear(x, z); } return; }
+  if (kind === 'shriek_end') { if (id === B.SCULK_SHRIEKER) this.shriekEnd(x, y, z); return; }
+  return _onScheduledDD.call(this, kind, x, y, z);
+};
+// a button popping back out (BLOCK_DEACTIVATE, nobody's)
+const _runScheduledDD = World.prototype.runScheduled;
+World.prototype.runScheduled = function (game) {
+  const arr = game && this.sched.get(this.tick), btn = arr && arr.filter(s => s[3] === 'button' && SHAPE[this.getBlock(s[0], s[1], s[2])] === SH.BUTTON && (this.getMeta(s[0], s[1], s[2]) & 8));
+  const r = _runScheduledDD.apply(this, arguments);
+  if (btn) for (const [x, y, z] of btn) if (!(this.getMeta(x, y, z) & 8)) game.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block_deactivate', null, this.getBlock(x, y, z));
+  return r;
+};
+// the tendrils light up while the sensor is active
+BOX_MODELS.sensor = (d, m) => [BX(0, 0, 0, 16, 8, 16), ...cross(sensorPhase(m) === SENSOR_ACTIVE ? 'sculk_sensor_tendril_active' : 'sculk_sensor_tendril_inactive', 12, 8, 16)];
+// a calibrated sensor faces the way the player looks when placing it
+const _onPlacedDD = Game.prototype.onPlaced;
+Game.prototype.onPlaced = function (x, y, z, id) {
+  if (id === B.CALIBRATED_SCULK_SENSOR && this.player) this.world.setBlock(x, y, z, id, lookDir4(this.player) << 2, false);
+  return _onPlacedDD.apply(this, arguments);
+};
+// scheduled ticks are not saved: a sensor or shrieker saved mid-way finishes on loading
+const _onChunkDataDD = Game.prototype.onChunkData;
+Game.prototype.onChunkData = function (cx, cz, seed, blocks, biomes, meta) {
+  const r = _onChunkDataDD.apply(this, arguments), w = this.world, c = w && w.chunks.get(w.key(cx, cz));
+  if (!meta || !c || !c.blocks || c.blocks !== blocks) return r;
+  for (const [x, y, z, id] of w.sculkIn(cx, cz) || []) {
+    const m = w.getMeta(x, y, z);
+    if (id === B.SCULK_SHRIEKER) { if (m & SHRIEKING) w.schedule(x, y, z, 1, 'shriek_end'); }
+    else if (sensorPhase(m)) w.schedule(x, y, z, 1, sensorPhase(m) === SENSOR_ACTIVE ? 'sculk_cool' : 'sculk_ready');
+  }
+  return r;
+};
+
+/* ---------------- shriekers ---------------- */
+// SculkShriekerBlockEntity.tryShriek: one that can call a warden shrieks only when the warning goes up
+Game.prototype.tryShriek = function (x, y, z, p) {
+  const w = this.world;
+  if (!(p instanceof Player) || p.dead || p.spectator || w.getBlock(x, y, z) !== B.SCULK_SHRIEKER) return;
+  const m = w.getMeta(x, y, z);
+  if (m & SHRIEKING) return;
+  let level = 0;
+  if (this.shriekerResponds(x, y, z)) { level = this.wardenWarn(x, y, z, p); if (level < 0) return; }
+  (w.shriekLevel || (w.shriekLevel = new Map())).set(x + ',' + y + ',' + z, level);
+  w.setBlock(x, y, z, B.SCULK_SHRIEKER, m | SHRIEKING, false);
+  w.schedule(x, y, z, 90, 'shriek_end');
+  this.sound('shriek', x + 0.5, y + 0.5, z + 0.5);
+  for (let k = 0; k < 10; k++) setTimeout(() => this.particles.add({ x: x + 0.5, y: y + 1.1 + k * 0.3, z: z + 0.5, vx: 0, vy: 0.05, vz: 0, life: 20, layer: texL('particle_shriek'), u: 0, v: 0, us: 1, size: 0.5, g: 0, col: [1, 1, 1], bright: true }), k * 250);
+  this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'shriek', p, B.SCULK_SHRIEKER);
+};
+Game.prototype.shriek = function (x, y, z, p) { this.tryShriek(x, y, z, p); };
+Game.prototype.shriekerResponds = function (x, y, z) { return !!(this.world.getMeta(x, y, z) & SHRIEK_SUMMON) && OPTIONS.difficulty > 0 && this.rule('doWardenSpawning'); };
+// WardenSpawnTracker: the warning level goes up once per 10 seconds, and not with a warden in the 48-block box around the shrieker
+Game.prototype.wardenTracker = function (p) { return p.wst || (p.wst = { level: 0, since: 0, cd: 0 }); };
+Game.prototype.wardenWarn = function (x, y, z, p) {
+  const cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+  if (this.entities.some(e => e instanceof Warden && !e.dead && Math.abs(e.x - cx) < 24 + e.w / 2 && Math.abs(e.z - cz) < 24 + e.w / 2 && e.y < cy + 24 && e.y + e.h > cy - 24)) return -1;
+  const t = this.wardenTracker(p);
+  if (t.cd > 0) return -1;
+  t.since = 0; t.cd = 200; t.level = Math.min(4, t.level + 1);
+  return t.level;
+};
+// MobEffectUtil.addEffectToPlayersAround: 13 seconds of darkness on a player in survival or adventure, renewed once under 10 seconds are left
+function wardenDarkness(g, x, y, z, r) {
+  const p = g.player;
+  if (!p || p.dead || !p.survival || (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2 >= r * r) return;
+  const e = p.effects && p.effects.get('darkness');
+  if (!e || e.ticks < 199) p.addEffect('darkness', 260, 0);
+}
+// the 90-tick shriek is over: a warden answers from somewhere near (or digs out at level 4), and darkness falls within 40 blocks
+Game.prototype.shriekEnd = function (x, y, z) {
+  const w = this.world, k = x + ',' + y + ',' + z, level = (w.shriekLevel && w.shriekLevel.get(k)) || 0;
+  if (w.shriekLevel) w.shriekLevel.delete(k);
+  w.setBlock(x, y, z, B.SCULK_SHRIEKER, w.getMeta(x, y, z) & ~SHRIEKING, false);
+  if (!this.shriekerResponds(x, y, z) || level <= 0) return;
+  if (!(level >= 4 && this.summonWarden(x, y, z))) {
+    const snd = [null, 'warden_nearby_close', 'warden_nearby_closer', 'warden_nearby_closest', 'warden_listen_angry'][level], r = () => Math.floor(Math.random() * 21) - 10;
+    if (snd) this.sound(snd, x + r(), y + r(), z + r());
+  }
+  wardenDarkness(this, x + 0.5, y + 0.5, z + 0.5, 40);
+};
+// SpawnUtil.trySpawnMob(WARDEN, TRIGGERED, 20 tries, 5 across, 6 up and down, on top of something solid)
+Game.prototype.summonWarden = function (x, y, z) {
+  const w = this.world;
+  for (let k = 0; k < 20; k++) {
+    const wx = x + Math.floor(Math.random() * 11) - 5, wz = z + Math.floor(Math.random() * 11) - 5;
+    for (let wy = y + 6; wy >= y - 6; wy--) {
+      const below = w.getBlock(wx, wy - 1, wz);
+      if (!(SOLID[below] && SHAPE[below] === SH.CUBE) || SOLID[w.getBlock(wx, wy, wz)]) continue;
+      // room for its 2.9-block height
+      if (SOLID[w.getBlock(wx, wy + 1, wz)] || SOLID[w.getBlock(wx, wy + 2, wz)]) break;
+      const wd = createMob(this, 'warden', wx + 0.5, wy, wz + 0.5);
+      if (!wd) return false;
+      wd.state = 'emerge'; wd.stateT = 134; wd.digCd = 1200; wd.sniffT = 0;
+      this.entities.push(wd);
+      this.sound('warden_agitated', wx + 0.5, wy + 1, wz + 0.5);
+      this.sound('warden_emerge', wx + 0.5, wy, wz + 0.5);
+      return true;
+    }
+  }
+  return false;
+};
+
+/* ---------------- the warden ---------------- */
+const WARDEN_ANGRY = 80;
+// Warden.canTargetEntity
+Warden.prototype.canTarget = function (e) {
+  return !!e && !e.dead && !(e.deathTime > 0) && e !== this && !(e instanceof Warden) && !(e instanceof ArmorStand) && !(e instanceof Hanging) &&
+    (e instanceof Player ? e.survival : e instanceof Mob && !e.invulnerable);
+};
+// AngerManagement: angry suspects first, then players, then the angriest
+Warden.prototype.topSuspect = function () {
+  let best = null, bv = 0;
+  for (const [e, v] of this.anger) {
+    if (!this.canTarget(e)) continue;
+    if (best) { const a = v >= WARDEN_ANGRY, b = bv >= WARDEN_ANGRY, ep = e instanceof Player, bp = best instanceof Player; if (a !== b ? !a : ep !== bp ? !ep : v <= bv) continue; }
+    best = e; bv = v;
+  }
+  return best;
+};
+// getActiveAnger: at its target while it has one, else the most at anyone
+Warden.prototype.activeAnger = function () {
+  if (this.target) return this.anger.get(this.target) || 0;
+  let n = 0;
+  for (const v of this.anger.values()) if (v > n) n = v;
+  return n;
+};
+// getEntityAngryAt
+Warden.prototype.angryAt = function () { return this.activeAnger() >= WARDEN_ANGRY ? this.topSuspect() : null; };
+// increaseAngerAt: puts off the dig; a player it gets angry at takes over from a mob it was fighting
+Warden.prototype.angerAt = function (e, n, listening) {
+  if (this.data.noAI || !this.canTarget(e)) return;
+  if (this.digCd > 0) this.digCd = 1200;
+  const v = Math.min(150, (this.anger.get(e) || 0) + (n === undefined ? 35 : n));
+  this.anger.set(e, v);
+  if (e instanceof Player && !(this.target instanceof Player) && v >= WARDEN_ANGRY) this.target = null;
+  if (listening && this.state !== 'roar') this.game.sound(this.activeAnger() >= 40 ? 'warden_listen_angry' : 'warden_listen', this.x, this.y + 2, this.z);
+};
+// a vibration within 16 blocks: not while emerging or digging, nor for 2 seconds after the last, nor from someone it can't go for
+Warden.prototype.vibOffer = function (v, d) {
+  if (this.dead || this.data.noAI || this.state === 'emerge' || this.state === 'dig' || this.vibCd > 0) return;
+  if ((v.src instanceof Mob || v.src instanceof Player) && !this.canTarget(v.src)) return;
+  if (this._vib && !(this._vib.v.tick === v.tick && (d < this._vib.dist || (d === this._vib.dist && v.freq > this._vib.v.freq)))) return;
+  const g = this.game, ey = this.y + this.h * 0.85;
+  if (vibOccluded(g.world, v.x, v.y, v.z, this.x, ey, this.z)) return;
+  this._vib = { v, dist: d, at: v.tick + Math.max(1, Math.floor(d)) };
+  g.vibrationParticle(v.x, v.y, v.z, this.x, ey, this.z);
+};
+Warden.prototype.hear = function (x, y, z, src, kind) { this.hearVibration({ x, y, z, src, kind, tick: this.game.world.tick }); };
+// Warden.VibrationUser.onReceiveVibration
+Warden.prototype.hearVibration = function (v) {
+  if (this.dead) return;
+  const g = this.game, src = v.src, owner = src instanceof Projectile ? src.owner : null;
+  this.vibCd = 40; this.data.tendril = 10;
+  g.sound('warden_tendril', this.x, this.y + 2.5, this.z);
+  let pos = [Math.floor(v.x), Math.floor(v.y), Math.floor(v.z)];
+  if (owner) {
+    // a shot: 10 the first time, then 35 and straight to the shooter for 5 seconds
+    if (this.distTo(owner) < 30) {
+      if (this.recentProjectile > 0) { if (this.canTarget(owner)) pos = [Math.floor(owner.x), Math.floor(owner.y), Math.floor(owner.z)]; this.angerAt(owner, 35, true); }
+      else this.angerAt(owner, 10, true);
+    }
+    this.recentProjectile = 100;
+  } else this.angerAt(src, 35, true);
+  if (this.activeAnger() < WARDEN_ANGRY) { const top = this.topSuspect(); if (owner || !top || top === src) this.disturbAt(pos); }
+};
+// WardenAi.setDisturbanceLocation: only while it isn't angry or fighting; it goes there for 5 seconds
+Warden.prototype.disturbAt = function (pos) {
+  if (this.angryAt() || this.target) return;
+  if (this.digCd > 0) this.digCd = 1200;
+  this.sniffT = 100;
+  this.investigate = [pos[0] + 0.5, pos[1], pos[2] + 0.5]; this.investigateT = 100;
+  this.nav = null;
+};
+// WardenEntitySensor: the nearest player it could go for within 24 blocks, else the nearest other
+Warden.prototype.nearestAttackable = function () {
+  const g = this.game;
+  let bp = null, bpd = 1e9, bo = null, bod = 1e9;
+  for (const e of [g.player, ...g.entities]) {
+    if (!e || e === this || Math.abs(e.x - this.x) > 24.5 || Math.abs(e.z - this.z) > 24.5 || e.y > this.y + this.h + 24 || e.y + (e.h || 0) < this.y - 24 || !this.canTarget(e)) continue;
+    const d = (e.x - this.x) ** 2 + (e.y - this.y) ** 2 + (e.z - this.z) ** 2;
+    if (e instanceof Player) { if (d < bpd) { bpd = d; bp = e; } } else if (d < bod) { bod = d; bo = e; }
+  }
+  return bp || bo;
+};
+// hits make it angry at the attacker (100); a punch, or a hit from within 5 blocks, starts the fight without a roar
+Warden.prototype.onHurtBy = function (a, source) {
+  if (!a || this.data.noAI || this.state === 'emerge' || this.state === 'dig') return;
+  this.angerAt(a, WARDEN_ANGRY + 20, false);
+  if (!this.target && !this.roarTarget && this.canTarget(a) && (source === 'player' || source === a.type || this.distTo(a) < 5)) this.fightTarget(a);
+};
+// Warden.setAttackTarget: no sonic boom in the first 10 seconds
+Warden.prototype.fightTarget = function (t) { this.roarTarget = null; this.target = t; this.state = 'fight'; this.boomCd = 200; this.boomT = 0; };
+Warden.prototype.canDisableShield = function () { return true; };
+Warden.prototype.setState = function (s, t) { this.state = s; this.stateT = t || 0; };
+Warden.prototype.think = function () {
+  const g = this.game, w = g.world;
+  if (this.vibCd > 0) this.vibCd--;
+  if (this.recentProjectile > 0) this.recentProjectile--;
+  if (this.digCd === undefined) this.digCd = 1200;
+  if (this.digCd > 0) this.digCd--;
+  if (this.boomCd > 0) this.boomCd--;
+  if (this.attackCd > 0) this.attackCd--;
+  if (this.sniffT > 0) this.sniffT--;
+  if (this.investigateT > 0 && --this.investigateT <= 0) this.investigate = null;
+  if (this.data.tendril > 0) this.data.tendril--;
+  // AngerManagement.tick: anger fades by 1 a second, and is forgotten for anyone it can no longer go for
+  if (this.age % 20 === 0) for (const [e, v] of this.anger) { if (v <= 1 || !this.canTarget(e) || e.game !== g) this.anger.delete(e); else this.anger.set(e, v - 1); }
+  // the heartbeat quickens with anger: every 40 ticks calm, every 10 angry
+  if (++this.heart >= 40 - Math.floor(Math.min(1, this.activeAnger() / WARDEN_ANGRY) * 30)) { this.heart = 0; if (!this.data.silent) g.sound('heartbeat', this.x, this.y + 2, this.z); }
+  // darkness on players within 20 blocks every 6 seconds
+  if ((this.age + (this.uid || 0)) % 120 === 0) wardenDarkness(g, this.x, this.y, this.z, 20);
+  if (this.stateT > 0) this.stateT--;
+  const dust = () => { if (this.age % 2 === 0) g.particles.blockBreak(Math.floor(this.x), Math.floor(this.y) - 1, Math.floor(this.z), w.getBlock(Math.floor(this.x), Math.floor(this.y) - 1, Math.floor(this.z)) || B.SCULK); };
+  // the brain's activities in Java's order: emerge, dig, roar, fight, investigate, sniff, idle
+  if (this.state === 'emerge') { this.move = null; this.nav = null; dust(); if (this.stateT <= 0) this.state = 'idle'; return; }
+  if (this.state === 'dig') { this.move = null; this.nav = null; dust(); if (this.stateT <= 0) { this.dead = true; this.noDrops = true; } return; }
+  if (this.digCd <= 0 && !this.roarTarget && !this.target) {
+    if (this.onGround) { this.setState('dig', 100); this.sniffing = false; g.sound('warden_dig', this.x, this.y, this.z); return; }
+    if (this.inWater || this.inLava) { g.sound('warden_agitated', this.x, this.y + 1, this.z); this.dead = true; this.noDrops = true; return; }
+  }
+  if (this.roarTarget) {
+    // Roar: 84 ticks, the sound 25 ticks in; then the fight
+    const t = this.roarTarget;
+    this.move = null; this.nav = null;
+    this.lookAt(t.x, t.y + (t.h || 1.8) * 0.85, t.z);
+    if (this.stateT === 84 - 25) g.sound('warden_roar', this.x, this.y + 2, this.z);
+    if (this.stateT <= 0) this.fightTarget(t);
+    return;
+  }
+  if (this.target) { this.fight(); return; }
+  // SetRoarTarget: someone it is angry at
+  const mad = this.angryAt();
+  if (mad) { this.roarTarget = mad; this.setState('roar', 84); this.angerAt(mad, 20, false); this.investigate = null; this.sniffing = false; this.nav = null; this.move = null; return; }
+  if (this.investigate) {
+    // GoToTargetLocation: to within 2 blocks of the disturbance, at 0.7 speed
+    this.state = 'investigate'; this.sniffing = false;
+    const [x, y, z] = this.investigate;
+    if (Math.hypot(Math.floor(x) - Math.floor(this.x), Math.floor(y) - Math.floor(this.y), Math.floor(z) - Math.floor(this.z)) >= 2) {
+      if (this.navDone()) this.goTo(x + Math.floor(Math.random() * 3) - 1, y, z + Math.floor(Math.random() * 3) - 1, jms(0.3, 0.7), 2);
+      else this.followPath();
+    } else this.nav = null;
+    return;
+  }
+  if (this.sniffing) {
+    // Sniffing: 84 ticks, then the nearest suspect within 6 blocks (20 up or down) is sniffed out, and looked for if farther
+    this.state = 'sniff'; this.move = null; this.nav = null;
+    if (this.stateT <= 0) {
+      this.sniffing = false; this.state = 'idle';
+      const na = this.nearestAttackable();
+      if (na) { if (Math.hypot(na.x - this.x, na.z - this.z) < 6 && Math.abs(na.y - this.y) < 20) this.angerAt(na, 35, true); if (!this.investigate) this.disturbAt([Math.floor(na.x), Math.floor(na.y), Math.floor(na.z)]); }
+    }
+    return;
+  }
+  // idle: TryToSniff once the cooldown is over and someone is about, else stroll
+  this.state = 'idle';
+  if (this.sniffT <= 0 && this.nearestAttackable()) { this.sniffing = true; this.state = 'sniff'; this.stateT = 84; this.sniffT = 100 + Math.floor(Math.random() * 101); this.nav = null; g.sound('warden_sniff', this.x, this.y + 2, this.z); return; }
+  GOALS.wander(this);
+};
+// the fight activity: stop when no longer angry; walk up at 1.2 speed; the sonic boom; punches
+Warden.prototype.fight = function () {
+  const g = this.game, t = this.target;
+  if (!this.canTarget(t) || this.activeAnger() < WARDEN_ANGRY) {
+    // StopAttackingIfTargetInvalid
+    if (!this.canTarget(t)) this.anger.delete(t);
+    this.target = null; this.boomT = 0; this.data.charge = 0;
+    if (this.digCd > 0) this.digCd = 1200;
+    return;
+  }
+  if (this.digCd > 0) this.digCd = 1200;
+  this.state = 'fight';
+  const hd = Math.hypot(t.x - this.x, t.z - this.z), inBoom = hd < 15 && Math.abs(t.y - this.y) < 20;
+  this.lookAt(t.x, t.y + t.h * 0.85, t.z);
+  // Mob.isWithinMeleeAttackRange: its box widened by about 0.83 touches the target's
+  const r = this.w / 2 + Math.sqrt(2.04) - 0.6 + (t.w || 0.6) / 2;
+  const reach = Math.abs(t.x - this.x) < r && Math.abs(t.z - this.z) < r && t.y < this.y + this.h && t.y + t.h > this.y && this.canSee(t);
+  if (!reach) {
+    const ok = this.age % 10 === 0 || this.navDone() ? this.goTo(t.x, t.y, t.z, jms(0.3, 1.2), 1.2) : this.followPath();
+    if (!ok || (this.nav && !this.nav.path.length)) this.navFails = (this.navFails || 0) + 1; else this.navFails = 0;
+  } else { this.nav = null; this.move = null; }
+  // SonicBoom: 60 ticks, the boom 34 ticks in when the target is still within 15 blocks (20 up or down); then 2 seconds before the next
+  if (this.boomT > 0) {
+    this.boomT--;
+    if (this.boomT === 60 - 34) {
+      this.data.charge = 0;
+      const ex = this.x, ey = this.y + 1.6, ez = this.z, ty = t.y + t.h * 0.85, dx = t.x - ex, dy = ty - ey, dz = t.z - ez, l = Math.hypot(dx, dy, dz) || 1;
+      if (inBoom && this.canTarget(t)) {
+        for (let k = 1; k < Math.floor(l) + 7; k++) g.particles.add({ x: ex + dx / l * k, y: ey + dy / l * k, z: ez + dz / l * k, vx: 0, vy: 0, vz: 0, life: 10, layer: texL('particle_sonic_boom'), u: 0, v: 0, us: 1, size: 0.5, g: 0, col: [1, 1, 1], bright: true });
+        g.sound('sonic_boom', this.x, this.y + 1.6, this.z);
+        const h0 = t.health;
+        t.invuln = 0;
+        if (t.hurt(t instanceof Player ? g.difficultyDmg(10) : 10, 'sonic_boom', this) || t.health < h0) {
+          const kr = 1 - ((t.T && t.T.kbRes) || 0);
+          t.vx += dx / l * 2.5 * kr; t.vy += dy / l * 0.5 * kr; t.vz += dz / l * 2.5 * kr;
+        }
+      }
+    }
+    if (this.boomT === 0) this.boomCd = 40;
+  } else if (this.boomCd <= 0 && inBoom) {
+    this.boomT = 60; this.data.charge = 34; this.attackCd = Math.max(this.attackCd || 0, 60);
+    g.sound('sonic_charge', this.x, this.y + 1.6, this.z);
+  }
+  // MeleeAttack: every 18 ticks; Warden.doHurtTarget puts the sonic boom off for 2 seconds; 1.5 attack knockback
+  if (reach && !(this.attackCd > 0)) {
+    this.attackCd = 18;
+    this.boomCd = Math.max(this.boomCd, 40);
+    this.attackAnim = 10;
+    t.invuln = 0;
+    g.sound('warden_attack', this.x, this.y + 1, this.z);
+    if (t.hurt(t instanceof Player ? g.difficultyDmg(30) : 30, 'warden', this)) {
+      const kr = 1 - ((t.T && t.T.kbRes) || 0), s = 0.75 * kr, l = hd || 1;
+      if (s > 0) { t.vx = t.vx / 2 + (t.x - this.x) / l * s; t.vz = t.vz / 2 + (t.z - this.z) / l * s; if (t.onGround) t.vy = Math.min(0.4, t.vy / 2 + s); }
+    }
+  }
+};
+// the warning levels go with the world's save
+const _saveAllDD = Game.prototype.saveAll;
+Game.prototype.saveAll = function () { if (this.meta && this.player && this.player.wst) this.meta.wardenWarn = this.player.wst; return _saveAllDD.apply(this, arguments); };
+const _startWorldDD = Game.prototype.startWorld;
+Game.prototype.startWorld = function (meta) { const r = _startWorldDD.apply(this, arguments); if (meta && meta.wardenWarn && this.player) this.player.wst = Object.assign({ level: 0, since: 0, cd: 0 }, meta.wardenWarn); return r; };
+
+/* ---------------- what makes vibrations ---------------- */
+// landing (HIT_GROUND): anything that falls, players (not flying), mobs and items alike
+const _landedDDE = Entity.prototype.landed, _landedDDM = Mob.prototype.landed, _landedDDP = Player.prototype.landed;
+Entity.prototype.landed = function (dist) { if (dist > 0 && this.game) this.game.vibrate(this.x, this.y, this.z, 'hit_ground', this); return _landedDDE.apply(this, arguments); };
+Mob.prototype.landed = function (dist) { if (dist > 0 && !(this instanceof Hanging)) this.game.vibrate(this.x, this.y, this.z, 'hit_ground', this); return _landedDDM.apply(this, arguments); };
+Player.prototype.landed = function (dist) { if (dist > 0 && !this.flying) this.game.vibrate(this.x, this.y, this.z, 'hit_ground', this); return _landedDDP.apply(this, arguments); };
+// mobs' steps (STEP) and swimming (SWIM) every 1/0.6 blocks they move, and going into water (SPLASH)
+const _mobTickDD = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const x0 = this.x, y0 = this.y, z0 = this.z, wet = this.inWater;
+  const r = _mobTickDD.apply(this, arguments);
+  if (this.dead || this instanceof Warden || this instanceof Hanging || this instanceof ArmorStand) return r;
+  const g = this.game;
+  if (this.inWater && !wet && this.age > 1) g.vibrate(this.x, this.y, this.z, 'splash', this);
+  this._moveD = (this._moveD || 0) + Math.hypot(this.x - x0, this.y - y0, this.z - z0) * 0.6;
+  if (this._moveD > (this._nextStep || 0)) {
+    if (this.onGround && !this.T.flying) { this._nextStep = Math.floor(this._moveD) + 1; g.vibrate(this.x, this.y, this.z, 'step', this); }
+    else if (this.inWater) { this._nextStep = Math.floor(this._moveD) + 1; g.vibrate(this.x, this.y, this.z, 'swim', this); }
+  }
+  return r;
+};
+// the player swimming and going into water (players' steps come with their footsteps)
+const _playerTickDD = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const x0 = this.x, y0 = this.y, z0 = this.z, wet = this.inWater;
+  const r = _playerTickDD.apply(this, arguments);
+  if (this.dead || this.spectator || this.riding) return r;
+  if (this.inWater && !wet) this.game.vibrate(this.x, this.y, this.z, 'splash', this);
+  if (this.inWater && !this.onGround) {
+    this._swimD = (this._swimD || 0) + Math.hypot(this.x - x0, this.y - y0, this.z - z0) * 0.6;
+    if (this._swimD > 1) { this._swimD = 0; this.game.vibrate(this.x, this.y, this.z, 'swim', this); }
+  }
+  return r;
+};
+// being hurt and dying (ENTITY_DAMAGE, ENTITY_DIE): the one hurt is the source
+const _mobHurtDD = Mob.prototype.hurt, _mobDieDD = Mob.prototype.die, _playerHurtDD = Player.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) { const h = this.health, r = _mobHurtDD.apply(this, arguments); if (this.health < h && !(this instanceof Hanging)) this.game.vibrate(this.x, this.y + this.h / 2, this.z, 'entity_damage', this); return r; };
+Mob.prototype.die = function () { const r = _mobDieDD.apply(this, arguments); if (!(this instanceof Hanging)) this.game.vibrate(this.x, this.y + this.h / 2, this.z, 'entity_die', this); return r; };
+Player.prototype.hurt = function (amount, source, attacker) { const h = this.health, r = _playerHurtDD.apply(this, arguments); if (this.health < h) this.game.vibrate(this.x, this.y + 1, this.z, 'entity_damage', this); return r; };
+// projectiles shot (PROJECTILE_SHOOT, the shooter's) and landing (PROJECTILE_LAND, at the block they hit)
+const _spawnProjectileDD = Game.prototype.spawnProjectile;
+Game.prototype.spawnProjectile = function (kind, x, y, z, vx, vy, vz, owner) { const pr = _spawnProjectileDD.apply(this, arguments); if (owner) this.vibrate(x, y, z, 'projectile_shoot', owner); return pr; };
+const _impactDD = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  const w = this.game.world, l = Math.hypot(this.vx, this.vy, this.vz) || 1;
+  let hx = Math.floor(this.x), hy = Math.floor(this.y), hz = Math.floor(this.z);
+  if (!e && !SOLID[w.getBlock(hx, hy, hz)]) { hx = Math.floor(this.x + this.vx / l * 0.3); hy = Math.floor(this.y + this.vy / l * 0.3); hz = Math.floor(this.z + this.vz / l * 0.3); }
+  const r = _impactDD.apply(this, arguments);
+  if (e) this.game.vibrate(this.x, this.y, this.z, 'projectile_land', this, 0);
+  else this.game.vibrate(hx + 0.5, hy + 0.5, hz + 0.5, 'projectile_land', this, w.getBlock(hx, hy, hz));
+  return r;
+};
+// items the player drops remember who threw them
+const _dropItemDD = Game.prototype.dropItem;
+Game.prototype.dropItem = function (x, y, z, stack, thrown, fromPlayer) { const e = _dropItemDD.apply(this, arguments); if (e && fromPlayer) e.thrower = this.player; return e; };
+// explosions (EXPLODE), TNT lit (PRIME_FUSE), note blocks (NOTE_BLOCK_PLAY), chorus fruit (TELEPORT, where you were)
+const _explodeDD = Game.prototype.explode;
+Game.prototype.explode = function (x, y, z, power, noBlocks, source) { const r = _explodeDD.apply(this, arguments); this.vibrate(x, y, z, 'explode', source || null); return r; };
+const _primeTNTDD = Game.prototype.primeTNT;
+Game.prototype.primeTNT = function (x, y, z) { const r = _primeTNTDD.apply(this, arguments); this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'prime_fuse', null); return r; };
+const _playNoteDD = Game.prototype.playNote;
+Game.prototype.playNote = function (x, y, z) { const r = _playNoteDD.apply(this, arguments); this.vibrate(x + 0.5, y + 0.5, z + 0.5, 'note_block_play', null); return r; };
+const _chorusDD = Player.prototype.chorusTeleport;
+Player.prototype.chorusTeleport = function () { const x0 = this.x, y0 = this.y, z0 = this.z, r = _chorusDD.apply(this, arguments); if (this.x !== x0 || this.z !== z0) this.game.vibrate(x0, y0, z0, 'teleport', this); return r; };
+// eating and drinking (EAT / DRINK)
+const _finishUseDD = Player.prototype.finishUse;
+Player.prototype.finishUse = function (u, st) { const it = st && ITEMS[st.id], drink = st && (st.id === I.POTION || st.id === I.MILK_BUCKET || st.id === I.HONEY_BOTTLE || st.id === I.OMINOUS_BOTTLE); const r = _finishUseDD.apply(this, arguments); if (it && (it.food || drink)) this.game.vibrate(this.x, this.y + 1, this.z, drink ? 'drink' : 'eat', this); return r; };
+// getting on and off (ENTITY_MOUNT / ENTITY_DISMOUNT, where the mount is)
+const _mountDD = Game.prototype.mount, _dismountDD = Game.prototype.dismount;
+Game.prototype.mount = function (p, m) { const r = _mountDD.apply(this, arguments); if (p && m && p.riding === m) this.vibrate(m.x, m.y, m.z, 'entity_mount', p); return r; };
+Game.prototype.dismount = function (p, thrown) { const m = p && p.riding, r = _dismountDD.apply(this, arguments); if (m && !p.riding) this.vibrate(m.x, m.y, m.z, 'entity_dismount', p); return r; };
+// containers opened and closed (CONTAINER_OPEN / CONTAINER_CLOSE)
+const VIB_CONTAINERS = new Set(['chest', 'trapped_chest', 'barrel', 'shulker', 'ender_chest', 'double_chest']);
+const _openInvDD = UI.prototype.openInv, _closeInvDD = UI.prototype.closeInv;
+UI.prototype.openInv = function (type, data) { const r = _openInvDD.apply(this, arguments); if (VIB_CONTAINERS.has(type) && data && data.x !== undefined) this.game.vibrate(data.x + 0.5, data.y + 0.5, data.z + 0.5, 'container_open', this.game.player); return r; };
+UI.prototype.closeInv = function () { const inv = this.inv; const r = _closeInvDD.apply(this, arguments); if (inv && VIB_CONTAINERS.has(inv.type) && inv.data && inv.data.x !== undefined) this.game.vibrate(inv.data.x + 0.5, inv.data.y + 0.5, inv.data.z + 0.5, 'container_close', this.game.player); return r; };
+// trapdoors and fence gates (BLOCK_OPEN / BLOCK_CLOSE), levers and buttons (BLOCK_ACTIVATE / BLOCK_DEACTIVATE)
+const _useBlockDD = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const w = this.world, id = hit && hit.id, d = id ? BLK[id] : null, m0 = d ? w.getMeta(hit.x, hit.y, hit.z) : 0;
+  const r = _useBlockDD.apply(this, arguments);
+  if (d && w.getBlock(hit.x, hit.y, hit.z) === id) {
+    const m1 = w.getMeta(hit.x, hit.y, hit.z), sh = SHAPE[id], cx = hit.x + 0.5, cy = hit.y + 0.5, cz = hit.z + 0.5;
+    if ((d.trapdoor || d.gate) && !d.redstoneOnly && ((m0 ^ m1) & 4)) this.vibrate(cx, cy, cz, (m1 & 4) ? 'block_open' : 'block_close', p, id);
+    else if ((sh === SH.LEVER || sh === SH.BUTTON) && ((m0 ^ m1) & 8)) this.vibrate(cx, cy, cz, (m1 & 8) ? 'block_activate' : 'block_deactivate', p, id);
+  }
+  return r;
+};
+// pressure plates going on and off (BLOCK_ACTIVATE / BLOCK_DEACTIVATE, the one standing on it)
+const _checkPlateDD = Game.prototype.checkPlate;
+Game.prototype.checkPlate = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z), on0 = (w.getMeta(x, y, z) & 1) === 1;
+  const r = _checkPlateDD.apply(this, arguments);
+  if (w.getBlock(x, y, z) !== id || SHAPE[id] !== SH.PLATE) return r;
+  const on1 = (w.getMeta(x, y, z) & 1) === 1;
+  if (on0 !== on1) {
+    let by = null;
+    if (on1) for (const e of [this.player, ...this.entities]) if (e && !e.dead && e.x > x - 0.3 && e.x < x + 1.3 && e.z > z - 0.3 && e.z < z + 1.3 && e.y >= y - 0.1 && e.y < y + 0.6) { by = e; break; }
+    this.vibrate(x + 0.5, y + 0.5, z + 0.5, on1 ? 'block_activate' : 'block_deactivate', by, id);
+  }
+  return r;
+};
+
+/* ---------------- sounds ---------------- */
+const DD_SOUNDS = [['warden_listen', 'Warden notices', 'hostile'], ['warden_listen_angry', 'Warden notices, angry', 'hostile'], ['warden_tendril', 'Warden tendrils click', 'hostile'],
+  ['warden_attack', 'Warden hits', 'hostile'], ['warden_dig', 'Warden burrows', 'hostile'], ['warden_emerge', 'Warden rises', 'hostile'], ['warden_agitated', 'Warden growls', 'hostile'],
+  ['warden_nearby_close', 'Warden is near', 'hostile'], ['warden_nearby_closer', 'Warden is nearer', 'hostile'], ['warden_nearby_closest', 'Warden is very near', 'hostile'],
+  ['sculk_click_stop', 'Sculk Sensor goes quiet', 'block'], ['amethyst_resonate', 'Amethyst rings', 'block']];
+for (const [n, t, c] of DD_SOUNDS) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+SOUND_EVENTS.unshift([/^entity\.warden\.listening_angry/, 'warden_listen_angry'], [/^entity\.warden\.listening/, 'warden_listen'], [/^entity\.warden\.tendril_clicks/, 'warden_tendril'],
+  [/^entity\.warden\.attack_impact/, 'warden_attack'], [/^entity\.warden\.dig/, 'warden_dig'], [/^entity\.warden\.emerge/, 'warden_emerge'], [/^entity\.warden\.agitated/, 'warden_agitated'],
+  [/^entity\.warden\.nearby_closest/, 'warden_nearby_closest'], [/^entity\.warden\.nearby_closer/, 'warden_nearby_closer'], [/^entity\.warden\.nearby_close/, 'warden_nearby_close'],
+  [/^block\.sculk_sensor\.clicking_stop/, 'sculk_click_stop'], [/^block\.amethyst_block\.resonate/, 'amethyst_resonate']);
+const DD_SOUND_SET = new Set(DD_SOUNDS.map(s => s[0]));
+const _audioPlayDD = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!DD_SOUND_SET.has(name)) return _audioPlayDD.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const far = name === 'warden_attack' || name === 'warden_listen_angry' ? 2 : name.startsWith('warden_nearby') ? 2.5 : 1.4, dst = this.out(x, y, z, far);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2, t = this.ctx.currentTime;
+  switch (name) {
+    case 'warden_listen': this.tone(dst, 'sawtooth', 70 * v, 52 * v, 0.8, 0.22); this.noiseHit(dst, 'lowpass', 320, 0.8, 0.7, 0.3); break;
+    case 'warden_listen_angry': this.tone(dst, 'sawtooth', 96 * v, 58 * v, 1.0, 0.32); this.tone(dst, 'square', 64 * v, 44 * v, 1.0, 0.12, t + 0.05); this.noiseHit(dst, 'lowpass', 480, 0.8, 0.9, 0.35); break;
+    case 'warden_tendril': for (let i = 0; i < 5; i++) this.noiseHit(dst, 'highpass', 2600 * v, 2, 0.03, 0.28, t + i * 0.055); break;
+    case 'warden_attack': this.noiseHit(dst, 'lowpass', 240, 0.7, 0.35, 0.8); this.tone(dst, 'sine', 72 * v, 34 * v, 0.32, 0.6); break;
+    case 'warden_dig': for (let i = 0; i < 8; i++) this.noiseHit(dst, 'bandpass', (380 + i * 40) * v, 1, 0.14, 0.3, t + i * 0.28); break;
+    case 'warden_emerge': for (let i = 0; i < 8; i++) this.noiseHit(dst, 'bandpass', (520 - i * 30) * v, 1, 0.16, 0.3, t + i * 0.3); this.tone(dst, 'sawtooth', 50 * v, 85 * v, 2.4, 0.2, t + 0.4); break;
+    case 'warden_agitated': this.tone(dst, 'sawtooth', 84 * v, 62 * v, 1.2, 0.3); this.noiseHit(dst, 'lowpass', 400, 0.7, 1.0, 0.25); break;
+    case 'warden_nearby_close': this.tone(dst, 'sine', 48 * v, 40 * v, 1.6, 0.25); this.noiseHit(dst, 'lowpass', 200, 0.6, 1.4, 0.2); break;
+    case 'warden_nearby_closer': this.tone(dst, 'sine', 54 * v, 42 * v, 1.8, 0.35); this.noiseHit(dst, 'lowpass', 240, 0.6, 1.6, 0.3); break;
+    case 'warden_nearby_closest': this.tone(dst, 'sawtooth', 60 * v, 44 * v, 2.0, 0.3); this.noiseHit(dst, 'lowpass', 300, 0.6, 1.8, 0.4); break;
+    case 'sculk_click_stop': this.noiseHit(dst, 'highpass', 1900 * v, 1.5, 0.05, 0.18); break;
+    case 'amethyst_resonate': this.tone(dst, 'sine', 1180 * v, 1180 * v, 1.3, 0.16); this.tone(dst, 'sine', 1770 * v, 1770 * v, 1.0, 0.08, t + 0.02); break;
   }
 };
 

@@ -319,8 +319,8 @@ The **Create New World** screen has Java Edition 1.21's three tabs:
 - **Villagers** claim job sites and beds, follow a daily schedule, level up and trade in the
   vanilla merchant screen. Zombie villagers can be cured; wandering traders visit with their
   llamas; iron and snow golems defend.
-- **The Warden** rises in the deep dark when sculk shriekers are triggered too often: it sniffs,
-  roars, punches and fires sonic booms.
+- **The Warden** rises in the deep dark when sculk shriekers are triggered too often: it follows
+  vibrations, sniffs out whoever is near, roars, punches and fires sonic booms through walls.
 - **Ocean monuments** hold guardians and elder guardians, whose curse gives Mining Fatigue III.
 - **Bosses**: the Ender Dragon with its end crystals, and the Wither.
 
@@ -788,6 +788,16 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Camel and strider saddles**: a saddled camel wears Java's saddle with its rug, a bridle and, while ridden,
   reins; a saddled strider wears its saddle. Resource packs' saddles are used, including the separate saddle
   textures of newer packs.
+- **The deep dark like Java's**: every vibration has Java's frequency, from footsteps (1) to explosions and
+  deaths (15). Sculk sensors hear it within 8 blocks (calibrated sensors 16), and it reaches them at a block a
+  tick. Wool in the way stops it, sneaking hides footsteps, landings and shots, and wool or carpet underfoot
+  muffles steps. A sensor's signal is weaker the farther away the noise was, a comparator reads its frequency,
+  and amethyst next to it rings on. A calibrated sensor fed a signal on the side that faced you when you placed
+  it only hears that frequency. Shriekers answer the click of a sensor near them, or you standing on them: warnings
+  come at least 10 seconds apart, a warden digs out at the fourth, and none come while a warden is close. The
+  warden gets angry at whatever it hears or sniffs out (players first), roars, then punches; its sonic boom goes
+  through walls, but not in the first 10 seconds of a fight or while it can keep hitting. It digs back down after a
+  minute without anger. Saddled horses, donkeys and mules wear Java's bridle, with reins while ridden.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
