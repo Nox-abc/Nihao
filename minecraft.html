@@ -6466,7 +6466,7 @@ const STONE_PROPS = {
   blackstone: ROCK(1.5, 0, { tex: { top: 'blackstone_top', side: 'blackstone' } }), gilded_blackstone: ROCK(1.5), chiseled_polished_blackstone: ROCK(1.5),
   polished_blackstone: ROCK(2), polished_blackstone_bricks: ROCK(1.5), cracked_polished_blackstone_bricks: ROCK(1.5),
   end_stone: ROCK(3), end_stone_bricks: ROCK(3), purpur_block: ROCK(1.5), purpur_pillar: ROCK(1.5, 0, { tex: { top: 'purpur_pillar_top', side: 'purpur_pillar' }, log: true }),
-  quartz_block: ROCK(0.8, 0, { tex: { top: 'quartz_block_top', bottom: 'quartz_block_bottom', side: 'quartz_block_side' } }),
+  quartz_block: ROCK(0.8, 0, { tex: { top: 'quartz_block_top', side: 'quartz_block_side' } }),
   chiseled_quartz_block: ROCK(0.8, 0, { tex: { top: 'chiseled_quartz_block_top', side: 'chiseled_quartz_block' } }), quartz_bricks: ROCK(0.8),
   quartz_pillar: ROCK(0.8, 0, { tex: { top: 'quartz_pillar_top', side: 'quartz_pillar' }, log: true }), smooth_quartz: ROCK(2, 0, { tex: 'quartz_block_bottom' }),
 };
@@ -6650,8 +6650,9 @@ defB('jack_o_lantern', { hard: 1, tool: AXE, sound: 'wood', light: 15, tex: { to
 defB('hay_block', { hard: 0.5, tool: HOE, sound: 'grass', tex: { top: 'hay_block_top', side: 'hay_block_side' }, log: true, display: 'Hay Bale' });
 defB('bee_nest', { hard: 0.3, tool: AXE, sound: 'wood', tex: { top: 'bee_nest_top', bottom: 'bee_nest_bottom', side: 'bee_nest_side', front: 'bee_nest_front' }, facing: true, fuel: 300, silk: true, drop: null });
 defB('honeycomb_block', { hard: 0.6, sound: 'wool' });
-defB('slime_block', { hard: 0, sound: 'wool', translucent: true, bouncy: true, sticky: true, cullSame: true });
-defB('honey_block', { hard: 0, sound: 'wool', translucent: true, honey: true, sticky: true, cullSame: true, tex: { top: 'honey_block_top', bottom: 'honey_block_bottom', side: 'honey_block_side' } });
+defB('slime_block', { hard: 0, sound: 'wool', translucent: true, bouncy: true, sticky: true, cullSame: true, shell: [3, 'slime_block', 'slime_block', 'slime_block'] });
+// Java's models: a clear outer shell (the honey all in its bottom texture) round a smaller cube
+defB('honey_block', { hard: 0, sound: 'wool', translucent: true, honey: true, sticky: true, cullSame: true, tex: 'honey_block_bottom', shell: [1, 'honey_block_top', 'honey_block_bottom', 'honey_block_side'] });
 for (const f of ['ochre', 'verdant', 'pearlescent']) defB(f + '_froglight', { hard: 0.3, sound: 'wool', light: 15, tex: { top: f + '_froglight_top', side: f + '_froglight_side' }, log: true });
 defB('sculk', { hard: 0.2, tool: HOE, sound: 'wool', drop: null, silk: true, xp: [1, 1], sculk: true });
 defB('sculk_vein', { shape: SH.VINE, hard: 0.2, tool: HOE, sound: 'wool', cutout: true, noCollide: true, needs: 'vine', drop: null, silk: true, repl: true });
@@ -6674,11 +6675,11 @@ defB('end_rod', { shape: SH.ROD, hard: 0, sound: 'wood', light: 14, cutout: true
 defB('lightning_rod', { shape: SH.ROD, hard: 3, tool: PICK, lvl: 1, sound: 'metal', cutout: true, rod: 'lightning_rod' });
 defB('redstone_lamp', { hard: 0.3, sound: 'glass', light: 15, lamp: true });
 EMITF[B.REDSTONE_LAMP] = m => (m & 1) ? 15 : 0;
-defB('crafting_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'crafting_table_top', bottom: 'oak_planks', side: 'crafting_table_side', front: 'crafting_table_front' }, use: 'craft', fuel: 300, frontBack: true });
+defB('crafting_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'crafting_table_top', bottom: 'oak_planks', side: 'crafting_table_side', north: 'crafting_table_front', west: 'crafting_table_front' }, use: 'craft', fuel: 300 });
 defB('stonecutter', { shape: SH.BOX, hard: 3.5, tool: PICK, lvl: 0, model: 'stonecutter', tex: { top: 'stonecutter_top', bottom: 'stonecutter_bottom', side: 'stonecutter_side' }, use: 'stonecutter', facing: true, cutout: true });
-defB('cartography_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'cartography_table_top', bottom: 'dark_oak_planks', side: 'cartography_table_side1', front: 'cartography_table_side3' }, fuel: 300, use: 'cartography' });
-defB('fletching_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'fletching_table_top', bottom: 'birch_planks', side: 'fletching_table_side', front: 'fletching_table_front' }, fuel: 300 });
-defB('smithing_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'smithing_table_top', bottom: 'smithing_table_bottom', side: 'smithing_table_side', front: 'smithing_table_front' }, use: 'smithing', fuel: 300 });
+defB('cartography_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'cartography_table_top', bottom: 'dark_oak_planks', side: 'cartography_table_side1', north: 'cartography_table_side3', east: 'cartography_table_side3', west: 'cartography_table_side2' }, fuel: 300, use: 'cartography' });
+defB('fletching_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'fletching_table_top', bottom: 'birch_planks', side: 'fletching_table_side', north: 'fletching_table_front', south: 'fletching_table_front' }, fuel: 300 });
+defB('smithing_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'smithing_table_top', bottom: 'smithing_table_bottom', side: 'smithing_table_side', north: 'smithing_table_front', south: 'smithing_table_front' }, use: 'smithing', fuel: 300 });
 defB('grindstone', { shape: SH.BOX, hard: 2, tool: PICK, lvl: 0, model: 'grindstone', tex: { top: 'grindstone_round', side: 'grindstone_side' }, use: 'grindstone', facing: true, cutout: true });
 defB('loom', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'loom_top', bottom: 'loom_bottom', side: 'loom_side', front: 'loom_front' }, facing: true, fuel: 300 });
 defB('furnace', { hard: 3.5, tool: PICK, lvl: 0, tex: { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front' }, facing: true, use: 'furnace', lit: 'lit_furnace' });
@@ -6693,7 +6694,7 @@ for (const [n, t] of [['anvil', 'anvil_top'], ['chipped_anvil', 'chipped_anvil_t
   defB(n, { shape: SH.BOX, hard: 5, tool: PICK, lvl: 0, sound: 'metal', model: 'anvil', tex: { top: t, side: 'anvil' }, use: 'anvil', gravity: true, facing: true, cutout: true });
 defB('composter', { shape: SH.BOX, hard: 0.6, tool: AXE, sound: 'wood', model: 'composter', tex: { top: 'composter_top', bottom: 'composter_bottom', side: 'composter_side' }, use: 'composter', fuel: 300, cutout: true });
 defB('note_block', { hard: 0.8, tool: AXE, sound: 'wood', use: 'note', fuel: 300 });
-defB('jukebox', { hard: 2, tool: AXE, sound: 'wood', tex: { top: 'jukebox_top', side: 'jukebox_side' }, use: 'jukebox', fuel: 300 });
+defB('jukebox', { hard: 2, tool: AXE, sound: 'wood', tex: { top: 'jukebox_top', bottom: 'jukebox_side', side: 'jukebox_side' }, use: 'jukebox', fuel: 300 });
 defB('enchanting_table', { shape: SH.BOX, hard: 5, tool: PICK, lvl: 0, model: 'enchanting_table', tex: { top: 'enchanting_table_top', bottom: 'enchanting_table_bottom', side: 'enchanting_table_side' }, use: 'enchant', light: 7 });
 defB('brewing_stand', { shape: SH.BOX, hard: 0.5, tool: PICK, lvl: 0, sound: 'metal', model: 'brewing_stand', tex: 'brewing_stand', use: 'brewing', light: 1, cutout: true, icon: 'brewing_stand' });
 defB('cauldron', { shape: SH.BOX, hard: 2, tool: PICK, lvl: 0, sound: 'metal', model: 'cauldron', tex: { top: 'cauldron_top', bottom: 'cauldron_bottom', side: 'cauldron_side' }, use: 'cauldron', cutout: true, icon: 'cauldron' });
@@ -9133,6 +9134,11 @@ const BIOME_COL = (() => {
   def([BI.ERODED_BADLANDS, BI.WOODED_BADLANDS], [144, 129, 77], [158, 129, 77], [50, 165, 200]);
   def([BI.WINDSWEPT_SAVANNA, BI.SAVANNA_PLATEAU], [191, 183, 85], [174, 164, 42], [50, 165, 200]);
   def([BI.LUSH_CAVES, BI.DRIPSTONE_CAVES, BI.DEEP_DARK], [145, 189, 89], [119, 171, 47]);
+  if (BI.SULFUR_CAVES !== undefined) {
+    def([BI.PALE_GARDEN], [119, 130, 114], [135, 141, 118], [118, 136, 157]);
+    def([BI.DAPPLED_FOREST], [223, 104, 39], [230, 142, 48], [55, 81, 84]);
+    def([BI.SULFUR_CAVES], [171, 166, 79], [119, 171, 47], [52, 191, 137]);
+  }
   return t;
 })();
 
@@ -10274,13 +10280,17 @@ function meshSection(world, c, sy) {
             else if (f === 3) emitCubeFace(mb, f, lx, ly, lz, sy, pi, TEX_DIRT, 255, 255, 255, 0, 0);
             else if (snowy) emitCubeFace(mb, f, lx, ly, lz, sy, pi, TEX_GRASS_SNOWY, 255, 255, 255, 0, 0);
             else {
-              emitCubeFace(mb, f, lx, ly, lz, sy, pi, TEX_DIRT, 255, 255, 255, 0, 0);
+              // the tinted fringe goes first: the terrain's depth test is strict, so a second face in the same place never shows,
+              // and where the fringe is clear nothing is written and the dirt behind fills in
               emitCubeFace(mb, f, lx, ly, lz, sy, pi, TEX_GRASS_OVERLAY, tint[to], tint[to + 1], tint[to + 2], 0, 0);
+              emitCubeFace(mb, f, lx, ly, lz, sy, pi, TEX_DIRT, 255, 255, 255, 0, 0);
             }
             continue;
           }
           emitCubeFace(mb, f, lx, ly, lz, sy, pi, faceLayer(id, meta, f), tr, tg, tb, fl, 0);
         }
+        // the inner cube of slime and honey blocks, seen through the shell
+        if (d.shell) emitBoxPart(mb, shellPart(id), X, Y, Z, pi, pLight[pi], id, meta, 255, 255, 255, 0);
         break;
       }
       case SH.CROSS: case SH.TALL:
@@ -10488,10 +10498,21 @@ function meshLiquid(mb, id, meta, pi, lx, ly, lz, sy, tint, to) {
   }
 }
 
+// [inset, top, bottom, side] of a block's inner cube -> a box part with the matching corner of each texture
+const SHELL_PARTS = new Map();
+function shellPart(id) {
+  let p = SHELL_PARTS.get(id);
+  if (!p) {
+    const [k, top, bottom, side] = BLK[id].shell, e = 16 - k, r = [k, k, e, e];
+    p = BX(k, k, k, e, e, e, { top, bottom, side }, UV6(r));
+    SHELL_PARTS.set(id, p);
+  }
+  return p;
+}
 /* ---------------- texture lookup tables ---------------- */
 let TEX_GRASS_TOP, TEX_DIRT, TEX_GRASS_SNOWY, TEX_GRASS_OVERLAY, TEX_FRAME_EYE;
 function resolveFaceTextures() {
-  MODEL_CACHE.clear(); BUD_CACHE.clear(); initNoMip();
+  MODEL_CACHE.clear(); BUD_CACHE.clear(); SHELL_PARTS.clear(); initNoMip();
   const L = n => texL(n);
   for (let id = 1; id < BLOCK_NAMES.length; id++) {
     const d = BLK[id];
@@ -10501,6 +10522,11 @@ function resolveFaceTextures() {
     const back = t.back || (d.frontBack ? front : side);
     const o = id * 6;
     FACETEX[o] = L(side); FACETEX[o + 1] = L(side); FACETEX[o + 2] = L(top); FACETEX[o + 3] = L(bottom); FACETEX[o + 4] = L(front); FACETEX[o + 5] = L(back);
+    // blocks that don't turn but differ side to side (the work tables) name their faces like Java's models
+    if (t.east) FACETEX[o] = L(t.east);
+    if (t.west) FACETEX[o + 1] = L(t.west);
+    if (t.south) FACETEX[o + 4] = L(t.south);
+    if (t.north) FACETEX[o + 5] = L(t.north);
     for (let k = 0; k < 6; k++) FACETEX_ALT[o + k] = FACETEX[o + k];
     FMODE[id] = d.log ? 1 : d.facing6 ? 3 : d.log6 ? 4 : d.facing ? 2 : 0;
     TOPTEX[id] = d.top ? L(d.top) : FACETEX[o];
@@ -16350,7 +16376,7 @@ class UI {
     $('xpbar').style.visibility = surv ? 'visible' : 'hidden';
     if (!surv) return;
     const poison = p.effectLevel('poison'), wither = p.effectLevel('wither'), hunger = p.effectLevel('hunger');
-    const key = Math.ceil(p.health) + '|' + p.maxHealth + '|' + Math.ceil(p.absorb) + '|' + p.food + '|' + Math.ceil(p.air / 30) + '|' + p.xpLevel + '|' + p.xp + '|' + p.armorPoints() + '|' + poison + wither + hunger + hc;
+    const key = Math.ceil(p.health) + '|' + p.maxHealth + '|' + Math.ceil(p.absorb) + '|' + p.food + '|' + (p.headInWater || p.air < 300 ? Math.ceil(Math.max(0, p.air) / 30) : '-') + '|' + p.xpLevel + '|' + p.xp + '|' + p.armorPoints() + '|' + poison + wither + hunger + hc;
     if (key === this._bk) return;
     this._bk = key;
     const hp = Math.ceil(p.health), kind = wither ? 'wither' : poison ? 'poison' : 'heart';
@@ -16367,7 +16393,8 @@ class UI {
     for (let i = 0; i < 10; i++) f += `<div class="icon18" style="background-image:url(${p.food >= i * 2 + 2 ? HUD_ICONS[fi] : p.food === i * 2 + 1 ? HUD_ICONS[fi + 'Half'] || HUD_ICONS.foodHalf : HUD_ICONS.foodEmpty})"></div>`;
     $('food').innerHTML = f;
     let b = '';
-    if (p.air < 300) { const n = Math.ceil(Math.max(0, p.air) / 30); for (let i = 0; i < 10; i++) b += `<div class="icon18" style="background-image:url(${i < n ? HUD_ICONS.bubble : ''})"></div>`; }
+    // like Java: shown while the eyes are under water or air is short (the key above tells full-out-of-water from full-under)
+    if (p.headInWater || p.air < 300) { const n = Math.ceil(Math.max(0, p.air) / 30); for (let i = 0; i < 10; i++) b += `<div class="icon18" style="background-image:url(${i < n ? HUD_ICONS.bubble : ''})"></div>`; }
     $('bubbles').innerHTML = b;
     const ar = p.armorPoints();
     let a = '';
@@ -16418,6 +16445,15 @@ class UI {
     const inp = $('chatin'); inp.value = prefix || ''; this.chatIdx = -1;
     setTimeout(() => inp.focus(), 0);
     this.chatOpen = true;
+  }
+  focusChat() { setTimeout(() => { if (this.chatOpen) $('chatin').focus(); }, 0); }
+  // a key pressed while the chat box hasn't the focus: Escape closes, Enter sends, letters go into the box
+  chatStrayKey(e) {
+    const inp = $('chatin');
+    if (e.key === 'Escape') { e.preventDefault(); this.closeChat(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); const v = inp.value.trim(); if (v) { this.chatHist.unshift(v); this.game.onChat(v); } this.closeChat(); return; }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); inp.value += e.key; }
+    inp.focus();
   }
   closeChat(lock) {
     $('chatbox').classList.add('hidden');
@@ -17327,7 +17363,8 @@ function drawIsoParts(g, id, meta, ps, tintFor) {
     for (const f of [2, 0, 4, 1, 5, 3]) {
       if (f === 1 || f === 5 || f === 3) continue;                     // hidden from this angle
       let L;
-      if (p.t) { if (!p.t[f]) continue; L = texLayer(p.t[f], FACETEX[id * 6 + f]); } else L = faceLayer(id, meta, f);
+      // Java's icons look from the north-east: a block that doesn't turn shows its north face where we draw the south one
+      if (p.t) { if (!p.t[f]) continue; L = texLayer(p.t[f], FACETEX[id * 6 + f]); } else L = faceLayer(id, meta, f === 4 && !FMODE[id] ? 5 : f);
       const vt = FV[f], P = vt.map(c => [c[0] ? b[3] : b[0], c[1] ? b[4] : b[1], c[2] ? b[5] : b[2]]);
       const uv = P.map(([px, py, pz]) => f === 0 ? [16 - pz, 16 - py] : f === 4 ? [px, 16 - py] : [px, pz]);
       const rr = p.uv && p.uv[f];
@@ -17411,7 +17448,7 @@ function iconFor(id, tag) {
   const style = itemStyle(id), it = ITEMS[id];
   if (style === 'cube') {
     const ps = id === B.GRASS_BLOCK ? [BX(0, 0, 0, 16, 16, 16, { top: null, bottom: 'dirt', side: 'grass_block_side_item' }), BX(0, 0, 0, 16, 16, 16, { top: 'grass_block_top', side: null, bottom: null }, null, { tint: 1 })]
-      : [BX(0, 0, 0, 16, 16, 16)];
+      : BLK[id] && BLK[id].shell ? [shellPart(id), BX(0, 0, 0, 16, 16, 16)] : [BX(0, 0, 0, 16, 16, 16)];
     drawIsoParts(g, id, 0, ps, blockTintFor(id));
   } else if (style === 'model') {
     drawIsoParts(g, id, 0, itemParts(id), blockTintFor(id));
@@ -19594,11 +19631,14 @@ class Game {
     const inp = this.input, cv = this.canvas;
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === cv;
+      // the mouse never stays caught while the chat is open (nothing could reach the chat box then)
+      if (this.locked && this.ui.chatOpen) { this.releasePointer(); this.ui.focusChat(); return; }
       if (!this.locked) { inp.reset(); if (this.state === 'playing' && !this.ui.inv && !this.ui.chatOpen && !this.ui.screen && this.player && !this.player.dead) { this.ui.show('scr-pause'); $('pause-hint').textContent = ''; } }
     });
     cv.addEventListener('mousedown', e => {
       AUDIO.init();
       if (this.state !== 'playing') return;
+      if (this.ui.chatOpen) { this.ui.focusChat(); return; }
       if (!this.locked) { if (!this.ui.screen && !this.ui.inv) this.lockPointer(); return; }
       if (e.button === 1) { this.pickBlock(); e.preventDefault(); return; }
       if (e.button <= 2) { inp.mouse[e.button] = true; inp.mouseQ[e.button] = true; }
@@ -19616,7 +19656,8 @@ class Game {
     document.addEventListener('keydown', e => {
       if (['F1', 'F2', 'F3', 'F5', 'Tab', 'Space'].includes(e.code) || (e.code === 'Slash' && this.locked)) e.preventDefault();
       AUDIO.init();
-      if (this.ui.chatOpen) return;
+      // keys that miss the chat box (it lost focus when the tab was left, or a click went elsewhere) still reach it
+      if (this.ui.chatOpen) { if (e.target !== $('chatin')) this.ui.chatStrayKey(e); return; }
       if (this.state !== 'playing') return;
       const p = this.player;
       if (this.ui.inv) {
@@ -19644,6 +19685,9 @@ class Game {
     });
     document.addEventListener('keyup', e => inp.keys.delete(e.code));
     window.addEventListener('blur', () => inp.reset());
+    // back from another tab or window: an open chat gets its box focused again
+    window.addEventListener('focus', () => { if (this.ui.chatOpen) this.ui.focusChat(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && this.ui.chatOpen) this.ui.focusChat(); });
   }
   // turning with the mouse
   mouseLook(dx, dy) {

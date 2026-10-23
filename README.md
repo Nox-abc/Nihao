@@ -825,6 +825,14 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   there is Java's short pause after a block that took longer. Punching a note block plays it, and a dragon egg jumps
   away. Beds are drawn like the bed models of newer versions, a texture per face, so resource packs texture them:
   packs from 1.21 and before (one bed texture per color) and newer packs (one texture per face) both work.
+- **Bug fixes**: grass blocks show the green grass edge on their sides again, with or without a resource pack (it was
+  drawn in the same place as the dirt and lost every time). The chat can't get stuck any more: if you leave the tab or
+  click the game while it's open, Escape still closes it, Enter still sends, typing goes back into the box, and a click
+  never catches the mouse while it's open. The air bubbles go away once your air is full again (they used to stay on
+  screen until the game was restarted) and show while your head is under water, like Java. Checked every block
+  against the default 26.2 resource pack's own models: the crafting, cartography, fletching and smithing tables now have
+  the right texture on each side, the jukebox and quartz block have the right bottoms, and slime and honey blocks have
+  their inner cube inside the see-through shell, like Java.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
