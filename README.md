@@ -798,6 +798,33 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   warden gets angry at whatever it hears or sniffs out (players first), roars, then punches; its sonic boom goes
   through walls, but not in the first 10 seconds of a fight or while it can keep hitting. It digs back down after a
   minute without anger. Saddled horses, donkeys and mules wear Java's bridle, with reins while ridden.
+- **Sculk spreading like Java's**: when anything dies within 8 blocks of a sculk catalyst, the nearest catalyst
+  blooms and takes its experience (no orbs drop) as a charge that creeps out from where it died. Sculk veins turn
+  the stone, deepslate, dirt, sand, terracotta and the like they cover into sculk and grow over the faces around
+  it, and on sculk the charge now and then raises a sculk sensor, or sometimes a shrieker that can't call a
+  warden, at least 4 blocks from the catalyst and never crowded together. The bigger the death, the farther it
+  spreads; a player's death near one feeds it too.
+- **Bats and squid like Java's**: bats hang upside down from the ceiling and drop off to flutter about when you
+  come within 4 blocks, when hit or when their ceiling goes, darting from spot to spot until they roost again.
+  Squid swim in strokes of their tentacles, pushing off and gliding, tipping toward where they go and spinning as
+  they push. Hit one and it squirts a cloud of ink and swims away from you; out of water it flops and sinks. Glow
+  squid glow and shed specks of light, and go dark for a few seconds when hurt.
+- **Farming like Java's**: crops grow at Java's rates, which depend on the farmland under and around them (wet
+  farmland counts three times as much as dry) and slow down when the same crop is planted on all sides, so rows
+  grow faster than solid blocks; beetroots and torchflowers grow a third slower. Crops, stems and berry bushes keep
+  growing at night under the open sky. Sugar cane and cactus grow a block every 16 random ticks, and a cactus that
+  grows next to a block breaks off. Saplings grow in two steps, azaleas only with bone meal, and nether wart in any
+  light. Farmland dries out step by step away from water and rain. Bone meal gives crops 2 to 5 stages, but does
+  nothing to nether wart, sugar cane or cactus.
+- **Little things that felt wrong, fixed**: stepping up now tries the lowest ledge first, like Java, so you (and
+  villagers) can walk from a path block into a house even with the door's lintel right above your head. Mobs only
+  jump when Java's mobs would (a ledge higher than a step, close by), so cows and sheep no longer hop over path blocks,
+  farmland or carpets, and villagers walk through their doors. Mining adds up the damage of each tick as things are at
+  that moment, so a block you started hitting in mid-air or in water speeds up as soon as you stand on the ground, and
+  switching tools starts over; blocks that break at once can be broken one per tick while you hold the button, and
+  there is Java's short pause after a block that took longer. Punching a note block plays it, and a dragon egg jumps
+  away. Beds are drawn like the bed models of newer versions, a texture per face, so resource packs texture them:
+  packs from 1.21 and before (one bed texture per color) and newer packs (one texture per face) both work.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

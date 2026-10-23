@@ -10073,6 +10073,8 @@ function emitBoxPart(mb, p, X, Y, Z, pi, l, id, meta, r, g, b, fl) {
         else if (f === 5) { su = (bx[3] - px) / (bx[3] - bx[0] || 1); tv = (bx[4] - py) / (bx[4] - bx[1] || 1); }
         else if (f === 2) { su = (px - bx[0]) / (bx[3] - bx[0] || 1); tv = (pz - bx[2]) / (bx[5] - bx[2] || 1); }
         else { su = (px - bx[0]) / (bx[3] - bx[0] || 1); tv = (bx[5] - pz) / (bx[5] - bx[2] || 1); }
+        // a turned model's top and bottom textures turn with it (p.ur quarter turns, clockwise from above)
+        if (p.ur && f >= 2 && f <= 3) { const k = f === 2 ? p.ur : 4 - p.ur, t = su; if (k === 1) { su = tv; tv = 1 - t; } else if (k === 2) { su = 1 - su; tv = 1 - tv; } else if (k === 3) { su = 1 - tv; tv = t; } }
         u = rr[0] + su * (rr[2] - rr[0]); v = rr[1] + tv * (rr[3] - rr[1]);
       } else if (f === 0) { u = 16 - pz; v = 16 - py; } else if (f === 1) { u = pz; v = 16 - py; }
       else if (f === 4) { u = px; v = 16 - py; } else if (f === 5) { u = 16 - px; v = 16 - py; }
@@ -11590,16 +11592,24 @@ function moveEntity(world, e, dx, dy, dz) {
     else if (dy > 0 && b[1] >= y1 - E) dy = Math.min(dy, b[1] - y1);
   }
   y0 += dy; y1 += dy;
-  for (const b of boxes) {
-    if (y1 <= b[1] + E || y0 >= b[4] - E || z1 <= b[2] + E || z0 >= b[5] - E) continue;
-    if (dx < 0 && b[3] <= x0 + E) dx = Math.max(dx, b[3] - x0);
-    else if (dx > 0 && b[0] >= x1 - E) dx = Math.min(dx, b[0] - x1);
-  }
-  x0 += dx; x1 += dx;
-  for (const b of boxes) {
-    if (y1 <= b[1] + E || y0 >= b[4] - E || x1 <= b[0] + E || x0 >= b[3] - E) continue;
-    if (dz < 0 && b[5] <= z0 + E) dz = Math.max(dz, b[5] - z0);
-    else if (dz > 0 && b[2] >= z1 - E) dz = Math.min(dz, b[2] - z1);
+  // Entity.collideWithShapes: up or down first, then the longer of the two sideways moves
+  const zFirst = Math.abs(dx) < Math.abs(dz);
+  for (let k = 0; k < 2; k++) {
+    if ((k === 0) === zFirst) {
+      for (const b of boxes) {
+        if (y1 <= b[1] + E || y0 >= b[4] - E || x1 <= b[0] + E || x0 >= b[3] - E) continue;
+        if (dz < 0 && b[5] <= z0 + E) dz = Math.max(dz, b[5] - z0);
+        else if (dz > 0 && b[2] >= z1 - E) dz = Math.min(dz, b[2] - z1);
+      }
+      z0 += dz; z1 += dz;
+    } else {
+      for (const b of boxes) {
+        if (y1 <= b[1] + E || y0 >= b[4] - E || z1 <= b[2] + E || z0 >= b[5] - E) continue;
+        if (dx < 0 && b[3] <= x0 + E) dx = Math.max(dx, b[3] - x0);
+        else if (dx > 0 && b[0] >= x1 - E) dx = Math.min(dx, b[0] - x1);
+      }
+      x0 += dx; x1 += dx;
+    }
   }
   e.x += dx; e.y += dy; e.z += dz;
   return { hx: dx !== odx, hy: dy !== ody, hz: dz !== odz, down: ody < 0 && dy !== ody };
@@ -11766,13 +11776,23 @@ class Entity {
     const ox = this.x, oy = this.y, oz = this.z, vx = this.vx, vy = this.vy, vz = this.vz;
     let res = moveEntity(w, this, vx, vy, vz);
     if (this.stepH && (res.hx || res.hz) && (this.onGround || res.down)) {
-      // try stepping up onto low obstacles (slabs, beds)
-      const fx = this.x, fy = this.y, fz = this.z;
-      this.x = ox; this.y = oy; this.z = oz;
-      moveEntity(w, this, 0, this.stepH, 0);
-      const r2 = moveEntity(w, this, vx, 0, vz);
-      const dn = moveEntity(w, this, 0, -(this.y - oy) - 0.01, 0);
-      if ((this.x - ox) ** 2 + (this.z - oz) ** 2 > (fx - ox) ** 2 + (fz - oz) ** 2 + 1e-6) res = { hx: r2.hx, hz: r2.hz, hy: true, down: dn.down || res.down };
+      // Entity.collide: step up by the height of a box edge within reach (slabs, beds, paths), lowest first, keeping the first
+      // that gets further sideways; a 1/16 step under a low ceiling (a path in a doorway) works where a full step bumps the head
+      const fx = this.x, fy = this.y, fz = this.z, by = res.down ? fy : oy, hw = this.w / 2, got = (fx - ox) ** 2 + (fz - oz) ** 2;
+      const x0 = Math.min(ox - hw, ox - hw + vx), x1 = Math.max(ox + hw, ox + hw + vx), z0 = Math.min(oz - hw, oz - hw + vz), z1 = Math.max(oz + hw, oz + hw + vz);
+      const y0 = res.down ? by : by - 1e-5, y1 = by + this.h + this.stepH, hs = [];
+      for (const b of collectBoxes(w, x0, y0, z0, x1, y1, z1)) {
+        if (b[3] <= x0 || b[0] >= x1 || b[4] <= y0 || b[1] >= y1 || b[5] <= z0 || b[2] >= z1) continue;
+        for (let k = 1; k <= 4; k += 3) { const f = b[k] - by; if (f >= 0 && f <= this.stepH && f !== fy - oy && !hs.includes(f)) hs.push(f); }
+      }
+      hs.sort((a, b) => a - b);
+      let r2 = null;
+      for (const f of hs) {
+        this.x = ox; this.y = by; this.z = oz;
+        const r = moveEntity(w, this, vx, f, vz);
+        if ((this.x - ox) ** 2 + (this.z - oz) ** 2 > got) { r2 = r; break; }
+      }
+      if (r2) res = { hx: r2.hx, hz: r2.hz, hy: true, down: vy < 0 };
       else { this.x = fx; this.y = fy; this.z = fz; }
     }
     const wasGround = this.onGround;
@@ -14033,6 +14053,47 @@ function shapeHeight(w, x, y, z, id) {
   if (sh === SH.SLAB) { const m = w.getMeta(x, y, z); return m === 2 ? 1 : (m === 1 ? 1 : 0.5); }
   return 1;
 }
+// the top of a block's collision shape (-1: none)
+function colTop(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (!SOLID[id]) return -1;
+  if (SHAPE[id] === SH.CUBE) return 1;
+  const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null;
+  let top = -1;
+  for (const b of shapeBoxes(id, w.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx)) top = Math.max(top, b[4] / 16);
+  return top;
+}
+// MoveControl.tick: jump when the next spot (its floor, GroundPathNavigation.getGroundY) is higher than a step and less than a
+// block away, or when the feet are inside the shape of the block they are in, unless that's a door or a fence; a path block or
+// farmland is never worth a jump
+function navJump(m, w, px, py, pz, ex, ez) {
+  const wy = w.getBlock(px, py - 1, pz) === 0 ? py : py - 1 + Math.max(0, colTop(w, px, py - 1, pz));
+  if (wy - m.y > (m.stepH || 0.6) && ex * ex + ez * ez < Math.max(1, m.w)) return true;
+  const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z), id = w.getBlock(bx, by, bz);
+  if (BLK[id].door || SHAPE[id] === SH.FENCE) return false;
+  const top = colTop(w, bx, by, bz);
+  return top >= 0 && m.y < by + top;
+}
+// PathNavigation.shouldTargetNextNodeInDirection: within 2 blocks of the next spot, it counts as passed when the one after it is
+// nearer (or the spot is very near) and lies the other way (canCutCorner: not through a door)
+function navPassed(m, n, w) {
+  if (n.i + 1 >= n.path.length) return false;
+  const a = n.path[n.i], b = n.path[n.i + 1], y = Math.floor(m.y + 0.5);
+  if (BLK[w.getBlock(a[0], a[1], a[2])].door) return false;
+  const ax = a[0] + 0.5 - m.x, ay = a[1] - y, az = a[2] + 0.5 - m.z, d0 = ax * ax + ay * ay + az * az;
+  if (d0 >= 4) return false;
+  const bx = b[0] + 0.5 - m.x, by = b[1] - y, bz = b[2] + 0.5 - m.z, d1 = bx * bx + by * by + bz * bz;
+  if (!(d1 < d0) && !(d0 < 0.5)) return false;
+  return ax * bx + ay * by + az * bz < 0;
+}
+// a block in the way, higher than a step and low enough to jump onto, with room on top
+function navStepAhead(m, w, mx, mz) {
+  const l = Math.hypot(mx, mz) || 1, r = m.w / 2 + 0.3, x = Math.floor(m.x + mx / l * r), z = Math.floor(m.z + mz / l * r), y = Math.floor(m.y + 0.01);
+  const top = colTop(w, x, y, z), rise = y + top - m.y;
+  if (top < 0 || rise <= (m.stepH || 0.6) || rise > 1.25) return false;
+  for (let k = 1; k < Math.ceil(top + m.h); k++) if (SOLID[w.getBlock(x, y + k, z)]) return false;
+  return true;
+}
 // A* over block cells; returns [[x,y,z], ...] from the start (excluded) to the goal or the closest reachable cell
 function findPath(mob, tx, ty, tz, maxNodes, near) {
   const w = mob.game.world;
@@ -14308,7 +14369,9 @@ class Mob extends Entity {
     const res = this.physicsStep();
     if (this.inWater || this.inLava) this.vy *= 0.8; else this.vy = (this.vy - 0.08) * 0.98;
     if (T.climbs && (res.hx || res.hz) && moving) { this.vy = 0.2; this.fallDist = 0; }
-    else if ((jump || ((res.hx || res.hz) && moving)) && (this.onGround || this.inWater) && this.jumpCd <= 0) { this.vy = T.jumpy ? 0.5 : 0.42; this.jumpCd = 10; }
+    // JumpControl: only when asked (by the path, see navJump); a mob walking straight at something with no path jumps onto a block
+    // in its way, and one in water climbs the bank it swims into
+    else if ((jump || (res.hx || res.hz) && moving && (this.inWater || this._pathMove !== this.age && navStepAhead(this, w, mx, mz))) && (this.onGround || this.inWater) && this.jumpCd <= 0) { this.vy = T.jumpy ? 0.5 : 0.42; this.jumpCd = 10; }
     if (this.jumpCd > 0) this.jumpCd--;
     const fr = this.inWater ? 0.8 : this.inLava ? 0.5 : this.onGround ? 0.546 * (BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z))].slip ? 1.6 : 1) : 0.91;
     this.vx *= Math.min(0.98, fr); this.vz *= Math.min(0.98, fr);
@@ -14376,12 +14439,15 @@ class Mob extends Entity {
   followPath() {
     const n = this.nav;
     if (!n || n.i >= n.path.length) return false;
+    const w = this.game.world;
+    // PathNavigation.followThePath: a spot is reached within maxDistanceToWaypoint across and a block up or down, or once the mob
+    // is past it on the way to the next
+    const md = this.w > 0.75 ? this.w / 2 : 0.75 - this.w / 2;
     let [px, py, pz] = n.path[n.i];
-    const dx = px + 0.5 - this.x, dz = pz + 0.5 - this.z, dist = Math.hypot(dx, dz);
-    if (dist < Math.max(0.35, this.w * 0.5) && Math.abs(py - this.y) < 1.2) { n.i++; if (n.i >= n.path.length) return false; [px, py, pz] = n.path[n.i]; }
+    if (Math.abs(this.x - px - 0.5) < md && Math.abs(this.z - pz - 0.5) < md && Math.abs(this.y - py) < 1 || navPassed(this, n, w)) { n.i++; if (n.i >= n.path.length) return false; [px, py, pz] = n.path[n.i]; }
     const ex = px + 0.5 - this.x, ez = pz + 0.5 - this.z, el = Math.hypot(ex, ez) || 1;
-    const jump = py > Math.floor(this.y + 0.01) && el < 1.6;
-    this.move = [ex / el, ez / el, n.speed, jump];
+    this.move = [ex / el, ez / el, n.speed, navJump(this, w, px, py, pz, ex, ez)];
+    this._pathMove = this.age;
     // open doors on the way (villagers)
     if (this.T.opensDoors && this.age % 5 === 0) this.openDoorNear(px, py, pz);
     // stuck: try again later
@@ -14709,7 +14775,7 @@ const GOALS = {
       if (T.flying || T.swims && m.inWater) { const l = Math.hypot(dx, t.y - m.y, dz) || 1; m.move = [dx / l, dz / l, T.run, false, (t.y + t.h * 0.5 - m.y - m.h * 0.5) / l]; }
       else if (m.age % 5 === 0 || !m.nav || m.navDone()) m.goTo(t.x, t.y, t.z, T.run * (m.baby ? 1.3 : 1), 1); else m.followPath();
       // close in directly when the path ends next to the target
-      if (d < 2.5 && (!m.nav || m.navDone())) m.move = [dx / (d || 1), dz / (d || 1), T.run, t.y > m.y + 0.5];
+      if (d < 2.5 && (!m.nav || m.navDone())) m.move = [dx / (d || 1), dz / (d || 1), T.run, t.y - m.y > (m.stepH || 0.6) && m.hcol];
     } else m.nav = null;
     if (m.attackCd > 0) m.attackCd--;
     if (d <= reach && t.y + t.h > m.y - 0.5 && t.y < m.y + m.h + 0.5 && m.attackCd <= 0) { m.attackCd = m.type === 'iron_golem' ? 20 : m.type === 'ravager' ? 40 : 20; if (m.type === 'iron_golem') m.data.attackT = 10; m.attackEntity(t); }
@@ -15454,6 +15520,8 @@ const BLOCKABLE = new Set(['zombie', 'spider', 'skeleton', 'arrow', 'wither_skul
 const isUndeadType = t => ['zombie', 'skeleton', 'wither_skeleton', 'husk', 'stray', 'drowned', 'zombified_piglin', 'zombie_villager', 'phantom', 'wither', 'zoglin', 'skeleton_horse', 'zombie_horse', 'bogged'].includes(t);
 const isArthropodType = t => ['spider', 'cave_spider', 'bee', 'silverfish', 'endermite'].includes(t);
 
+// ItemStack.isSameItemSameComponents, for telling whether the item in hand changed while mining
+const mineItemKey = st => st ? st.id + (st.tag ? JSON.stringify(st.tag) : '') : '';
 class Player extends Entity {
   // the player feels water currents the vanilla way (not normalized), unless flying
   get isPlayer() { return true; }
@@ -15467,7 +15535,7 @@ class Player extends Entity {
     this.inv = new Array(36).fill(null); this.craft = new Array(4).fill(null); this.sel = 0;
     this.armor = [null, null, null, null]; this.offhand = [null];      // armor: head, chest, legs, feet
     this.spawn = null;
-    this.mining = null; this.mineProgress = 0; this.mineCd = 0; this.useCd = 0; this.attackCd = 0;
+    this.mining = null; this.mineProgress = 0; this.mineTicks = 0; this.mineCd = 0; this.missTime = 0; this.useCd = 0; this.attackCd = 0;
     this.swing = 0; this.swingT = 0; this.equip = 0; this.lastSel = -1;
     this.walkDist = 0; this.pwalkDist = 0; this.bob = 0; this.pbob = 0;
     this.jumpT = 0; this.lastSpace = -100; this.lastW = -100; this.regenT = 0; this.starveT = 0;
@@ -15629,11 +15697,13 @@ class Player extends Entity {
     if (d > 0) this.hurt(Math.ceil(d), 'fall');
   }
   // ---------- mining ----------
-  breakTicks(id) {
+  // BlockBehaviour.getDestroyProgress with Player.getDestroySpeed: the share of a block broken in one tick (1 or more breaks it at
+  // once, 0 never); it is worked out again every tick, so standing, swimming and effects count as they are at the time
+  destroyProgress(id) {
     const d = BLK[id];
-    if (d.hard < 0) return Infinity;
-    if (this.mode === 1) return 0;
-    if (d.hard === 0) return 0;
+    if (d.hard < 0) return 0;
+    if (this.mode === 1) return 1;
+    if (d.hard === 0) return 1;
     const h = this.inv[this.sel], it = h ? ITEMS[h.id] : null, tool = it && it.tool;
     let speed = 1;
     if (tool) {
@@ -15648,8 +15718,56 @@ class Player extends Entity {
     if (fat) speed *= [1, 0.3, 0.09, 0.0027, 0.00081][Math.min(4, fat)];
     if (this.headInWater && !enchLevel(this.armor[0], 'aqua_affinity') && !this.effectLevel('conduit_power')) speed /= 5;
     if (!this.onGround && !this.flying) speed /= 5;
-    const dmg = speed / d.hard / (this.canHarvest(id) ? 30 : 100);
-    return dmg >= 1 ? 0 : Math.ceil(1 / dmg);
+    return Math.fround(speed / d.hard / (this.canHarvest(id) ? 30 : 100));
+  }
+  // how many ticks of mining that is, as things stand
+  breakTicks(id) { const p = this.destroyProgress(id); return p <= 0 ? Infinity : p >= 1 ? 0 : Math.ceil(1 / p); }
+  // MultiPlayerGameMode.sameDestroyTarget: the same block with the same item in hand (another item starts over)
+  sameDestroyTarget(hit) {
+    const m = this.mining;
+    return !!m && m.x === hit.x && m.y === hit.y && m.z === hit.z && m.item === mineItemKey(this.inv[this.sel]);
+  }
+  stopDestroy() { this.mining = null; this.mineProgress = 0; this.mineTicks = 0; }
+  // creative players break blocks at once, but not with weapons that never break blocks there
+  creativeCanBreak(id) {
+    const it = ITEMS[this.heldId()];
+    return !(it && it.tool && it.tool.type === 'sword') && this.destroyProgress(id) > 0;
+  }
+  // MultiPlayerGameMode.startDestroyBlock: true when the block broke at once
+  startDestroy(hit) {
+    const g = this.game;
+    if (this.mode === 1) {
+      if (this.creativeCanBreak(hit.id)) g.playerBreak(hit.x, hit.y, hit.z);
+      this.mineCd = 5;
+      return g.world.getBlock(hit.x, hit.y, hit.z) === 0;
+    }
+    if (this.sameDestroyTarget(hit)) return false;
+    this.stopDestroy();
+    // BlockBehaviour.attack: punching a note block plays it, a dragon egg jumps away
+    if (this.mode === 0 && g.attackBlock) g.attackBlock(this, hit.x, hit.y, hit.z, hit.id);
+    const id = g.world.getBlock(hit.x, hit.y, hit.z);
+    if (id !== hit.id) return id === 0;
+    if (this.destroyProgress(id) >= 1) { g.playerBreak(hit.x, hit.y, hit.z); return true; }
+    this.mining = { key: hit.x + ',' + hit.y + ',' + hit.z, x: hit.x, y: hit.y, z: hit.z, id, item: mineItemKey(this.inv[this.sel]) };
+    return false;
+  }
+  // MultiPlayerGameMode.continueDestroyBlock: a tick of mining; after a block that took more than a tick, 5 ticks of rest
+  continueDestroy(hit) {
+    const g = this.game;
+    if (this.mineCd > 0) { this.mineCd--; return true; }
+    if (this.mode === 1) {
+      this.mineCd = 5;
+      if (this.creativeCanBreak(hit.id)) g.playerBreak(hit.x, hit.y, hit.z);
+      return true;
+    }
+    if (!this.sameDestroyTarget(hit)) return this.startDestroy(hit), true;
+    const id = g.world.getBlock(hit.x, hit.y, hit.z);
+    if (id === 0) { this.stopDestroy(); return false; }
+    this.mineProgress = Math.fround(this.mineProgress + this.destroyProgress(id));
+    if (this.mineTicks % 4 === 0) g.sound('hit_' + BLK[id].sound, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+    this.mineTicks++;
+    if (this.mineProgress >= 1) { this.stopDestroy(); g.playerBreak(hit.x, hit.y, hit.z); this.mineCd = 5; }
+    return true;
   }
   canHarvest(id) {
     const d = BLK[id];
@@ -15915,35 +16033,26 @@ class Player extends Entity {
   }
   interactTick(inp) {
     const g = this.game, w = g.world;
-    if (this.mineCd > 0) this.mineCd--;
     if (this.useCd > 0) this.useCd--;
-    if (!inp.enabled) { this.mining = null; this.mineProgress = 0; if (this.using) this.releaseUse(); return; }
+    if (!inp.enabled) { this.stopDestroy(); this.missTime = 0; if (this.using) this.releaseUse(); return; }
     const hit = g.target, ent = g.targetEntity;
-    // ---- left button: attack / mine ----
+    // ---- left button: attack / mine (Minecraft.startAttack and continueAttack) ----
+    // a swing at nothing holds off attacking and mining for 10 ticks (not in creative) while the button stays down
     if (inp.mouse[0] && !this.using) {
-      if (inp.mousePressed(0)) { this.doSwing(); if (!ent && !hit) this.lastAttack = this.age; }
-      if (ent && inp.mousePressed(0)) {
-        this.attack(ent);
-        this.mining = null;
-      } else if (hit && !ent && this.mineCd === 0) {
-        const key = hit.x + ',' + hit.y + ',' + hit.z;
-        if (!this.mining || this.mining.key !== key) { this.mining = { key, x: hit.x, y: hit.y, z: hit.z, id: hit.id, ticks: this.breakTicks(hit.id) }; this.mineProgress = 0; }
-        const m = this.mining;
-        // swords can't break blocks in creative mode
-        const sword = this.mode === 1 && ITEMS[this.heldId()] && ITEMS[this.heldId()].tool && ITEMS[this.heldId()].tool.type === 'sword';
-        if (m.ticks === Infinity || sword) { /* unbreakable */ }
-        else {
-          this.mineProgress++;
-          if (this.mineProgress % 4 === 1) { g.sound('hit_' + BLK[hit.id].sound, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); g.particles.hitBlock(hit.x, hit.y, hit.z, hit.id, hit.face); }
-          if (this.mineProgress % 4 === 0) this.doSwing();
-          if (this.mineProgress >= m.ticks) {
-            g.playerBreak(hit.x, hit.y, hit.z);
-            this.mining = null; this.mineProgress = 0;
-            this.mineCd = this.mode === 1 ? 5 : (m.ticks === 0 ? 4 : 5);
-          }
-        }
-      } else if (!hit) { this.mining = null; this.mineProgress = 0; }
-    } else { this.mining = null; this.mineProgress = 0; }
+      let broke = false;
+      if (inp.mousePressed(0) && !(this.missTime > 0)) {
+        if (ent) this.attack(ent);
+        else if (hit) broke = this.startDestroy(hit);
+        else { if (this.mode !== 1) this.missTime = 10; this.lastAttack = this.age; }
+        this.doSwing();
+      }
+      if (broke) { this.missTime = 0; this.stopDestroy(); }
+      else if (!(this.missTime > 0)) {
+        if (hit && !ent) { if (this.continueDestroy(hit)) { g.particles.hitBlock(hit.x, hit.y, hit.z, hit.id, hit.face); this.doSwing(); } }
+        else this.stopDestroy();
+      }
+    } else { this.missTime = 0; this.stopDestroy(); }
+    if (this.missTime > 0) this.missTime--;
     // ---- right button: use / place ----
     if (this.using) {
       const u = this.using, st = u.hand === 'off' ? this.offhand[0] : this.inv[this.sel];
@@ -18234,6 +18343,38 @@ async function applyPackRecords(game, recs) {
       out[L('bed_side')] = grab(bc, 0, 0, bc.width, bc.height);
     }
   }
+  // beds from packs made for 1.21 and before: one entity texture a colour (BedRenderer's 64x64 layout) where the bed model reads a
+  // texture a face, as newer packs have them; the faces are cut out of the entity texture (turned the way the old model showed them)
+  const cutBed = (im, rows, map, legV) => {
+    const k = im.width / 64, S = Math.max(16, Math.round(16 * k)), sc = document.createElement('canvas');
+    sc.width = im.width; sc.height = im.height;
+    const sg = sc.getContext('2d'); sg.drawImage(im, 0, 0);
+    const sd = sg.getImageData(0, 0, im.width, im.height).data, dc = document.createElement('canvas'); dc.width = dc.height = S;
+    const dg = dc.getContext('2d'), id = dg.createImageData(S, S), o = id.data;
+    for (let J = 0; J < S; J++) for (let I = 0; I < S; I++) {
+      const x = (I + 0.5) * 16 / S, y = (J + 0.5) * 16 / S;
+      const uv = y >= rows[0] && y < rows[1] ? map(x, y) : legV !== undefined && y >= 13 ? [50 + x % 12, legV + y - 13] : null;
+      if (!uv) continue;
+      const sx = Math.min(im.width - 1, Math.floor(uv[0] * k)), sy = Math.min(im.height - 1, Math.floor(uv[1] * k)), si = (sy * im.width + sx) * 4, di = (J * S + I) * 4;
+      o[di] = sd[si]; o[di + 1] = sd[si + 1]; o[di + 2] = sd[si + 2]; o[di + 3] = sd[si + 3];
+    }
+    dg.putImageData(id, 0, 0);
+    return grab(dc, 0, 0, S, S);
+  };
+  const BED_CUTS = {
+    head_up: [[0, 16], (x, y) => [6 + x, 6 + y]], head_west: [[7, 13], (x, y) => [13 - y, 6 + x], 9], head_east: [[7, 13], (x, y) => [15 + y, 22 - x], 9],
+    foot_up: [[0, 16], (x, y) => [6 + x, 28 + y]], foot_west: [[7, 13], (x, y) => [13 - y, 28 + x], 3], foot_east: [[7, 13], (x, y) => [15 + y, 44 - x], 3], foot_south: [[7, 13], (x, y) => [22 + x, 35 - y], 3],
+  };
+  let anyBed = null;
+  for (const c of COLORS) {
+    const im = img('entity/bed/' + c);
+    if (!im) continue;
+    anyBed = anyBed || im;
+    if (img('block/' + c + '_bed_head_up')) continue;
+    for (const f in BED_CUTS) { const [rows, map, legV] = BED_CUTS[f]; out[L(c + '_bed_' + f)] = cutBed(im, rows, map, legV); }
+  }
+  if (anyBed && !img('block/bed_head_north')) out[L('bed_head_north')] = cutBed(anyBed, [7, 13], (x, y) => [22 - x, 13 - y], 9);
+  if (anyBed && !img('block/bed_down')) out[L('bed_down')] = cutBed(anyBed, [0, 16], (x, y) => [44 - x, 22 - y]);
   // end portal: crops of the starfield, slightly tinted
   const ep = img('entity/end_portal');
   if (ep) for (let k = 0; k < 4; k++) {
@@ -20320,8 +20461,9 @@ class Game {
     for (const [a, c] of E) pts.push(...P[a], ...P[c]);
     r.drawLines(pts, [0, 0, 0, 0.45]);
     const p = this.player;
-    if (p.mining && p.mining.ticks > 0 && p.mining.ticks !== Infinity && p.mineProgress > 0) {
-      const stage = Math.min(9, Math.floor(p.mineProgress / p.mining.ticks * 10));
+    // MultiPlayerGameMode.getDestroyStage
+    if (p.mining && p.mineProgress > 0 && t.x === p.mining.x && t.y === p.mining.y && t.z === p.mining.z) {
+      const stage = Math.min(9, Math.floor(p.mineProgress * 10));
       const layer = texL('destroy_' + stage);
       r.org = [0, 0, 0];
       const l = w.getLightRaw(t.x, t.y + 1, t.z);
@@ -20915,13 +21057,7 @@ Object.assign(Game.prototype, {
     }
     if (id === B.CAVE_VINES && (m & 1)) { this.dropItem(x + 0.5, y + 0.5, z + 0.5, { id: I.GLOW_BERRIES, count: 1 }); w.setMeta(x, y, z, m & ~1); return done(); }
     if (id === B.DAYLIGHT_DETECTOR) { w.setMeta(x, y, z, m ^ 16); return done(); }
-    if (id === B.DRAGON_EGG) {
-      for (let k = 0; k < 100; k++) {
-        const tx = x + Math.floor(Math.random() * 31) - 15, ty = y + Math.floor(Math.random() * 15) - 7, tz = z + Math.floor(Math.random() * 31) - 15;
-        if (ty > 0 && w.getBlock(tx, ty, tz) === 0 && SOLID[w.getBlock(tx, ty - 1, tz)]) { w.setBlock(x, y, z, 0, 0); w.setBlock(tx, ty, tz, B.DRAGON_EGG, 0); this.particles.portal(x + 0.5, y, z + 0.5); this.remeshNear(tx, tz); break; }
-      }
-      return done();
-    }
+    if (id === B.DRAGON_EGG) { this.eggTeleport(x, y, z); return done(); }
     if (id === B.END_PORTAL_FRAME && it && held.id === I.ENDER_EYE) return this.useEye(p, hit);
     if (d.use && !(id === B.CAULDRON || id === B.COMPOSTER)) {
       const use = d.use;
@@ -22194,12 +22330,11 @@ Game.prototype.setDoorOpen = function (x, y, z, open) {
   const cur = !!(w.getMeta(x, by, z) & 4);
   if (cur !== open) _toggleDoor.call(this, x, by, z);
 };
-// mobs dying near a sculk catalyst feed it
+// what dying leaves behind (sculk catalysts listen for deaths in Part 57)
 const _mobDie = Mob.prototype.die;
 Mob.prototype.die = function (source, attacker) {
   _mobDie.call(this, source, attacker);
-  const g = this.game, T = this.T;
-  if (g.world.dim === 'overworld' && T.xp && !this.baby && g.sculkBloom) g.sculkBloom(this.x, this.y, this.z, typeof T.xp === 'number' ? T.xp : T.xp[1]);
+  const g = this.game;
   // (slimes split when the body goes: Part 44)
   // skeletons that kill creepers: music discs
   if (this.type === 'creeper' && attacker instanceof Projectile === false && attacker && (attacker.type === 'skeleton' || attacker.type === 'stray' || attacker.type === 'bogged')) {
@@ -22849,31 +22984,6 @@ Object.assign(Game.prototype, {
         }
       }
     }
-  },
-  // dying mobs feed a nearby sculk catalyst, which spreads sculk around the body
-  sculkBloom(x, y, z, xp) {
-    const w = this.world;
-    let cat = null;
-    for (let dy = -8; dy <= 8 && !cat; dy++) for (let dz = -8; dz <= 8 && !cat; dz++) for (let dx = -8; dx <= 8; dx++) if (w.getBlock(Math.floor(x) + dx, Math.floor(y) + dy, Math.floor(z) + dz) === B.SCULK_CATALYST) { cat = [Math.floor(x) + dx, Math.floor(y) + dy, Math.floor(z) + dz]; break; }
-    if (!cat) return false;
-    this.particles.add({ x: cat[0] + 0.5, y: cat[1] + 1.2, z: cat[2] + 0.5, vx: 0, vy: 0.04, vz: 0, life: 30, layer: texL('particle_sculk_soul'), u: 0, v: 0, us: 1, size: 0.2, g: 0, col: [1, 1, 1], bright: true });
-    let charge = Math.max(1, xp);
-    const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
-    for (let k = 0; k < 40 && charge > 0; k++) {
-      const sx = bx + Math.floor((Math.random() - 0.5) * 6), sz = bz + Math.floor((Math.random() - 0.5) * 6);
-      for (let sy = by + 2; sy >= by - 3; sy--) {
-        const id = w.getBlock(sx, sy, sz);
-        if (!SOLID[id] || SHAPE[id] !== SH.CUBE || BLK[id].sculk || id === B.SCULK_CATALYST || BLK[id].hard < 0 || BLK[id].be) continue;
-        if (SOLID[w.getBlock(sx, sy + 1, sz)]) continue;
-        w.setBlock(sx, sy, sz, B.SCULK, 0); charge--;
-        if (Math.random() < 0.08 && w.getBlock(sx, sy + 1, sz) === 0) w.setBlock(sx, sy + 1, sz, Math.random() < 0.7 ? B.SCULK_SENSOR : B.SCULK_SHRIEKER, 0);
-        this.particles.add({ x: sx + 0.5, y: sy + 1.05, z: sz + 0.5, vx: 0, vy: 0.02, vz: 0, life: 20, layer: texL('particle_sculk_charge'), u: 0, v: 0, us: 1, size: 0.15, g: 0, col: [1, 1, 1], bright: true });
-        break;
-      }
-    }
-    this.remeshNear(bx, bz);
-    this.sound('sculk', cat[0] + 0.5, cat[1] + 0.5, cat[2] + 0.5);
-    return true;
   },
 });
 
@@ -28256,10 +28366,10 @@ Game.prototype.tickOperatorItems = function () {
   }
 };
 // creative players break anything they can reach, except with weapons that never break blocks there
-const _breakTicksOP = Player.prototype.breakTicks;
-Player.prototype.breakTicks = function (id) {
-  if (this.mode === 1) { const h = this.inv[this.sel]; if (h && (h.id === I.TRIDENT || h.id === I.MACE || h.id === I.DEBUG_STICK)) return Infinity; if (BLK[id].hard < 0) return 0; }
-  return _breakTicksOP.call(this, id);
+const _destroyProgressOP = Player.prototype.destroyProgress;
+Player.prototype.destroyProgress = function (id) {
+  if (this.mode === 1) { const h = this.inv[this.sel]; if (h && (h.id === I.TRIDENT || h.id === I.MACE || h.id === I.DEBUG_STICK)) return 0; if (BLK[id].hard < 0) return 1; }
+  return _destroyProgressOP.call(this, id);
 };
 UI.prototype.actionBar = function (text, col) {
   const n = $('itemname');
@@ -31769,7 +31879,7 @@ Player.prototype.spectatorTick = function (inp) {
 // left click a creature to look through its eyes, right click a container to look inside
 Player.prototype.spectatorInteract = function (inp) {
   const g = this.game;
-  this.mining = null; this.mineProgress = 0;
+  this.stopDestroy();
   if (this.useCd > 0) this.useCd--;
   if (!inp.enabled) return;
   const hit = g.target, ent = g.targetEntity;
@@ -31912,8 +32022,8 @@ Game.prototype.touchGateway = function () { if (this.player && this.player.mode 
 
 /* ---------------- Adventure ---------------- */
 // Player.blockActionRestricted: no breaking
-const _breakTicksGM = Player.prototype.breakTicks;
-Player.prototype.breakTicks = function (id) { return this.mode === 2 || this.mode === 3 ? Infinity : _breakTicksGM.call(this, id); };
+const _destroyProgressGM = Player.prototype.destroyProgress;
+Player.prototype.destroyProgress = function (id) { return this.mode === 2 || this.mode === 3 ? 0 : _destroyProgressGM.call(this, id); };
 // and no placing (abilities.mayBuild)
 const _placeBlockGM = Game.prototype.placeBlock;
 Game.prototype.placeBlock = function (p, hit, id) { if (p && (p.mode === 2 || p.mode === 3)) return false; return _placeBlockGM.call(this, p, hit, id); };
@@ -37701,7 +37811,7 @@ Game.prototype.tutorialTick = function () {
       // PunchTreeTutorialStepInstance: done with wood in the inventory; the hint after 30 seconds, filling up while you dig
       if (hasLog()) { this.tutSet('open_inventory'); break; }
       if (T.wait === 600) T.a = this.ui.tutToast('Break the tree', 'Hold ' + tutKey('attack') + ' on a log', iconFor(itemOf('oak_log')), true);
-      if (T.a && T.a._bar) { const t = this.target, m = t && BLK[t.id] && BLK[t.id].log && p.mining ? Math.min(1, (p.mineProgress || 0) / Math.max(1, p.breakTicks ? p.breakTicks(t.id) : 30)) : 0; T.a._bar.style.width = m * 100 + '%'; }
+      if (T.a && T.a._bar) { const t = this.target, m = t && BLK[t.id] && BLK[t.id].log && p.mining ? Math.min(1, p.mineProgress || 0) : 0; T.a._bar.style.width = m * 100 + '%'; }
       break;
     }
     case 'open_inventory':
@@ -51473,7 +51583,8 @@ World.prototype.sculkIn = function (cx, cz) {
 };
 const _setBlockDD = World.prototype.setBlock;
 World.prototype.setBlock = function (x, y, z, id, meta, notify) {
-  if (SCULK_LISTENS[id] || SCULK_LISTENS[this.getBlock(x, y, z)]) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._sculk = null; }
+  const old = this.getBlock(x, y, z);
+  if (id !== old && (SCULK_LISTENS[id] || SCULK_LISTENS[old])) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._sculk = null; }
   return _setBlockDD.call(this, x, y, z, id, meta, notify);
 };
 // BlockGetter.traverseBlocks from one point to another, the first and last block included: does it run into wool?
@@ -51562,7 +51673,12 @@ Game.prototype.vibOffer = function (x, y, z, v, d, kind) {
   } else if ((m & SHRIEKING) || !vibPlayer(v.src)) return;
   if (vibOccluded(w, v.x, v.y, v.z, x + 0.5, y + 0.5, z + 0.5)) return;
   M.set(k, { v, dist: d, tick: v.tick, at: v.tick + Math.max(1, Math.floor(d)), x, y, z, kind });
-  this.vibrationParticle(v.x, v.y, v.z, x + 0.5, y + 0.6, z + 0.5);
+  this.vibrationParticle(v.x, v.y, v.z, x + 0.5, y + 0.6, z + 0.5, Math.max(1, Math.floor(d)));
+};
+// VibrationParticle: it travels to the listener and gets there with the vibration (making up for the particles' sideways drag)
+Game.prototype.vibrationParticle = function (x0, y0, z0, x1, y1, z1, ticks) {
+  const n = ticks || Math.max(1, Math.floor(Math.hypot(x1 - x0, y1 - y0, z1 - z0))), k = 0.02 / (1 - 0.98 ** n);
+  this.particles.add({ x: x0, y: y0, z: z0, vx: (x1 - x0) * k, vy: (y1 - y0) / n, vz: (z1 - z0) * k, life: n, layer: texL('particle_vibration'), u: 0, v: 0, us: 1, size: 0.1, g: 0, col: [1, 1, 1], bright: true });
 };
 // vibrations arriving, the players' warning levels, and standing on a shrieker
 Game.prototype.tickVibrations = function () {
@@ -51652,8 +51768,10 @@ World.prototype.runScheduled = function (game) {
   if (btn) for (const [x, y, z] of btn) if (!(this.getMeta(x, y, z) & 8)) game.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block_deactivate', null, this.getBlock(x, y, z));
   return r;
 };
-// the tendrils light up while the sensor is active
-BOX_MODELS.sensor = (d, m) => [BX(0, 0, 0, 16, 8, 16), ...cross(sensorPhase(m) === SENSOR_ACTIVE ? 'sculk_sensor_tendril_active' : 'sculk_sensor_tendril_inactive', 12, 8, 16)];
+// the tendrils light up while the sensor is active; a calibrated sensor shows its input on the side it takes it from
+const CAL_FACES = [0, 1, 2, 3, 4, 5].map(b => [0, 1, 2, 3, 4, 5].map(f => f === 2 ? 'calibrated_sculk_sensor_top' : f === 3 ? 'sculk_sensor_bottom' : f === b ? 'calibrated_sculk_sensor_input_side' : 'sculk_sensor_side'));
+BOX_MODELS.sensor = (d, m) => [BX(0, 0, 0, 16, 8, 16, d.id === B.CALIBRATED_SCULK_SENSOR ? CAL_FACES[calibratedBack(m)] : undefined),
+  ...cross(sensorPhase(m) === SENSOR_ACTIVE ? 'sculk_sensor_tendril_active' : 'sculk_sensor_tendril_inactive', 12, 8, 16)];
 // a calibrated sensor faces the way the player looks when placing it
 const _onPlacedDD = Game.prototype.onPlaced;
 Game.prototype.onPlaced = function (x, y, z, id) {
@@ -51785,7 +51903,7 @@ Warden.prototype.vibOffer = function (v, d) {
   const g = this.game, ey = this.y + this.h * 0.85;
   if (vibOccluded(g.world, v.x, v.y, v.z, this.x, ey, this.z)) return;
   this._vib = { v, dist: d, at: v.tick + Math.max(1, Math.floor(d)) };
-  g.vibrationParticle(v.x, v.y, v.z, this.x, ey, this.z);
+  g.vibrationParticle(v.x, v.y, v.z, this.x, ey, this.z, Math.max(1, Math.floor(d)));
 };
 Warden.prototype.hear = function (x, y, z, src, kind) { this.hearVibration({ x, y, z, src, kind, tick: this.game.world.tick }); };
 // Warden.VibrationUser.onReceiveVibration
@@ -52096,6 +52214,781 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'amethyst_resonate': this.tone(dst, 'sine', 1180 * v, 1180 * v, 1.3, 0.16); this.tone(dst, 'sine', 1770 * v, 1770 * v, 1.0, 0.08, t + 0.02); break;
   }
 };
+
+/* @file 168_sculk_spread.js */
+/* ===================================================================
+   Part 57: sculk spreading like Java's (SculkCatalystBlockEntity,
+   SculkSpreader, SculkBlock, SculkVeinBlock and MultifaceSpreader)
+   - the nearest sculk catalyst within 8 blocks of anything living that
+     dies takes its experience (no orbs drop) as charge where it died, and
+     blooms for 8 ticks
+   - the charge moves as cursors (32 at most, 1000 charge each) every
+     other tick over sculk and sculk veins; a vein turns the block it
+     covers into sculk if it is stone, dirt, sand, terracotta and the like
+     (1 charge), and veins grow onto the faces around new sculk; on sculk,
+     one time in 10 the charge sprouts a sensor (a shrieker one time in
+     11) at least 4 blocks from the catalyst with no more than 2 others
+     near (10 charge), or else fades, faster the farther it is
+   - cursors on the same block merge; a cursor off sculk dies out
+   =================================================================== */
+// BlockTags.SCULK_REPLACEABLE
+const SCULK_REPLACEABLE = new Uint8Array(MAXB);
+for (const n of ['stone', 'granite', 'diorite', 'andesite', 'tuff', 'deepslate', 'dirt', 'grass_block', 'podzol', 'coarse_dirt', 'mycelium', 'rooted_dirt', 'moss_block', 'pale_moss_block',
+  'mud', 'muddy_mangrove_roots', 'crimson_nylium', 'warped_nylium', 'netherrack', 'basalt', 'blackstone', 'sand', 'red_sand', 'gravel', 'soul_sand', 'soul_soil', 'calcite',
+  'smooth_basalt', 'clay', 'dripstone_block', 'end_stone', 'red_sandstone', 'sandstone']) if (B[n.toUpperCase()]) SCULK_REPLACEABLE[B[n.toUpperCase()]] = 1;
+for (let i = 1; i < MAXB; i++) { const n = BLK[i] && BLK[i].name; if (n && (n === 'terracotta' || (n.endsWith('_terracotta') && !n.endsWith('glazed_terracotta')))) SCULK_REPLACEABLE[i] = 1; }
+// SculkSpreader.createLevelSpreader
+const SC_GROWTH_COST = 10, SC_NO_GROWTH = 4, SC_DECAY_RATE = 10, SC_MORE_DECAY = 5, SC_MAX_CHARGE = 1000, SC_MAX_CURSORS = 32;
+const scRand = n => Math.floor(Math.random() * n);
+const scShuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = scRand(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// a full face to cling to (blocks that fill their space)
+const scFull = (w, x, y, z) => { const b = w.getBlock(x, y, z); return SOLID[b] === 1 && SHAPE[b] === SH.CUBE; };
+
+/* ---------------- sculk veins ---------------- */
+// SculkVeinBlock.SculkVeinSpreaderConfig.canSpreadInto: a new face for the block at p, clinging to the block on side f
+// (sculk veins can't be under water here, so water stops them)
+function veinCanSpreadInto(w, sx, sy, sz, px, py, pz, f) {
+  const ax = px + DX[f], ay = py + DY[f], az = pz + DZ[f], a = w.getBlock(ax, ay, az);
+  if (a === B.SCULK || a === B.SCULK_CATALYST || a === B.MOVING_PISTON) return false;
+  // around an edge only where nothing full stands in the way
+  if (Math.abs(sx - px) + Math.abs(sy - py) + Math.abs(sz - pz) === 2) { const g = f ^ 1; if (scFull(w, sx + DX[g], sy + DY[g], sz + DZ[g])) return false; }
+  const st = w.getBlock(px, py, pz);
+  if (st === B.SCULK_VEIN) { if (w.getMeta(px, py, pz) & (1 << f)) return false; }
+  else if (!(st === 0 || (REPL[st] && !BLK[st].liquid && !BLK[st].fire))) return false;
+  return scFull(w, ax, ay, az);
+}
+// MultifaceSpreader.spreadAll: from each face (every side for a block that isn't a vein) toward the four sides across it, trying the same block,
+// then the next block along the same plane, then round the edge (types picks which); how many faces it grew
+function veinSpreadAll(w, x, y, z, types) {
+  const vein = w.getBlock(x, y, z) === B.SCULK_VEIN, mask = vein ? w.getMeta(x, y, z) & 63 : 63;
+  let n = 0;
+  for (let d = 0; d < 6; d++) {
+    if (!(mask & (1 << d))) continue;
+    for (let f = 0; f < 6; f++) {
+      if ((f >> 1) === (d >> 1) || (vein && (mask & (1 << f)))) continue;
+      for (const t of types) {
+        const px = x + (t ? DX[f] : 0) + (t === 2 ? DX[d] : 0), py = y + (t ? DY[f] : 0) + (t === 2 ? DY[d] : 0), pz = z + (t ? DZ[f] : 0) + (t === 2 ? DZ[d] : 0);
+        const pf = t === 0 ? f : t === 1 ? d : f ^ 1;
+        if (!veinCanSpreadInto(w, x, y, z, px, py, pz, pf)) continue;
+        const old = w.getBlock(px, py, pz) === B.SCULK_VEIN ? w.getMeta(px, py, pz) : 0;
+        w.setBlock(px, py, pz, B.SCULK_VEIN, old | (1 << pf));
+        n++;
+        break;
+      }
+    }
+  }
+  return n;
+}
+// SculkVeinBlock.regrow: a vein with the faces the cursor remembers, where they still have something to cling to
+function veinRegrow(w, x, y, z, faces) {
+  let m = 0;
+  for (let f = 0; f < 6; f++) if ((faces & (1 << f)) && scFull(w, x + DX[f], y + DY[f], z + DZ[f])) m |= 1 << f;
+  if (!m) return false;
+  w.setBlock(x, y, z, B.SCULK_VEIN, m);
+  return true;
+}
+// SculkVeinBlock.onDischarged: faces on sculk go, and with none left the vein is gone
+function veinDischarged(w, x, y, z) {
+  if (w.getBlock(x, y, z) !== B.SCULK_VEIN) return;
+  let m = w.getMeta(x, y, z) & 63;
+  for (let f = 0; f < 6; f++) if ((m & (1 << f)) && w.getBlock(x + DX[f], y + DY[f], z + DZ[f]) === B.SCULK) m &= ~(1 << f);
+  w.setBlock(x, y, z, m ? B.SCULK_VEIN : 0, m);
+}
+// SculkVeinBlock.attemptPlaceSculk: the first block it covers (in a random order) that sculk can take over becomes sculk
+function veinPlaceSculk(g, w, x, y, z) {
+  if (w.getBlock(x, y, z) !== B.SCULK_VEIN) return false;
+  const m = w.getMeta(x, y, z);
+  for (const f of scShuffle([0, 1, 2, 3, 4, 5])) {
+    if (!(m & (1 << f))) continue;
+    const bx = x + DX[f], by = y + DY[f], bz = z + DZ[f];
+    if (!SCULK_REPLACEABLE[w.getBlock(bx, by, bz)]) continue;
+    w.setBlock(bx, by, bz, B.SCULK, 0);
+    g.sound('sculk_spread', bx + 0.5, by + 0.5, bz + 0.5);
+    veinSpreadAll(w, bx, by, bz, [0, 1, 2]);
+    for (let e = 0; e < 6; e++) if (e !== (f ^ 1) && w.getBlock(bx + DX[e], by + DY[e], bz + DZ[e]) === B.SCULK_VEIN) veinDischarged(w, bx + DX[e], by + DY[e], bz + DZ[e]);
+    return true;
+  }
+  return false;
+}
+const veinHasSubstrate = (w, x, y, z) => { const m = w.getMeta(x, y, z); for (let f = 0; f < 6; f++) if ((m & (1 << f)) && SCULK_REPLACEABLE[w.getBlock(x + DX[f], y + DY[f], z + DZ[f])]) return true; return false; };
+
+/* ---------------- what the charge does on each block (SculkBehaviour) ---------------- */
+// SculkBlock.canPlaceGrowth: room above, and no more than 2 sensors or shriekers in the 9x3x9 around
+function sculkCanGrow(w, x, y, z) {
+  if (w.getBlock(x, y + 1, z) !== 0) return false;
+  let n = 0;
+  for (let dx = -4; dx <= 4; dx++) for (let dy = 0; dy <= 2; dy++) for (let dz = -4; dz <= 4; dz++) { const b = w.getBlock(x + dx, y + dy, z + dz); if ((b === B.SCULK_SENSOR || b === B.SCULK_SHRIEKER) && ++n > 2) return false; }
+  return true;
+}
+const SB_DEFAULT = {
+  spreadVein(w, x, y, z, faces) {
+    if (faces === null) return veinSpreadAll(w, x, y, z, [0]) > 0;
+    if (faces) return w.getBlock(x, y, z) === 0 && veinRegrow(w, x, y, z, faces);
+    return veinSpreadAll(w, x, y, z, [0, 1, 2]) > 0;
+  },
+  useCharge(c) { return c.decayDelay > 0 ? c.charge : 0; },
+  decay(d) { return Math.max(d - 1, 0); },
+  changes: true,
+  discharged() { },
+};
+const SB_SCULK = {
+  spreadVein(w, x, y, z) { return veinSpreadAll(w, x, y, z, [0, 1, 2]) > 0; },
+  useCharge(c, g, w, cat) {
+    const i = c.charge;
+    if (!i || scRand(SC_DECAY_RATE) !== 0) return i;
+    const [x, y, z] = c.pos, d2 = (x - cat.x) ** 2 + (y - cat.y) ** 2 + (z - cat.z) ** 2, near = d2 < SC_NO_GROWTH * SC_NO_GROWTH;
+    if (!near && sculkCanGrow(w, x, y, z)) {
+      if (scRand(SC_GROWTH_COST) < i) {
+        const id = scRand(11) === 0 ? B.SCULK_SHRIEKER : B.SCULK_SENSOR;
+        w.setBlock(x, y + 1, z, id, 0);
+        g.sound('place_' + BLK[id].sound, x + 0.5, y + 1.5, z + 0.5);
+      }
+      return Math.max(0, i - SC_GROWTH_COST);
+    }
+    if (scRand(SC_MORE_DECAY) !== 0) return i;
+    if (near) return i - 1;
+    // getDecayPenalty: up to half the charge, growing with the distance past 4 blocks out to 24
+    const f = Math.min(1, (Math.sqrt(d2) - SC_NO_GROWTH) ** 2 / (24 - SC_NO_GROWTH) ** 2);
+    return i - Math.max(1, Math.floor(i * f * 0.5));
+  },
+  decay() { return 1; },
+  changes: false,
+  discharged() { },
+};
+const SB_VEIN = {
+  spreadVein(w, x, y, z) { return veinSpreadAll(w, x, y, z, [0, 1, 2]) > 0; },
+  useCharge(c, g, w) { if (veinPlaceSculk(g, w, c.pos[0], c.pos[1], c.pos[2])) return c.charge - 1; return scRand(SC_DECAY_RATE) === 0 ? Math.floor(c.charge * 0.5) : c.charge; },
+  decay() { return 1; },
+  changes: true,
+  discharged: veinDischarged,
+};
+const scBehaviour = id => id === B.SCULK ? SB_SCULK : id === B.SCULK_VEIN ? SB_VEIN : SB_DEFAULT;
+
+/* ---------------- charge cursors ---------------- */
+// the 18 blocks around one that share a face or an edge with it
+const SC_STEPS = [];
+for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) if ((dx === 0 || dy === 0 || dz === 0) && (dx || dy || dz)) SC_STEPS.push([dx, dy, dz]);
+// ChargeCursor.isMovementUnobstructed: an edge step needs one of the two ways round it open
+function scUnobstructed(w, x, y, z, dx, dy, dz) {
+  if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) === 1) return true;
+  const open = (ex, ey, ez) => !scFull(w, x + ex, y + ey, z + ez);
+  if (dx === 0) return open(0, dy, 0) || open(0, 0, dz);
+  if (dy === 0) return open(dx, 0, 0) || open(0, 0, dz);
+  return open(dx, 0, 0) || open(0, dy, 0);
+}
+// ChargeCursor.getValidMovementPos: a sculk block or vein around it, best a vein over something sculk can take
+function scMovePos(w, x, y, z) {
+  let to = null;
+  for (const [dx, dy, dz] of scShuffle(SC_STEPS.slice())) {
+    const nx = x + dx, ny = y + dy, nz = z + dz, b = w.getBlock(nx, ny, nz);
+    if ((b !== B.SCULK && b !== B.SCULK_VEIN) || !scUnobstructed(w, x, y, z, dx, dy, dz)) continue;
+    to = [nx, ny, nz];
+    if (b === B.SCULK_VEIN && veinHasSubstrate(w, nx, ny, nz)) break;
+  }
+  return to;
+}
+// ChargeCursor.update
+function scCursorUpdate(g, w, c, cat) {
+  if (c.charge <= 0 || !w.isLoadedAt(c.pos[0], c.pos[2])) return;
+  if (c.delay > 0) { c.delay--; return; }
+  const [x, y, z] = c.pos;
+  let b = scBehaviour(w.getBlock(x, y, z));
+  if (b.spreadVein(w, x, y, z, c.faces)) {
+    if (b.changes) b = scBehaviour(w.getBlock(x, y, z));
+    g.sound('sculk_spread', x + 0.5, y + 0.5, z + 0.5);
+  }
+  c.charge = b.useCharge(c, g, w, cat);
+  if (c.charge <= 0) { b.discharged(w, x, y, z); return; }
+  const to = scMovePos(w, x, y, z);
+  if (to) { b.discharged(w, x, y, z); c.pos = to; }
+  const now = w.getBlock(c.pos[0], c.pos[1], c.pos[2]);
+  if (now === B.SCULK_VEIN) c.faces = w.getMeta(c.pos[0], c.pos[1], c.pos[2]) & 63;
+  else if (now === B.SCULK) c.faces = 0;
+  c.decayDelay = b.decay(c.decayDelay);
+  c.delay = 1;
+}
+// SculkSpreader.updateCursors: cursors that end on the same block merge while they fit in 1000
+function scUpdateCursors(g, w, cat) {
+  const list = [], at = new Map();
+  for (const c of cat.cursors) {
+    scCursorUpdate(g, w, c, cat);
+    if (c.charge <= 0) continue;
+    const k = c.pos.join(','), o = at.get(k);
+    if (!o) { at.set(k, c); list.push(c); }
+    else if (c.charge + o.charge <= SC_MAX_CHARGE) { o.charge += c.charge; o.delay = Math.min(o.delay, c.delay); }
+    else { list.push(c); if (c.charge < o.charge) at.set(k, c); }
+  }
+  // the charge glows where it is
+  if (w.tick % 4 === 0) for (const c of list) g.particles.add({ x: c.pos[0] + 0.2 + Math.random() * 0.6, y: c.pos[1] + 0.3 + Math.random() * 0.5, z: c.pos[2] + 0.2 + Math.random() * 0.6, vx: 0, vy: 0.01, vz: 0, life: 12, layer: texL('particle_sculk_charge'), u: 0, v: 0, us: 1, size: 0.12, g: 0, col: [1, 1, 1], bright: true });
+  cat.cursors = list;
+}
+
+/* ---------------- sculk catalysts ---------------- */
+// the catalysts of a chunk, found once and forgotten when one is placed or broken there
+World.prototype.catalystsIn = function (cx, cz) {
+  const c = this.getChunk(cx, cz);
+  if (!c || !c.blocks) return null;
+  if (c._cat && c._catBl === c.blocks) return c._cat;
+  const out = [], bl = c.blocks;
+  for (let i = bl.indexOf(B.SCULK_CATALYST); i >= 0; i = bl.indexOf(B.SCULK_CATALYST, i + 1)) out.push([cx * 16 + (i & 15), i >> 8, cz * 16 + ((i >> 4) & 15)]);
+  c._cat = out; c._catBl = bl;
+  return out;
+};
+const _setBlockSC = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  if ((id === B.SCULK_CATALYST) !== (this.getBlock(x, y, z) === B.SCULK_CATALYST)) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._cat = null; }
+  return _setBlockSC.call(this, x, y, z, id, meta, notify);
+};
+// SculkCatalystBlockEntity.CatalystListener.handleGameEvent: the nearest catalyst within 8 blocks (between block positions) of a death
+Game.prototype.catalystNear = function (x, y, z) {
+  const w = this.world, bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+  let best = null, bd = 1e9;
+  for (let cx = (bx - 8) >> 4; cx <= (bx + 8) >> 4; cx++) for (let cz = (bz - 8) >> 4; cz <= (bz + 8) >> 4; cz++) for (const s of w.catalystsIn(cx, cz) || []) {
+    if ((s[0] - bx) ** 2 + (s[1] - by) ** 2 + (s[2] - bz) ** 2 > 64) continue;
+    const d = (s[0] + 0.5 - x) ** 2 + (s[1] + 0.5 - y) ** 2 + (s[2] + 0.5 - z) ** 2;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+};
+// the experience becomes charge where it died (half a block up), and the catalyst blooms
+Game.prototype.catalystFeed = function (s, x, y, z, xp) {
+  const w = this.world, k = s.join(','), cats = w.catalysts || (w.catalysts = new Map());
+  let cat = cats.get(k);
+  if (!cat) cats.set(k, cat = { x: s[0], y: s[1], z: s[2], cursors: [] });
+  const pos = [Math.floor(x), Math.floor(y + 0.5), Math.floor(z)];
+  for (let n = xp; n > 0; n -= SC_MAX_CHARGE) if (cat.cursors.length < SC_MAX_CURSORS) cat.cursors.push({ pos: pos.slice(), charge: Math.min(n, SC_MAX_CHARGE), delay: 1, decayDelay: 0, faces: null });
+  w.setBlock(s[0], s[1], s[2], B.SCULK_CATALYST, 1, false);
+  w.schedule(s[0], s[1], s[2], 8, 'catalyst_calm');
+  this.remeshNear(s[0], s[2]);
+  for (let i = 0; i < 2; i++) this.particles.add({ x: s[0] + 0.3 + Math.random() * 0.4, y: s[1] + 1.15, z: s[2] + 0.3 + Math.random() * 0.4, vx: 0, vy: 0.04, vz: 0, life: 30, layer: texL('particle_sculk_soul'), u: 0, v: 0, us: 1, size: 0.2, g: 0, col: [1, 1, 1], bright: true });
+  this.sound('catalyst_bloom', s[0] + 0.5, s[1] + 0.5, s[2] + 0.5);
+};
+const _onScheduledSC = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind !== 'catalyst_calm') return _onScheduledSC.call(this, kind, x, y, z);
+  const w = this.world;
+  if (w.getBlock(x, y, z) === B.SCULK_CATALYST && (w.getMeta(x, y, z) & 1)) { w.setBlock(x, y, z, B.SCULK_CATALYST, 0, false); this.remeshNear(x, z); }
+};
+// the catalysts' charge moves every tick (SculkCatalystBlockEntity.serverTick); one broken loses its charge
+const _gameTickSC = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickSC.call(this);
+  const w = this.world, cats = w && w.catalysts;
+  if (!cats || !cats.size) return;
+  for (const [k, cat] of [...cats]) {
+    if (w.getBlock(cat.x, cat.y, cat.z) !== B.SCULK_CATALYST || !cat.cursors.length) { if (w.isLoadedAt(cat.x, cat.z)) cats.delete(k); continue; }
+    if (w.isLoadedAt(cat.x, cat.z)) scUpdateCursors(this, w, cat);
+  }
+};
+// a mob's experience, as it would drop (LivingEntity.getExperienceReward)
+function mobXP(m) {
+  const T = m.T;
+  if (m.baby || m.noDrops) return 0;
+  let xp = typeof T.xp === 'number' ? T.xp : T.xp ? T.xp[0] + Math.floor(Math.random() * (T.xp[1] - T.xp[0] + 1)) : 0;
+  if (m.data.size) xp = m.data.size;
+  if (T.cat === 'monster' && m.data.armor) xp += m.data.armor.filter(s => s).length * 2;
+  return xp;
+}
+const _mobDieSC = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  const fresh = !(this.deathTime > 0), r = _mobDieSC.apply(this, arguments);
+  if (fresh && this.deathTime > 0 && !(this instanceof Hanging) && !(this instanceof ArmorStand)) {
+    const s = this.game.catalystNear(this.x, this.y, this.z);
+    if (s) { this.game.catalystFeed(s, this.x, this.y, this.z, mobXP(this)); this.xpEaten = true; }
+  }
+  return r;
+};
+// its experience went to the catalyst, so none drops
+const _dropLootSC = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  if (!this.xpEaten) return _dropLootSC.apply(this, arguments);
+  const g = this.game;
+  g._noXP = true;
+  try { return _dropLootSC.apply(this, arguments); } finally { g._noXP = false; }
+};
+const _spawnXPSC = Game.prototype.spawnXP;
+Game.prototype.spawnXP = function (x, y, z, n) { if (this._noXP) return; return _spawnXPSC.apply(this, arguments); };
+// a player dying near one feeds it too (7 a level, 100 at most)
+const _onDeathSC = Game.prototype.onDeath;
+Game.prototype.onDeath = function (source, silent) {
+  const p = this.player, s = p && !p.spectator ? this.catalystNear(p.x, p.y, p.z) : null;
+  if (!s) return _onDeathSC.apply(this, arguments);
+  this.catalystFeed(s, p.x, p.y, p.z, silent || this.keepInventory ? 0 : Math.min(100, p.xpLevel * 7));
+  this._noXP = true;
+  try { return _onDeathSC.apply(this, arguments); } finally { this._noXP = false; }
+};
+
+/* ---------------- the bloom ---------------- */
+TEXGEN.push(function texSculkSpread() {
+  // a catalyst in bloom: its soul fire flares on top and the sculk climbs its sides
+  T('sculk_catalyst_top_bloom', (d, r) => fillF(d, (x, y) => { const dd = Math.hypot(x - 7.5, y - 7.5); return dd < 4 ? (dd < 2 ? [190, 255, 250] : [70, 235, 235]) : dd < 5.5 ? [20, 90, 96] : mul([210, 200, 180], 0.85 + r() * 0.15); }));
+  T('sculk_catalyst_side_bloom', (d, r) => fillF(d, (x, y) => y < 6 || (y < 9 && (x * 7 + y * 3) % 5 === 0) ? (r() < 0.2 ? [60, 220, 230] : mul([14, 52, 60], 0.8 + r() * 0.3)) : mul([200, 190, 172], (x % 5 === 0 ? 0.85 : 1) * (0.88 + r() * 0.12))));
+});
+const _resolveFaceTexturesSC = resolveFaceTextures;
+resolveFaceTextures = function () {
+  _resolveFaceTexturesSC();
+  const o = B.SCULK_CATALYST * 6, side = texLayer('sculk_catalyst_side_bloom', FACETEX[o]);
+  ALTMASK[B.SCULK_CATALYST] = 1;
+  for (const k of [0, 1, 4, 5]) FACETEX_ALT[o + k] = side;
+  FACETEX_ALT[o + 2] = texLayer('sculk_catalyst_top_bloom', FACETEX[o + 2]);
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t] of [['sculk_spread', 'Sculk spreads'], ['catalyst_bloom', 'Sculk Catalyst blooms']]) { SND_CAT[n] = 'block'; SUB_TEXT[n] = t; }
+SOUND_EVENTS.unshift([/^block\.sculk\.spread/, 'sculk_spread'], [/^block\.sculk_catalyst\.bloom/, 'catalyst_bloom']);
+const _audioPlaySC = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'sculk_spread' && name !== 'catalyst_bloom') return _audioPlaySC.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, name === 'catalyst_bloom' ? 1.6 : 0.8);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2, t = this.ctx.currentTime;
+  if (name === 'sculk_spread') { this.noiseHit(dst, 'bandpass', 700 * v, 2, 0.18, 0.25); this.tone(dst, 'sine', 140 * v, 90 * v, 0.2, 0.08); }
+  else { this.tone(dst, 'sine', 220 * v, 330 * v, 0.9, 0.18); this.tone(dst, 'triangle', 110 * v, 165 * v, 1.1, 0.12, t + 0.05); this.noiseHit(dst, 'lowpass', 600, 1, 0.8, 0.15); }
+};
+
+/* @file 169_bats_squid.js */
+/* ===================================================================
+   Part 58: bats, squid and glow squid like Java's (Bat, Squid, GlowSquid
+   and their renderers)
+   - a bat hangs from the full block above it and lets go when a player
+     comes within 4 blocks, when it is hurt or when the block goes; flying,
+     it heads for a spot up to 6 blocks off
+     (a new one 1 time in 30 or once within 2 blocks of it), gaining a tenth
+     of the way to 0.5 across and 0.7 up or down each tick, and roosts 1
+     time in 100 under a full block
+   - squid swim in strokes: the tentacles beat at a speed that changes now
+     and then, the squid pushes off in its chosen direction late in the
+     stroke and glides at 90% between, turning toward where it goes and
+     spinning while it pushes; a new direction 1 time in 50, none after 5
+     seconds with nobody near; hurt by something, it squirts ink and flees
+     from it while it is within 10 blocks; out of water it sinks and
+     points down
+   - glow squid glow, shed glow specks, and go dark for 5 seconds when hurt
+   =================================================================== */
+const bsRand = n => Math.floor(Math.random() * n);
+
+/* ---------------- bats ---------------- */
+// Bat.customServerAiStep
+MOB_TICK.bat = function (m) {
+  const g = m.game, w = g.world, bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z), d = m.data;
+  const ceiling = conductive(w.getBlock(bx, by + 1, bz));
+  if (d.resting) {
+    const p = g.player;
+    if (!ceiling || (p && !p.dead && !p.spectator && m.distTo(p) <= 4)) batWake(m);
+    return;
+  }
+  let t = m._bt;
+  if (t && (w.getBlock(t[0], t[1], t[2]) !== 0 || t[1] <= 0)) t = null;
+  if (!t || bsRand(30) === 0 || (t[0] + 0.5 - m.x) ** 2 + (t[1] + 0.5 - m.y) ** 2 + (t[2] + 0.5 - m.z) ** 2 < 4)
+    t = m._bt = [Math.floor(m.x + bsRand(7) - bsRand(7)), Math.floor(m.y + bsRand(6) - 2), Math.floor(m.z + bsRand(7) - bsRand(7))];
+  const dx = t[0] + 0.5 - m.x, dy = t[1] + 0.1 - m.y, dz = t[2] + 0.5 - m.z;
+  m.vx += (Math.sign(dx) * 0.5 - m.vx) * 0.1; m.vy += (Math.sign(dy) * 0.7 - m.vy) * 0.1; m.vz += (Math.sign(dz) * 0.5 - m.vz) * 0.1;
+  m.yaw = m.bodyYaw = Math.atan2(m.vx, m.vz);
+  m.move = null;
+  if (bsRand(100) === 0 && ceiling) d.resting = true;
+};
+function batWake(m) { m.data.resting = false; if (!m.data.silent) m.game.sound('bat_takeoff', m.x, m.y + 0.5, m.z); }
+// LivingEntity.travel in the air: 0.02 of flying speed forward, gravity and 0.91 drag; then Bat.tick slows its fall, or holds it to the ceiling
+const _flyPhysicsBS = Mob.prototype.flyPhysics;
+Mob.prototype.flyPhysics = function () {
+  if (this.type !== 'bat') return _flyPhysicsBS.call(this);
+  if (this.data.resting) {
+    this.vx = this.vy = this.vz = 0;
+    this.y = Math.floor(this.y) + 1 - this.h;
+    this.onGround = false; this.walkAmt *= 0.6;
+    return;
+  }
+  this.vx += Math.sin(this.yaw) * 0.01; this.vz += Math.cos(this.yaw) * 0.01;
+  const res = moveEntity(this.game.world, this, this.vx, this.vy, this.vz);
+  if (res.hx) this.vx = 0; if (res.hy) this.vy = 0; if (res.hz) this.vz = 0;
+  this.onGround = res.down;
+  this.vy -= 0.08; this.vx *= 0.91; this.vy *= 0.98; this.vz *= 0.91;
+  this.vy *= 0.6;
+  this.fallDist = 0;
+  const spd = Math.hypot(this.x - this.px, this.z - this.pz);
+  this.walkAmt += (Math.min(1, spd * 4) - this.walkAmt) * 0.4; this.walk += spd * 4;
+};
+
+/* ---------------- squid ---------------- */
+// their own movement, not the generic swimming
+MOB_TYPES.squid.ai = []; MOB_TYPES.glow_squid.ai = [];
+MOB_TYPES.glow_squid.glow = false;
+// the attacker it remembers (LivingEntity.getLastHurtByMob, forgotten after 5 seconds)
+const lastHurtBy = m => m.lastAttacker && !m.lastAttacker.dead && m.age - (m.lastHurtAge || -1e9) <= 100 ? m.lastAttacker : null;
+function squidTick(m) {
+  const d = m.data, g = m.game, w = g.world;
+  if (d.tSpeed === undefined) Object.assign(d, { tSpeed: 1 / (Math.random() + 1) * 0.2, tMove: 0, tAngle: 0, xRot: 0, zRot: 0, rotSpeed: 0, mv: [0, 0, 0] });
+  // SquidRandomMovementGoal (every other tick): still after 5 seconds with nobody about, else a new direction now and then
+  if (m.age % 2 === 0) {
+    if ((m.noAct || 0) > 100) d.mv = [0, 0, 0];
+    else if (bsRand(25) === 0 || !m.inWater || Math.hypot(...d.mv) ** 2 <= 1e-5) { const a = Math.random() * Math.PI * 2; d.mv = [Math.cos(a) * 0.2, -0.1 + Math.random() * 0.2, Math.sin(a) * 0.2]; }
+  }
+  // SquidFleeGoal: away from what hurt it while it is within 10 blocks (3 blocks a second, less from farther than 5)
+  const a = lastHurtBy(m);
+  if (a && m.inWater && (m.x - a.x) ** 2 + (m.y - a.y) ** 2 + (m.z - a.z) ** 2 < 100) {
+    let v = [m.x - a.x, m.y - a.y, m.z - a.z];
+    const tx = Math.floor(m.x + v[0]), ty = Math.floor(m.y + v[1]), tz = Math.floor(m.z + v[2]), b = w.getBlock(tx, ty, tz);
+    if (b === B.WATER || WATERY[b] === 1 || b === 0) {
+      const l = Math.hypot(...v);
+      if (l > 0) { const s = 3 - (l > 5 ? (l - 5) / 5 : 0); if (s > 0) v = v.map(c => c * s); }
+      if (b === 0) v[1] = 0;
+      d.mv = [v[0] / 20, v[1] / 20, v[2] / 20];
+    }
+    if ((d.fleeT = (d.fleeT || 0) + 1) % 10 === 5) g.particles.bubble(m.x, m.y, m.z);
+  } else d.fleeT = 0;
+  // Squid.aiStep: the tentacle stroke
+  d.tMove += d.tSpeed;
+  if (d.tMove > Math.PI * 2) { d.tMove -= Math.PI * 2; if (bsRand(10) === 0) d.tSpeed = 1 / (Math.random() + 1) * 0.2; }
+  if (m.inWater) {
+    if (d.tMove < Math.PI) {
+      const f = d.tMove / Math.PI;
+      d.tAngle = Math.sin(f * f * Math.PI) * Math.PI * 0.25;
+      if (f > 0.75) { [m.vx, m.vy, m.vz] = d.mv; d.rotSpeed = 1; } else d.rotSpeed *= 0.8;
+    } else { d.tAngle = 0; m.vx *= 0.9; m.vy *= 0.9; m.vz *= 0.9; d.rotSpeed *= 0.99; }
+    const h = Math.hypot(m.vx, m.vz);
+    m.bodyYaw += (Math.atan2(m.vx, m.vz) - m.bodyYaw) * 0.1; m.yaw = m.bodyYaw;
+    d.zRot += Math.PI * d.rotSpeed * 1.5;
+    d.xRot += (-Math.atan2(h, m.vy) * 180 / Math.PI - d.xRot) * 0.1;
+  } else {
+    d.tAngle = Math.abs(Math.sin(d.tMove)) * Math.PI * 0.25;
+    const lev = m.effectLevel ? m.effectLevel('levitation') : 0;
+    m.vx = 0; m.vz = 0; m.vy = (lev ? 0.05 * lev : m.vy - 0.08) * 0.98;
+    d.xRot += (-90 - d.xRot) * 0.02;
+  }
+  m.move = null;
+  // GlowSquid.aiStep: darkness wears off, and glow specks
+  if (m.type === 'glow_squid') {
+    if (d.dark > 0) d.dark--;
+    g.particles.add({ x: m.x + (Math.random() - 0.5) * 0.6 * m.w * 2, y: m.y + Math.random() * m.h, z: m.z + (Math.random() - 0.5) * 0.6 * m.w * 2, vx: 0, vy: 0, vz: 0, life: 30 + bsRand(20), layer: texL('particle_glow'), u: 0, v: 0, us: 1, size: 0.06, g: 0, col: [1, 1, 1], bright: true });
+  }
+}
+MOB_TICK.squid = MOB_TICK.glow_squid = squidTick;
+// Squid.travel: it moves exactly as it is pushed
+const _swimPhysicsBS = Mob.prototype.swimPhysics, _walkPhysicsBS = Mob.prototype.walkPhysics;
+function squidTravel(m) {
+  const res = moveEntity(m.game.world, m, m.vx, m.vy, m.vz);
+  if (res.hx) m.vx = 0; if (res.hy) m.vy = 0; if (res.hz) m.vz = 0;
+  m.onGround = res.down;
+  const spd = Math.hypot(m.x - m.px, m.z - m.pz);
+  m.walkAmt += (Math.min(1, spd * 4) - m.walkAmt) * 0.4; m.walk += spd * 4;
+  return res;
+}
+Mob.prototype.swimPhysics = function () { return this.type === 'squid' || this.type === 'glow_squid' ? squidTravel(this) : _swimPhysicsBS.apply(this, arguments); };
+Mob.prototype.walkPhysics = function () { return this.type === 'squid' || this.type === 'glow_squid' ? squidTravel(this) : _walkPhysicsBS.apply(this, arguments); };
+// hurt by something: ink (along its tentacles), and a glow squid goes dark; a bat lets go
+const _mobHurtBS = Mob.prototype.hurt;
+Mob.prototype.hurt = function (amount, source, attacker) {
+  if (this.type === 'bat' && this.data.resting) this.data.resting = false;
+  const r = _mobHurtBS.apply(this, arguments);
+  if (r && (this.type === 'squid' || this.type === 'glow_squid')) {
+    if (this.type === 'glow_squid') this.data.dark = 100;
+    if (lastHurtBy(this)) squidInk(this);
+  }
+  return r;
+};
+// Squid.spawnInk: 30 drops along its body's down axis, turned with it
+function squidInk(m) {
+  const g = m.game, d = m.data, th = (d.xRot || 0) * Math.PI / 180, ya = m.bodyYaw;
+  const rot = (x, y, z) => { const y1 = y * Math.cos(th) + z * Math.sin(th), z1 = z * Math.cos(th) - y * Math.sin(th); return [x * Math.cos(ya) + z1 * Math.sin(ya), y1, z1 * Math.cos(ya) - x * Math.sin(ya)]; };
+  g.sound('squid_squirt', m.x, m.y, m.z);
+  const o = rot(0, -1, 0), layer = texL(m.type === 'glow_squid' ? 'particle_glow_squid_ink' : 'particle_squid_ink');
+  for (let i = 0; i < 30; i++) {
+    const v = rot(Math.random() * 0.6 - 0.3, -1, Math.random() * 0.6 - 0.3), s = (m.baby ? 0.1 : 0.3) + Math.random() * 2;
+    g.particles.add({ x: m.x + o[0], y: m.y + o[1] + 0.5, z: m.z + o[2], vx: v[0] * s * 0.1, vy: v[1] * s * 0.1, vz: v[2] * s * 0.1, life: 20 + bsRand(15), layer, u: 0, v: 0, us: 1, size: 0.15 + Math.random() * 0.1, g: 0, col: [1, 1, 1], water: true, bright: m.type === 'glow_squid' });
+  }
+}
+// GlowSquidRenderer.getBlockLightLevel: full light, except while dark (back up over its last half second)
+const _lightAtBS = Mob.prototype.lightAt;
+Mob.prototype.lightAt = function () {
+  const l = _lightAtBS.apply(this, arguments);
+  if (this.type !== 'glow_squid') return l;
+  const i = Math.floor(Math.max(0, Math.min(1, 1 - (this.data.dark || 0) / 10)) * 15);
+  return [l[0], i === 15 ? 15 : Math.max(i, l[1])];
+};
+// SquidRenderer.setupRotations: the whole squid pitches toward where it goes and spins, about a point half a block up
+MOB_MODELS.squid = MOB_MODELS.glow_squid = { tw: 64, th: 32, parts: [P_('pitch', [0, 16, 0], []), P_('spin', [0, 0, 0], [], null, 'pitch'),
+  P_('body', [0, 11.2, 0], [[0, 0, -6, -8, -6, 12, 16, 12, 0.02]], null, 'spin'),
+  ...Array.from({ length: 8 }, (_, i) => { const a = i * PI * 2 / 8; return P_('tentacle' + i, [Math.cos(a) * 5, 18.2, Math.sin(a) * 5], [[48, 0, -1, 0, -1, 2, 18, 2]], [0, -a + HPI, 0], 'spin'); })],
+  anim(P, st) {
+    P.pitch = [-(st.bodyX || 0), 0, 0]; P.spin = [0, -(st.spin || 0), 0];
+    for (let i = 0; i < 8; i++) P['tentacle' + i] = [st.tentacle || 0, -i * PI * 2 / 8 + HPI, 0];
+  } };
+const squidState = (m, st) => {
+  const d = m.data;
+  st.tentacle = d.tAngle || 0; st.bodyX = (d.xRot || 0) * Math.PI / 180; st.spin = (d.zRot || 0) * Math.PI / 180;
+};
+MOB_ANIM.squid = MOB_ANIM.glow_squid = squidState;
+
+/* ---------------- particles and sounds ---------------- */
+TEXGEN.push(function texBatsSquid() {
+  T('particle_squid_ink', (d) => fillEl(d, 8, 8, 5, 5, (x, y) => Math.hypot(x + 0.5 - 8, y + 0.5 - 8) < 2 ? [40, 40, 52] : [12, 12, 18]));
+  T('particle_glow_squid_ink', (d) => fillEl(d, 8, 8, 5, 5, (x, y) => Math.hypot(x + 0.5 - 8, y + 0.5 - 8) < 2 ? [190, 255, 240] : [60, 210, 200]));
+  T('particle_glow', (d) => fillEl(d, 8, 8, 2.5, 2.5, [120, 255, 230]));
+});
+for (const [n, t, c] of [['bat_takeoff', 'Bat takes off', 'neutral'], ['squid_squirt', 'Squid shoots ink', 'neutral']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+SOUND_EVENTS.unshift([/^entity\.bat\.takeoff/, 'bat_takeoff'], [/^entity\.(glow_)?squid\.squirt/, 'squid_squirt']);
+const _audioPlayBS = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'bat_takeoff' && name !== 'squid_squirt') return _audioPlayBS.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, name === 'bat_takeoff' ? 0.4 : 0.8);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.2, t = this.ctx.currentTime;
+  if (name === 'bat_takeoff') for (let i = 0; i < 4; i++) this.noiseHit(dst, 'bandpass', 1800 * v, 2, 0.05, 0.2, t + i * 0.07);
+  else { this.noiseHit(dst, 'lowpass', 500 * v, 1, 0.35, 0.4); this.tone(dst, 'sine', 160 * v, 90 * v, 0.3, 0.12); }
+};
+
+/* @file 170_farming.js */
+/* ===================================================================
+   Part 59: farming like Java's (CropBlock, BeetrootBlock,
+   TorchflowerCropBlock, StemBlock, NetherWartBlock, SugarCaneBlock,
+   CactusBlock, SaplingBlock, MangrovePropaguleBlock, SweetBerryBushBlock,
+   KelpBlock, FarmBlock and SpreadingSnowyDirtBlock)
+   - crops, stems and berry bushes look at the light without the night's
+     dimming, so they grow at night under the open sky (saplings and grass
+     don't)
+   - crops and stems grow one random tick in 25/speed + 1, the speed
+     counting the farmland under and around them (3 for wet, 1 for dry, a
+     quarter of that for each of the 8 around) and halving when the same
+     crop grows beside them on both axes or diagonally, so rows beat
+     blocks; beetroots and torchflowers skip a third of their ticks
+   - nether wart grows 1 time in 10 in any light
+   - sugar cane and cactus count 16 random ticks before growing a block,
+     up to 3 tall; a cactus that grows next to something breaks
+   - saplings grow in two steps (1 time in 7 each), azaleas only with bone
+     meal, mangrove propagules in any light
+   - kelp grows 14% of its random ticks
+   - farmland stays wet within 4 blocks of water or under rain, else dries
+     a step at a time and turns to dirt with nothing growing on it
+   - grass and mycelium try 4 spots a tick; they die under a full block or
+     a full block of water
+   - bone meal: crops 2 to 5 stages (beetroots 0 or 1, torchflowers and
+     pitchers 1), stems the same and a try for a fruit once grown,
+     saplings a step 45% of the time; nether wart, sugar cane and cactus
+     take none
+   =================================================================== */
+const fmRand = n => Math.floor(Math.random() * n);
+// BlockTags.DIRT: what a melon or pumpkin can grow on besides farmland
+const DIRT_TAG = new Uint8Array(MAXB);
+for (const n of ['dirt', 'grass_block', 'podzol', 'coarse_dirt', 'mycelium', 'rooted_dirt', 'moss_block', 'pale_moss_block', 'mud', 'muddy_mangrove_roots']) if (B[n.toUpperCase()]) DIRT_TAG[B[n.toUpperCase()]] = 1;
+// CropBlock.getGrowthSpeed
+function cropSpeed(w, x, y, z, id) {
+  let f = 1;
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+    let f1 = 0;
+    if (w.getBlock(x + i, y - 1, z + j) === B.FARMLAND) f1 = w.getMeta(x + i, y - 1, z + j) > 0 ? 3 : 1;
+    if (i || j) f1 /= 4;
+    f += f1;
+  }
+  const same = (dx, dz) => w.getBlock(x + dx, y, z + dz) === id;
+  if ((same(-1, 0) || same(1, 0)) && (same(0, -1) || same(0, 1))) f /= 2;
+  else if (same(-1, -1) || same(1, -1) || same(1, 1) || same(-1, 1)) f /= 2;
+  return f;
+}
+const cropMax = d => d.maxAge !== undefined ? d.maxAge : 7;
+// the torchflower crop becomes the flower at its last stage
+function cropSetAge(w, x, y, z, id, age) {
+  if (id === B.TORCHFLOWER_CROP && age >= cropMax(BLK[id])) w.setBlock(x, y, z, B.TORCHFLOWER, 0, false);
+  else w.setBlock(x, y, z, id, (w.getMeta(x, y, z) & ~7) | age, false);
+}
+// SpreadingSnowyDirtBlock.canBeGrass: light gets through the block above (snow short of a full block does), and no full block of fluid sits on it
+function grassCanLive(w, x, y, z) {
+  const a = w.getBlock(x, y + 1, z);
+  if (a === B.SNOW) return (w.getMeta(x, y + 1, z) & 7) < 7;
+  if (BLK[a].liquid && (w.getMeta(x, y + 1, z) & 7) === 0) return false;
+  return !OPAQUE[a];
+}
+// SaplingBlock.advanceTree: a first step, then the tree
+Game.prototype.advanceSapling = function (x, y, z, type) {
+  const w = this.world, m = w.getMeta(x, y, z);
+  if (!(m & 1)) w.setBlock(x, y, z, w.getBlock(x, y, z), m | 1, false);
+  else this.growSapling(x, y, z, type);
+};
+const _randomTickFM = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  const w = this.world, d = BLK[id];
+  // Level.getRawBrightness(pos, 0): the light with no dimming for the time of day; getMaxLocalRawBrightness: dimmed at night
+  const raw = yy => { const l = w.getLightRaw(x, yy, z); return Math.max(l >> 4, l & 15); };
+  const dim = yy => { const l = w.getLightRaw(x, yy, z); return Math.max((l >> 4) - (this.skyDarken ? this.skyDarken() : 0), l & 15); };
+  if (id === B.NETHER_WART) { const m = w.getMeta(x, y, z); if ((m & 7) < 3 && fmRand(10) === 0) w.setBlock(x, y, z, id, (m & 7) + 1, false); return; }
+  if (d.crop && !d.stem) {
+    if ((id === B.BEETROOTS || id === B.TORCHFLOWER_CROP) && fmRand(3) === 0) return;
+    const age = w.getMeta(x, y, z) & 7;
+    if (raw(y) < 9 || age >= cropMax(d)) return;
+    if (fmRand(Math.floor(25 / cropSpeed(w, x, y, z, id)) + 1) === 0) cropSetAge(w, x, y, z, id, age + 1);
+    return;
+  }
+  if (d.stem) { if (raw(y) >= 9 && fmRand(Math.floor(25 / cropSpeed(w, x, y, z, id)) + 1) === 0) this.stemGrow(x, y, z, id); return; }
+  if (d.sapling) {
+    // azaleas grow only with bone meal; a mangrove propagule needs no light (and grows no tree while it hangs)
+    if (id === B.AZALEA || id === B.FLOWERING_AZALEA) return;
+    if (id === B.MANGROVE_PROPAGULE ? w.getBlock(x, y - 1, z) !== 0 : dim(y + 1) >= 9) { if (fmRand(7) === 0) this.advanceSapling(x, y, z, d.sapling); }
+    return;
+  }
+  switch (id) {
+    case B.SUGAR_CANE: case B.CACTUS: {
+      if (w.getBlock(x, y + 1, z) !== 0) return;
+      let i = 1;
+      while (w.getBlock(x, y - i, z) === id) i++;
+      if (i >= 3) return;
+      const age = w.getMeta(x, y, z) & 15;
+      if (age < 15) { w.setBlock(x, y, z, id, age + 1, false); return; }
+      w.setBlock(x, y + 1, z, id, 0);
+      w.setBlock(x, y, z, id, 0, false);
+      if (id === B.CACTUS && !w.canStay(id, x, y + 1, z, 0)) w.schedule(x, y + 1, z, 1, 'pop');
+      return;
+    }
+    case B.SWEET_BERRY_BUSH: { const m = w.getMeta(x, y, z); if ((m & 3) < 3 && fmRand(5) === 0 && raw(y + 1) >= 9) w.setBlock(x, y, z, id, m + 1, false); return; }
+    case B.KELP: {
+      if (Math.random() >= 0.14) return;
+      if (w.getBlock(x, y + 1, z) === B.WATER && (w.getMeta(x, y + 1, z) & 7) === 0) { let n = 1; while (w.getBlock(x, y - n, z) === id) n++; if (n < 16) w.setBlock(x, y + 1, z, id, 0); }
+      return;
+    }
+    case B.FARMLAND: {
+      let wet = false;
+      for (let dz = -4; dz <= 4 && !wet; dz++) for (let dx = -4; dx <= 4 && !wet; dx++) for (let dy = 0; dy <= 1; dy++) if (WATERY[w.getBlock(x + dx, y + dy, z + dz)]) { wet = true; break; }
+      const m = w.getMeta(x, y, z);
+      if (wet || this.rainingAt(x, y + 1, z)) { if (m < 7) w.setBlock(x, y, z, B.FARMLAND, 7, false); }
+      else if (m > 0) w.setBlock(x, y, z, B.FARMLAND, m - 1, false);
+      else if (!BLK[w.getBlock(x, y + 1, z)].crop) w.setBlock(x, y, z, B.DIRT, 0);
+      return;
+    }
+    case B.GRASS_BLOCK: case B.MYCELIUM: {
+      if (!grassCanLive(w, x, y, z)) { w.setBlock(x, y, z, B.DIRT, 0); return; }
+      if (dim(y + 1) < 9) return;
+      for (let i = 0; i < 4; i++) {
+        const tx = x + fmRand(3) - 1, ty = y + fmRand(5) - 3, tz = z + fmRand(3) - 1;
+        if (w.getBlock(tx, ty, tz) === B.DIRT && grassCanLive(w, tx, ty, tz) && !WATERY[w.getBlock(tx, ty + 1, tz)]) w.setBlock(tx, ty, tz, id, 0);
+      }
+      return;
+    }
+  }
+  return _randomTickFM.call(this, x, y, z, id);
+};
+// StemBlock: a stage, or once grown a melon or pumpkin on a random side (on farmland or dirt, while none is beside it)
+Game.prototype.stemGrow = function (x, y, z, id) {
+  const w = this.world, m = w.getMeta(x, y, z);
+  if ((m & 7) < 7) { w.setBlock(x, y, z, id, (m & ~7) | ((m & 7) + 1), false); return; }
+  const fruit = B[BLK[id].stem.toUpperCase()];
+  for (const f of [0, 1, 4, 5]) if (w.getBlock(x + DX[f], y, z + DZ[f]) === fruit) return;
+  const f = [0, 1, 4, 5][fmRand(4)], fx = x + DX[f], fz = z + DZ[f], below = w.getBlock(fx, y - 1, fz);
+  if (w.getBlock(fx, y, fz) === 0 && (below === B.FARMLAND || DIRT_TAG[below])) w.setBlock(fx, y, fz, fruit, 0);
+};
+const _boneMealFM = Game.prototype.boneMeal;
+Game.prototype.boneMeal = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z), d = BLK[id], m = w.getMeta(x, y, z);
+  if (id === B.NETHER_WART || id === B.SUGAR_CANE || id === B.CACTUS) return false;
+  // CropBlock.performBonemeal: 2 to 5 stages (BeetrootBlock a third of that, torchflowers and pitchers 1)
+  if (d.crop && !d.stem) {
+    const age = m & 7, max = cropMax(d);
+    if (age >= max) return false;
+    let n = 2 + fmRand(4);
+    if (id === B.BEETROOTS) n = Math.floor(n / 3); else if (id === B.TORCHFLOWER_CROP || id === B.PITCHER_CROP) n = 1;
+    cropSetAge(w, x, y, z, id, Math.min(max, age + n));
+    return true;
+  }
+  // StemBlock.performBonemeal: 2 to 5 stages, and once grown a random tick's try for a fruit
+  if (d.stem) {
+    if ((m & 7) >= 7) return false;
+    const age = Math.min(7, (m & 7) + 2 + fmRand(4));
+    w.setBlock(x, y, z, id, (m & ~7) | age, false);
+    if (age === 7) this.stemGrow(x, y, z, id);
+    return true;
+  }
+  if (d.sapling && id !== B.AZALEA && id !== B.FLOWERING_AZALEA) { if (Math.random() < 0.45) this.advanceSapling(x, y, z, d.sapling); return true; }
+  return _boneMealFM.apply(this, arguments);
+};
+
+/* @file 171_feel_fixes.js */
+/* ===================================================================
+   Part 60: the little things that made it feel off
+   - stepping up tries the lowest edge first (Entity.collide), so a path
+     block or a bed under a door lintel is a step, not a wall
+   - mobs jump only when Java's MoveControl would: not onto paths,
+     farmland or carpets, not into walls
+   - mining adds up the damage of each tick as things stand at the time
+     (MultiPlayerGameMode.continueDestroyBlock): a block started in the
+     air or in water no longer stays slow once you're standing, and
+     another item in hand starts over
+   - punching a note block plays it, a dragon egg jumps away
+   - beds are the bed block models of newer versions, a texture a face,
+     so resource packs texture them: packs from 1.21 (one entity texture
+     a colour) are cut into those faces
+   =================================================================== */
+// BlockBehaviour.attack: what a punch does besides mining (survival only)
+Game.prototype.attackBlock = function (p, x, y, z, id) {
+  if (id === B.NOTE_BLOCK) { this.playNote(x, y, z); if (p.stat) p.stat('play_noteblock'); }
+  else if (id === B.DRAGON_EGG) this.eggTeleport(x, y, z);
+};
+// DragonEggBlock.teleport: 1000 tries at an empty spot up to 15 blocks across and 7 up or down (it falls from there); portal
+// specks along the way
+Game.prototype.eggTeleport = function (x, y, z) {
+  const w = this.world, r = n => Math.floor(Math.random() * n);
+  for (let i = 0; i < 1000; i++) {
+    const tx = x + r(16) - r(16), ty = y + r(8) - r(8), tz = z + r(16) - r(16);
+    if (ty < 0 || ty > CH_TOP || !w.isLoadedAt(tx, tz) || w.getBlock(tx, ty, tz) !== 0) continue;
+    const m = w.getMeta(x, y, z);
+    w.setBlock(tx, ty, tz, B.DRAGON_EGG, m);
+    w.setBlock(x, y, z, 0, 0);
+    for (let j = 0; j < 128; j++) {
+      const t = Math.random();
+      this.particles.add({ x: tx + (x - tx) * t + Math.random(), y: ty + (y - ty) * t + Math.random() - 0.5, z: tz + (z - tz) * t + Math.random(), vx: (Math.random() - 0.5) * 0.2, vy: (Math.random() - 0.5) * 0.2, vz: (Math.random() - 0.5) * 0.2,
+        life: 20 + Math.random() * 20, layer: texL('particle_generic_' + (2 + Math.floor(Math.random() * 6))), u: 0, v: 0, us: 1, size: 0.08, g: 0, col: [0.7, 0.3, 1.0], bright: true });
+    }
+    this.remeshNear(tx, tz);
+    return true;
+  }
+  return false;
+};
+
+/* ---------------- beds ---------------- */
+// the bed textures, in the layout of the bed block models: tops whole, sides with the mattress in rows 7 to 12 (the cover over the
+// wooden frame) and the legs in rows 13 to 15
+TEXGEN.push(function texBeds() {
+  const wood = (r, k) => mul([152, 110, 64], k * (0.86 + r() * 0.14)), leg = (x, r) => x % 3 === 0 ? mul([98, 70, 40], 0.86 + r() * 0.14) : wood(r, 0.92);
+  const sheet = r => mul([238, 238, 232], 0.94 + r() * 0.06), clear = [0, 0, 0, 0];
+  for (const c of COLORS) {
+    const col = COLOR_RGB[c], cloth = (x, y, r) => mul(col, (0.9 + r() * 0.08) * ((x + 2 * y) % 7 === 0 ? 0.9 : 1));
+    // head: the pillow at the end, a fold of the cover, then the cover
+    T(c + '_bed_head_up', (d, r) => fillF(d, (x, y) => y < 6 ? (x === 0 || x === 15 ? sheet(r) : x === 1 || x === 14 || y === 0 || y === 5 ? [204, 204, 198] : mul([248, 248, 244], 0.97 + r() * 0.03)) : y === 6 ? mul(col, 0.7) : cloth(x, y, r)));
+    T(c + '_bed_foot_up', (d, r) => fillF(d, (x, y) => x === 0 || x === 15 || y === 15 ? mul(col, 0.78) : cloth(x, y, r)));
+    // sides: the cover (the sheet shows by the pillow), the frame, the legs
+    const side = sheetAt => (d, r) => fillF(d, (x, y) => y < 7 ? clear : y < 11 ? (sheetAt && sheetAt(x) ? sheet(r) : y === 7 ? mul(col, 1.05) : cloth(x, y, r)) : y < 13 ? wood(r, y === 11 ? 1.04 : 0.88) : leg(x, r));
+    T(c + '_bed_head_east', side(x => x >= 10)); T(c + '_bed_head_west', side(x => x < 6));
+    T(c + '_bed_foot_east', side(null)); T(c + '_bed_foot_west', side(null)); T(c + '_bed_foot_south', side(null));
+  }
+  T('bed_head_north', (d, r) => fillF(d, (x, y) => y < 7 ? clear : y < 11 ? sheet(r) : y < 13 ? wood(r, y === 11 ? 1.04 : 0.88) : leg(x, r)));
+  T('bed_down', (d, r) => fillF(d, (x, y) => wood(r, (y % 4 === 3 ? 0.8 : 1) * ((x + (y >> 2) * 5) % 8 === 0 ? 0.86 : 1))));
+});
+// template_bed_head and template_bed_foot: the mattress and two legs, each face with its texture and the part of it it shows
+const BED_FACE = { east: 0, west: 1, up: 2, down: 3, south: 4, north: 5 };
+const BED_PARTS = {
+  head: [
+    [[0, 3, 0], [16, 9, 16], { down: ['down', [0, 0, 16, 16]], up: ['up', [0, 0, 16, 16]], north: ['north', [0, 7, 16, 13]], west: ['west', [0, 7, 16, 13]], east: ['east', [0, 7, 16, 13]] }],
+    [[0, 0, 0], [3, 3, 3], { down: ['west', [6, 13, 9, 16]], north: ['north', [13, 13, 16, 16]], south: ['west', [3, 13, 6, 16]], west: ['west', [0, 13, 3, 16]], east: ['north', [10, 13, 13, 16]] }],
+    [[13, 0, 0], [16, 3, 3], { down: ['east', [7, 13, 10, 16]], north: ['north', [0, 13, 3, 16]], south: ['east', [10, 13, 13, 16]], west: ['north', [3, 13, 6, 16]], east: ['east', [13, 13, 16, 16]] }],
+  ],
+  foot: [
+    [[0, 3, 0], [16, 9, 16], { down: ['down', [0, 0, 16, 16]], up: ['up', [0, 0, 16, 16]], south: ['south', [0, 7, 16, 13]], west: ['west', [0, 7, 16, 13]], east: ['east', [0, 7, 16, 13]] }],
+    [[0, 0, 13], [3, 3, 16], { down: ['west', [7, 13, 10, 16]], north: ['west', [10, 13, 13, 16]], south: ['south', [0, 13, 3, 16]], west: ['west', [13, 13, 16, 16]], east: ['south', [3, 13, 6, 16]] }],
+    [[13, 0, 13], [16, 3, 16], { down: ['east', [6, 13, 9, 16]], north: ['east', [3, 13, 6, 16]], south: ['south', [13, 13, 16, 16]], west: ['south', [10, 13, 13, 16]], east: ['east', [0, 13, 3, 16]] }],
+  ],
+};
+// built facing north as the models are, then turned to the bed's facing (the meta's head direction: south, west, north, east)
+MDL[SH.BED] = (d, m) => {
+  const c = d.color, head = !!(m & 4), k = ((m & 3) + 2) & 3;
+  const tex = head ? { up: c + '_bed_head_up', east: c + '_bed_head_east', west: c + '_bed_head_west', north: 'bed_head_north', down: 'bed_down' }
+    : { up: c + '_bed_foot_up', east: c + '_bed_foot_east', west: c + '_bed_foot_west', south: c + '_bed_foot_south', down: 'bed_down' };
+  const ps = BED_PARTS[head ? 'head' : 'foot'].map(([a, b, faces]) => {
+    const t = [null, null, null, null, null, null], uv = [null, null, null, null, null, null];
+    for (const f in faces) { t[BED_FACE[f]] = tex[faces[f][0]]; uv[BED_FACE[f]] = faces[f][1]; }
+    return BX(a[0], a[1], a[2], b[0], b[1], b[2], t, uv);
+  });
+  return rotParts(ps, k).map(p => Object.assign(p, { ur: k }));
+};
+// older packs: the bed entity texture of every colour
+for (const c of COLORS) PACK_EXTRA.push('entity/bed/' + c);
 
 </script>
 </body>
