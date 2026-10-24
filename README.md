@@ -233,7 +233,7 @@ starts and the strongholds against cubiomes.
   gives one of those results, the same however the world is explored. Fossils, which Java builds from structure
   files, are placed where Java places them but built to the game's own designs; desert wells (a structure file in 26.x
   too) come out block for block like Java's, and the sulfur caves' springs (structure files too) are placed where Java
-  places them, built to the game's own design. 26.3's abandoned camps aren't placed yet. Chunks of worlds made before this
+  places them, built to the game's own design, and so are 26.3's abandoned camps. Chunks of worlds made before this
   version keep their old decoration, so a tree can be cut off where old and new chunks meet.
 
 ### Creating a world
@@ -751,6 +751,31 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   plains, savannas and snowy plains, where 26.x adds zombie horses, and nautiluses in the oceans. Mobs the game doesn't
   have yet (the parched, the nautilus, the sulfur cube) and the natural zombie horses keep their place in the lists
   without spawning, so every other mob comes as often as in Java.
+- **The straw bed** (Part 109, from 26.3): three hay bales in a row make four straw beds, a bed for a single night.
+  Lying down in one doesn't set your respawn point, and once you get up again it falls apart and leaves nothing
+  behind; in the Nether and the End it blows up like any other bed. It stacks to 16, burns like wool, composts like
+  hay, is low like Java's (a mattress and a pillow, with straw sticking out round them) and doesn't bounce you, so a
+  fall onto it hurts in full. Villagers don't claim it and cats don't lie on it, and nights in it are counted in a
+  statistic of their own. With 26.3's default pack it looks just like Java's (its 64-pixel texture is used pixel for
+  pixel); without one it gets the game's own bound straw. Beds of every kind can now be placed with nothing under
+  them, as in Java.
+- **Water and lava wash blocks away** (Part 110, 26.3's rules): flowing water now sweeps away the blocks Java's list
+  names: flowers, saplings, grass and ferns, crops and stems, mushrooms, torches, redstone dust, repeaters and
+  comparators, buttons, levers, tripwire, carpets, flower pots, heads, vines, cobwebs, snow, end rods, chorus plants,
+  straw beds and more. They drop what they would broken by hand, so ripe crops give their harvest and water-harvested
+  farms work like Java's; a tall flower washed from the top gives nothing, and the other half of a tall plant or a
+  straw bed goes with it. Lava burns them up with a hiss instead. Blocks that can hold water, doors, signs, ladders,
+  sugar cane, pressure plates and beds keep fluids out as before, and a bucket emptied onto a block water would wash
+  away breaks it the same way.
+- **Abandoned camps** (Part 111, from 26.3): the camps 26.3 leaves in forests, taigas, jungles, savannas, swamps,
+  meadows, cherry groves, pale gardens and wooded badlands now turn up where Java's seed puts them, eighteen kinds, one
+  for each biome. Java builds them from structure files, so the camp itself is the game's own: a canvas tent over a
+  straw bed and a barrel, a cold campfire with log seats, a chest, and sometimes a stash buried under the ashes, in the
+  wood and colours of its biome. Chests and barrels hold 26.3's loot, with camp maps that lead to a camp of another
+  biome and, in the stash, maps to far-off structures (the spears and cushions on Java's lists aren't in the game yet,
+  so those draws come up empty). 26.3's other new explorer maps work too: buried ancient city, mineshaft, desert
+  pyramid and warm ocean ruins maps; an explorer map found in loot with nothing to lead to vanishes, as in 26.3.
+  /locate finds the camps.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

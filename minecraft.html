@@ -636,6 +636,8 @@ function buildBlockNames() {
   add('dried_ghast');
   // ---- copper chests (Part 104)
   for (const wx of ['', 'waxed_']) for (const ox of OXID) add(copperName(wx + ox, 'chest'));
+  // ---- the straw bed (Part 109)
+  add('straw_bed');
   return out;
 }
 const BLOCK_NAMES = buildBlockNames();
@@ -10254,6 +10256,110 @@ if (typeof VanillaWorldGen !== 'undefined') {
   };
 }
 
+/* @file 19_abandoned_camps.js */
+/* ===================================================================
+   Part 111: abandoned camps (26.3): where Java starts them and the
+   game's own camp built there (with the world, in the generation
+   workers too); the loot, maps and /locate are in
+   214_abandoned_camps.js
+   - the abandoned_camp structure set (random spread, spacing 37,
+     separation 8, salt 91231127) of eighteen camps, one a biome
+     (bamboo jungles, birch forests, cherry groves, dappled forests,
+     flower forests, forests, meadows, the old growth taigas and birch
+     forest, pale gardens, savannas, snowy taigas, sparse jungles,
+     swamps, taigas, windswept forests and wooded badlands): the start
+     piece (a tent, one of ten, 8 or 6 wide, turned at random) is
+     centred on its spot and the biome there, at the surface, picks the
+     camp; beard_thin terrain
+   - Java builds them from structure files, so the camp is the game's
+     own: a canvas tent over a straw bed and a barrel, an old campfire
+     ringed by log seats, a chest, now and then a stash buried under
+     the fire; the wood and the canvas suit the biome
+   - ocean ruins, like camps, carry their kind (warm or cold) in their
+     plan, for the maps that look for one kind
+   =================================================================== */
+if (typeof VS !== 'undefined') VS.SETS.abandoned_camp = [37, 8, 91231127];
+// the set's camps in its order (the biome of each is its name)
+const CAMP_TYPES = ['bamboo_jungle', 'birch_forest', 'cherry_grove', 'dappled_forest', 'flower_forest', 'forest', 'meadow', 'old_growth_pine_taiga',
+  'old_growth_birch_forest', 'old_growth_spruce_taiga', 'pale_garden', 'savanna', 'snowy_taiga', 'sparse_jungle', 'swamp', 'taiga', 'windswept_forest', 'wooded_badlands'];
+const CAMP_OF_BIOME = {};
+for (const t of CAMP_TYPES) if (BI[t.toUpperCase()] !== undefined) CAMP_OF_BIOME[BI[t.toUpperCase()]] = t;
+const CAMP_BIOMES = new Set(Object.keys(CAMP_OF_BIOME).map(Number));
+// each camp's ten tents: 8 x 8 but for the third and eighth, 6 x 8
+const campTent = n => n === 2 || n === 7 ? [6, 8] : [8, 8];
+if (typeof VanillaWorldGen !== 'undefined') {
+  const _vStartComputeAC = VanillaWorldGen.prototype.vStartCompute;
+  VanillaWorldGen.prototype.vStartCompute = function (name, rx, rz) {
+    if (name !== 'abandoned_camp') return _vStartComputeAC.apply(this, arguments);
+    const seed = this.v.seed, [cx, cz] = VS.candidate(seed, VS.SETS.abandoned_camp, rx, rz);
+    // every camp's start draws the same turn and tent from the chunk's random, so the biome under that tent decides which camp it is
+    const r = VS.chunkRand(seed, cx, cz), rot = r.nextInt(4), n = r.nextInt(10), [sx, sz] = campTent(n), [X, Z] = VS.pieceMiddle(cx, cz, rot, sx, sz);
+    const t = CAMP_OF_BIOME[this.qb(X, this.wsTop(X, Z) + 1, Z)];
+    return t ? { cx, cz, X, Z, type: t, rot, tent: n } : null;
+  };
+  // the plan carries the camp's biome (and an ocean ruin's kind) for the builder and for maps
+  const _vPlanAC = VanillaWorldGen.prototype.vPlan;
+  VanillaWorldGen.prototype.vPlan = function (name, rx, rz) {
+    const p = _vPlanAC.call(this, name, rx, rz);
+    if (p && !p.style && name === 'abandoned_camp') p.style = p.start.type;
+    else if (p && !p.style && name === 'ocean_ruin') p.style = p.start.warm ? 'warm' : 'cold';
+    return p;
+  };
+}
+
+/* ---------------- the camp ---------------- */
+// [wood, canvas, patches]
+const CAMP_LOOK = {
+  bamboo_jungle: ['bamboo', 'lime', 'green'], birch_forest: ['birch', 'white', 'light_gray'], cherry_grove: ['cherry', 'pink', 'white'],
+  dappled_forest: ['poplar', 'yellow', 'orange'], flower_forest: ['oak', 'white', 'magenta'], forest: ['oak', 'white', 'brown'], meadow: ['oak', 'white', 'light_blue'],
+  old_growth_pine_taiga: ['spruce', 'brown', 'gray'], old_growth_birch_forest: ['birch', 'light_gray', 'white'], old_growth_spruce_taiga: ['spruce', 'brown', 'black'],
+  pale_garden: ['pale_oak', 'light_gray', 'gray'], savanna: ['acacia', 'orange', 'brown'], snowy_taiga: ['spruce', 'white', 'light_gray'],
+  sparse_jungle: ['jungle', 'lime', 'brown'], swamp: ['oak', 'green', 'brown'], taiga: ['spruce', 'brown', 'white'], windswept_forest: ['spruce', 'gray', 'white'],
+  wooded_badlands: ['oak', 'red', 'brown'] };
+const campBlock = (n, fb) => B[n.toUpperCase()] !== undefined ? B[n.toUpperCase()] : B[fb.toUpperCase()];
+addStructure('abandoned_camp', 592, { salt: 9721, chance: 0.9, biomes: CAMP_BIOMES, size: [11, 13], flat: 4, beard: true }, (W, R, p, ctx) => {
+  const type = p.style || 'forest', [wood, cloth, patch] = CAMP_LOOK[type] || CAMP_LOOK.forest;
+  const LOG = wood === 'bamboo' ? B.BAMBOO_BLOCK : campBlock(wood + '_log', 'oak_log'), FENCE = campBlock(wood + '_fence', 'oak_fence');
+  const C1 = campBlock(cloth + '_wool', 'white_wool'), C2 = campBlock(patch + '_wool', 'brown_wool');
+  const patched = (x, y, z, a, b) => W.rand(x, y, z, 1) < 0.18 ? b : a;
+  const canvas = (x, y, z) => W.set(x, y, z, patched(x, y, z, C1, C2));
+  const slope = (x, y, z, d) => W.set(x, y, z, patched(x, y, z, campBlock(cloth + '_wool_stairs', 'white_wool_stairs'), campBlock(patch + '_wool_stairs', 'brown_wool_stairs')), M_STAIRS(W.d(d)));
+  // the ground: grass where it was open, cleared above
+  W.foundation(0, 0, 10, 12, B.DIRT);
+  for (let z = 0; z <= 12; z++) for (let x = 0; x <= 10; x++) { if (FILLABLE[W.get(x, 0, z)]) W.set(x, 0, z, type === 'wooded_badlands' ? B.COARSE_DIRT : B.GRASS_BLOCK); }
+  W.fill(1, 1, 0, 9, 5, 12, B.AIR);
+  // the tent: canvas sloping up to the ridge, the back closed, two pegs at the open front
+  for (let z = 1; z <= 5; z++) {
+    slope(3, 1, z, 1); slope(7, 1, z, 3); slope(4, 2, z, 1); slope(6, 2, z, 3);
+    W.set(5, 3, z, patched(5, 3, z, campBlock(cloth + '_wool_slab', 'white_wool_slab'), campBlock(patch + '_wool_slab', 'brown_wool_slab')));
+  }
+  canvas(4, 1, 1); canvas(5, 1, 1); canvas(6, 1, 1); canvas(5, 2, 1);
+  W.set(3, 1, 6, FENCE); W.set(7, 1, 6, FENCE);
+  // inside: the straw bed (its head at the back), the barrel, cobwebs in the corners
+  W.bed(4, 1, 3, B.STRAW_BED, 0);
+  W.chest(6, 1, 2, 0, 'abandoned_camp_barrel', B.BARREL);
+  if (W.rand(4, 1, 5, 2) < 0.5) W.set(4, 1, 5, B.COBWEB);
+  if (W.rand(6, 1, 4, 3) < 0.5) W.set(6, 1, 4, B.COBWEB);
+  // a worn path to the campfire, the fire long out, log seats round it and the chest
+  for (let z = 6; z <= 8; z++) W.set(5, 0, z, W.rand(5, 0, z, 4) < 0.6 ? B.DIRT_PATH : B.COARSE_DIRT);
+  W.set(5, 1, 9, B.CAMPFIRE, 4 | W.d(0));
+  W.set(3, 1, 9, LOG, W.axisZ); W.set(7, 1, 9, LOG, W.axisZ); W.set(5, 1, 11, LOG, W.axisX);
+  W.chest(8, 1, 7, 3, 'abandoned_camp_common_chest_' + type);
+  // now and then a stash under the ashes
+  if (W.rand(5, -2, 9, 5) < 0.35) { W.set(5, -1, 9, B.DIRT); W.chest(5, -2, 9, 2, 'abandoned_camp_secret_chest'); }
+});
+{
+  // in the classic worlds, the camp of the biome where it stands
+  const S = STRUCTURES.find(q => q.name === 'abandoned_camp'), pl = S.plan;
+  S.plan = (gen, rx, rz) => { const p = pl(gen, rx, rz); if (p && !p.style) p.style = CAMP_OF_BIOME[gen.columnAt(p.X, p.Z).b]; return p; };
+}
+
+// in the classic worlds, ocean ruins warm or cold by the biome where they stand
+{
+  const S = STRUCTURES.find(q => q.name === 'ocean_ruin'), pl = S.plan;
+  S.plan = (gen, rx, rz) => { const p = pl(gen, rx, rz); if (p && !p.style) p.style = OR_WARM.has(gen.columnAt(p.X, p.Z).b) ? 'warm' : 'cold'; return p; };
+}
+
 </script>
 <script>
 /* @file 20_blocks.js */
@@ -10741,6 +10847,8 @@ for (const wx of ['', 'waxed_']) for (let s = 0; s < 4; s++) defB(copperName(wx 
   tex: s ? OXID[s] + 'copper' : 'copper_block', facing: true, use: 'chest' });
 // the dried ghast (Part 103): soaks up water a stage at a time and becomes a ghastling
 defB('dried_ghast', { shape: SH.BOX, model: 'dried_ghast', hard: 0, sound: 'dried_ghast', facing: true, cutout: true, tex: 'dried_ghast_hydration_0_north' });
+// the straw bed (Part 109): a bed for one night, broken on getting up; no bounce, and not a home to villagers or cats
+defB('straw_bed', { shape: SH.BOX, model: 'straw_bed', hard: 0.2, tool: HOE, sound: 'grass', tex: 'straw_bed_particle', use: 'bed', bed: true, strawBed: true, cutout: true, stack: 16 });
 // shelves (Part 101): a wall shelf showing three stacks, its front turned to the player
 for (const w of [...WOODS, 'bamboo', ...STEMS]) defB(w + '_shelf', { shape: SH.BOX, model: 'shelf', hard: 2, tool: AXE, sound: 'wood', facing: true, shelf: true, fuel: STEMS.includes(w) ? 0 : 300 });
 const NONSOLID_SHAPES = new Set([SH.NONE, SH.CROSS, SH.TORCH, SH.LIQUID, SH.CROP, SH.PORTAL, SH.TALL, SH.VINE, SH.FAN, SH.WIRE, SH.RAIL, SH.FIRE, SH.LEVER]);
@@ -11095,6 +11203,7 @@ shaped('composter', 1, ['# #', '# #', '###'], { '#': '#wooden_slabs' });
 shaped('bookshelf', 1, ['###', 'BBB', '###'], { '#': '#planks', B: 'book' });
 shaped('chiseled_bookshelf', 1, ['###', 'SSS', '###'], { '#': '#planks', S: '#wooden_slabs' });
 shaped('dried_ghast', 1, ['###', '#X#', '###'], { '#': 'ghast_tear', X: 'soul_sand' });
+shaped('straw_bed', 4, ['XXX'], { X: 'hay_block' });
 shaped('copper_chest', 1, ['###', '#X#', '###'], { '#': 'copper_ingot', X: 'chest' });
 for (let s = 0; s < 4; s++) shapeless(copperName('waxed_' + OXID[s], 'chest'), 1, [copperName(OXID[s], 'chest'), 'honeycomb']);
 for (const c of COLORS) {
@@ -13843,6 +13952,10 @@ class World {
       } else if (game && game.onScheduled) game.onScheduled(kind, x, y, z);
     }
   }
+  // FlowingFluid.canHoldFluid: air and the blocks a fluid takes the place of (Part 110 adds the ones it washes away), and what
+  // happens to the block it takes (Part 110: water drops it, lava burns it)
+  canFlowInto(n) { return n === 0 || (REPL[n] && !BLK[n].liquid && !WATERY[n] && !WLABLE[n]); }
+  washAway(x, y, z, fluid) {}
   fluidTick(x, y, z) {
     const id = this.getBlock(x, y, z);
     if (id !== B.WATER && id !== B.LAVA) return;
@@ -13889,8 +14002,8 @@ class World {
       if (below === other) {
         if (lava) { this.setBlock(x, y - 1, z, B.STONE, 0); if (this.onFizz) this.onFizz(x, y - 1, z); }
         else canDown = false;
-      } else if (below === 0 || (REPL[below] && !BLK[below].liquid && !WATERY[below] && !WLABLE[below])) {
-        this.setBlock(x, y - 1, z, id, 8); canDown = true;
+      } else if (this.canFlowInto(below)) {
+        this.washAway(x, y - 1, z, id); this.setBlock(x, y - 1, z, id, 8); canDown = true;
       } else if (below === id) {
         const bm = this.getMeta(x, y - 1, z);
         if (bm !== 0 && bm !== 8) this.setBlock(x, y - 1, z, id, 8);
@@ -13904,7 +14017,7 @@ class World {
     for (const f of [0, 1, 4, 5]) {
       const nx = x + DX[f], nz = z + DZ[f];
       const n = this.getBlock(nx, y, nz);
-      if (n === 0 || (REPL[n] && !BLK[n].liquid && !WATERY[n] && !WLABLE[n])) this.setBlock(nx, y, nz, id, nm);
+      if (this.canFlowInto(n)) { this.washAway(nx, y, nz, id); this.setBlock(nx, y, nz, id, nm); }
       else if (n === id) { const m = this.getMeta(nx, y, nz); if (m !== 0 && !(m & 8) && amt(m) < a) this.setBlock(nx, y, nz, id, nm); }
       else if (n === other && lava) { /* handled by water tick */ this.schedule(nx, y, nz, 2, 'fluid'); }
       else if (n === other && !lava) this.schedule(nx, y, nz, 2, 'fluid');
@@ -21152,7 +21265,7 @@ function buildCreativeTabs() {
     'lodestone', 'ladder', 'scaffolding', 'bee_nest', 'beehive', 'suspicious_sand', 'suspicious_gravel', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'lightning_rod'))), 'flower_pot', 'decorated_pot', 'armor_stand',
     'item_frame', 'glow_item_frame', 'painting', 'bookshelf', 'chiseled_bookshelf', 'lectern', 'tinted_glass');
   for (const w of woods) add(w + '_sign', w + '_hanging_sign');
-  add('chest', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'chest'))), 'barrel', 'ender_chest', 'shulker_box', C('#_shulker_box'), 'respawn_anchor', C('#_bed'), 'candle', C('#_candle'), C('#_banner'), HEADS, 'dragon_egg',
+  add('chest', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'chest'))), 'barrel', 'ender_chest', 'shulker_box', C('#_shulker_box'), 'respawn_anchor', C('#_bed'), 'straw_bed', 'candle', C('#_candle'), C('#_banner'), HEADS, 'dragon_egg',
     'end_portal_frame', 'ender_eye', 'vault', 'heavy_core', 'infested_stone', 'infested_cobblestone', 'infested_stone_bricks', 'infested_mossy_stone_bricks',
     'infested_cracked_stone_bricks', 'infested_chiseled_stone_bricks', 'infested_deepslate');
   CREATIVE.functional = take();
@@ -24496,9 +24609,12 @@ class Game {
     const reach = (x, z) => Math.abs(p.x - x - 0.5) <= 3 && Math.abs(p.y - h.y) <= 2 && Math.abs(p.z - z - 0.5) <= 3;
     if (!reach(h.x, h.z) && !reach(h.x - h.d[0], h.z - h.d[1])) { this.ui.chat("You're too far from the bed", '#ccc'); return; }
     if (bedSuffocates(w, h.x, h.y + 1, h.z) || bedSuffocates(w, h.x - h.d[0], h.y + 1, h.z - h.d[1])) { this.ui.chat('The bed is blocked', '#ccc'); return; }
-    const old = p.spawnBlock, moved = !old || old[0] !== h.x || old[1] !== h.y || old[2] !== h.z || (p.spawnDim || 'overworld') !== w.dim;
-    p.spawn = [h.x + 0.5, h.y + 1, h.z + 0.5]; p.spawnDim = w.dim; p.spawnBlock = [h.x, h.y, h.z]; p.spawnYaw = p.yaw; p.spawnBlockGuess = false; p.spawnForced = false;
-    if (moved) this.ui.chat('Respawn point set', '#ccc');
+    // (a straw bed never sets it: 26.3's straw_bed_rule)
+    if (!BLK[w.getBlock(h.x, h.y, h.z)].strawBed) {
+      const old = p.spawnBlock, moved = !old || old[0] !== h.x || old[1] !== h.y || old[2] !== h.z || (p.spawnDim || 'overworld') !== w.dim;
+      p.spawn = [h.x + 0.5, h.y + 1, h.z + 0.5]; p.spawnDim = w.dim; p.spawnBlock = [h.x, h.y, h.z]; p.spawnYaw = p.yaw; p.spawnBlockGuess = false; p.spawnForced = false;
+      if (moved) this.ui.chat('Respawn point set', '#ccc');
+    }
     if (this.skyDarken() < 4) { this.ui.chat('You can only sleep at night or during a thunderstorm', '#ccc'); return; }
     const cx = h.x + 0.5, cz = h.z + 0.5;
     if (p.mode !== 1 && this.entities.some(e => keepsAwake(e, p) && e.x + e.w / 2 > cx - 8 && e.x - e.w / 2 < cx + 8 && e.y + e.h > h.y - 5 && e.y < h.y + 5 && e.z + e.w / 2 > cz - 8 && e.z - e.w / 2 < cz + 8)) {
@@ -25370,7 +25486,7 @@ Object.assign(Game.prototype, {
     // blocks that take two cells
     if (multi) {
       let x2 = x, y2 = y, z2 = z;
-      if (d.bed) { const r = (look + 2) & 3; meta = r; x2 += BED_DIR[r][0]; z2 += BED_DIR[r][1]; if (!SOLID[w.getBlock(x, y - 1, z)] || !SOLID[w.getBlock(x2, y - 1, z2)]) return false; }
+      if (d.bed) { const r = (look + 2) & 3; meta = r; x2 += BED_DIR[r][0]; z2 += BED_DIR[r][1]; }
       else y2++;
       const c2 = w.getBlock(x2, y2, z2);
       if (y2 > CH_TOP || (c2 !== 0 && !REPL[c2]) || (d.tall && d.water && !WATERY[c2])) return false;
@@ -25661,10 +25777,10 @@ Object.assign(Game.prototype, {
       const fluid = it.bucket === 'water' ? B.WATER : it.bucket === 'lava' ? B.LAVA : B.POWDER_SNOW;
       if (!REPL[hit.id] || BLK[hit.id].liquid) { x += DX[hit.face]; y += DY[hit.face]; z += DZ[hit.face]; }
       const cur = w.getBlock(x, y, z);
-      if (cur !== 0 && !REPL[cur] && !BLK[cur].liquid) return false;
+      if (cur !== 0 && !REPL[cur] && !BLK[cur].liquid && !(fluid !== B.POWDER_SNOW && w.canFlowInto(cur))) return false;
       if (fluid === B.WATER && w.dim === 'nether') {
         this.sound('fizz', x + 0.5, y + 0.5, z + 0.5); this.particles.smoke(x + 0.5, y + 0.3, z + 0.5, 10);
-      } else w.setBlock(x, y, z, fluid, 0);
+      } else { if (fluid !== B.POWDER_SNOW && cur && !BLK[cur].liquid) w.washAway(x, y, z, B.WATER); w.setBlock(x, y, z, fluid, 0); }
       if (it.fishBucket && this.spawnMob) this.spawnMob(it.fishBucket, x + 0.5, y + 0.2, z + 0.5);
       if (p.survival) p.inv[p.sel] = { id: I.BUCKET, count: 1 };
       this.sound('bucket', x, y, z); return done(x, z);
@@ -27089,7 +27205,7 @@ Object.assign(GOALS, {
     if (scan && (!d.meet || (m.age + m.id) % 1200 === 0)) { const bells = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 24, 6, id => id === B.BELL); if (bells.length) { bells.sort((a, b) => Math.hypot(a[0] - m.x, a[2] - m.z) - Math.hypot(b[0] - m.x, b[2] - m.z)); d.meet = bells[0].slice(0, 3); } }
     if (!m.home && d.meet) m.home = d.meet;
     // claim a bed and a job site
-    if (scan && !d.bed) { const beds = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 16, 4, (id, x, y, z) => BLK[id].bed && (w.getMeta(x, y, z) & 4) && poiFree(g, 'bed', [x, y, z], m)); if (beds.length) { d.bed = beds[Math.floor(Math.random() * beds.length)].slice(0, 3); claimPOI(g, 'bed', d.bed, m); } }
+    if (scan && !d.bed) { const beds = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 16, 4, (id, x, y, z) => BLK[id].bed && !BLK[id].strawBed && (w.getMeta(x, y, z) & 4) && poiFree(g, 'bed', [x, y, z], m)); if (beds.length) { d.bed = beds[Math.floor(Math.random() * beds.length)].slice(0, 3); claimPOI(g, 'bed', d.bed, m); } }
     if (scan && !m.baby && d.prof !== 'nitwit' && (d.prof === 'none' || !d.job)) {
       const jobs = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 16, 4, (id, x, y, z) => JOB_BLOCK[id] && (d.prof === 'none' || JOB_BLOCK[id] === d.prof) && poiFree(g, 'job', [x, y, z], m));
       if (jobs.length) { jobs.sort((a, b) => Math.hypot(a[0] - m.x, a[2] - m.z) - Math.hypot(b[0] - m.x, b[2] - m.z)); d.jobCand = jobs[0]; }
@@ -27104,7 +27220,7 @@ Object.assign(GOALS, {
     }
     // lost the job site: forget the profession if never traded
     if (d.job && (m.age + m.id) % 200 === 0 && !JOB_BLOCK[w.getBlock(d.job[0], d.job[1], d.job[2])]) { d.job = null; if (d.xp === 0 && d.level === 1) { d.prof = 'none'; d.trades = []; } }
-    if (d.bed && (m.age + m.id) % 200 === 0 && !BLK[w.getBlock(d.bed[0], d.bed[1], d.bed[2])].bed) d.bed = null;
+    if (d.bed && (m.age + m.id) % 200 === 0 && (!BLK[w.getBlock(d.bed[0], d.bed[1], d.bed[2])].bed || BLK[w.getBlock(d.bed[0], d.bed[1], d.bed[2])].strawBed)) d.bed = null;
     // sleep
     if (night && !m.baby || night && m.baby && t > 13000) {
       if (d.bed) {
@@ -38138,7 +38254,7 @@ const STAT_GENERAL = [
   ['damage_blocked_by_shield', 'Damage Blocked by Shield', 'dmg'], ['deaths', 'Number of Deaths'], ['mob_kills', 'Mob Kills'], ['animals_bred', 'Animals Bred'], ['fish_caught', 'Fish Caught'],
   ['talked_to_villager', 'Talked to Villagers'], ['traded_with_villager', 'Traded with Villagers'], ['eat_cake_slice', 'Cake Slices Eaten'], ['fill_cauldron', 'Cauldrons Filled'],
   ['use_cauldron', 'Water Taken from Cauldron'], ['enchant_item', 'Items Enchanted'], ['play_noteblock', 'Note Blocks Played'], ['tune_noteblock', 'Note Blocks Tuned'],
-  ['pot_flower', 'Plants Potted'], ['play_record', 'Music Discs Played'], ['sleep_in_bed', 'Times Slept in a Bed'], ['open_chest', 'Chests Opened'], ['open_barrel', 'Barrels Opened'],
+  ['pot_flower', 'Plants Potted'], ['play_record', 'Music Discs Played'], ['sleep_in_bed', 'Times Slept in a Bed'], ['sleep_in_straw_bed', 'Times Slept in a Straw Bed'], ['open_chest', 'Chests Opened'], ['open_barrel', 'Barrels Opened'],
   ['open_enderchest', 'Ender Chests Opened'], ['open_shulker_box', 'Shulker Boxes Opened'], ['inspect_dispenser', 'Dispensers Searched'], ['inspect_dropper', 'Droppers Searched'],
   ['inspect_hopper', 'Hoppers Searched'], ['interact_with_crafting_table', 'Interactions with Crafting Table'], ['interact_with_furnace', 'Interactions with Furnace'],
   ['interact_with_blast_furnace', 'Interactions with Blast Furnace'], ['interact_with_smoker', 'Interactions with Smoker'], ['interact_with_brewingstand', 'Interactions with Brewing Stand'],
@@ -38267,7 +38383,7 @@ Game.prototype.useBlock = function (p, hit, held) {
   return r;
 };
 const _tryToSleepST = Game.prototype.tryToSleep;
-Game.prototype.tryToSleep = function (p, hit) { const r = _tryToSleepST.call(this, p, hit); if (this.sleeping > 0 && this.player) { this.player.stat('sleep_in_bed'); if (this.player.stats) this.player.stats.time_since_rest = 0; } return r; };
+Game.prototype.tryToSleep = function (p, hit) { const r = _tryToSleepST.call(this, p, hit); if (this.sleeping > 0 && this.player) { const b = this.player.sleepBed; this.player.stat(b && BLK[this.world.getBlock(b[0], b[1], b[2])].strawBed ? 'sleep_in_straw_bed' : 'sleep_in_bed'); if (this.player.stats) this.player.stats.time_since_rest = 0; } return r; };
 const _advST = Game.prototype.adv;
 Game.prototype.adv = function (type, ...args) {
   const p = this.player;
@@ -46860,7 +46976,7 @@ function vEatAndDigest(m) {
 // VillagerMakeLove.takeVacantBed: the nearest unclaimed bed within 48 blocks
 function vFreeBed(m) {
   const g = m.game, w = g.world;
-  const beds = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 48, 8, (id, x, y, z) => BLK[id].bed && (w.getMeta(x, y, z) & 4) && poiFree(g, 'bed', [x, y, z], m)
+  const beds = scanBlocks(g, Math.floor(m.x), Math.floor(m.y), Math.floor(m.z), 48, 8, (id, x, y, z) => BLK[id].bed && !BLK[id].strawBed && (w.getMeta(x, y, z) & 4) && poiFree(g, 'bed', [x, y, z], m)
     && !g.entities.some(e => e.type === 'villager' && !e.dead && e.data.bed && e.data.bed[0] === x && e.data.bed[1] === y && e.data.bed[2] === z));
   if (!beds.length) return null;
   beds.sort((a, b) => Math.hypot(a[0] - m.x, a[1] - m.y, a[2] - m.z) - Math.hypot(b[0] - m.x, b[1] - m.y, b[2] - m.z));
@@ -59824,7 +59940,7 @@ const CAT_SIT = {
     const id = w.getBlock(x, y, z);
     if (id === B.CHEST) return !chestOpenAt(g, x, y, z);
     if (id === B.LIT_FURNACE) return true;
-    return !!BLK[id].bed && !(w.getMeta(x, y, z) & 4);
+    return !!BLK[id].bed && !BLK[id].strawBed && !(w.getMeta(x, y, z) & 4);
   },
   start(m) { m._sitPose = false; },
   tick(m, s) { m._sitPose = s.reached; },
@@ -59834,7 +59950,7 @@ const CAT_BED = {
   name: 'catBed', range: 8, vrange: 6, vstart: -2, speed: () => jms(0.3, 1.1),
   can: m => m.data.tame && !m.data.sitting && !m._lying,
   delay: () => 40,
-  valid(m, x, y, z) { const w = m.game.world; return w.getBlock(x, y + 1, z) === 0 && !!BLK[w.getBlock(x, y, z)].bed; },
+  valid(m, x, y, z) { const w = m.game.world, d = BLK[w.getBlock(x, y, z)]; return w.getBlock(x, y + 1, z) === 0 && !!d.bed && !d.strawBed; },
   start(m) { m._sitPose = false; },
   tick(m, s) { m._sitPose = false; m._lying = s.reached; },
   stop(m) { m._lying = false; },
@@ -59878,7 +59994,7 @@ GOALS.catBed = m => catMoveToBlock(m, CAT_BED);
 // head goes down for 8 goes, then it lies down
 const relaxSpot = m => {
   const w = m.game.world, o = m.ownerEntity(), bx = Math.floor(o.x), by = Math.floor(o.y), bz = Math.floor(o.z);
-  if (!BLK[w.getBlock(bx, by, bz)].bed) return null;
+  if (!BLK[w.getBlock(bx, by, bz)].bed || BLK[w.getBlock(bx, by, bz)].strawBed) return null;
   const d = BED_DIR[w.getMeta(bx, by, bz) & 3];
   return [bx - d[0], by, bz - d[1]];
 };
@@ -60239,7 +60355,7 @@ Game.prototype.resolveRespawn = function () {
   if (!w.isLoadedAt(b[0], b[2])) return null;
   const id = w.getBlock(b[0], b[1], b[2]);
   let v = null;
-  if (BLK[id].bed && w.dim === 'overworld') { const h = bedHead(w, b[0], b[1], b[2]); v = h && bedStandUp(w, h, yawLook(p.spawnYaw)); }
+  if (BLK[id].bed && !BLK[id].strawBed && w.dim === 'overworld') { const h = bedHead(w, b[0], b[1], b[2]); v = h && bedStandUp(w, h, yawLook(p.spawnYaw)); }
   else if (id === B.RESPAWN_ANCHOR && w.dim === 'nether' && (w.getMeta(b[0], b[1], b[2]) & 7) > 0) {
     v = anchorStandUp(w, b[0], b[1], b[2]);
     if (v) { const m = w.getMeta(b[0], b[1], b[2]); w.setBlock(b[0], b[1], b[2], B.RESPAWN_ANCHOR, (m & ~7) | ((m & 7) - 1)); this.sound('anchor_deplete', b[0] + 0.5, b[1] + 0.5, b[2] + 0.5); }
@@ -63086,11 +63202,11 @@ Game.prototype.onScheduled = function (kind, x, y, z) {
   if (kind !== 'wlfluid') return _onScheduledWL.apply(this, arguments);
   const w = this.world;
   if (!w.isWet(x, y, z) || w.dim === 'nether') return;
-  const open = id => id === 0 || (REPL[id] && !BLK[id].liquid && !WATERY[id]);
-  if (y > 0 && open(w.getBlock(x, y - 1, z)) && !w.isWet(x, y - 1, z)) { w.setBlock(x, y - 1, z, B.WATER, 8); return; }
+  const open = id => id === 0 || (REPL[id] && !BLK[id].liquid && !WATERY[id]) || w.canFlowInto(id);
+  if (y > 0 && open(w.getBlock(x, y - 1, z)) && !w.isWet(x, y - 1, z)) { w.washAway(x, y - 1, z, B.WATER); w.setBlock(x, y - 1, z, B.WATER, 8); return; }
   for (const f of [0, 1, 4, 5]) {
     const nx = x + DX[f], nz = z + DZ[f], n = w.getBlock(nx, y, nz);
-    if (open(n)) w.setBlock(nx, y, nz, B.WATER, 1);
+    if (open(n)) { w.washAway(nx, y, nz, B.WATER); w.setBlock(nx, y, nz, B.WATER, 1); }
   }
 };
 // water next to a block holding water (or kelp, seagrass) sees still water there: it neither dries up nor flows into it
@@ -64523,6 +64639,332 @@ applyPackRecords = async function (game, recs) {
   }
   return r;
 };
+
+/* @file 212_straw_bed.js */
+/* ===================================================================
+   Part 109: the straw bed (26.3)
+   - three hay bales in a row make four; 0.2 hard, a hoe's, burns like
+     wool (30/60), composts like hay (0.85), stacks to 16, yellow on
+     maps; pistons break it, and it doesn't need ground under it (nor
+     does any bed: BedBlock has no canSurvive)
+   - a bed for one night (26.3's straw_bed_rule: can_set_spawn never,
+     destroy_on_leave): lying down in it doesn't set the respawn point,
+     and once you are up again it falls apart, both halves, dropping
+     nothing; in the Nether and the End it blows up like any bed;
+     sleeping in it counts as Times Slept in a Straw Bed
+   - not in #beds: villagers don't claim it, cats don't lie on it; it
+     doesn't bounce you and the whole fall counts on it
+   - the models straw_bed_foot and straw_bed_head: a mattress 4 pixels
+     high, a pillow 5 high at the head end, straw sticking out on the
+     floor round it and from the pillow's sides; the collision of the
+     mattress and the pillow; in the hand and the inventory the two
+     halves together, as 26.3's item model has them
+   - the texture: a pack's block/straw_bed (64 x 64) cut into sixteen
+     tiles of 16 so it keeps every pixel (the faces are cut where they
+     cross from one tile to the next), block/straw_bed_particle for the
+     bits; the game's own pictures without a pack
+   =================================================================== */
+
+/* ---------------- textures ---------------- */
+const SB_TILE = k => 'straw_bed_t' + k;
+for (let k = 0; k < 16; k++) PACK_CROPS[SB_TILE(k)] = ['block/straw_bed', (k % 4) * 16, (k >> 2) * 16, 16, 16, 64];
+
+/* ---------------- models ---------------- */
+// straw_bed_foot and straw_bed_head as Java draws them facing south (the head toward +Z), uv in sixteenths of the texture
+const SB_FOOT = [
+  [[0, 0, 0], [16, 4, 16], { north: [4, 10.25, 8, 11.25], east: [0, 10.25, 4, 11.25], west: [8, 10.25, 12, 11.25], up: [8, 10.25, 4, 6.25], down: [12, 6.25, 8, 10.25] }],
+  [[0, 0.125, -3], [16, 0.125, 0], { up: [0, 11.25, 4, 12, 180], down: [0, 12.75, 4, 12, 180] }],
+  [[16, 0.105, 0], [19, 0.105, 16], { up: [12, 6.25, 12.75, 10.25, 180], down: [12.75, 10.25, 13.5, 6.25, 180] }],
+  [[-3, 0.115, 0], [0, 0.115, 16], { up: [13.5, 10.25, 14.25, 6.25, 180], down: [14.25, 6.25, 15, 10.25, 180] }]];
+const SB_HEAD = [
+  [[0, 0, 0], [16, 4, 8], { north: [2, 5.25, 6, 6.25], east: [0, 5.25, 2, 6.25], south: [8, 5.25, 12, 6.25], west: [6, 5.25, 8, 6.25], up: [6, 5.25, 2, 3.25], down: [10, 3.25, 6, 5.25] }],
+  [[-2, 0.065, 8], [0, 0.065, 16], { up: [1.5, 8.25, 1, 6.25], down: [2, 6.25, 1.5, 8.25] }],
+  [[-2, 4.96, 8], [0, 4.96, 16], { up: [10.5, 2, 10, 0], down: [11, 0, 10.5, 2] }],
+  [[-2, 0.065, 8.025], [0, 4.95, 8.025], { north: [1, 8.25, 1.5, 9.48125], south: [2, 8.25, 1.5, 9.48125] }],
+  [[-2, 0.065, 15.985], [0, 4.95, 15.985], { north: [10, 3.25, 10.5, 4.48125], south: [10.5, 3.25, 11, 4.48125] }],
+  [[16, 0.05, 8], [18, 0.05, 16], { up: [0.5, 8.25, 0, 6.25], down: [0.5, 6.25, 1, 8.25] }],
+  [[16, 4.975, 8], [18, 4.975, 16], { up: [0.5, 2, 0, 0], down: [0.5, 0, 1, 2] }],
+  [[16, 0.05, 8], [18, 4.975, 8], { north: [0, 8.25, 0.5, 9.48125], south: [1, 8.25, 0.5, 9.48125] }],
+  [[16, 0.05, 15.975], [18, 4.975, 15.975], { north: [0, 3.25, 0.5, 4.48125], south: [1, 3.25, 0.5, 4.48125] }],
+  [[0, 0, 8], [16, 5, 16], { north: [2, 2, 6, 3.25], east: [0, 2, 2, 3.25], south: [8, 2, 12, 3.25], west: [6, 2, 8, 3.25], up: [6, 2, 2, 0], down: [10, 0, 6, 2] }],
+  [[16, 0.05, 0], [19, 0.05, 8], { up: [12.75, 6.25, 12, 4.25], down: [13.5, 4.25, 12.75, 6.25] }],
+  [[-3, 0.065, 0], [0, 0.065, 8], { up: [14.25, 6.25, 13.5, 4.25], down: [15, 4.25, 14.25, 6.25] }]];
+// a face of the whole texture cut along the tile lines (every 4 sixteenths), each piece reading its own tile
+// a face's texture rectangle, and the point on the face for a place in it
+function sbFrame(q) {
+  const us = q.map(v => v[3]), vs = q.map(v => v[4]);
+  const u0 = Math.min(...us), u1 = Math.max(...us), v0 = Math.min(...vs), v1 = Math.max(...vs);
+  const corner = (u, v) => q.find(c => c[3] === u && c[4] === v);
+  const c00 = corner(u0, v0), c10 = corner(u1, v0), c01 = corner(u0, v1), c11 = corner(u1, v1);
+  const at = (u, v) => {
+    const a = u1 > u0 ? (u - u0) / (u1 - u0) : 0, b = v1 > v0 ? (v - v0) / (v1 - v0) : 0;
+    return [0, 1, 2].map(i => (1 - a) * (1 - b) * c00[i] + a * (1 - b) * c10[i] + (1 - a) * b * c01[i] + a * b * c11[i]);
+  };
+  return { u0, u1, v0, v1, at };
+}
+function sbTiled(p) {
+  const q = p.q, { u0, u1, v0, v1, at } = sbFrame(q);
+  const cuts = (a, b) => { const o = [a]; for (let k = Math.floor(a / 4) + 1; k * 4 < b; k++) o.push(k * 4); o.push(b); return o; };
+  const U = cuts(u0, u1), V = cuts(v0, v1), out = [];
+  for (let i = 0; i + 1 < U.length; i++) for (let j = 0; j + 1 < V.length; j++) {
+    const ua = U[i], ub = U[i + 1], va = V[j], vb = V[j + 1], tu = Math.min(3, Math.floor((ua + ub) / 8)), tv = Math.min(3, Math.floor((va + vb) / 8));
+    const nq = q.map(c => { const u = c[3] === u0 ? ua : ub, v = c[4] === v0 ? va : vb, s = at(u, v); return [s[0], s[1], s[2], (u - tu * 4) * 4, (v - tv * 4) * 4]; });
+    out.push(Object.assign({}, p, { q: nq, t: SB_TILE(tv * 4 + tu) }));
+  }
+  return out;
+}
+const sbRawQuads = els => jQuads(els.map(([f, t, fs]) => { const o = {}; for (const k in fs) o[k] = [fs[k].slice(0, 4), 'straw_bed', fs[k][4] || 0]; return jE(f, t, o); }));
+const sbQuads = els => sbRawQuads(els).flatMap(sbTiled);
+const SB_Q = { foot: sbQuads(SB_FOOT), head: sbQuads(SB_HEAD) };
+BOX_MODELS.straw_bed = (d, m) => rotParts(SB_Q[(m & 4) ? 'head' : 'foot'], m & 3);
+
+/* ---------------- the game's own picture ---------------- */
+// painted through the models: every pixel a face reads is coloured by where it lands on the bed, so the
+// straw runs along the bed on top and on the sides, two twine bands go round the foot, one round the mattress at the head and
+// one round the pillow, the ends show the cut straw, and the wisps on the floor grow out from the bed's edge
+const SB_STRAW = [218, 186, 92], SB_DARK = [166, 128, 50], SB_LIGHT = [238, 214, 130], SB_TWINE = [128, 92, 54];
+const SB_BANDS = { foot: [4, 11], head: [4, 12] };
+function sbPaint() {
+  const px = new Array(64 * 64).fill(null), H = (a, b, s) => hash2(a, b, 6151 + s);
+  for (const part of ['foot', 'head']) for (const el of part === 'foot' ? SB_FOOT : SB_HEAD) {
+    const flat = [0, 1, 2].some(i => el[0][i] === el[1][i]), pillow = part === 'head' && el[1][1] === 5;
+    for (const p of sbRawQuads([el])) {
+      const F = sbFrame(p.q), q = p.q;
+      const ax = q[1][0] - q[0][0], ay = q[1][1] - q[0][1], az = q[1][2] - q[0][2], bx = q[3][0] - q[0][0], by = q[3][1] - q[0][1], bz = q[3][2] - q[0][2];
+      const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+      const side = Math.abs(nx) > Math.abs(ny) && Math.abs(nx) > Math.abs(nz), vert = Math.abs(ny) >= Math.abs(nx) && Math.abs(ny) >= Math.abs(nz);
+      for (let ty = Math.floor(F.v0 * 4); ty < Math.ceil(F.v1 * 4); ty++) for (let tx = Math.floor(F.u0 * 4); tx < Math.ceil(F.u1 * 4); tx++) {
+        const [x, y, z] = F.at((tx + 0.5) / 4, (ty + 0.5) / 4), fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z);
+        const band = SB_BANDS[part].some(b => fz === b && (part === 'foot' || (b < 8) !== pillow));
+        const base = pillow ? lerpC(SB_STRAW, SB_LIGHT, 0.3) : SB_STRAW;
+        let c;
+        if (flat) {
+          // a wisp: out from the edge of the bed to its length, one to a pixel along the edge
+          const out = Math.max(-x, x - 16, -z, z - 16, 0), sideways = x < 0 || x > 16;
+          const id = (sideways ? (el[0][1] === el[1][1] ? fz : fy) : fx) * 3 + (x < 0 ? 1 : x > 16 ? 2 : 0), len = 0.6 + H(id, part === 'foot' ? 1 : 2, 1) * 2.6;
+          if (out > len) continue;
+          c = mul(H(id, 7, 2) < 0.3 ? SB_DARK : base, 0.9 + H(id, 3, 3) * 0.2);
+        } else if (vert && ny < 0) c = mul(lerpC(SB_STRAW, SB_DARK, 0.6), 0.92 + H(fx, fz, 4) * 0.12);
+        else if (vert || side) {
+          // straw along the bed: a strand to a column on top, to a row on the sides; darker between bundles; the twine over it
+          const id = vert ? fx : fy, t = 0.88 + H(id, Math.floor(z / 5 + H(id, 0, 5) * 3), 6) * 0.22;
+          c = band ? (vert || fy % 2 ? SB_TWINE : mul(SB_TWINE, 1.18)) : H(id, 9, 7) < 0.22 ? mul(SB_DARK, t) : side && fy === 0 ? mul(SB_DARK, 0.95) : mul(base, t);
+        } else {
+          // an end: the cut straw, darker round its edge
+          const e = x < 1 || x > 15 || y < 1;
+          c = e ? SB_DARK : H(fx, fy + (pillow ? 50 : 0), 8) < 0.4 ? lerpC(base, SB_DARK, 0.55) : H(fx, fy, 9) > 0.8 ? SB_LIGHT : base;
+        }
+        px[ty * 64 + tx] = mul(c, 0.97 + H(tx, ty, 10) * 0.06);
+      }
+    }
+  }
+  return px;
+}
+TEXGEN.push(() => {
+  const px = sbPaint();
+  for (let k = 0; k < 16; k++) T(SB_TILE(k), d => {
+    const ox = (k % 4) * 16, oy = (k >> 2) * 16;
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const c = px[(oy + y) * 64 + ox + x]; if (c) sp(d, x, y, c); }
+  });
+  T('straw_bed_particle', (d, r) => fillF(d, (x, y) => { const q = r(); return mul(q < 0.2 ? SB_DARK : q > 0.9 ? SB_LIGHT : SB_STRAW, 0.9 + r() * 0.15); }));
+});
+// the mattress, and over the head half the pillow (StrawBedBlock's shapes)
+const _modelCollisionSB = modelCollision;
+modelCollision = function (id, meta, ctx) {
+  if (id !== B.STRAW_BED) return _modelCollisionSB(id, meta, ctx);
+  const out = [[0, 0, 0, 16, 4, 16]];
+  if (meta & 4) out.push(rotPart({ b: [0, 4, 8, 16, 5, 16] }, meta & 3).b);
+  return out;
+};
+// the item: both halves, the head away from the viewer and turned a little, as 26.3's item model shows it in the inventory
+// (its gui view, rotation [30, 340, 0], seen from the south a little east of the foot; the icons here look from the south-east, so
+// the bed is turned 25 degrees the other way, at three quarters of a block's icon size)
+const SB_ITEM = (() => {
+  const c = Math.cos(25 * Math.PI / 180), s = Math.sin(25 * Math.PI / 180), k = 0.75;
+  return [...rotParts(SB_Q.head, 2), ...rotParts(SB_Q.foot, 2).map(p => Object.assign({}, p, { q: p.q.map(v => [v[0], v[1], v[2] + 16, v[3], v[4]]) }))]
+    .map(p => Object.assign({}, p, { q: p.q.map(v => { const x = v[0] - 8, z = v[2] - 16; return [8 + (x * c + z * s) * k, 6 + (v[1] - 2.5) * k, 8 + (z * c - x * s) * k, v[3], v[4]]; }) }));
+})();
+const _itemPartsSB = itemParts;
+itemParts = function (id) { return id === B.STRAW_BED ? SB_ITEM : _itemPartsSB(id); };
+
+/* ---------------- the block's rules ---------------- */
+FIRE_IGNITE[B.STRAW_BED] = 30; FIRE_BURN[B.STRAW_BED] = 60;
+COMPOST[ITEM_BY_NAME.straw_bed.id] = 0.85;
+const _mapColorRuleSB = mapColorRule;
+mapColorRule = function (n) { return n === 'straw_bed' ? MC.YELLOW : _mapColorRuleSB(n); };
+
+/* ---------------- one night ---------------- */
+// up again from a straw bed (in the morning, by Leave Bed, hurt or dying), it comes apart: no drops, the straw rustles
+const _bedStandUpSB = Game.prototype.bedStandUp;
+Game.prototype.bedStandUp = function () {
+  const p = this.player, b = p && p.sleepBed, w = this.world;
+  const r = _bedStandUpSB.apply(this, arguments);
+  const h = b && bedHead(w, b[0], b[1], b[2]);
+  if (h && BLK[w.getBlock(h.x, h.y, h.z)].strawBed) {
+    this.sound('straw_bed_break_leave', h.x + 0.5, h.y + 0.5, h.z + 0.5);
+    this.breakBlock(h.x, h.y, h.z, null, false);
+    this.remeshNear(h.x, h.z); this.remeshNear(h.x - h.d[0], h.z - h.d[1]);
+  }
+  return r;
+};
+SND_CAT.straw_bed_break_leave = 'block'; SUB_TEXT.straw_bed_break_leave = 'Straw Bed falls apart';
+const _audioPlaySB = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'straw_bed_break_leave') return _audioPlaySB.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  for (let k = 0; k < 3; k++) this.noiseHit(dst, 'bandpass', 2400 + k * 300, 0.6, 0.18, 0.35 - k * 0.08, this.ctx.currentTime + k * 0.07);
+};
+
+/* @file 213_fluid_wash.js */
+/* ===================================================================
+   Part 110: flowing water and lava wash blocks away like 26.3
+   - FlowingFluid.canHoldFluid with 26.3's #washed_away_by_fluids: a
+     fluid spreads into flowers and saplings, grass and ferns, crops and
+     stems, mushrooms and fungi, torches, redstone dust, repeaters and
+     comparators, buttons, levers, tripwire, carpets, flower pots, heads,
+     vines, cobwebs, snow, end rods, chorus plants, the straw bed ... as
+     it does into air; a block that can hold water still keeps fluids
+     out (Part 96), and so do the blocks the tag leaves out (doors,
+     signs, ladders, sugar cane, pressure plates, beds ...)
+   - WaterFluid.beforeDestroyingBlock (Block.dropResources): what water
+     washes away drops what it would broken without a tool: ripe crops
+     their harvest, grass a seed now and then, a pot its pot and plant;
+     the upper half of a tall plant nothing, and the other half of a tall
+     plant or a straw bed goes with it (as Java's shape updates take it,
+     so a sunflower washed from the top gives nothing); snow and chorus
+     flowers drop only when a player breaks them. LavaFluid: lava burns
+     it up with a hiss and smoke
+   - a bucket emptied into such a block destroys it with its drops
+     (BucketItem.emptyContents) and fills its place
+   =================================================================== */
+
+const WASH = new Uint8Array(MAXB);
+{
+  const names = ('allium attached_melon_stem attached_pumpkin_stem azalea azure_bluet beetroots big_dripleaf big_dripleaf_stem blue_orchid brown_mushroom ' +
+    'bush cactus_flower carrots cave_vines cave_vines_plant chorus_flower chorus_plant closed_eyeblossom cobweb cocoa comparator copper_torch copper_wall_torch ' +
+    'cornflower crimson_fungus crimson_roots dandelion dead_bush end_rod fern fire firefly_bush flower_pot flowering_azalea frogspawn glow_lichen ' +
+    'golden_dandelion hanging_roots heavy_core kelp kelp_plant large_fern leaf_litter lever light lilac lily_of_the_valley lily_pad mangrove_propagule ' +
+    'melon_stem nether_sprouts nether_wart open_eyeblossom orange_tulip oxeye_daisy pale_hanging_moss peony pink_petals pink_tulip pitcher_crop ' +
+    'pitcher_plant poppy potatoes powder_snow pumpkin_stem red_mushroom red_shrub red_tulip redstone_torch redstone_wall_torch redstone_wire repeater ' +
+    'resin_clump rose_bush scaffolding sea_pickle seagrass shelf_mushroom short_dry_grass short_grass small_dripleaf snow soul_fire soul_torch ' +
+    'soul_wall_torch spore_blossom straw_bed sunflower sweet_berry_bush tall_dry_grass tall_grass tall_seagrass torch torchflower torchflower_crop ' +
+    'tripwire tripwire_hook twisting_vines twisting_vines_plant vine wall_torch warped_fungus warped_roots weeping_vines weeping_vines_plant wheat ' +
+    'white_tulip wildflowers wither_rose').split(' ');
+  // and the tag's own tags: #saplings, #flower_pots, #buttons, #wool_carpets, #candles, #rails, #skulls, #corals, #wall_corals
+  const fam = /_sapling$|^potted_|_button$|_carpet$|candle$|rail$|_head$|_skull$|_coral$|_coral_fan$|_coral_wall_fan$/;
+  BLOCK_NAMES.forEach((n, id) => {
+    if (id >= MAXB || !BLK[id] || n === 'piston_head' || !(names.includes(n) || fam.test(n))) return;
+    if (!WLABLE[id] && !WATERY[id] && !BLK[id].liquid) WASH[id] = 1;
+  });
+}
+const _canFlowIntoFW = World.prototype.canFlowInto;
+World.prototype.canFlowInto = function (n) { return WASH[n] === 1 || _canFlowIntoFW.call(this, n); };
+World.prototype.washAway = function (x, y, z, fluid) {
+  const id = this.getBlock(x, y, z);
+  if (id && !BLK[id].liquid && this.onWash) this.onWash(x, y, z, id, this.getMeta(x, y, z), fluid);
+};
+// what a block washed away drops: Block.dropResources, no tool; a bed only from its head, a tall plant only from its lower half
+const WASH_NO_DROPS = new Set([B.SNOW, B.CHORUS_FLOWER]);
+Game.prototype.washDrops = function (id, meta) {
+  const d = BLK[id];
+  if (d.fire || WASH_NO_DROPS.has(id)) return [];
+  if (d.bed) return (meta & 4) ? this.dropsFor(id, meta & ~4, null) : [];
+  return this.dropsFor(id, meta, null);
+};
+const _newWorldFW = Game.prototype.newWorld;
+Game.prototype.newWorld = function (dim, st) {
+  const w = _newWorldFW.apply(this, arguments);
+  w.onWash = (x, y, z, id, meta, fluid) => {
+    const o = this.otherHalf(x, y, z, id, meta);
+    if (fluid === B.LAVA) { if (w.onFizz) w.onFizz(x, y, z); }
+    else for (const s of this.washDrops(id, meta)) this.dropItem(x + 0.5, y + 0.5, z + 0.5, s);
+    if (o && w.getBlock(o[0], o[1], o[2]) === id) { w.setBlock(o[0], o[1], o[2], 0, 0); this.remeshNear(o[0], o[2]); }
+  };
+  return w;
+};
+
+/* @file 214_abandoned_camps.js */
+/* ===================================================================
+   Part 111: abandoned camps (26.3), the game's side (where they are and
+   how they are built: 19_abandoned_camps.js)
+   - loot: 26.3's abandoned_camp_barrel, abandoned_camp_common_chest
+     (with a map to a camp of another biome) and
+     abandoned_camp_secret_chest (with a map to a far structure); the
+     spears and cushions the tables name aren't in the game, so those
+     rolls come up empty
+   - abandoned camp maps (ExplorationMapFunction, decoration
+     abandoned_camp) find the nearest camp of their biome; 26.3's
+     buried ancient city, mineshaft, desert pyramid and warm ocean ruins
+     maps theirs; explorer maps from loot that find nothing vanish
+     (filtered, on_fail discard)
+   - /locate structure abandoned_camp or abandoned_camp_<biome>
+   =================================================================== */
+
+/* ---------------- loot ---------------- */
+// rolls of an item the game doesn't have yet (spears, cushions) come up empty: [null, weight]
+Object.assign(LOOT, {
+  abandoned_camp_barrel: [[[4, 8], [['arrow', 1, 1, 3], ['bone', 1, 2, 4], ['bowl', 1, 1, 2], ['bread', 1, 1, 3], ['coal', 1, 2, 4], ['cobweb', 1], ['glass_bottle', 1, 1, 3],
+    ['leather', 1, 1, 3], ['rabbit_hide', 1, 1, 4], ['string', 1, 1, 2], ['wheat', 1, 1, 4], ['white_candle', 1, 1, 3], [null, 1], ['straw_bed', 1, 2, 4]]],
+    [[1, 1], [['bundle', 1], ['wooden_axe', 1], ['fishing_rod', 1]]]],
+  abandoned_camp_secret_chest: [[[2, 2], [['diamond', 1], ['potion', 1, 1, 1, { potion: 'healing' }], ['potion', 1, 1, 1, { potion: 'leaping' }],
+    ['potion', 1, 1, 1, { potion: 'night_vision' }], ['potion', 1, 1, 1, { potion: 'swiftness' }]]],
+    [[4, 6], [['map', 1], ['copper_ingot', 1, 1, 2], ['gold_ingot', 1, 1, 2], ['iron_ingot', 1]]],
+    [[0, 1], [['iron_axe', 1], ['iron_boots', 1], ['iron_leggings', 1], [null, 1]]],
+    [[1, 1], ['ancient_city', 'trial_chambers', 'mineshaft', 'desert_pyramid', 'jungle_temple', 'ocean_ruin_warm', 'woodland_mansion'].map(d => ['filled_map', 1, 1, 1, { explore: d }])]],
+});
+// the common chest's last roll: a map to a camp of another biome (each map leaves out the biome it is found in), named for it
+const CAMP_MAPS = [['bamboo_jungle', 'Bamboo Camp Map'], ['cherry_grove', 'Cherry Grove Camp Map'], ['birch_forest', 'Birch Forest Camp Map'],
+  ['dappled_forest', 'Dappled Forest Camp Map'], ['flower_forest', 'Flower Forest Camp Map'], ['pale_garden', 'Pale Garden Camp Map'], ['swamp', 'Swamp Camp Map'],
+  ['windswept_forest', 'Windswept Forest Camp Map']];
+const campCommon = here => [[[4, 6], [['arrow', 1, 4, 4], ['map', 1], ['bone', 1, 2, 4], ['cobweb', 1], ['compass', 1], ['map', 1, 1, 2], ['gunpowder', 1, 2, 4],
+  ['fishing_rod', 1], ['flint_and_steel', 1], ['glass_bottle', 1, 1, 4], ['lead', 1, 1, 3], ['leather', 1, 1, 4], ['bundle', 1], ['rabbit_hide', 1, 1, 4], ['saddle', 1],
+  ['white_candle', 1, 1, 3]]],
+  [[2, 2], [['bow', 1], ['bucket', 1], ['copper_axe', 1], ['copper_boots', 1], ['copper_chestplate', 1], ['copper_leggings', 1], [null, 1], ['copper_sword', 1], ['spyglass', 1], ['shears', 1]]],
+  [[1, 1], CAMP_MAPS.filter(([t]) => t !== here).map(([t, name]) => ['filled_map', 1, 1, 1, { explore: 'abandoned_camp_' + t, name }])]];
+LOOT.abandoned_camp_common_chest = campCommon(null);
+for (const t of CAMP_TYPES) LOOT['abandoned_camp_common_chest_' + t] = campCommon(t);
+
+/* ---------------- maps ---------------- */
+// ExplorationMapFunction's destinations (zoom 2), the maps they make, their markers
+for (const t of CAMP_TYPES) EXPLORER['abandoned_camp_' + t] = { scale: 2, struct: 'abandoned_camp', style: t, mark: 'abandoned_camp', item: 'abandoned_camp_map' };
+Object.assign(EXPLORER, {
+  ancient_city: { scale: 2, mark: 'ancient_city', item: 'buried_ancient_city_map' }, mineshaft: { scale: 2, mark: 'mineshaft', item: 'buried_mineshaft_map' },
+  desert_pyramid: { scale: 2, mark: 'desert_pyramid', item: 'desert_pyramid_map' },
+  ocean_ruin_warm: { scale: 2, struct: 'ocean_ruin', style: 'warm', mark: 'warm_ocean_ruins', item: 'warm_ocean_ruins_map' } });
+// 26.3's explorer maps in loot vanish when there is nothing to find (filtered, on_fail discard); a camp map keeps its name
+const _lootStackAC = lootStack;
+lootStack = function (e, R) {
+  const st = _lootStackAC(e, R), x = e[4];
+  if (st && x && x.explore && st.tag) { st.tag.discard = true; if (x.name) st.tag.name = x.name; }
+  return st;
+};
+const _resolveMapStackAC = Game.prototype.resolveMapStack;
+Game.prototype.resolveMapStack = function (st) {
+  const gone = st && st.tag && st.tag.post === 'explore' && st.tag.discard;
+  _resolveMapStackAC.call(this, st);
+  if (gone && st.id === I.MAP && !st.tag) st.count = 0;
+};
+const _resolveMapPostsAC = Game.prototype.resolveMapPosts;
+Game.prototype.resolveMapPosts = function () {
+  _resolveMapPostsAC.call(this);
+  const p = this.player;
+  if (!p) return;
+  for (let i = 0; i < p.inv.length; i++) if (p.inv[i] && p.inv[i].count <= 0) p.inv[i] = null;
+  if (p.offhand[0] && p.offhand[0].count <= 0) p.offhand[0] = null;
+  if (this.ui.cursor && this.ui.cursor.count <= 0) this.ui.cursor = null;
+};
+// the markers, the game's own drawings (a pack's map/decorations/... where it has them)
+for (const [n, rows] of [
+  ['abandoned_camp', ['   BB   ', '  ByyB  ', '  ByyB  ', ' ByykyB ', ' Byykky ', 'ByyykkyB', 'Byyykkyy', 'B      B']],
+  ['ancient_city', ['  CCCC  ', ' CccccC ', ' Cc  cC ', 'CCCCCCCC', 'CcCccCcC', 'CcCccCcC', 'CcC  CcC', 'CCC  CCC']],
+  ['mineshaft', ['        ', ' B    B ', ' BkkkkB ', ' kBBBBk ', ' kBBBBk ', ' kkkkkk ', '  k  k  ', 'BBBBBBBB']],
+  ['desert_pyramid', ['   OO   ', '  OyyO  ', '  OyyO  ', ' OyyyyO ', ' OyOOyO ', 'OyyyyyyO', 'OyyOOyyO', 'OOOOOOOO']],
+  ['warm_ocean_ruins', ['        ', ' y    y ', ' y  y y ', ' yy y y ', ' yy yyy ', 'cyycyyyc', 'cccccccc', 'cccccccc']],
+]) defSkin('map/decorations/' + n, 8, 8, () => skinFromRows(8, 8, rows.map(r => r.padEnd(8)), DECO_PAL));
+// /locate structure abandoned_camp_<biome> finds the camps
+for (const t of CAMP_TYPES) LOCATE_ALIAS['abandoned_camp_' + t] = 'abandoned_camp';
 
 </script>
 </body>
