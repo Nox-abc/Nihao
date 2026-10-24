@@ -954,6 +954,35 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   rare, horse armor and the end crystal common, and an enchanted book's name no longer turns purple); honey bottles are
   drunk rather than eaten and can be drunk when full; dropped netherite blocks and ancient debris don't burn; the 26.3
   blocks (sulfur, cinnabar, resin bricks, pale oak and poplar wood) resist explosions as they do in Java.
+- **Recipes like 26.3** (Part 70): every crafting, smelting, blasting, smoking, campfire and stonecutter recipe now gives
+  what Java Edition 26.3 gives for the items Blockcraft has. The mace can finally be crafted (its recipe never matched
+  before); andesite, diorite and granite are made from cobblestone and quartz; a lead takes five string and no slime ball;
+  name tags (paper and a nugget) and saddles (three leather and an iron ingot) can be crafted; a lodestone needs an iron
+  ingot; any two mushrooms make stew; a dye recolours wool, carpets and beds of any colour; smithing templates are copied
+  with seven diamonds; six banner patterns are made from paper and a charge; waxed copper is cut and shaped like plain
+  copper; the stonecutter cuts deepslate and stone into their cobbled kinds; smelting leaves gives leaf litter and horse
+  armor melts down into nuggets.
+- **Chest loot like 26.3** (Part 70): the chests of dungeons, temples, strongholds, shipwrecks, ruined portals, bastions,
+  the End and the ancient city hold what 26.3's do: leather where saddles were (saddles are crafted now), copper horse
+  armor, smithing templates two at a time, random enchanted books at Java's odds (curses as likely as the rest) and
+  suspicious stews with their effects.
+- **Trades like 26.3** (Part 70): villagers trade from 26.3's trade sets. Cartographers sell maps to the villages of
+  other biomes (a desert cartographer never sells a desert village map), to jungle temples and swamp huts, to ocean
+  monuments and trial chambers, and banners of every colour; shepherds and masons offer every colour of wool, carpet,
+  bed, banner and terracotta; leatherworkers' armor comes dyed; master librarians sell candles instead of name tags;
+  fishermen buy boats. The wandering trader buys water bottles, buckets of water and milk, baked potatoes and hay, and
+  sells 26.3's goods: dyes, flowers, saplings and logs of every tree, moss, coral and more.
+- **Bundles** (Part 71): the bundle and its sixteen dyed colours, crafted from string and leather and dyed with any dye
+  (what is inside stays). A bundle holds one stack's worth of mixed items: 64 of a kind fill it, items that stack to 16
+  take four times the room, a tool or other unstackable item fills it alone, a bundle inside takes a sixteenth plus what it
+  holds, and shulker boxes don't go in. In the inventory, with a bundle in hand, left click a stack to put it in and
+  right click an empty slot to take one out; with a bundle in a slot, left click it holding a stack to put that in, or
+  right click it with an empty hand to take one out. The mouse wheel over a bundle picks which stack comes out next. Its
+  tooltip shows what is inside and how full it is, and using one throws its stacks out one after another.
+- **Wool and concrete stairs and slabs** (Part 71): every colour of wool and concrete now has stairs and slabs as in
+  26.3, crafted and (for concrete) stonecut like other stairs and slabs, in the Colored Blocks tab.
+- **Dropping with Q keeps an item's data** (Part 71): an item thrown with the drop key keeps its enchantments, name,
+  damage and contents (it used to come out as a plain copy).
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

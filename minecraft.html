@@ -581,6 +581,8 @@ function buildBlockNames() {
   add('terracotta', 'glass_pane', 'tinted_glass', 'shulker_box', 'candle');
   for (const c of COLORS) add(c + '_wool', c + '_carpet', c + '_terracotta', c + '_concrete', c + '_concrete_powder', c + '_glazed_terracotta',
     c + '_stained_glass', c + '_stained_glass_pane', c + '_shulker_box', c + '_bed', c + '_candle', c + '_banner');
+  // 26.3's wool and concrete stairs and slabs
+  for (const c of COLORS) add(c + '_wool_stairs', c + '_wool_slab', c + '_concrete_stairs', c + '_concrete_slab');
   // ---- natural
   add('podzol', 'mycelium', 'dirt_path', 'coarse_dirt', 'rooted_dirt', 'farmland', 'mud', 'clay', 'red_sand', 'ice', 'packed_ice', 'blue_ice', 'snow_block', 'snow',
     'powder_snow', 'moss_block', 'moss_carpet', 'calcite', 'dripstone_block', 'pointed_dripstone', 'magma_block', 'obsidian', 'crying_obsidian',
@@ -2646,17 +2648,17 @@ Generator.prototype.structuresFor = function (cx, cz) {
   return out;
 };
 // the structure of a kind nearest to (wx, wz), searching rings of regions outward
-function nearestStructure(gen, name, wx, wz, maxRegions) {
+function nearestStructure(gen, name, wx, wz, maxRegions, accept) {
   const S = STRUCTURES.find(s => s.name === name) || (name === 'end_city' ? END_CITY_STRUCT : name === 'bastion_remnant' ? BASTION_STRUCT : null);
   if (!S) return null;
-  if (gen.locate) return gen.locate(name, wx, wz, (maxRegions || 8) * S.region);
+  if (gen.locate) return gen.locate(name, wx, wz, (maxRegions || 8) * S.region, accept);
   const rx0 = Math.floor(wx / S.region), rz0 = Math.floor(wz / S.region);
   let best = null, bd = Infinity;
   for (let r = 0; r <= (maxRegions || 8); r++) {
     for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
       if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
       const p = structurePlan(gen, S, rx0 + dx, rz0 + dz);
-      if (!p) continue;
+      if (!p || (accept && !accept(p))) continue;
       const d = (p.X - wx) ** 2 + (p.Z - wz) ** 2;
       if (d < bd) { bd = d; best = p; }
     }
@@ -6411,7 +6413,7 @@ Object.assign(VanillaWorldGen.prototype, {
     return null;
   },
   // /locate: the nearest start of a kind within maxDist blocks, searching rings of regions
-  locate(name, wx, wz, maxDist) {
+  locate(name, wx, wz, maxDist, accept) {
     if (!(VS.SETS[name] || V_PER_CHUNK.has(name))) return null;
     const sp = (V_PER_CHUNK.has(name) ? 1 : VS.SETS[name][0]) * 16;
     const rx0 = Math.floor(wx / sp), rz0 = Math.floor(wz / sp), R = Math.max(1, Math.ceil((maxDist || 2000) / sp));
@@ -6420,7 +6422,7 @@ Object.assign(VanillaWorldGen.prototype, {
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
         const p = this.vPlan(name, rx0 + dx, rz0 + dz);
-        if (!p) continue;
+        if (!p || (accept && !accept(p))) continue;
         const d = (p.start.X - wx) ** 2 + (p.start.Z - wz) ** 2;
         if (d < bd) { bd = d; best = p; }
       }
@@ -10046,6 +10048,7 @@ for (const c of COLORS) {
   defB(c + '_candle', { shape: SH.CANDLE, hard: 0.1, sound: 'wool', candle: true, noCollide: true, needs: 'solid_below', cutout: true, color: c, icon: c + '_candle' });
   defB(c + '_banner', { shape: SH.BANNER, hard: 1, tool: AXE, sound: 'wood', tex: c + '_wool', noCollide: true, needs: 'banner', stack: 16, color: c, fuel: 300, icon: c + '_banner' });
 }
+for (const c of COLORS) { variantsOf(c + '_wool', 'sh', { fuel: 0, color: c }); variantsOf(c + '_concrete', 'sh', { color: c }); }
 for (const id of BLOCK_NAMES.map((n, i) => i).filter(i => BLK[i] && BLK[i].candle)) EMITF[id] = m => (m & 4) ? 3 * ((m & 3) + 1) : 0;
 
 /* ---------------- natural blocks ---------------- */
@@ -10524,6 +10527,9 @@ defI('debug_stick', { stack: 1, rarity: 3, glint: true });
 // the items of 1.21.4 to 26.x
 for (const w of NEW_WOODS) defBoats(w);
 defI('resin_brick');
+// bundles (1.21.2) and their sixteen colours
+defI('bundle', { stack: 1, bundle: true });
+for (const c of COLORS) defI(c + '_bundle', { stack: 1, bundle: true });
 for (const e of [['creaking', 0x5f5f5f, 0xfc7812]]) { SPAWN_EGGS.push(e); defI(e[0] + '_spawn_egg', { egg: e[0], eggCol: [e[1], e[2]] }); EGG_MOBS[e[0]] = true; }
 // the spawn eggs Java has for the other mobs the game already had
 for (const e of [['camel', 0xfcc369, 0xcb9337], ['donkey', 0x534539, 0x867566], ['elder_guardian', 0xceccba, 0x747693], ['evoker', 0x959b9b, 0x1e1c1a], ['guardian', 0x5a8272, 0xf17d30],
@@ -10593,7 +10599,13 @@ const keyOf = v => Array.isArray(v) ? v : (typeof v === 'string' && v[0] === '#'
 function shaped(out, count, pattern, key) {
   const k = {};
   for (const ch in key) k[ch] = keyOf(key[ch]);
-  RECIPES.push({ type: 'shaped', out: typeof out === 'string' ? itemOf(out) : out, count, pattern, key: k, w: pattern[0].length, h: pattern.length });
+  // ShapedRecipePattern: empty rows and columns around the pattern don't count (the grid is compared the same way)
+  let rows = pattern.slice();
+  while (rows.length > 1 && !rows[0].trim()) rows.shift();
+  while (rows.length > 1 && !rows[rows.length - 1].trim()) rows.pop();
+  const used = rows.filter(r => r.trim()), a = Math.min(...used.map(r => r.search(/\S/))), b = Math.max(...used.map(r => r.trimEnd().length));
+  rows = rows.map(r => r.padEnd(b).slice(a, b));
+  RECIPES.push({ type: 'shaped', out: typeof out === 'string' ? itemOf(out) : out, count, pattern: rows, key: k, w: b - a, h: rows.length });
 }
 function shapeless(out, count, ings) {
   RECIPES.push({ type: 'shapeless', out: typeof out === 'string' ? itemOf(out) : out, count, ings: ings.map(keyOf) });
@@ -10674,7 +10686,7 @@ shaped('smoker', 1, [' L ', 'LFL', ' L '], { L: '#logs_any', F: 'furnace' });
 shaped('blast_furnace', 1, ['III', 'IFI', 'SSS'], { I: 'iron_ingot', F: 'furnace', S: 'smooth_stone' });
 shaped('stonecutter', 1, [' I ', 'SSS'], { I: 'iron_ingot', S: 'stone' });
 shaped('grindstone', 1, ['SPS', '# #'], { S: 'stick', P: 'stone_slab', '#': '#planks' });
-shaped('lodestone', 1, ['SSS', 'SNS', 'SSS'], { S: 'chiseled_stone_bricks', N: 'netherite_ingot' });
+shaped('lodestone', 1, ['SSS', 'SNS', 'SSS'], { S: 'chiseled_stone_bricks', N: 'iron_ingot' });
 // variants: every stone family gets stairs / slabs / walls / plates / buttons, also from the stonecutter
 for (const [b, f] of STONE_SETS) {
   const st = variantStem(b);
@@ -10692,7 +10704,16 @@ const POLISH = [['granite', 'polished_granite'], ['diorite', 'polished_diorite']
 for (const [a, b] of POLISH) if (a !== 'mud') { shaped(b, 4, SQ2, { '#': a }); stonecut(a, b); }
 shapeless('packed_mud', 1, ['mud', 'wheat']);
 // the stonecutter also turns the base stone straight into later variants
-const CUT_CHAINS = [['stone', ['stone_bricks', 'stone_brick_stairs', 'stone_brick_slab', 'stone_brick_wall', 'chiseled_stone_bricks', 'stone_stairs', 'stone_slab']],
+const CUT_CHAINS = [['stone', ['stone_bricks', 'stone_brick_stairs', 'stone_brick_slab', 'stone_brick_wall', 'chiseled_stone_bricks', 'stone_stairs', 'stone_slab', 'cobblestone',
+    'cobblestone_stairs', 'cobblestone_slab', 'cobblestone_wall']],
+  ['deepslate', ['cobbled_deepslate', 'cobbled_deepslate_stairs', 'cobbled_deepslate_slab', 'cobbled_deepslate_wall', 'polished_deepslate', 'polished_deepslate_stairs',
+    'polished_deepslate_slab', 'polished_deepslate_wall', 'deepslate_bricks', 'deepslate_brick_stairs', 'deepslate_brick_slab', 'deepslate_brick_wall', 'deepslate_tiles',
+    'deepslate_tile_stairs', 'deepslate_tile_slab', 'deepslate_tile_wall', 'chiseled_deepslate']],
+  ['polished_deepslate', ['deepslate_bricks', 'deepslate_brick_stairs', 'deepslate_brick_slab', 'deepslate_brick_wall', 'deepslate_tiles', 'deepslate_tile_stairs', 'deepslate_tile_slab',
+    'deepslate_tile_wall']], ['deepslate_bricks', ['deepslate_tiles', 'deepslate_tile_stairs', 'deepslate_tile_slab', 'deepslate_tile_wall']],
+  ['stone_bricks', ['chiseled_stone_bricks']], ['nether_bricks', ['chiseled_nether_bricks']], ['tuff_bricks', ['chiseled_tuff_bricks']],
+  ['polished_tuff', ['tuff_bricks', 'tuff_brick_stairs', 'tuff_brick_slab', 'tuff_brick_wall', 'chiseled_tuff_bricks']],
+  ['polished_blackstone', ['polished_blackstone_bricks', 'polished_blackstone_brick_stairs', 'polished_blackstone_brick_slab', 'polished_blackstone_brick_wall', 'chiseled_polished_blackstone']],
   ['cobbled_deepslate', ['polished_deepslate', 'polished_deepslate_stairs', 'polished_deepslate_slab', 'polished_deepslate_wall', 'deepslate_bricks', 'deepslate_brick_stairs',
     'deepslate_brick_slab', 'deepslate_brick_wall', 'deepslate_tiles', 'deepslate_tile_stairs', 'deepslate_tile_slab', 'deepslate_tile_wall', 'chiseled_deepslate']],
   ['tuff', ['polished_tuff', 'polished_tuff_stairs', 'polished_tuff_slab', 'polished_tuff_wall', 'tuff_bricks', 'tuff_brick_stairs', 'tuff_brick_slab', 'tuff_brick_wall', 'chiseled_tuff', 'chiseled_tuff_bricks']],
@@ -10702,12 +10723,18 @@ const CUT_CHAINS = [['stone', ['stone_bricks', 'stone_brick_stairs', 'stone_bric
   ['quartz_block', ['quartz_bricks', 'quartz_pillar', 'chiseled_quartz_block']], ['purpur_block', ['purpur_pillar']], ['end_stone', ['end_stone_bricks', 'end_stone_brick_stairs', 'end_stone_brick_slab', 'end_stone_brick_wall']],
   ['granite', ['polished_granite', 'polished_granite_stairs', 'polished_granite_slab']], ['diorite', ['polished_diorite', 'polished_diorite_stairs', 'polished_diorite_slab']],
   ['andesite', ['polished_andesite', 'polished_andesite_stairs', 'polished_andesite_slab']], ['basalt', ['polished_basalt']], ['mud_bricks', []],
-  ['copper_block', ['cut_copper', 'cut_copper_stairs', 'cut_copper_slab', 'chiseled_copper', 'copper_grate']], ['prismarine', []], ['smooth_stone', ['smooth_stone_slab']],
+  // every copper block, waxed or not, at every stage of weathering, and its cut copper
+  ...['', 'waxed_'].flatMap(wx => OXID.flatMap(ox => [[copperName(wx + ox, 'block'), ['cut', 'cut_stairs', 'cut_slab', 'chiseled', 'grate'].map(k => copperName(wx + ox, k))],
+    [copperName(wx + ox, 'cut'), ['cut_stairs', 'cut_slab', 'chiseled'].map(k => copperName(wx + ox, k))]])), ['prismarine', []], ['smooth_stone', ['smooth_stone_slab']],
   ...['sulfur', 'cinnabar'].flatMap(m => [[m, ['polished_' + m, 'polished_' + m + '_stairs', 'polished_' + m + '_slab', 'polished_' + m + '_wall', m + '_bricks', m + '_brick_stairs',
     m + '_brick_slab', m + '_brick_wall', 'chiseled_' + m]], ['polished_' + m, [m + '_brick_stairs', m + '_brick_slab', m + '_brick_wall']]]),
   ['resin_bricks', ['chiseled_resin_bricks']]];
-for (const [a, list] of CUT_CHAINS) for (const b of list) if (!(STONECUT[itemOf(a)] || []).some(e => e[0] === itemOf(b))) stonecut(a, b, a === 'copper_block' ? (b.endsWith('_slab') ? 8 : 4) : b.endsWith('_slab') ? 2 : 1);
+const COPPER_BASES = new Set(['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'block'))));
+for (const [a, list] of CUT_CHAINS) for (const b of list) if (!(STONECUT[itemOf(a)] || []).some(e => e[0] === itemOf(b))) stonecut(a, b, COPPER_BASES.has(a) ? (b.endsWith('_slab') ? 8 : 4) : b.endsWith('_slab') ? 2 : 1);
 shaped('chiseled_stone_bricks', 1, ['#', '#'], { '#': 'stone_brick_slab' });
+for (const [out, more] of [['quartz_slab', ['chiseled_quartz_block', 'quartz_pillar']], ['quartz_stairs', ['chiseled_quartz_block', 'quartz_pillar']], ['purpur_slab', ['purpur_pillar']],
+  ['purpur_stairs', ['purpur_pillar']], ['sandstone_slab', ['chiseled_sandstone']], ['sandstone_stairs', ['chiseled_sandstone', 'cut_sandstone']], ['red_sandstone_slab', ['chiseled_red_sandstone']],
+  ['red_sandstone_stairs', ['chiseled_red_sandstone', 'cut_red_sandstone']]]) for (const r of RECIPES) if (r.type === 'shaped' && r.out === itemOf(out)) r.key['#'] = r.key['#'].concat(ids(more));
 shaped('chiseled_deepslate', 1, ['#', '#'], { '#': 'cobbled_deepslate_slab' });
 shaped('chiseled_tuff', 1, ['#', '#'], { '#': 'tuff_slab' });
 for (const m of ['sulfur', 'cinnabar']) shaped('chiseled_' + m, 1, ['#', '#'], { '#': m + '_slab' });
@@ -10722,6 +10749,11 @@ shaped('chiseled_polished_blackstone', 1, ['#', '#'], { '#': 'polished_blackston
 shaped('chiseled_sandstone', 1, ['#', '#'], { '#': 'sandstone_slab' });
 shaped('chiseled_red_sandstone', 1, ['#', '#'], { '#': 'red_sandstone_slab' });
 shaped('chiseled_quartz_block', 1, ['#', '#'], { '#': 'quartz_slab' });
+shaped('diorite', 2, ['CQ', 'QC'], { C: 'cobblestone', Q: 'quartz' });
+shapeless('andesite', 2, ['diorite', 'cobblestone']);
+shapeless('granite', 1, ['diorite', 'quartz']);
+shapeless('muddy_mangrove_roots', 1, ['mud', 'mangrove_roots']);
+shaped('creaking_heart', 1, ['L', 'R', 'L'], { L: 'pale_oak_log', R: 'resin_block' });
 shaped('chiseled_nether_bricks', 1, ['#', '#'], { '#': 'nether_brick_slab' });
 shaped('quartz_pillar', 2, ['#', '#'], { '#': 'quartz_block' });
 shaped('purpur_pillar', 1, ['#', '#'], { '#': 'purpur_slab' });
@@ -10790,8 +10822,8 @@ shaped('detector_rail', 6, ['I I', 'IPI', 'IRI'], { I: 'iron_ingot', P: 'stone_p
 shaped('activator_rail', 6, ['ISI', 'IRI', 'ISI'], { I: 'iron_ingot', S: 'stick', R: 'redstone_torch' });
 for (const k of ['block', 'chiseled', 'grate', 'cut', 'cut_stairs', 'cut_slab', 'door', 'trapdoor', 'bulb']) for (let s = 0; s < 4; s++)
   shapeless(copperName('waxed_' + OXID[s], k), 1, [copperName(OXID[s], k), 'honeycomb']);
-for (let s = 0; s < 4; s++) {
-  const C = k => copperName(OXID[s], k);
+for (let s = 0; s < 8; s++) {
+  const C = k => copperName((s >= 4 ? 'waxed_' : '') + OXID[s & 3], k);
   shaped(C('cut'), 4, SQ2, { '#': C('block') });
   shaped(C('cut_stairs'), 4, ['#  ', '## ', '###'], { '#': C('cut') });
   shaped(C('cut_slab'), 6, ['###'], { '#': C('cut') });
@@ -10821,9 +10853,20 @@ for (const [mat, x] of ARMOR_CRAFT) {
 }
 shaped('turtle_helmet', 1, ['XXX', 'X X'], { X: 'turtle_scute' });
 shaped('wolf_armor', 1, ['X  ', 'XXX', 'X X'], { X: 'armadillo_scute' });
+// the banner patterns made from paper and a charge
+for (const [pat, x] of [['flower', 'oxeye_daisy'], ['creeper', 'creeper_head'], ['skull', 'wither_skeleton_skull'], ['mojang', 'enchanted_golden_apple'], ['field_masoned', 'bricks'],
+  ['bordure_indented', 'vine']]) shapeless(pat + '_banner_pattern', 1, ['paper', x]);
 shaped('leather_horse_armor', 1, ['X X', 'XXX', 'X X'], { X: 'leather' });
 for (const t of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + t), I.NETHERITE_INGOT, itemOf('netherite_' + t)]);
 for (const p of ARMOR_PIECES) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + p), I.NETHERITE_INGOT, itemOf('netherite_' + p)]);
+// a smithing template is copied with seven diamonds and a block of what it is made of
+const TEMPLATE_BLOCK = { netherite_upgrade: 'netherrack', bolt: ['copper_block', 'waxed_copper_block'], coast: 'cobblestone', dune: 'sandstone', eye: 'end_stone', flow: 'breeze_rod',
+  host: 'terracotta', raiser: 'terracotta', rib: 'netherrack', sentry: 'cobblestone', shaper: 'terracotta', silence: 'cobbled_deepslate', snout: 'blackstone', spire: 'purpur_block',
+  tide: 'prismarine', vex: 'cobblestone', ward: 'cobbled_deepslate', wayfinder: 'terracotta', wild: 'mossy_cobblestone' };
+for (const t in TEMPLATE_BLOCK) {
+  const n = t === 'netherite_upgrade' ? 'netherite_upgrade_smithing_template' : t + '_armor_trim_smithing_template', c = TEMPLATE_BLOCK[t];
+  if (ITEM_BY_NAME[n]) shaped(n, 2, ['#S#', '#C#', '###'], { '#': 'diamond', S: n, C: Array.isArray(c) ? ids(c) : c });
+}
 shaped('netherite_upgrade_smithing_template', 2, ['D#D', 'DND', 'DDD'], { D: 'diamond', '#': 'netherite_upgrade_smithing_template', N: 'netherrack' });
 shaped('bow', 1, [' #S', '# S', ' #S'], { '#': 'stick', S: 'string' });
 shaped('crossbow', 1, ['#I#', 'STS', ' # '], { '#': 'stick', I: 'iron_ingot', S: 'string', T: 'tripwire_hook' });
@@ -10835,7 +10878,9 @@ shaped('fishing_rod', 1, ['  #', ' #S', '# S'], { '#': 'stick', S: 'string' });
 shaped('carrot_on_a_stick', 1, ['# ', ' C'], { '#': 'fishing_rod', C: 'carrot' });
 shaped('warped_fungus_on_a_stick', 1, ['# ', ' F'], { '#': 'fishing_rod', F: 'warped_fungus' });
 shaped('brush', 1, ['F', 'C', 'S'], { F: 'feather', C: 'copper_ingot', S: 'stick' });
-shaped('lead', 2, ['SS ', 'SB ', '  S'], { S: 'string', B: 'slime_ball' });
+shaped('lead', 2, ['SS ', 'SS ', '  S'], { S: 'string' });
+shaped('name_tag', 1, [' N', 'P '], { N: ids(['iron_nugget', 'gold_nugget', 'copper_nugget']), P: 'paper' });
+shaped('saddle', 1, [' L ', 'LIL'], { L: 'leather', I: 'iron_ingot' });
 shapeless('wind_charge', 4, ['breeze_rod']);
 
 /* ---------------- redstone ---------------- */
@@ -10862,14 +10907,17 @@ const DYE_SOURCES = [['dandelion', 'yellow', 1], ['poppy', 'red', 1], ['blue_orc
   ['red_tulip', 'red', 1], ['orange_tulip', 'orange', 1], ['white_tulip', 'light_gray', 1], ['pink_tulip', 'pink', 1], ['oxeye_daisy', 'light_gray', 1], ['cornflower', 'blue', 1],
   ['lily_of_the_valley', 'white', 1], ['torchflower', 'orange', 1], ['wither_rose', 'black', 1], ['sunflower', 'yellow', 2], ['lilac', 'magenta', 2], ['rose_bush', 'red', 2],
   ['peony', 'pink', 2], ['pitcher_plant', 'cyan', 2], ['pink_petals', 'pink', 1], ['ink_sac', 'black', 1], ['cocoa_beans', 'brown', 1], ['lapis_lazuli', 'blue', 1],
-  ['bone_meal', 'white', 1], ['beetroot', 'red', 1], ['open_eyeblossom', 'orange', 1], ['closed_eyeblossom', 'gray', 1], ['golden_dandelion', 'yellow', 1]];
+  ['bone_meal', 'white', 1], ['beetroot', 'red', 1], ['open_eyeblossom', 'orange', 1], ['closed_eyeblossom', 'gray', 1], ['golden_dandelion', 'yellow', 1],
+  ['wildflowers', 'yellow', 1], ['cactus_flower', 'pink', 1]];
 for (const [src, c, n] of DYE_SOURCES) shapeless(c + '_dye', n, [src]);
 const DYE_MIX = [['orange', ['red', 'yellow'], 2], ['light_blue', ['blue', 'white'], 2], ['pink', ['red', 'white'], 2], ['lime', ['green', 'white'], 2], ['cyan', ['blue', 'green'], 2],
-  ['purple', ['red', 'blue'], 2], ['magenta', ['purple', 'pink'], 2], ['gray', ['black', 'white'], 2], ['light_gray', ['gray', 'white'], 2], ['magenta', ['blue', 'red', 'red', 'white'], 4]];
+  ['purple', ['red', 'blue'], 2], ['magenta', ['purple', 'pink'], 2], ['gray', ['black', 'white'], 2], ['light_gray', ['gray', 'white'], 2], ['magenta', ['blue', 'red', 'red', 'white'], 4],
+  ['light_gray', ['black', 'white', 'white'], 3], ['magenta', ['blue', 'red', 'pink'], 3]];
 for (const [c, parts, n] of DYE_MIX) shapeless(c + '_dye', n, parts.map(p => p + '_dye'));
 for (const c of COLORS) {
   const D = c + '_dye';
-  if (c !== 'white') shapeless(c + '_wool', 1, [D, ids(COLORS.filter(x => x !== c).map(x => x + '_wool'))]);
+  // a dye recolours wool (its stairs and slabs too), carpets and beds of any other colour
+  for (const k of ['wool', 'carpet', 'bed', 'wool_slab', 'wool_stairs']) shapeless(c + '_' + k, 1, [D, ids(COLORS.filter(x => x !== c).map(x => x + '_' + k))]);
   shaped(c + '_carpet', 3, ['##'], { '#': c + '_wool' });
   shaped(c + '_terracotta', 8, ['###', '#D#', '###'], { '#': 'terracotta', D });
   shapeless(c + '_concrete_powder', 8, [D, 'sand', 'sand', 'sand', 'sand', 'gravel', 'gravel', 'gravel', 'gravel']);
@@ -10883,6 +10931,11 @@ for (const c of COLORS) {
   smelt(c + '_terracotta', c + '_glazed_terracotta', 0.1);
 }
 shaped('white_wool', 1, SQ2, { '#': 'string' });
+for (const c of COLORS) for (const m of ['wool', 'concrete']) {
+  const b = c + '_' + m;
+  shaped(b + '_stairs', 4, ['#  ', '## ', '###'], { '#': b }); shaped(b + '_slab', 6, ['###'], { '#': b });
+  if (m === 'concrete') { stonecut(b, b + '_stairs'); stonecut(b, b + '_slab', 2); }
+}
 shaped('glass_pane', 16, ['###', '###'], { '#': 'glass' });
 shaped('candle', 1, ['S', 'H'], { S: 'string', H: 'honeycomb' });
 shaped('shulker_box', 1, ['S', 'C', 'S'], { S: 'shulker_shell', C: 'chest' });
@@ -10896,10 +10949,11 @@ shapeless('pumpkin_pie', 1, ['pumpkin', 'sugar', 'egg']);
 shaped('golden_apple', 1, ['GGG', 'GAG', 'GGG'], { G: 'gold_ingot', A: 'apple' });
 shaped('golden_carrot', 1, ['GGG', 'GCG', 'GGG'], { G: 'gold_nugget', C: 'carrot' });
 shaped('glistering_melon_slice', 1, ['GGG', 'GMG', 'GGG'], { G: 'gold_nugget', M: 'melon_slice' });
-shapeless('mushroom_stew', 1, ['brown_mushroom', 'red_mushroom', 'bowl']);
-shaped('beetroot_soup', 1, ['BBB', 'BBB', ' W '], { B: 'beetroot', W: 'bowl' });
-shapeless('rabbit_stew', 1, ['cooked_rabbit', 'carrot', 'baked_potato', ids(['brown_mushroom', 'red_mushroom', 'shelf_mushroom']), 'bowl']);
-shapeless('suspicious_stew', 1, ['brown_mushroom', 'red_mushroom', 'bowl', ids([...FLOWERS, 'open_eyeblossom', 'closed_eyeblossom', 'golden_dandelion'])]);
+const MUSHROOMS = ids(['brown_mushroom', 'red_mushroom', 'shelf_mushroom']);
+shapeless('mushroom_stew', 1, [MUSHROOMS, MUSHROOMS, 'bowl']);
+shapeless('beetroot_soup', 1, ['bowl', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot']);
+shapeless('rabbit_stew', 1, ['cooked_rabbit', 'carrot', 'baked_potato', MUSHROOMS, 'bowl']);
+shapeless('suspicious_stew', 1, [MUSHROOMS, MUSHROOMS, 'bowl', ids([...FLOWERS, 'open_eyeblossom', 'closed_eyeblossom', 'golden_dandelion'])]);
 shaped('golden_dandelion', 1, ['###', '#I#', '###'], { '#': 'gold_nugget', I: 'dandelion' });
 shapeless('sugar', 1, ['sugar_cane']); shapeless('sugar', 3, ['honey_bottle']);
 shapeless('fermented_spider_eye', 1, ['spider_eye', 'brown_mushroom', 'sugar']);
@@ -10937,13 +10991,16 @@ for (const t of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) { smelt('iron_' + 
 for (const p of ARMOR_PIECES) { smelt('iron_' + p, 'iron_nugget', 0.1, ['ore']); smelt('golden_' + p, 'gold_nugget', 0.1, ['ore']); smelt('chainmail_' + p, 'iron_nugget', 0.1, ['ore']); smelt('copper_' + p, 'copper_nugget', 0.1, ['ore']); }
 const FOOD_SMELT = [['porkchop', 'cooked_porkchop'], ['beef', 'cooked_beef'], ['chicken', 'cooked_chicken'], ['mutton', 'cooked_mutton'], ['rabbit', 'cooked_rabbit'],
   ['cod', 'cooked_cod'], ['salmon', 'cooked_salmon'], ['potato', 'baked_potato'], ['kelp', 'dried_kelp']];
-for (const [a, b] of FOOD_SMELT) smelt(a, b, 0.35, ['food']);
+for (const [a, b] of FOOD_SMELT) smelt(a, b, a === 'kelp' ? 0.1 : 0.35, ['food']);
 const BLOCK_SMELT = [['sand', 'glass'], ['red_sand', 'glass'], ['cobblestone', 'stone'], ['stone', 'smooth_stone'], ['cobbled_deepslate', 'deepslate'], ['clay_ball', 'brick'],
   ['clay', 'terracotta'], ['netherrack', 'nether_brick'], ['stone_bricks', 'cracked_stone_bricks'], ['sandstone', 'smooth_sandstone'], ['red_sandstone', 'smooth_red_sandstone'],
   ['basalt', 'smooth_basalt'], ['quartz_block', 'smooth_quartz'], ['nether_bricks', 'cracked_nether_bricks'], ['deepslate_bricks', 'cracked_deepslate_bricks'],
   ['deepslate_tiles', 'cracked_deepslate_tiles'], ['polished_blackstone_bricks', 'cracked_polished_blackstone_bricks'], ['cactus', 'green_dye'], ['sea_pickle', 'lime_dye'],
   ['wet_sponge', 'sponge'], ['chorus_fruit', 'popped_chorus_fruit'], ['resin_clump', 'resin_brick']];
-for (const [a, b] of BLOCK_SMELT) smelt(a, b, 0.1);
+const SMELT_XP_OF = { clay_ball: 0.3, clay: 0.35, cactus: 1, wet_sponge: 0.15 };
+for (const [a, b] of BLOCK_SMELT) smelt(a, b, SMELT_XP_OF[a] || 0.1);
+for (const [m, n] of [['iron', 'iron_nugget'], ['golden', 'gold_nugget'], ['copper', 'copper_nugget']]) smelt(m + '_horse_armor', n, 0.1, ['ore']);
+for (const n of BLOCK_NAMES) if (BLK[B[n.toUpperCase()]] && BLK[B[n.toUpperCase()]].leaves && ITEM_BY_NAME[n] && ITEM_BY_NAME.leaf_litter) smelt(n, 'leaf_litter', 0.1);
 for (const l of TAGS.burn_logs) { SMELT[l] = I.CHARCOAL; SMELT_XP[l] = 0.15; }
 
 /* ---------------- matching ---------------- */
@@ -20553,7 +20610,7 @@ function buildCreativeTabs() {
   CREATIVE.building = take();
   // ---- colored blocks
   const C = (pat) => COLORS.map(c => pat.replace('#', c));
-  add(C('#_wool'), C('#_carpet'), 'terracotta', C('#_terracotta'), C('#_concrete'), C('#_concrete_powder'), C('#_glazed_terracotta'), 'glass', C('#_stained_glass'),
+  add(C('#_wool'), C('#_wool_stairs'), C('#_wool_slab'), C('#_carpet'), 'terracotta', C('#_terracotta'), C('#_concrete'), C('#_concrete_stairs'), C('#_concrete_slab'), C('#_concrete_powder'), C('#_glazed_terracotta'), 'glass', C('#_stained_glass'),
     'glass_pane', C('#_stained_glass_pane'), 'shulker_box', C('#_shulker_box'), C('#_bed'), 'candle', C('#_candle'), C('#_banner'));
   CREATIVE.colored = take();
   // ---- natural blocks
@@ -20602,7 +20659,7 @@ function buildCreativeTabs() {
   // ---- tools and utilities
   for (const t of ['wooden', 'stone', 'copper', 'iron', 'golden', 'diamond', 'netherite']) add(t + '_shovel', t + '_pickaxe', t + '_axe', t + '_hoe');
   add('bucket', 'water_bucket', 'cod_bucket', 'salmon_bucket', 'tropical_fish_bucket', 'pufferfish_bucket', 'axolotl_bucket', 'tadpole_bucket', 'lava_bucket', 'powder_snow_bucket',
-    'milk_bucket', 'fishing_rod', 'flint_and_steel', 'fire_charge', 'bone_meal', 'shears', 'brush', 'name_tag', 'lead', 'compass', 'recovery_compass', 'clock', 'spyglass', 'map',
+    'milk_bucket', 'fishing_rod', 'flint_and_steel', 'fire_charge', 'bone_meal', 'shears', 'brush', 'name_tag', 'lead', 'bundle', COLORS.map(c => c + '_bundle'), 'compass', 'recovery_compass', 'clock', 'spyglass', 'map',
     'writable_book', 'wind_charge', 'ender_pearl', 'ender_eye', 'elytra',
     { id: I.FIREWORK_ROCKET, tag: { flight: 1 } }, { id: I.FIREWORK_ROCKET, tag: { flight: 2 } }, { id: I.FIREWORK_ROCKET, tag: { flight: 3 } },
     'saddle', 'carrot_on_a_stick', 'warped_fungus_on_a_stick');
@@ -23845,7 +23902,8 @@ class Game {
     const p = this.player, h = p.held;
     if (!h) return;
     const n = all ? h.count : 1;
-    this.dropItem(p.x, p.y + 1.3, p.z, { id: h.id, count: n, dmg: h.dmg || 0 }, true, true);
+    // the thrown stack keeps its enchantments, name and contents
+    this.dropItem(p.x, p.y + 1.3, p.z, copyStack(h, n), true, true);
     h.count -= n; if (h.count <= 0) p.inv[p.sel] = null;
     p.doSwing();
     this.ui.refreshHotbar();
@@ -26316,35 +26374,36 @@ for (const b in JOB_SITES) { const id = B[b.toUpperCase()]; if (id !== undefined
 const LEVEL_NAMES = ['', 'Novice', 'Apprentice', 'Journeyman', 'Expert', 'Master'];
 const LEVEL_XP = [0, 0, 10, 70, 150, 250];
 const BADGE = ['', 'stone', 'iron', 'gold', 'emerald', 'diamond'];
-// offers: ['buy', item, count, emeralds, maxUses, xp] = sell items for emeralds; ['sell', item, count, price, maxUses, xp] = buy items with emeralds
-// ['book'] enchanted book, ['ench', item, price] enchanted gear, extra third field may be a second input [item, count]
-const T_ = (kind, item, count, price, uses, xp, second) => ({ kind, item, count, price, uses: uses || 12, xp: xp || 1, second });
+// 26.3's trade sets: ['buy', item, count, emeralds, maxUses, xp] = sell items for emeralds; ['sell', item, count, price, maxUses, xp] = buy items with emeralds;
+// ['book'] enchanted book, ['ench', item, count, price] enchanted gear, ['tipped'] tipped arrows, ['explorer', destination] explorer maps; the seventh field
+// is a second input [item, count], the eighth { only: villager types that offer it, pm: price multiplier, lvl: enchanting levels, dyes, stew, potion }
+const T_ = (kind, item, count, price, uses, xp, second, x) => ({ kind, item, count, price, uses: uses || 12, xp: xp || 1, second: second || undefined, x });
 const TRADES = {
   farmer: [[T_('buy', 'wheat', 20, 1, 16, 2), T_('buy', 'potato', 26, 1, 16, 2), T_('buy', 'carrot', 22, 1, 16, 2), T_('buy', 'beetroot', 15, 1, 16, 2), T_('sell', 'bread', 6, 1, 16, 1)],
     [T_('buy', 'pumpkin', 6, 1, 12, 10), T_('sell', 'pumpkin_pie', 4, 1, 12, 5), T_('sell', 'apple', 4, 1, 16, 5)],
     [T_('sell', 'cookie', 18, 3, 12, 10), T_('buy', 'melon', 4, 1, 12, 20)],
-    [T_('sell', 'cake', 1, 1, 12, 15), T_('sell', 'suspicious_stew', 1, 1, 12, 15)],
+    [T_('sell', 'cake', 1, 3, 12, 15), T_('sell', 'suspicious_stew', 1, 1, 12, 15, null, { stew: [['night_vision', 5], ['jump_boost', 8], ['weakness', 7], ['blindness', 6], ['poison', 14], ['saturation', 7]] })],
     [T_('sell', 'golden_carrot', 3, 3, 12, 30), T_('sell', 'glistering_melon_slice', 3, 4, 12, 30)]],
-  librarian: [[T_('buy', 'paper', 24, 1, 16, 2), T_('book'), T_('sell', 'bookshelf', 1, 9, 12, 1)],
-    [T_('buy', 'book', 4, 1, 12, 10), T_('book'), T_('sell', 'lantern', 1, 1, 12, 5)],
-    [T_('buy', 'ink_sac', 5, 1, 12, 20), T_('book'), T_('sell', 'glass', 4, 1, 12, 10)],
-    [T_('buy', 'writable_book', 2, 1, 12, 30), T_('book'), T_('sell', 'clock', 1, 5, 12, 15), T_('sell', 'compass', 1, 4, 12, 15)],
-    [T_('sell', 'name_tag', 1, 20, 12, 30)]],
-  armorer: [[T_('buy', 'coal', 15, 1, 16, 2), T_('sell', 'iron_leggings', 1, 7, 12, 1), T_('sell', 'iron_boots', 1, 4, 12, 1), T_('sell', 'iron_helmet', 1, 5, 12, 1), T_('sell', 'iron_chestplate', 1, 9, 12, 1)],
-    [T_('buy', 'iron_ingot', 4, 1, 12, 10), T_('sell', 'bell', 1, 36, 12, 5), T_('sell', 'chainmail_boots', 1, 1, 12, 5), T_('sell', 'chainmail_leggings', 1, 3, 12, 5)],
-    [T_('buy', 'lava_bucket', 1, 1, 12, 20), T_('buy', 'diamond', 1, 1, 12, 20), T_('sell', 'chainmail_helmet', 1, 1, 12, 10), T_('sell', 'chainmail_chestplate', 1, 4, 12, 10), T_('sell', 'shield', 1, 5, 12, 10)],
-    [T_('ench', 'diamond_leggings', 1, 14, 3, 15), T_('ench', 'diamond_boots', 1, 8, 3, 15)],
-    [T_('ench', 'diamond_helmet', 1, 8, 3, 30), T_('ench', 'diamond_chestplate', 1, 16, 3, 30)]],
+  librarian: [[T_('buy', 'paper', 24, 1, 16, 2), T_('book', null, 1, 0, 12, 1, null, { pm: 0.2 }), T_('sell', 'bookshelf', 1, 9, 12, 1)],
+    [T_('buy', 'book', 4, 1, 12, 10), T_('book', null, 1, 0, 12, 5, null, { pm: 0.2 }), T_('sell', 'lantern', 1, 1, 12, 5)],
+    [T_('buy', 'ink_sac', 5, 1, 12, 20), T_('book', null, 1, 0, 12, 10, null, { pm: 0.2 }), T_('sell', 'glass', 4, 1, 12, 10)],
+    [T_('buy', 'writable_book', 2, 1, 12, 30), T_('book', null, 1, 0, 12, 15, null, { pm: 0.2 }), T_('sell', 'clock', 1, 5, 12, 15), T_('sell', 'compass', 1, 4, 12, 15)],
+    [T_('sell', 'yellow_candle', 1, 3, 12, 30), T_('sell', 'red_candle', 1, 3, 12, 30)]],
+  armorer: [[T_('buy', 'coal', 15, 1, 16, 2), T_('sell', 'iron_leggings', 1, 7, 12, 1, null, { pm: 0.2 }), T_('sell', 'iron_boots', 1, 4, 12, 1, null, { pm: 0.2 }), T_('sell', 'iron_helmet', 1, 5, 12, 1, null, { pm: 0.2 }), T_('sell', 'iron_chestplate', 1, 9, 12, 1, null, { pm: 0.2 })],
+    [T_('buy', 'iron_ingot', 4, 1, 12, 10), T_('sell', 'bell', 1, 36, 12, 5, null, { pm: 0.2 }), T_('sell', 'chainmail_boots', 1, 1, 12, 5, null, { pm: 0.2 }), T_('sell', 'chainmail_leggings', 1, 3, 12, 5, null, { pm: 0.2 })],
+    [T_('buy', 'lava_bucket', 1, 1, 12, 20), T_('sell', 'chainmail_helmet', 1, 1, 12, 10, null, { pm: 0.2 }), T_('sell', 'chainmail_chestplate', 1, 4, 12, 10, null, { pm: 0.2 }), T_('sell', 'shield', 1, 5, 12, 10, null, { pm: 0.2 }), T_('buy', 'diamond', 1, 1, 12, 20)],
+    [T_('ench', 'diamond_leggings', 1, 14, 3, 15, null, { pm: 0.2, lvl: [5, 19] }), T_('ench', 'diamond_boots', 1, 8, 3, 15, null, { pm: 0.2, lvl: [5, 19] })],
+    [T_('ench', 'diamond_helmet', 1, 8, 3, 30, null, { pm: 0.2, lvl: [5, 19] }), T_('ench', 'diamond_chestplate', 1, 16, 3, 30, null, { pm: 0.2, lvl: [5, 19] })]],
   butcher: [[T_('buy', 'chicken', 14, 1, 16, 2), T_('buy', 'porkchop', 7, 1, 16, 2), T_('buy', 'rabbit', 4, 1, 16, 2), T_('sell', 'rabbit_stew', 1, 1, 12, 1)],
     [T_('buy', 'coal', 15, 1, 16, 2), T_('sell', 'cooked_porkchop', 5, 1, 16, 5), T_('sell', 'cooked_chicken', 8, 1, 16, 5)],
     [T_('buy', 'mutton', 7, 1, 16, 20), T_('buy', 'beef', 10, 1, 16, 20)],
     [T_('buy', 'dried_kelp_block', 10, 1, 12, 30)],
     [T_('buy', 'sweet_berries', 10, 1, 12, 30)]],
-  cartographer: [[T_('buy', 'paper', 24, 1, 16, 2), T_('sell', 'map', 1, 7, 12, 1)],
-    [T_('buy', 'glass_pane', 11, 1, 16, 10), T_('sell', 'compass', 1, 13, 12, 5)],
-    [T_('buy', 'compass', 1, 1, 12, 20), T_('sell', 'map', 1, 7, 12, 10)],
-    [T_('sell', 'item_frame', 1, 7, 12, 15), T_('sell', 'white_banner', 1, 3, 12, 15)],
-    [T_('sell', 'globe_banner_pattern', 1, 8, 12, 30)]],
+  cartographer: [[T_('buy', 'paper', 24, 1, 12, 2), T_('sell', 'map', 1, 7, 12, 1)],
+    [T_('buy', 'glass_pane', 11, 1, 12, 10), T_('explorer', 'village_taiga', 1, 8, 12, 5, ['compass', 1], { only: ['swamp', 'snow', 'plains'], pm: 0.2 }), T_('explorer', 'swamp_hut', 1, 8, 12, 5, ['compass', 1], { only: ['taiga', 'snow', 'jungle'], pm: 0.2 }), T_('explorer', 'village_snowy', 1, 8, 12, 5, ['compass', 1], { only: ['taiga', 'swamp'], pm: 0.2 }), T_('explorer', 'village_savanna', 1, 8, 12, 5, ['compass', 1], { only: ['plains', 'jungle', 'desert'], pm: 0.2 }), T_('explorer', 'village_plains', 1, 8, 12, 5, ['compass', 1], { only: ['taiga', 'snow', 'savanna', 'desert'], pm: 0.2 }), T_('explorer', 'jungle_temple', 1, 8, 12, 5, ['compass', 1], { only: ['swamp', 'savanna', 'desert'], pm: 0.2 }), T_('explorer', 'village_desert', 1, 8, 12, 5, ['compass', 1], { only: ['savanna', 'jungle'], pm: 0.2 })],
+    [T_('buy', 'compass', 1, 1, 12, 20), T_('explorer', 'ocean_monument', 1, 13, 12, 10, ['compass', 1], { pm: 0.2 }), T_('explorer', 'trial_chambers', 1, 12, 12, 10, ['compass', 1], { pm: 0.2 })],
+    [T_('sell', 'item_frame', 1, 7, 12, 15), T_('sell', 'white_banner', 1, 2, 12, 15, null, { only: ['snow', 'plains'] }), T_('sell', 'orange_banner', 1, 2, 12, 15, null, { only: ['savanna', 'desert'] }), T_('sell', 'magenta_banner', 1, 2, 12, 15, null, { only: ['savanna'] }), T_('sell', 'blue_banner', 1, 2, 12, 15, null, { only: ['snow', 'taiga'] }), T_('sell', 'light_blue_banner', 1, 2, 12, 15, null, { only: ['snow', 'swamp'] }), T_('sell', 'yellow_banner', 1, 2, 12, 15, null, { only: ['plains', 'jungle'] }), T_('sell', 'lime_banner', 1, 2, 12, 15, null, { only: ['desert', 'taiga'] }), T_('sell', 'pink_banner', 1, 2, 12, 15, null, { only: ['taiga', 'plains'] }), T_('sell', 'gray_banner', 1, 2, 12, 15, null, { only: ['desert'] }), T_('sell', 'cyan_banner', 1, 2, 12, 15, null, { only: ['desert', 'snow'] }), T_('sell', 'purple_banner', 1, 2, 12, 15, null, { only: ['taiga', 'swamp'] }), T_('sell', 'brown_banner', 1, 2, 12, 15, null, { only: ['plains', 'jungle'] }), T_('sell', 'green_banner', 1, 2, 12, 15, null, { only: ['desert', 'savanna', 'jungle'] }), T_('sell', 'red_banner', 1, 2, 12, 15, null, { only: ['snow', 'savanna'] }), T_('sell', 'black_banner', 1, 2, 12, 15, null, { only: ['swamp'] })],
+    [T_('sell', 'globe_banner_pattern', 1, 8, 12, 30), T_('explorer', 'woodland_mansion', 1, 14, 12, 30, ['compass', 1], { pm: 0.2 })]],
   cleric: [[T_('buy', 'rotten_flesh', 32, 1, 16, 2), T_('sell', 'redstone', 2, 1, 12, 1)],
     [T_('buy', 'gold_ingot', 3, 1, 12, 10), T_('sell', 'lapis_lazuli', 1, 1, 12, 5)],
     [T_('buy', 'rabbit_foot', 2, 1, 12, 20), T_('sell', 'glowstone', 1, 4, 12, 10)],
@@ -26352,74 +26411,89 @@ const TRADES = {
     [T_('buy', 'nether_wart', 22, 1, 12, 30), T_('sell', 'experience_bottle', 1, 3, 12, 30)]],
   fisherman: [[T_('buy', 'string', 20, 1, 16, 2), T_('buy', 'coal', 10, 1, 16, 2), T_('sell', 'cooked_cod', 6, 1, 16, 1, ['cod', 6]), T_('sell', 'cod_bucket', 1, 3, 16, 1)],
     [T_('buy', 'cod', 15, 1, 16, 10), T_('sell', 'cooked_salmon', 6, 1, 16, 5, ['salmon', 6]), T_('sell', 'campfire', 1, 2, 12, 5)],
-    [T_('buy', 'salmon', 13, 1, 16, 20), T_('ench', 'fishing_rod', 1, 3, 3, 10)],
+    [T_('buy', 'salmon', 13, 1, 16, 20), T_('ench', 'fishing_rod', 1, 3, 3, 10, null, { pm: 0.2, lvl: [5, 19] })],
     [T_('buy', 'tropical_fish', 6, 1, 12, 30)],
-    [T_('buy', 'pufferfish', 4, 1, 12, 30), T_('buy', 'oak_boat', 1, 1, 12, 30)]],
+    [T_('buy', 'pufferfish', 4, 1, 12, 30), T_('buy', 'oak_boat', 1, 1, 12, 30, null, { only: ['plains'] }), T_('buy', 'spruce_boat', 1, 1, 12, 30, null, { only: ['taiga', 'snow'] }), T_('buy', 'jungle_boat', 1, 1, 12, 30, null, { only: ['desert', 'jungle'] }), T_('buy', 'acacia_boat', 1, 1, 12, 30, null, { only: ['savanna'] }), T_('buy', 'dark_oak_boat', 1, 1, 12, 30, null, { only: ['swamp'] })]],
   fletcher: [[T_('buy', 'stick', 32, 1, 16, 2), T_('sell', 'arrow', 16, 1, 12, 1), T_('sell', 'flint', 10, 1, 12, 1, ['gravel', 10])],
     [T_('buy', 'flint', 26, 1, 12, 10), T_('sell', 'bow', 1, 2, 12, 5)],
     [T_('buy', 'string', 14, 1, 16, 20), T_('sell', 'crossbow', 1, 3, 12, 10)],
-    [T_('buy', 'feather', 24, 1, 16, 30), T_('ench', 'bow', 1, 2, 3, 15)],
-    [T_('buy', 'tripwire_hook', 8, 1, 12, 30), T_('ench', 'crossbow', 1, 3, 3, 15), T_('tipped', 'tipped_arrow', 5, 2, 12, 30, ['arrow', 5])]],
-  leatherworker: [[T_('buy', 'leather', 6, 1, 16, 2), T_('sell', 'leather_leggings', 1, 3, 12, 1), T_('sell', 'leather_chestplate', 1, 7, 12, 1)],
-    [T_('buy', 'flint', 26, 1, 12, 10), T_('sell', 'leather_helmet', 1, 5, 12, 5), T_('sell', 'leather_boots', 1, 4, 12, 5)],
-    [T_('buy', 'rabbit_hide', 9, 1, 12, 20), T_('sell', 'leather_chestplate', 1, 7, 12, 10)],
-    [T_('buy', 'turtle_scute', 4, 1, 12, 30), T_('sell', 'leather_horse_armor', 1, 6, 12, 15)],
-    [T_('sell', 'saddle', 1, 6, 12, 30), T_('sell', 'leather_helmet', 1, 5, 12, 30)]],
+    [T_('buy', 'feather', 24, 1, 16, 30), T_('ench', 'bow', 1, 2, 3, 15, null, { lvl: [5, 19] })],
+    [T_('buy', 'tripwire_hook', 8, 1, 12, 30), T_('ench', 'crossbow', 1, 3, 3, 15, null, { lvl: [5, 19] }), T_('tipped', 'tipped_arrow', 5, 2, 12, 30, ['arrow', 5])]],
+  leatherworker: [[T_('buy', 'leather', 6, 1, 16, 2), T_('sell', 'leather_leggings', 1, 3, 12, 1, null, { pm: 0.2, dyes: true }), T_('sell', 'leather_chestplate', 1, 7, 12, 1, null, { pm: 0.2, dyes: true })],
+    [T_('buy', 'flint', 26, 1, 12, 10), T_('sell', 'leather_helmet', 1, 5, 12, 5, null, { pm: 0.2, dyes: true }), T_('sell', 'leather_boots', 1, 4, 12, 5, null, { pm: 0.2, dyes: true })],
+    [T_('buy', 'rabbit_hide', 9, 1, 12, 20), T_('sell', 'leather_chestplate', 1, 7, 12, 1, null, { pm: 0.2, dyes: true })],
+    [T_('buy', 'turtle_scute', 4, 1, 12, 30), T_('sell', 'leather_horse_armor', 1, 6, 12, 15, null, { pm: 0.2, dyes: true })],
+    [T_('sell', 'saddle', 1, 6, 12, 30, null, { pm: 0.2 }), T_('sell', 'leather_helmet', 1, 5, 12, 5, null, { pm: 0.2, dyes: true })]],
   mason: [[T_('buy', 'clay_ball', 10, 1, 16, 2), T_('sell', 'brick', 10, 1, 16, 1)],
     [T_('buy', 'stone', 20, 1, 16, 10), T_('sell', 'chiseled_stone_bricks', 4, 1, 16, 5)],
-    [T_('buy', 'granite', 16, 1, 16, 20), T_('buy', 'andesite', 16, 1, 16, 20), T_('buy', 'diorite', 16, 1, 16, 20), T_('sell', 'polished_andesite', 4, 1, 16, 10), T_('sell', 'polished_diorite', 4, 1, 16, 10), T_('sell', 'polished_granite', 4, 1, 16, 10)],
-    [T_('buy', 'quartz', 12, 1, 12, 30), T_('sell', 'terracotta', 1, 1, 12, 15)],
+    [T_('buy', 'granite', 16, 1, 16, 20), T_('buy', 'andesite', 16, 1, 16, 20), T_('buy', 'diorite', 16, 1, 16, 20), T_('sell', 'dripstone_block', 4, 1, 16, 10), T_('sell', 'polished_andesite', 4, 1, 16, 10), T_('sell', 'polished_diorite', 4, 1, 16, 10), T_('sell', 'polished_granite', 4, 1, 16, 10)],
+    [T_('buy', 'quartz', 12, 1, 12, 30), T_('sell', 'white_terracotta', 1, 1, 12, 15), T_('sell', 'orange_terracotta', 1, 1, 12, 15), T_('sell', 'magenta_terracotta', 1, 1, 12, 15), T_('sell', 'light_blue_terracotta', 1, 1, 12, 15), T_('sell', 'yellow_terracotta', 1, 1, 12, 15), T_('sell', 'lime_terracotta', 1, 1, 12, 15), T_('sell', 'pink_terracotta', 1, 1, 12, 15), T_('sell', 'gray_terracotta', 1, 1, 12, 15), T_('sell', 'light_gray_terracotta', 1, 1, 12, 15), T_('sell', 'cyan_terracotta', 1, 1, 12, 15), T_('sell', 'purple_terracotta', 1, 1, 12, 15), T_('sell', 'blue_terracotta', 1, 1, 12, 15), T_('sell', 'brown_terracotta', 1, 1, 12, 15), T_('sell', 'green_terracotta', 1, 1, 12, 15), T_('sell', 'red_terracotta', 1, 1, 12, 15), T_('sell', 'black_terracotta', 1, 1, 12, 15), T_('sell', 'white_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'orange_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'magenta_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'light_blue_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'yellow_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'lime_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'pink_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'gray_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'light_gray_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'cyan_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'purple_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'blue_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'brown_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'green_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'red_glazed_terracotta', 1, 1, 12, 15), T_('sell', 'black_glazed_terracotta', 1, 1, 12, 15)],
     [T_('sell', 'quartz_pillar', 1, 1, 12, 30), T_('sell', 'quartz_block', 1, 1, 12, 30)]],
-  shepherd: [[T_('buy', 'white_wool', 18, 1, 16, 2), T_('buy', 'brown_wool', 18, 1, 16, 2), T_('buy', 'black_wool', 18, 1, 16, 2), T_('sell', 'shears', 1, 2, 12, 1)],
-    [T_('buy', 'white_dye', 12, 1, 16, 10), T_('buy', 'gray_dye', 12, 1, 16, 10), T_('sell', 'white_wool', 1, 1, 16, 5), T_('sell', 'white_carpet', 4, 1, 16, 5)],
-    [T_('buy', 'yellow_dye', 12, 1, 16, 20), T_('buy', 'red_dye', 12, 1, 16, 20), T_('sell', 'white_bed', 1, 3, 12, 10)],
-    [T_('buy', 'brown_dye', 12, 1, 16, 30), T_('buy', 'blue_dye', 12, 1, 16, 30), T_('sell', 'white_banner', 1, 3, 12, 15)],
+  shepherd: [[T_('buy', 'white_wool', 18, 1, 16, 2), T_('buy', 'brown_wool', 18, 1, 16, 2), T_('buy', 'gray_wool', 18, 1, 16, 2), T_('buy', 'black_wool', 18, 1, 16, 2), T_('sell', 'shears', 1, 2, 12, 1)],
+    [T_('buy', 'white_dye', 12, 1, 16, 10), T_('buy', 'gray_dye', 12, 1, 16, 10), T_('buy', 'black_dye', 12, 1, 16, 10), T_('buy', 'light_blue_dye', 12, 1, 16, 10), T_('buy', 'lime_dye', 12, 1, 16, 10), T_('sell', 'white_wool', 1, 1, 16, 5), T_('sell', 'orange_wool', 1, 1, 16, 5), T_('sell', 'magenta_wool', 1, 1, 16, 5), T_('sell', 'light_blue_wool', 1, 1, 16, 5), T_('sell', 'yellow_wool', 1, 1, 16, 5), T_('sell', 'lime_wool', 1, 1, 16, 5), T_('sell', 'pink_wool', 1, 1, 16, 5), T_('sell', 'gray_wool', 1, 1, 16, 5), T_('sell', 'light_gray_wool', 1, 1, 16, 5), T_('sell', 'cyan_wool', 1, 1, 16, 5), T_('sell', 'purple_wool', 1, 1, 16, 5), T_('sell', 'blue_wool', 1, 1, 16, 5), T_('sell', 'brown_wool', 1, 1, 16, 5), T_('sell', 'green_wool', 1, 1, 16, 5), T_('sell', 'red_wool', 1, 1, 16, 5), T_('sell', 'black_wool', 1, 1, 16, 5), T_('sell', 'white_carpet', 4, 1, 16, 5), T_('sell', 'orange_carpet', 4, 1, 16, 5), T_('sell', 'magenta_carpet', 4, 1, 16, 5), T_('sell', 'light_blue_carpet', 4, 1, 16, 5), T_('sell', 'yellow_carpet', 4, 1, 16, 5), T_('sell', 'lime_carpet', 4, 1, 16, 5), T_('sell', 'pink_carpet', 4, 1, 16, 5), T_('sell', 'gray_carpet', 4, 1, 16, 5), T_('sell', 'light_gray_carpet', 4, 1, 16, 5), T_('sell', 'cyan_carpet', 4, 1, 16, 5), T_('sell', 'purple_carpet', 4, 1, 16, 5), T_('sell', 'blue_carpet', 4, 1, 16, 5), T_('sell', 'brown_carpet', 4, 1, 16, 5), T_('sell', 'green_carpet', 4, 1, 16, 5), T_('sell', 'red_carpet', 4, 1, 16, 5), T_('sell', 'black_carpet', 4, 1, 16, 5)],
+    [T_('buy', 'yellow_dye', 12, 1, 16, 20), T_('buy', 'light_gray_dye', 12, 1, 16, 20), T_('buy', 'orange_dye', 12, 1, 16, 20), T_('buy', 'red_dye', 12, 1, 16, 20), T_('buy', 'pink_dye', 12, 1, 16, 20), T_('sell', 'white_bed', 1, 3, 12, 10), T_('sell', 'orange_bed', 1, 3, 12, 10), T_('sell', 'magenta_bed', 1, 3, 12, 10), T_('sell', 'light_blue_bed', 1, 3, 12, 10), T_('sell', 'yellow_bed', 1, 3, 12, 10), T_('sell', 'lime_bed', 1, 3, 12, 10), T_('sell', 'pink_bed', 1, 3, 12, 10), T_('sell', 'gray_bed', 1, 3, 12, 10), T_('sell', 'light_gray_bed', 1, 3, 12, 10), T_('sell', 'cyan_bed', 1, 3, 12, 10), T_('sell', 'purple_bed', 1, 3, 12, 10), T_('sell', 'blue_bed', 1, 3, 12, 10), T_('sell', 'brown_bed', 1, 3, 12, 10), T_('sell', 'green_bed', 1, 3, 12, 10), T_('sell', 'red_bed', 1, 3, 12, 10), T_('sell', 'black_bed', 1, 3, 12, 10)],
+    [T_('buy', 'brown_dye', 12, 1, 16, 30), T_('buy', 'purple_dye', 12, 1, 16, 30), T_('buy', 'blue_dye', 12, 1, 16, 30), T_('buy', 'green_dye', 12, 1, 16, 30), T_('buy', 'magenta_dye', 12, 1, 16, 30), T_('buy', 'cyan_dye', 12, 1, 16, 30), T_('sell', 'white_banner', 1, 3, 12, 15), T_('sell', 'orange_banner', 1, 3, 12, 15), T_('sell', 'magenta_banner', 1, 3, 12, 15), T_('sell', 'light_blue_banner', 1, 3, 12, 15), T_('sell', 'yellow_banner', 1, 3, 12, 15), T_('sell', 'lime_banner', 1, 3, 12, 15), T_('sell', 'pink_banner', 1, 3, 12, 15), T_('sell', 'gray_banner', 1, 3, 12, 15), T_('sell', 'light_gray_banner', 1, 3, 12, 15), T_('sell', 'cyan_banner', 1, 3, 12, 15), T_('sell', 'purple_banner', 1, 3, 12, 15), T_('sell', 'blue_banner', 1, 3, 12, 15), T_('sell', 'brown_banner', 1, 3, 12, 15), T_('sell', 'green_banner', 1, 3, 12, 15), T_('sell', 'red_banner', 1, 3, 12, 15), T_('sell', 'black_banner', 1, 3, 12, 15)],
     [T_('sell', 'painting', 3, 2, 12, 30)]],
-  toolsmith: [[T_('buy', 'coal', 15, 1, 16, 2), T_('sell', 'stone_axe', 1, 1, 12, 1), T_('sell', 'stone_shovel', 1, 1, 12, 1), T_('sell', 'stone_pickaxe', 1, 1, 12, 1), T_('sell', 'stone_hoe', 1, 1, 12, 1)],
-    [T_('buy', 'iron_ingot', 4, 1, 12, 10), T_('sell', 'bell', 1, 36, 12, 5)],
-    [T_('buy', 'flint', 30, 1, 12, 20), T_('ench', 'iron_axe', 1, 1, 3, 10), T_('ench', 'iron_shovel', 1, 2, 3, 10), T_('ench', 'iron_pickaxe', 1, 3, 3, 10), T_('sell', 'diamond_hoe', 1, 4, 3, 10)],
-    [T_('buy', 'diamond', 1, 1, 12, 30), T_('ench', 'diamond_axe', 1, 12, 3, 15), T_('ench', 'diamond_shovel', 1, 5, 3, 15)],
-    [T_('ench', 'diamond_pickaxe', 1, 13, 3, 30)]],
-  weaponsmith: [[T_('buy', 'coal', 15, 1, 16, 2), T_('sell', 'iron_axe', 1, 3, 12, 1), T_('ench', 'iron_sword', 1, 2, 3, 1)],
-    [T_('buy', 'iron_ingot', 4, 1, 12, 10), T_('sell', 'bell', 1, 36, 12, 5)],
+  toolsmith: [[T_('buy', 'coal', 15, 1, 16, 2), T_('sell', 'stone_axe', 1, 1, 12, 1, null, { pm: 0.2 }), T_('sell', 'stone_shovel', 1, 1, 12, 1, null, { pm: 0.2 }), T_('sell', 'stone_pickaxe', 1, 1, 12, 1, null, { pm: 0.2 }), T_('sell', 'stone_hoe', 1, 1, 12, 1, null, { pm: 0.2 })],
+    [T_('buy', 'iron_ingot', 4, 1, 12, 10), T_('sell', 'bell', 1, 36, 12, 5, null, { pm: 0.2 })],
+    [T_('buy', 'flint', 30, 1, 12, 20), T_('ench', 'iron_axe', 1, 1, 3, 10, null, { pm: 0.2, lvl: [5, 19] }), T_('ench', 'iron_shovel', 1, 2, 3, 10, null, { pm: 0.2, lvl: [5, 19] }), T_('ench', 'iron_pickaxe', 1, 3, 3, 10, null, { pm: 0.2, lvl: [5, 19] }), T_('sell', 'diamond_hoe', 1, 4, 3, 10, null, { pm: 0.2 })],
+    [T_('ench', 'diamond_axe', 1, 12, 3, 15, null, { pm: 0.2, lvl: [5, 19] }), T_('ench', 'diamond_shovel', 1, 5, 3, 15, null, { pm: 0.2, lvl: [5, 19] }), T_('buy', 'diamond', 1, 1, 12, 30)],
+    [T_('ench', 'diamond_pickaxe', 1, 13, 3, 30, null, { pm: 0.2, lvl: [5, 19] })]],
+  weaponsmith: [[T_('buy', 'coal', 15, 1, 16, 2), T_('sell', 'iron_axe', 1, 3, 12, 1, null, { pm: 0.2 }), T_('ench', 'iron_sword', 1, 2, 12, 1, null, { pm: 0.2, lvl: [5, 19] })],
+    [T_('buy', 'iron_ingot', 4, 1, 12, 10), T_('sell', 'bell', 1, 36, 12, 5, null, { pm: 0.2 })],
     [T_('buy', 'flint', 24, 1, 12, 20)],
-    [T_('buy', 'diamond', 1, 1, 12, 30), T_('ench', 'diamond_axe', 1, 12, 3, 15)],
-    [T_('ench', 'diamond_sword', 1, 8, 3, 30)]],
+    [T_('ench', 'diamond_axe', 1, 12, 3, 15, null, { pm: 0.2, lvl: [5, 19] }), T_('buy', 'diamond', 1, 1, 12, 30)],
+    [T_('ench', 'diamond_sword', 1, 8, 3, 30, null, { pm: 0.2, lvl: [5, 19] })]],
 };
-const TRADER_COMMON = ['sea_pickle', 'slime_ball', 'glowstone', 'nautilus_shell', 'fern', 'sugar_cane', 'pumpkin', 'kelp', 'cactus', 'dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip',
-  'white_tulip', 'pink_tulip', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'wheat_seeds', 'beetroot_seeds', 'pumpkin_seeds', 'melon_seeds', 'acacia_sapling', 'birch_sapling', 'dark_oak_sapling', 'jungle_sapling', 'oak_sapling',
-  'spruce_sapling', 'cherry_sapling', 'mangrove_propagule', 'red_dye', 'white_dye', 'blue_dye', 'pink_dye', 'black_dye', 'green_dye', 'light_gray_dye', 'magenta_dye', 'yellow_dye', 'gray_dye', 'purple_dye', 'light_blue_dye', 'lime_dye',
-  'orange_dye', 'brown_dye', 'cyan_dye', 'brain_coral_block', 'bubble_coral_block', 'fire_coral_block', 'horn_coral_block', 'tube_coral_block', 'vine', 'brown_mushroom', 'red_mushroom', 'lily_pad', 'small_dripleaf', 'sand', 'red_sand',
-  'pointed_dripstone', 'rooted_dirt', 'moss_block'];
-const TRADER_RARE = [['tropical_fish_bucket', 1, 5], ['pufferfish_bucket', 1, 5], ['packed_ice', 1, 3], ['blue_ice', 1, 6], ['gunpowder', 1, 1], ['podzol', 3, 1], ['name_tag', 1, 5]];
+// the wandering trader's trade sets of 26.3: [how many, trades]
+const TRADER_SETS = {
+  buying: [2, [T_('buy', 'potion', 1, 1, 2, 1, null, { potion: 'water' }), T_('buy', 'water_bucket', 1, 2, 2, 1), T_('buy', 'milk_bucket', 1, 2, 2, 1), T_('buy', 'fermented_spider_eye', 1, 3, 2, 1), T_('buy', 'baked_potato', 4, 1, 2, 1), T_('buy', 'hay_block', 1, 1, 2, 1)]],
+  common: [5, [T_('sell', 'white_dye', 3, 1, 12, 1), T_('sell', 'orange_dye', 3, 1, 12, 1), T_('sell', 'magenta_dye', 3, 1, 12, 1), T_('sell', 'light_blue_dye', 3, 1, 12, 1), T_('sell', 'yellow_dye', 3, 1, 12, 1), T_('sell', 'lime_dye', 3, 1, 12, 1), T_('sell', 'pink_dye', 3, 1, 12, 1), T_('sell', 'gray_dye', 3, 1, 12, 1), T_('sell', 'light_gray_dye', 3, 1, 12, 1), T_('sell', 'cyan_dye', 3, 1, 12, 1), T_('sell', 'purple_dye', 3, 1, 12, 1), T_('sell', 'blue_dye', 3, 1, 12, 1), T_('sell', 'brown_dye', 3, 1, 12, 1), T_('sell', 'green_dye', 3, 1, 12, 1), T_('sell', 'red_dye', 3, 1, 12, 1), T_('sell', 'black_dye', 3, 1, 12, 1), T_('sell', 'tropical_fish_bucket', 1, 3, 12, 1), T_('sell', 'pufferfish_bucket', 1, 3, 12, 1), T_('sell', 'sea_pickle', 1, 2, 5, 1), T_('sell', 'slime_ball', 1, 4, 5, 1), T_('sell', 'glowstone', 1, 2, 5, 1), T_('sell', 'nautilus_shell', 1, 5, 5, 1), T_('sell', 'fern', 1, 1, 12, 1), T_('sell', 'sugar_cane', 1, 1, 8, 1), T_('sell', 'pumpkin', 1, 1, 12, 1), T_('sell', 'kelp', 1, 3, 12, 1), T_('sell', 'cactus', 1, 3, 8, 1), T_('sell', 'dandelion', 1, 1, 12, 1), T_('sell', 'poppy', 1, 1, 12, 1), T_('sell', 'blue_orchid', 1, 1, 8, 1), T_('sell', 'allium', 1, 1, 12, 1), T_('sell', 'azure_bluet', 1, 1, 12, 1), T_('sell', 'red_tulip', 1, 1, 12, 1), T_('sell', 'orange_tulip', 1, 1, 12, 1), T_('sell', 'white_tulip', 1, 1, 12, 1), T_('sell', 'pink_tulip', 1, 1, 12, 1), T_('sell', 'oxeye_daisy', 1, 1, 12, 1), T_('sell', 'cornflower', 1, 1, 12, 1), T_('sell', 'lily_of_the_valley', 1, 1, 7, 1), T_('sell', 'open_eyeblossom', 1, 1, 7, 1), T_('sell', 'wheat_seeds', 1, 1, 12, 1), T_('sell', 'beetroot_seeds', 1, 1, 12, 1), T_('sell', 'pumpkin_seeds', 1, 1, 12, 1), T_('sell', 'melon_seeds', 1, 1, 12, 1), T_('sell', 'acacia_sapling', 1, 5, 8, 1), T_('sell', 'birch_sapling', 1, 5, 8, 1), T_('sell', 'dark_oak_sapling', 1, 5, 8, 1), T_('sell', 'jungle_sapling', 1, 5, 8, 1), T_('sell', 'oak_sapling', 1, 5, 8, 1), T_('sell', 'spruce_sapling', 1, 5, 8, 1), T_('sell', 'cherry_sapling', 1, 5, 8, 1), T_('sell', 'pale_oak_sapling', 1, 5, 8, 1), T_('sell', 'mangrove_propagule', 1, 5, 8, 1), T_('sell', 'poplar_sapling', 1, 5, 8, 1), T_('sell', 'brain_coral_block', 1, 3, 8, 1), T_('sell', 'bubble_coral_block', 1, 3, 8, 1), T_('sell', 'fire_coral_block', 1, 3, 8, 1), T_('sell', 'horn_coral_block', 1, 3, 8, 1), T_('sell', 'tube_coral_block', 1, 3, 8, 1), T_('sell', 'vine', 3, 1, 12, 1), T_('sell', 'pale_hanging_moss', 3, 1, 12, 1), T_('sell', 'brown_mushroom', 3, 1, 12, 1), T_('sell', 'red_mushroom', 3, 1, 12, 1), T_('sell', 'lily_pad', 5, 1, 2, 1), T_('sell', 'small_dripleaf', 2, 1, 5, 1), T_('sell', 'sand', 8, 1, 8, 1), T_('sell', 'red_sand', 4, 1, 6, 1), T_('sell', 'pointed_dripstone', 2, 1, 5, 1), T_('sell', 'sulfur_spike', 2, 1, 5, 1), T_('sell', 'rooted_dirt', 2, 1, 5, 1), T_('sell', 'moss_block', 2, 1, 5, 1), T_('sell', 'pale_moss_block', 2, 1, 5, 1), T_('sell', 'wildflowers', 1, 1, 12, 1), T_('sell', 'tall_dry_grass', 1, 1, 12, 1), T_('sell', 'firefly_bush', 1, 3, 12, 1), T_('sell', 'golden_dandelion', 1, 2, 12, 1), T_('sell', 'name_tag', 1, 1, 5, 1), T_('sell', 'shelf_mushroom', 3, 1, 12, 1)]],
+  uncommon: [2, [T_('sell', 'packed_ice', 1, 1, 6, 1), T_('sell', 'blue_ice', 1, 6, 6, 1), T_('sell', 'gunpowder', 4, 1, 2, 1), T_('sell', 'podzol', 3, 3, 6, 1), T_('sell', 'acacia_log', 8, 1, 12, 1), T_('sell', 'birch_log', 8, 1, 12, 1), T_('sell', 'dark_oak_log', 8, 1, 12, 1), T_('sell', 'jungle_log', 8, 1, 12, 1), T_('sell', 'oak_log', 8, 1, 12, 1), T_('sell', 'spruce_log', 8, 1, 12, 1), T_('sell', 'cherry_log', 8, 1, 12, 1), T_('sell', 'mangrove_log', 8, 1, 12, 1), T_('sell', 'pale_oak_log', 8, 1, 12, 1), T_('sell', 'poplar_log', 8, 1, 12, 1), T_('ench', 'iron_pickaxe', 1, 1, 1, 1, null, { pm: 0.2, lvl: [5, 19] }), T_('sell', 'potion', 1, 5, 1, 1, null, { potion: 'long_invisibility' })]],
+};
 const itemIdOr = n => ITEM_BY_NAME[n] ? ITEM_BY_NAME[n].id : null;
 // make one offer from a template
 function makeOffer(tp, R) {
+  // EnchantRandomlyFunction over #tradeable (the curses, frost walker and mending too): the price grows with the level, doubled for
+  // the treasure enchantments (#double_trade_price)
   if (tp.kind === 'book') {
-    const list = ENCHANTS.filter(e => !e.curse && e.key !== 'soul_speed' && e.key !== 'swift_sneak' && e.key !== 'wind_burst');
+    const list = ENCHANTS.filter(e => e.key !== 'soul_speed' && e.key !== 'swift_sneak' && e.key !== 'wind_burst');
     const e = list[Math.floor(R() * list.length)], lvl = 1 + Math.floor(R() * e.max);
     let price = Math.min(64, 2 + Math.floor(R() * (5 + lvl * 10)) + 3 * lvl);
     if (e.treasure) price = Math.min(64, price * 2);
-    return { buy: [I.EMERALD, price], buy2: [I.BOOK, 1], sell: { id: I.ENCHANTED_BOOK, count: 1, tag: { stored: { [e.key]: lvl } } }, uses: 0, max: 12, xp: 1 };
+    return { buy: [I.EMERALD, price], buy2: [I.BOOK, 1], sell: { id: I.ENCHANTED_BOOK, count: 1, tag: { stored: { [e.key]: lvl } } }, uses: 0, max: tp.uses || 12, xp: tp.xp || 1 };
   }
   const id = itemIdOr(tp.item);
   if (id === null) return null;
-  if (tp.kind === 'buy') return { buy: [id, tp.count], sell: { id: I.EMERALD, count: tp.price }, uses: 0, max: tp.uses, xp: tp.xp };
+  if (tp.kind === 'buy') { const o = { buy: [id, tp.count], sell: { id: I.EMERALD, count: tp.price }, uses: 0, max: tp.uses, xp: tp.xp }; if (tp.x && tp.x.potion) o.buyPotion = tp.x.potion; return o; }
   const out = { id, count: tp.count };
   if (tp.kind === 'ench') {
-    const lvl = 5 + Math.floor(R() * 15), opts = rollEnchants(id, (ITEMS[id] && ITEMS[id].ench) || 1, lvl, R);
+    const [l0, l1] = (tp.x && tp.x.lvl) || [5, 19], lvl = l0 + Math.floor(R() * (l1 - l0 + 1)), opts = rollEnchants(id, (ITEMS[id] && ITEMS[id].ench) || 1, lvl, R);
     if (opts && opts.length) { out.tag = { ench: {} }; for (const [k, l] of opts) out.tag.ench[k] = l; }
     return { buy: [I.EMERALD, Math.min(64, tp.price + lvl)], sell: out, uses: 0, max: tp.uses, xp: tp.xp };
   }
-  if (tp.kind === 'tipped') { const pots = ['swiftness', 'healing', 'poison', 'slowness', 'strength', 'regeneration', 'fire_resistance', 'night_vision']; out.tag = { potion: pots[Math.floor(R() * pots.length)] }; }
+  // SetRandomPotionFunction over #tradeable potions
+  if (tp.kind === 'tipped') { const pots = TRADEABLE_POTIONS.filter(k => typeof POTION_TYPES === 'undefined' || POTION_TYPES.some(p => p.key === k)); out.tag = { potion: pots[Math.floor(R() * pots.length)] }; }
+  const x = tp.x || {};
+  // SetRandomDyesFunction: one dye, and one more each of two times in four
+  if (x.dyes) { const dyes = [COLORS[Math.floor(R() * 16)]]; for (let k = 0; k < 2; k++) if (R() < 0.75) dyes.push(COLORS[Math.floor(R() * 16)]); out.tag = { color: applyDyes(undefined, dyes) }; }
+  if (x.stew) { const [e, sec] = x.stew[Math.floor(R() * x.stew.length)]; out.tag = { effect: [e, sec * 20] }; }
+  if (x.potion) out.tag = { potion: x.potion };
   const o = { buy: [I.EMERALD, tp.price], sell: out, uses: 0, max: tp.uses, xp: tp.xp };
   if (tp.second) { const s2 = itemIdOr(tp.second[0]); if (s2 !== null) o.buy2 = [s2, tp.second[1]]; }
   return o;
 }
+const TRADEABLE_POTIONS = ['wind_charged', 'oozing', 'infested', 'weaving', 'night_vision', 'long_night_vision', 'invisibility', 'long_invisibility', 'fire_resistance', 'long_fire_resistance',
+  'leaping', 'long_leaping', 'strong_leaping', 'slowness', 'long_slowness', 'strong_slowness', 'turtle_master', 'long_turtle_master', 'strong_turtle_master', 'swiftness', 'long_swiftness',
+  'strong_swiftness', 'water_breathing', 'long_water_breathing', 'healing', 'strong_healing', 'harming', 'strong_harming', 'poison', 'long_poison', 'strong_poison', 'regeneration',
+  'long_regeneration', 'strong_regeneration', 'strength', 'long_strength', 'strong_strength', 'weakness', 'long_weakness', 'slow_falling', 'long_slow_falling'];
+// a trade set: two of the level's trades the villager's type may offer
 function addTrades(m, level) {
   const pool = TRADES[m.data.prof] && TRADES[m.data.prof][level - 1];
   if (!pool) return;
-  const R = Math.random, list = pool.slice();
+  // (an explorer map of a structure the world can't have is dropped, as Java drops one that finds nothing)
+  const R = Math.random, list = pool.filter(tp => (!(tp.x && tp.x.only) || tp.x.only.includes(m.data.vtype))
+    && (tp.kind !== 'explorer' || typeof EXPLORER === 'undefined' || (EXPLORER[tp.item] && STRUCTURES.some(q => q.name === (EXPLORER[tp.item].struct || tp.item)))));
   for (let k = 0; k < 2 && list.length; k++) { const tp = list.splice(Math.floor(R() * list.length), 1)[0], o = makeOffer(tp, R); if (o) m.data.trades.push(o); }
 }
 // villager clothes by biome
@@ -26440,12 +26514,14 @@ function initVillager(m, o) {
   if (m.data.prof !== 'none' && m.data.prof !== 'nitwit') addTrades(m, 1);
   m.persistent = true;
 }
+// WanderingTrader.updateTrades: two things it buys, five common offers and two uncommon ones
 function initTrader(m) {
   m.data.trades = [];
-  const R = Math.random, c = TRADER_COMMON.slice();
-  for (let k = 0; k < 5; k++) { const n = c.splice(Math.floor(R() * c.length), 1)[0], id = itemIdOr(n); if (id !== null) m.data.trades.push({ buy: [I.EMERALD, 1 + Math.floor(R() * 3)], sell: { id, count: 1 + Math.floor(R() * 3) }, uses: 0, max: 8, xp: 1 }); }
-  const [n, cnt, price] = TRADER_RARE[Math.floor(R() * TRADER_RARE.length)], id = itemIdOr(n);
-  if (id !== null) m.data.trades.push({ buy: [I.EMERALD, price], sell: { id, count: cnt }, uses: 0, max: 4, xp: 1 });
+  const R = Math.random;
+  for (const set of ['buying', 'common', 'uncommon']) {
+    const [n, pool] = TRADER_SETS[set], list = pool.filter(tp => itemIdOr(tp.item) !== null);
+    for (let k = 0; k < n && list.length; k++) { const o = makeOffer(list.splice(Math.floor(R() * list.length), 1)[0], R); if (o) m.data.trades.push(o); }
+  }
   m.data.despawn = 48000;
 }
 
@@ -26678,7 +26754,7 @@ function offerPrice(o, p) {
   if (hero) n -= Math.max(Math.floor((0.3 + 0.0625 * (hero - 1)) * o.buy[1]), 1);
   return Math.max(1, n);
 }
-function canPay(st, need, id) { return st && st.id === id && st.count >= need; }
+function canPay(st, need, id, potion) { return st && st.id === id && st.count >= need && (!potion || (st.tag && st.tag.potion === potion)); }
 Object.assign(Game.prototype, {
   openMerchant(m) {
     m.data.trading = true; this.trader = m;
@@ -26693,7 +26769,7 @@ SCREEN_LOGIC.merchant = {
   result(ui) {
     const o = this.offers(ui)[ui.inv.pick], [a, b] = ui.inv.local;
     if (!o || o.uses >= o.max) return null;
-    if (!canPay(a, offerPrice(o, ui.game.player), o.buy[0])) return null;
+    if (!canPay(a, offerPrice(o, ui.game.player), o.buy[0], o.buyPotion)) return null;
     if (o.buy2 && !canPay(b, o.buy2[1], o.buy2[0])) return null;
     return copyStack(o.sell, o.sell.count);
   },
@@ -26750,16 +26826,16 @@ SCREEN_LOGIC.merchant = {
   autoFill(ui, o) {
     const p = ui.game.player, L = ui.inv.local;
     for (let k = 0; k < 2; k++) if (L[k]) { const left = p.addItem(L[k]); L[k] = left > 0 ? Object.assign({}, L[k], { count: left }) : null; }
-    const take = (id, n, k) => {
+    const take = (id, n, k, potion) => {
       for (let i = 0; i < 36 && (!L[k] || L[k].count < n); i++) {
         const s = p.inv[i];
-        if (!s || s.id !== id || s.tag) continue;
+        if (!s || s.id !== id || (s.tag && !(potion && s.tag.potion === potion))) continue;
         const need = n - (L[k] ? L[k].count : 0), m = Math.min(need, s.count);
-        if (!L[k]) L[k] = { id, count: 0 };
+        if (!L[k]) L[k] = s.tag ? { id, count: 0, tag: Object.assign({}, s.tag) } : { id, count: 0 };
         L[k].count += m; s.count -= m; if (s.count <= 0) p.inv[i] = null;
       }
     };
-    take(o.buy[0], offerPrice(o, p), 0);
+    take(o.buy[0], offerPrice(o, p), 0, o.buyPotion);
     if (o.buy2) take(o.buy2[0], o.buy2[1], 1);
     ui.game.ui.refreshHotbar();
   },
@@ -27161,47 +27237,54 @@ class EnderDragon extends Mob {
 // extra: { ench: level, [min, max] or { key: level } }, { rand: true } (one random enchantment), { book: key, [keys] or true, lvl },
 // { potion }, { dmg: [min, max] } (durability left), { amp: [min, max] } (ominous bottles), { trim: { pattern, material } }
 const LOOT = {
-  village_plains_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['dandelion', 2], ['poppy', 1], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['apple', 10, 1, 5], ['book', 1], ['feather', 1], ['emerald', 2, 1, 4], ['oak_sapling', 5, 1, 2]]]],
-  village_desert_house: [[[3, 8], [['clay_ball', 1], ['green_dye', 1], ['cactus', 10, 1, 4], ['wheat', 10, 1, 7], ['bread', 10, 1, 4], ['book', 1], ['dead_bush', 2, 1, 3], ['emerald', 1, 1, 3]]]],
-  village_savanna_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['short_grass', 5], ['tall_grass', 5], ['bread', 10, 1, 4], ['wheat_seeds', 10, 1, 5], ['emerald', 2, 1, 4], ['acacia_sapling', 10, 1, 2], ['saddle', 1], ['torch', 1, 1, 2], ['bucket', 1]]]],
-  village_taiga_house: [[[3, 8], [['iron_nugget', 1, 1, 5], ['fern', 2], ['large_fern', 2], ['potato', 10, 1, 7], ['sweet_berries', 5, 1, 7], ['bread', 10, 1, 4], ['pumpkin_seeds', 5, 1, 5], ['pumpkin_pie', 1], ['emerald', 2, 1, 4], ['spruce_sapling', 5, 1, 5], ['spruce_sign', 1], ['spruce_log', 10, 1, 5]]]],
-  village_snowy_house: [[[3, 8], [['blue_ice', 1], ['snow_block', 4], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['beetroot_seeds', 10, 1, 5], ['beetroot_soup', 1], ['furnace', 1], ['emerald', 1, 1, 4], ['snowball', 10, 1, 7], ['coal', 5, 1, 4]]]],
-  village_weaponsmith: [[[3, 8], [['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['bread', 15, 1, 3], ['apple', 15, 1, 3], ['iron_pickaxe', 5], ['iron_sword', 5], ['iron_chestplate', 5], ['iron_helmet', 5],
-    ['iron_leggings', 5], ['iron_boots', 5], ['obsidian', 5, 3, 7], ['oak_sapling', 5, 3, 7], ['saddle', 3], ['iron_horse_armor', 1], ['golden_horse_armor', 1], ['diamond_horse_armor', 1]]]],
-  ancient_city: [[[5, 10], [['enchanted_golden_apple', 1, 1, 2], ['music_disc_otherside', 1], ['compass', 2], ['sculk_catalyst', 2, 1, 2], ['name_tag', 2], ['diamond_hoe', 2, 1, 1, { ench: 40 }], ['lead', 2],
-    ['diamond_horse_armor', 2], ['saddle', 2], ['music_disc_13', 2], ['music_disc_cat', 2], ['diamond_leggings', 2, 1, 1, { ench: 40 }], ['enchanted_book', 3, 1, 1, { book: 'swift_sneak' }], ['sculk', 3, 4, 10],
-    ['sculk_sensor', 3, 1, 3], ['candle', 3, 1, 4], ['amethyst_shard', 3, 1, 15], ['experience_bottle', 3, 1, 3], ['glow_berries', 3, 1, 15], ['iron_leggings', 3, 1, 1, { ench: 30 }], ['echo_shard', 4, 1, 4],
-    ['disc_fragment_5', 4, 1, 3], ['potion', 5, 1, 3, { potion: 'regeneration' }], ['enchanted_book', 5, 1, 1, { book: true }], ['bone', 5, 1, 15], ['soul_torch', 5, 1, 15], ['coal', 7, 6, 15]]],
-    [[1, 1], [[null, 64], ['ward_armor_trim_smithing_template', 4], ['silence_armor_trim_smithing_template', 1]]]],
-  ancient_city_ice_box: [[[4, 10], [['suspicious_stew', 1, 1, 6], ['golden_carrot', 1, 1, 10], ['baked_potato', 1, 1, 10], ['packed_ice', 2, 2, 6], ['snowball', 4, 2, 6]]]],
-  desert_pyramid: [[[2, 4], [['diamond', 5, 1, 3], ['iron_ingot', 15, 1, 5], ['gold_ingot', 15, 2, 7], ['emerald', 15, 1, 3], ['bone', 25, 4, 6], ['spider_eye', 25, 1, 3], ['rotten_flesh', 25, 3, 7], ['saddle', 20],
-    ['iron_horse_armor', 15], ['golden_horse_armor', 10], ['diamond_horse_armor', 5], ['enchanted_book', 20, 1, 1, { book: true }], ['golden_apple', 20], ['enchanted_golden_apple', 2], [null, 15]]],
+  village_plains_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['dandelion', 2], ['poppy', 1], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['apple', 10, 1, 5], ['book', 1], ['feather', 1], ['emerald', 2, 1, 4], ['oak_sapling', 5, 1, 2]]], [[1, 1], [['bundle', 1], [null, 2]]]],
+  village_desert_house: [[[3, 8], [['clay_ball', 1], ['green_dye', 1], ['cactus', 10, 1, 4], ['wheat', 10, 1, 7], ['bread', 10, 1, 4], ['book', 1], ['dead_bush', 2, 1, 3], ['emerald', 1, 1, 3]]], [[1, 1], [['bundle', 1], [null, 2]]]],
+  village_savanna_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['short_grass', 5], ['tall_grass', 5], ['bread', 10, 1, 4], ['wheat_seeds', 10, 1, 5], ['emerald', 2, 1, 4], ['acacia_sapling', 10, 1, 2], ['saddle', 1], ['torch', 1, 1, 2], ['bucket', 1]]], [[1, 1], [['bundle', 1], [null, 2]]]],
+  village_taiga_house: [[[3, 8], [['iron_nugget', 1, 1, 5], ['fern', 2], ['large_fern', 2], ['potato', 10, 1, 7], ['sweet_berries', 5, 1, 7], ['bread', 10, 1, 4], ['pumpkin_seeds', 5, 1, 5], ['pumpkin_pie', 1], ['emerald', 2, 1, 4], ['spruce_sapling', 5, 1, 5], ['spruce_sign', 1], ['spruce_log', 10, 1, 5]]], [[1, 1], [['bundle', 1], [null, 2]]]],
+  village_snowy_house: [[[3, 8], [['blue_ice', 1], ['snow_block', 4], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['beetroot_seeds', 10, 1, 5], ['beetroot_soup', 1], ['furnace', 1], ['emerald', 1, 1, 4], ['snowball', 10, 1, 7], ['coal', 5, 1, 4]]], [[1, 1], [['bundle', 1], [null, 2]]]],
+  village_weaponsmith: [[[3, 8], [['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['bread', 15, 1, 3], ['apple', 15, 1, 3], ['iron_pickaxe', 5], ['iron_sword', 5], ['iron_spear', 5],
+    ['copper_spear', 7], ['iron_chestplate', 5], ['iron_helmet', 5], ['iron_leggings', 5], ['iron_boots', 5], ['obsidian', 5, 3, 7], ['oak_sapling', 5, 3, 7], ['saddle', 3], ['copper_horse_armor', 1],
+    ['iron_horse_armor', 1], ['golden_horse_armor', 1], ['diamond_horse_armor', 1]]], [[1, 1], [['bundle', 1], [null, 2]]]],
+  ancient_city: [[[5, 10], [['enchanted_golden_apple', 1, 1, 2], ['music_disc_otherside', 1], ['compass', 2], ['sculk_catalyst', 2, 1, 2], ['diamond_hoe', 2, 1, 1, { dmg: [0.8, 1], ench: [30, 50] }],
+    ['lead', 2], ['diamond_horse_armor', 2], ['leather', 2, 1, 5], ['music_disc_13', 2], ['music_disc_cat', 2], ['diamond_leggings', 2, 1, 1, { ench: [30, 50] }], ['enchanted_book', 3, 1, 1, { book: 'swift_sneak' }],
+    ['sculk', 3, 4, 10], ['sculk_sensor', 3, 1, 3], ['candle', 3, 1, 4], ['amethyst_shard', 3, 1, 15], ['experience_bottle', 3, 1, 3], ['glow_berries', 3, 1, 15], ['iron_leggings', 3, 1, 1, { ench: [20, 39] }],
+    ['echo_shard', 4, 1, 3], ['disc_fragment_5', 4, 1, 3], ['potion', 5, 1, 3, { potion: 'strong_regeneration' }], ['enchanted_book', 5, 1, 1, { book: true }], ['book', 5, 3, 10], ['bone', 5, 1, 15],
+    ['soul_torch', 5, 1, 15], ['coal', 7, 6, 15]]],
+    [[1, 1], [[null, 75], ['ward_armor_trim_smithing_template', 4], ['silence_armor_trim_smithing_template', 1]]]],
+  ancient_city_ice_box: [[[4, 10], [['suspicious_stew', 1, 2, 6, { stew: [['night_vision', 7, 10], ['blindness', 5, 7]] }], ['golden_carrot', 1, 1, 10], ['baked_potato', 1, 1, 10], ['packed_ice', 2, 2, 6],
+    ['snowball', 4, 2, 6]]]],
+  desert_pyramid: [[[2, 4], [['diamond', 5, 1, 3], ['iron_ingot', 15, 1, 5], ['gold_ingot', 15, 2, 7], ['emerald', 15, 1, 3], ['bone', 25, 4, 6], ['spider_eye', 25, 1, 3], ['rotten_flesh', 25, 3, 7], ['leather', 20, 1, 5],
+    ['copper_horse_armor', 15], ['iron_horse_armor', 15], ['golden_horse_armor', 10], ['diamond_horse_armor', 5], ['enchanted_book', 20, 1, 1, { book: true }], ['golden_apple', 20], ['enchanted_golden_apple', 2], [null, 15]]],
     [[4, 4], [['bone', 10, 1, 8], ['gunpowder', 10, 1, 8], ['rotten_flesh', 10, 1, 8], ['string', 10, 1, 8], ['sand', 10, 1, 8]]],
-    [[1, 1], [[null, 6], ['dune_armor_trim_smithing_template', 1]]]],
-  jungle_temple: [[[2, 6], [['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 15, 2, 7], ['emerald', 2, 1, 3], ['bone', 20, 4, 6], ['rotten_flesh', 16, 3, 7], ['saddle', 3], ['iron_horse_armor', 1],
-    ['golden_horse_armor', 1], ['diamond_horse_armor', 1], ['enchanted_book', 1, 1, 1, { book: true }], ['bamboo', 15, 1, 3]]], [[1, 1], [[null, 2], ['wild_armor_trim_smithing_template', 1]]]],
-  simple_dungeon: [[[1, 3], [['saddle', 20], ['golden_apple', 15], ['enchanted_golden_apple', 2], ['music_disc_otherside', 2], ['music_disc_13', 15], ['music_disc_cat', 15], ['name_tag', 20],
-    ['golden_horse_armor', 10], ['iron_horse_armor', 15], ['diamond_horse_armor', 5], ['enchanted_book', 10, 1, 1, { book: true }]]],
+    [[1, 1], [[null, 6], ['dune_armor_trim_smithing_template', 1, 2, 2]]]],
+  jungle_temple: [[[2, 6], [['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 15, 2, 7], ['bamboo', 15, 1, 3], ['emerald', 2, 1, 3], ['bone', 20, 4, 6], ['rotten_flesh', 16, 3, 7], ['leather', 3, 1, 5],
+    ['copper_horse_armor', 1], ['iron_horse_armor', 1], ['golden_horse_armor', 1], ['diamond_horse_armor', 1], ['book', 1, 1, 1, { ench: 30 }]]], [[1, 1], [[null, 2], ['wild_armor_trim_smithing_template', 1, 2, 2]]]],
+  simple_dungeon: [[[1, 3], [['leather', 20, 1, 5], ['golden_apple', 15], ['enchanted_golden_apple', 2], ['music_disc_otherside', 2], ['music_disc_13', 15], ['music_disc_cat', 15], ['name_tag', 20],
+    ['golden_horse_armor', 10], ['copper_horse_armor', 15], ['iron_horse_armor', 15], ['diamond_horse_armor', 5], ['enchanted_book', 10, 1, 1, { book: true }]]],
     [[1, 4], [['iron_ingot', 10, 1, 4], ['gold_ingot', 5, 1, 4], ['bread', 20], ['wheat', 20, 1, 4], ['bucket', 10], ['redstone', 15, 1, 4], ['coal', 15, 1, 4], ['melon_seeds', 10, 2, 4], ['pumpkin_seeds', 10, 2, 4], ['beetroot_seeds', 10, 2, 4]]],
     [[3, 3], [['bone', 10, 1, 8], ['gunpowder', 10, 1, 8], ['rotten_flesh', 10, 1, 8], ['string', 10, 1, 8]]]],
   igloo_chest: [[[2, 8], [['apple', 15, 1, 3], ['coal', 15, 1, 4], ['gold_nugget', 10, 1, 3], ['stone_axe', 2], ['rotten_flesh', 10], ['emerald', 1], ['wheat', 10, 2, 3]]], [[1, 1], [['golden_apple', 1]]]],
   pillager_outpost: [[[0, 1], [['crossbow', 1]]], [[2, 3], [['wheat', 7, 3, 5], ['potato', 5, 2, 5], ['carrot', 5, 3, 5]]], [[1, 3], [['dark_oak_log', 1, 2, 3]]],
     [[2, 3], [['experience_bottle', 7], ['string', 4, 1, 6], ['arrow', 4, 2, 7], ['tripwire_hook', 3, 1, 3], ['iron_ingot', 3, 1, 3], ['enchanted_book', 1, 1, 1, { book: true }]]],
-    [[1, 1], [[null, 3], ['sentry_armor_trim_smithing_template', 1]]], [[1, 1], [[null, 9], ['goat_horn', 1]]]],
-  shipwreck_supply: [[[3, 10], [['paper', 8, 1, 12], ['potato', 7, 2, 6], ['moss_block', 7, 1, 4], ['poisonous_potato', 7, 2, 6], ['carrot', 7, 4, 8], ['wheat', 7, 8, 21], ['suspicious_stew', 10], ['coal', 6, 2, 8],
-    ['rotten_flesh', 5, 5, 24], ['pumpkin', 2, 1, 3], ['bamboo', 2, 1, 3], ['gunpowder', 3, 1, 5], ['tnt', 1, 1, 2], ['leather_helmet', 3, 1, 1, { ench: 15 }], ['leather_chestplate', 3, 1, 1, { ench: 15 }], ['leather_boots', 3, 1, 1, { ench: 15 }]]],
-    [[1, 1], [[null, 5], ['coast_armor_trim_smithing_template', 1]]]],
-  shipwreck_treasure: [[[3, 6], [['iron_ingot', 90, 1, 5], ['gold_ingot', 10, 1, 5], ['emerald', 40, 1, 5], ['diamond', 5], ['experience_bottle', 5]]], [[2, 5], [['iron_nugget', 50, 1, 10], ['gold_nugget', 10, 1, 10], ['lapis_lazuli', 20, 1, 10]]]],
-  shipwreck_map: [[[1, 1], [['map', 1]]], [[3, 3], [['compass', 1], ['map', 1], ['clock', 1], ['paper', 20, 1, 10], ['feather', 10, 1, 5], ['book', 5, 1, 5]]], [[1, 1], [[null, 5], ['coast_armor_trim_smithing_template', 1]]]],
+    [[0, 1], [['goat_horn', 1]]], [[1, 1], [[null, 3], ['sentry_armor_trim_smithing_template', 1, 2, 2]]]],
+  shipwreck_supply: [[[3, 10], [['paper', 8, 1, 12], ['potato', 7, 2, 6], ['moss_block', 7, 1, 4], ['poisonous_potato', 7, 2, 6], ['carrot', 7, 4, 8], ['wheat', 7, 8, 21], ['suspicious_stew', 10, 1, 1, { stew: [['night_vision', 7, 10], ['jump_boost', 7, 10], ['weakness', 6, 8], ['blindness', 5, 7], ['poison', 10, 20], ['saturation', 7, 10]] }],
+    ['coal', 6, 2, 8], ['rotten_flesh', 5, 5, 24], ['pumpkin', 2, 1, 3], ['bamboo', 2, 1, 3], ['gunpowder', 3, 1, 5], ['tnt', 1, 1, 2], ['leather_helmet', 3, 1, 1, { rand: true }], ['leather_chestplate', 3, 1, 1, { rand: true }],
+    ['leather_leggings', 3, 1, 1, { rand: true }], ['leather_boots', 3, 1, 1, { rand: true }]]],
+    [[1, 1], [[null, 5], ['coast_armor_trim_smithing_template', 1, 2, 2]]], [[1, 1], [[null, 148], ['copper_nautilus_armor', 20], ['iron_nautilus_armor', 10], ['golden_nautilus_armor', 5], ['diamond_nautilus_armor', 2]]]],
+  shipwreck_treasure: [[[3, 6], [['iron_ingot', 90, 1, 5], ['gold_ingot', 10, 1, 5], ['emerald', 40, 1, 5], ['diamond', 5], ['experience_bottle', 5]]], [[2, 5], [['iron_nugget', 50, 1, 10], ['gold_nugget', 10, 1, 10], ['lapis_lazuli', 20, 1, 10]]],
+    [[1, 1], [[null, 5], ['coast_armor_trim_smithing_template', 1, 2, 2]]], [[1, 1], [[null, 148], ['copper_nautilus_armor', 20], ['iron_nautilus_armor', 10], ['golden_nautilus_armor', 5], ['diamond_nautilus_armor', 2]]]],
+  shipwreck_map: [[[1, 1], [['map', 1]]], [[3, 3], [['compass', 1], ['map', 1], ['clock', 1], ['paper', 20, 1, 10], ['feather', 10, 1, 5], ['book', 5, 1, 5]]], [[1, 1], [[null, 5], ['coast_armor_trim_smithing_template', 1, 2, 2]]],
+    [[1, 1], [[null, 148], ['copper_nautilus_armor', 20], ['iron_nautilus_armor', 10], ['golden_nautilus_armor', 5], ['diamond_nautilus_armor', 2]]]],
   buried_treasure: [[[1, 1], [['heart_of_the_sea', 1]]], [[5, 8], [['iron_ingot', 20, 1, 4], ['gold_ingot', 10, 1, 4], ['tnt', 5, 1, 2]]], [[1, 3], [['emerald', 5, 4, 8], ['diamond', 5, 1, 2], ['prismarine_crystals', 5, 1, 5]]],
-    [[0, 1], [['leather_chestplate', 1], ['iron_sword', 1]]], [[2, 2], [['cooked_cod', 1, 2, 4], ['cooked_salmon', 1, 2, 4]]], [[0, 2], [['potion', 1, 1, 1, { potion: 'water_breathing' }]]]],
-  ruined_portal: [[[4, 8], [['obsidian', 40, 1, 2], ['flint', 40, 1, 4], ['iron_nugget', 40, 9, 18], ['flint_and_steel', 40], ['fire_charge', 40], ['golden_apple', 15], ['gold_nugget', 15, 4, 24], ['golden_sword', 15, 1, 1, { ench: 15 }],
-    ['golden_axe', 15, 1, 1, { ench: 15 }], ['golden_hoe', 15, 1, 1, { ench: 15 }], ['golden_shovel', 15, 1, 1, { ench: 15 }], ['golden_pickaxe', 15, 1, 1, { ench: 15 }], ['golden_boots', 15, 1, 1, { ench: 15 }],
-    ['golden_chestplate', 15, 1, 1, { ench: 15 }], ['golden_helmet', 15, 1, 1, { ench: 15 }], ['golden_leggings', 15, 1, 1, { ench: 15 }], ['glistering_melon_slice', 5, 4, 12], ['golden_horse_armor', 5], ['light_weighted_pressure_plate', 5],
-    ['golden_carrot', 5, 4, 12], ['clock', 5], ['gold_ingot', 5, 2, 8], ['bell', 1], ['enchanted_golden_apple', 1], ['gold_block', 1, 1, 2]]]],
+    [[0, 1], [['leather_chestplate', 1], ['iron_sword', 1], ['iron_spear', 1]]], [[2, 2], [['cooked_cod', 1, 2, 4], ['cooked_salmon', 1, 2, 4]]], [[0, 2], [['potion', 1, 1, 1, { potion: 'water_breathing' }]]],
+    [[1, 1], [[null, 148], ['copper_nautilus_armor', 20], ['iron_nautilus_armor', 10], ['golden_nautilus_armor', 5], ['diamond_nautilus_armor', 2]]]],
+  ruined_portal: [[[4, 8], [['obsidian', 40, 1, 2], ['flint', 40, 1, 4], ['iron_nugget', 40, 9, 18], ['flint_and_steel', 40], ['fire_charge', 40], ['golden_apple', 15], ['gold_nugget', 15, 4, 24], ['golden_sword', 15, 1, 1, { rand: true }],
+    ['golden_axe', 15, 1, 1, { rand: true }], ['golden_hoe', 15, 1, 1, { rand: true }], ['golden_shovel', 15, 1, 1, { rand: true }], ['golden_pickaxe', 15, 1, 1, { rand: true }], ['golden_boots', 15, 1, 1, { rand: true }],
+    ['golden_chestplate', 15, 1, 1, { rand: true }], ['golden_helmet', 15, 1, 1, { rand: true }], ['golden_leggings', 15, 1, 1, { rand: true }], ['glistering_melon_slice', 5, 4, 12], ['golden_horse_armor', 5], ['light_weighted_pressure_plate', 5],
+    ['golden_carrot', 5, 4, 12], ['clock', 5], ['gold_ingot', 5, 2, 8], ['bell', 1], ['enchanted_golden_apple', 1], ['gold_block', 1, 1, 2]]], [[1, 1], [[null, 1], ['lodestone', 2, 1, 2]]]],
   abandoned_mineshaft: [[[1, 1], [['golden_apple', 20], ['enchanted_golden_apple', 1], ['name_tag', 30], ['enchanted_book', 10, 1, 1, { book: true }], ['iron_pickaxe', 5], [null, 5]]],
     [[2, 4], [['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['redstone', 5, 4, 9], ['lapis_lazuli', 5, 4, 9], ['diamond', 3, 1, 2], ['coal', 10, 3, 8], ['bread', 15, 1, 3], ['glow_berries', 15, 3, 6], ['melon_seeds', 10, 2, 4],
-      ['pumpkin_seeds', 10, 2, 4], ['beetroot_seeds', 10, 2, 4]]], [[3, 3], [['rail', 20, 4, 8], ['powered_rail', 5, 1, 4], ['detector_rail', 5, 1, 4], ['activator_rail', 5, 1, 4], ['torch', 15, 1, 16]]]],
+      ['pumpkin_seeds', 10, 2, 4], ['beetroot_seeds', 10, 2, 4]]], [[3, 3], [['rail', 20, 4, 8], ['powered_rail', 5, 1, 4], ['detector_rail', 5, 1, 4], ['activator_rail', 5, 1, 4], ['torch', 15, 1, 16], ['music_disc_bounce', 10]]]],
   trial_chambers_corridor: [[[1, 3], [['iron_axe', 1, 1, 1, { dmg: [0.4, 0.9], rand: true }], ['honeycomb', 1, 2, 8], ['stone_axe', 2, 1, 1, { dmg: [0.15, 0.8] }], ['stone_pickaxe', 2, 1, 1, { dmg: [0.15, 0.8] }],
     ['ender_pearl', 2, 1, 2], ['bamboo_hanging_sign', 2, 1, 4], ['bamboo_planks', 2, 3, 6], ['scaffolding', 2, 2, 10], ['torch', 2, 3, 6], ['tuff', 3, 8, 20]]]],
   trial_chambers_supply: [[[3, 5], [['arrow', 2, 4, 14], ['tipped_arrow', 1, 4, 8, { potion: 'poison' }], ['tipped_arrow', 1, 4, 8, { potion: 'slowness' }], ['baked_potato', 2, 2, 4], ['glow_berries', 2, 2, 10],
@@ -27212,26 +27295,32 @@ const LOOT = {
     ['cake', 20, 1, 4], ['amethyst_shard', 20, 8, 20], ['iron_block', 20, 1, 2]]]],
   trial_chambers_intersection_barrel: [[[1, 3], [['diamond_axe', 1, 1, 1, { dmg: [0.4, 0.9], rand: true }], ['diamond_pickaxe', 1, 1, 1, { dmg: [0.15, 0.8] }], ['diamond', 1, 1, 3], ['compass', 1], ['bucket', 1, 1, 2],
     ['golden_axe', 4, 1, 1, { dmg: [0.15, 0.8] }], ['golden_pickaxe', 4, 1, 1, { dmg: [0.15, 0.8] }], ['bamboo_planks', 10, 5, 15], ['baked_potato', 10, 6, 10]]]],
-  end_city_treasure: [[[2, 6], [['diamond', 5, 2, 7], ['iron_ingot', 10, 4, 8], ['gold_ingot', 15, 2, 7], ['emerald', 2, 2, 6], ['beetroot_seeds', 5, 1, 10], ['saddle', 3], ['iron_horse_armor', 1], ['golden_horse_armor', 1],
-    ['diamond_horse_armor', 1], ['diamond_sword', 3, 1, 1, { ench: 25 }], ['diamond_boots', 3, 1, 1, { ench: 25 }], ['diamond_chestplate', 3, 1, 1, { ench: 25 }], ['diamond_leggings', 3, 1, 1, { ench: 25 }],
-    ['diamond_helmet', 3, 1, 1, { ench: 25 }], ['diamond_pickaxe', 3, 1, 1, { ench: 25 }], ['diamond_shovel', 3, 1, 1, { ench: 25 }], ['iron_sword', 3, 1, 1, { ench: 25 }], ['iron_pickaxe', 3, 1, 1, { ench: 25 }]]],
+  end_city_treasure: [[[2, 6], [['diamond', 5, 2, 7], ['iron_ingot', 10, 4, 8], ['gold_ingot', 15, 2, 7], ['emerald', 2, 2, 6], ['beetroot_seeds', 5, 1, 10], ['saddle', 3], ['copper_horse_armor', 1], ['iron_horse_armor', 1],
+    ['golden_horse_armor', 1], ['diamond_horse_armor', 1], ['diamond_sword', 3, 1, 1, { ench: [20, 39] }], ['diamond_spear', 3, 1, 1, { ench: [20, 39] }], ['diamond_boots', 3, 1, 1, { ench: [20, 39] }],
+    ['diamond_chestplate', 3, 1, 1, { ench: [20, 39] }], ['diamond_leggings', 3, 1, 1, { ench: [20, 39] }], ['diamond_helmet', 3, 1, 1, { ench: [20, 39] }], ['diamond_pickaxe', 3, 1, 1, { ench: [20, 39] }],
+    ['diamond_shovel', 3, 1, 1, { ench: [20, 39] }], ['iron_sword', 3, 1, 1, { ench: [20, 39] }], ['iron_boots', 3, 1, 1, { ench: [20, 39] }], ['iron_chestplate', 3, 1, 1, { ench: [20, 39] }],
+    ['iron_leggings', 3, 1, 1, { ench: [20, 39] }], ['iron_helmet', 3, 1, 1, { ench: [20, 39] }], ['iron_pickaxe', 3, 1, 1, { ench: [20, 39] }], ['iron_shovel', 3, 1, 1, { ench: [20, 39] }]]],
     [[1, 1], [[null, 14], ['spire_armor_trim_smithing_template', 1]]]],
   end_ship_elytra: [[[1, 1], [['elytra', 1]]], [[2, 4], [['diamond', 5, 2, 7], ['iron_ingot', 10, 4, 8], ['gold_ingot', 15, 2, 7], ['emerald', 2, 2, 6], ['diamond_sword', 3, 1, 1, { ench: 25 }]]]],
   nether_bridge: [[[2, 4], [['diamond', 5, 1, 3], ['iron_ingot', 5, 1, 5], ['gold_ingot', 15, 1, 3], ['golden_sword', 5], ['golden_chestplate', 5], ['flint_and_steel', 5], ['nether_wart', 5, 3, 7], ['saddle', 10],
-    ['golden_horse_armor', 8], ['iron_horse_armor', 5], ['diamond_horse_armor', 3], ['obsidian', 2, 2, 4]]], [[1, 1], [[null, 14], ['rib_armor_trim_smithing_template', 1]]]],
-  bastion_treasure: [[[3, 4], [['netherite_ingot', 15], ['ancient_debris', 10], ['netherite_scrap', 8], ['diamond_sword', 6, 1, 1, { ench: 30 }], ['diamond_chestplate', 6, 1, 1, { ench: 30 }], ['diamond_helmet', 6, 1, 1, { ench: 30 }],
-    ['diamond_leggings', 6, 1, 1, { ench: 30 }], ['diamond_boots', 6, 1, 1, { ench: 30 }], ['diamond', 6, 2, 6], ['enchanted_golden_apple', 2]]], [[1, 1], [['netherite_upgrade_smithing_template', 1]]],
-    [[1, 1], [[null, 11], ['snout_armor_trim_smithing_template', 1]]],
-    [[3, 4], [['spectral_arrow', 1, 12, 25], ['gold_block', 1, 2, 5], ['iron_block', 1, 2, 5], ['gold_ingot', 1, 3, 9], ['iron_ingot', 1, 3, 9], ['crying_obsidian', 1, 3, 5], ['quartz', 1, 8, 23], ['gilded_blackstone', 1, 5, 15], ['magma_cream', 1, 3, 8]]]],
-  bastion_other: [[[1, 1], [['diamond_pickaxe', 6, 1, 1, { ench: 20 }], ['diamond_shovel', 6], ['crossbow', 6, 1, 1, { ench: 20 }], ['ancient_debris', 12], ['netherite_scrap', 4], ['spectral_arrow', 10, 10, 22],
-    ['piglin_banner_pattern', 9], ['music_disc_pigstep', 5], ['golden_carrot', 12, 6, 17], ['golden_apple', 9], ['enchanted_book', 10, 1, 1, { book: 'soul_speed' }]]],
-    [[2, 2], [['iron_sword', 2, 1, 1, { ench: 15 }], ['iron_block', 2], ['golden_boots', 1, 1, 1, { book: false }], ['golden_axe', 1], ['gold_block', 2], ['crossbow', 1], ['gold_ingot', 1, 1, 6], ['iron_ingot', 1, 1, 6],
-      ['golden_sword', 1], ['golden_chestplate', 1], ['golden_helmet', 1], ['golden_leggings', 1], ['crying_obsidian', 1, 1, 5]]],
-    [[1, 1], [[null, 9], ['netherite_upgrade_smithing_template', 1]]], [[1, 1], [[null, 11], ['snout_armor_trim_smithing_template', 1]]],
-    [[3, 4], [['blackstone', 1, 2, 7], ['chain', 1, 2, 10], ['magma_cream', 1, 2, 6], ['bone_block', 1, 3, 6], ['iron_nugget', 1, 2, 8], ['obsidian', 1, 4, 6], ['gold_nugget', 1, 2, 8], ['string', 1, 4, 6], ['arrow', 2, 5, 17], ['cooked_porkchop', 1]]]],
+    ['golden_horse_armor', 8], ['copper_horse_armor', 5], ['iron_horse_armor', 5], ['diamond_horse_armor', 3], ['obsidian', 2, 2, 4]]], [[1, 1], [[null, 14], ['rib_armor_trim_smithing_template', 1]]]],
+  bastion_treasure: [[[3, 3], [['netherite_ingot', 15], ['ancient_debris', 10], ['netherite_scrap', 8], ['ancient_debris', 4, 2, 2], ['diamond_sword', 6, 1, 1, { dmg: [0.8, 1], rand: true }],
+    ['diamond_spear', 6, 1, 1, { dmg: [0.8, 1], rand: true }], ['diamond_chestplate', 6, 1, 1, { dmg: [0.8, 1], rand: true }], ['diamond_helmet', 6, 1, 1, { dmg: [0.8, 1], rand: true }],
+    ['diamond_leggings', 6, 1, 1, { dmg: [0.8, 1], rand: true }], ['diamond_boots', 6, 1, 1, { dmg: [0.8, 1], rand: true }], ['diamond_sword', 6], ['diamond_spear', 6], ['diamond_chestplate', 5], ['diamond_helmet', 5], ['diamond_boots', 5],
+    ['diamond_leggings', 5], ['diamond', 5, 2, 6], ['enchanted_golden_apple', 2]]],
+    [[3, 4], [['spectral_arrow', 1, 12, 25], ['gold_block', 1, 2, 5], ['iron_block', 1, 2, 5], ['gold_ingot', 1, 3, 9], ['iron_ingot', 1, 3, 9], ['crying_obsidian', 1, 3, 5], ['quartz', 1, 8, 23], ['gilded_blackstone', 1, 5, 15],
+      ['magma_cream', 1, 3, 8]]],
+    [[1, 1], [[null, 11], ['snout_armor_trim_smithing_template', 1]]], [[1, 1], [['netherite_upgrade_smithing_template', 1]]]],
+  bastion_other: [[[1, 1], [['diamond_pickaxe', 6, 1, 1, { rand: true }], ['diamond_shovel', 6], ['crossbow', 6, 1, 1, { dmg: [0.1, 0.9], rand: true }], ['ancient_debris', 12], ['netherite_scrap', 4],
+    ['spectral_arrow', 10, 10, 22], ['piglin_banner_pattern', 9], ['music_disc_pigstep', 5], ['golden_carrot', 12, 6, 17], ['golden_apple', 9], ['enchanted_book', 10, 1, 1, { book: 'soul_speed' }]]],
+    [[2, 2], [['iron_sword', 2, 1, 1, { dmg: [0.1, 0.9], rand: true }], ['iron_block', 2], ['golden_boots', 1, 1, 1, { rand: ['soul_speed'] }], ['golden_axe', 1, 1, 1, { rand: true }], ['gold_block', 2], ['crossbow', 1],
+      ['gold_ingot', 2, 1, 6], ['iron_ingot', 2, 1, 6], ['golden_sword', 1], ['golden_chestplate', 1], ['golden_helmet', 1], ['golden_leggings', 1], ['golden_boots', 1], ['crying_obsidian', 2, 1, 5]]],
+    [[3, 4], [['gilded_blackstone', 2, 1, 5], ['chain', 1, 2, 10], ['magma_cream', 2, 2, 6], ['bone_block', 1, 3, 6], ['iron_nugget', 1, 2, 8], ['obsidian', 1, 4, 6], ['gold_nugget', 1, 2, 8], ['string', 1, 4, 6],
+      ['arrow', 2, 5, 17], ['cooked_porkchop', 1]]],
+    [[1, 1], [[null, 11], ['snout_armor_trim_smithing_template', 1]]], [[1, 1], [[null, 9], ['netherite_upgrade_smithing_template', 1]]]],
   stronghold_corridor: [[[2, 3], [['ender_pearl', 10], ['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['redstone', 5, 4, 9], ['bread', 15, 1, 3], ['apple', 15, 1, 3], ['iron_pickaxe', 5], ['iron_sword', 5],
-    ['iron_chestplate', 5], ['iron_helmet', 5], ['iron_leggings', 5], ['iron_boots', 5], ['golden_apple', 1], ['saddle', 1], ['iron_horse_armor', 1], ['golden_horse_armor', 1], ['diamond_horse_armor', 1], ['music_disc_otherside', 1],
-    ['enchanted_book', 1, 1, 1, { book: true }]]], [[1, 1], [[null, 9], ['eye_armor_trim_smithing_template', 1]]]],
+    ['iron_chestplate', 5], ['iron_helmet', 5], ['iron_leggings', 5], ['iron_boots', 5], ['golden_apple', 1], ['leather', 1, 1, 5], ['copper_horse_armor', 1], ['iron_horse_armor', 1], ['golden_horse_armor', 1],
+    ['diamond_horse_armor', 1], ['music_disc_otherside', 1], ['book', 1, 1, 1, { ench: 30 }]]], [[1, 1], [[null, 9], ['eye_armor_trim_smithing_template', 1]]]],
   swamp_hut: [[[2, 4], [['glass_bottle', 3, 1, 3], ['redstone', 2, 1, 4], ['glowstone_dust', 2, 1, 4], ['sugar', 2, 1, 4], ['spider_eye', 2, 1, 2], ['gunpowder', 2, 1, 2], ['stick', 2, 1, 3]]]],
 };
 function enchantTag(id, level, R) {
@@ -27260,19 +27349,21 @@ function lootStack(e, R) {
     if (typeof x.ench === 'object' && !Array.isArray(x.ench)) tag().ench = Object.assign({}, x.ench);
     else { const t = enchantTag(it.id, rollRange(x.ench, R), R); if (t) st.tag = t; }
   }
-  if (x && x.rand) { const en = randomEnchant(it.id, R); if (en) tag().ench = { [en[0]]: en[1] }; }
+  // EnchantWithLevelsFunction on a book makes an enchanted book that stores what it rolled
+  if (x && x.ench && name === 'book' && st.tag && st.tag.ench) { st.id = I.ENCHANTED_BOOK; st.tag = { stored: st.tag.ench }; }
+  if (x && x.rand) { const en = randomEnchant(it.id, R, Array.isArray(x.rand) ? x.rand : null); if (en) tag().ench = { [en[0]]: en[1] }; }
   if (x && x.book) {
     let key = x.book, lvl = 1;
-    if (key === true) {
-      const list = ENCHANTS.filter(en => !en.curse || R() < 0.3);
-      const en = list[Math.floor(R() * list.length)];
-      key = en.key; lvl = 1 + Math.floor(R() * en.max);
-    } else if (Array.isArray(key)) [key, lvl] = randomEnchant(it.id, R, key);
+    // EnchantRandomlyFunction over #on_random_loot: any of them alike (the curses too), at a random level
+    if (key === true) [key, lvl] = randomEnchant(it.id, R);
+    else if (Array.isArray(key)) [key, lvl] = randomEnchant(it.id, R, key);
     else { const en = ENCHANTS.find(q => q.key === key); lvl = en ? 1 + Math.floor(R() * en.max) : 1; }
     if (x.lvl) lvl = x.lvl;
     st.tag = { stored: { [key]: lvl } };
   }
   if (x && x.potion) tag().potion = x.potion;
+  // SetStewEffectFunction: one of the effects, for a number of seconds
+  if (x && x.stew) { const [e, a, b] = x.stew[Math.floor(R() * x.stew.length)]; tag().effect = [e, (a + Math.floor(R() * (b - a + 1))) * 20]; }
   if (x && x.amp) tag().amp = rollRange(x.amp, R);
   if (x && x.trim) tag().trim = Object.assign({}, x.trim);
   // SetItemDamageFunction: the share of durability left
@@ -29183,11 +29274,16 @@ Game.prototype.biomePreview = function (map) {
   }
   map.ver = (map.ver || 0) + 1;
 };
-const EXPLORER = { buried_treasure: { scale: 1, mark: 'red_x', name: 'Buried Treasure Map' }, trial_chambers: { scale: 2, mark: 'trial_chambers', name: 'Trial Explorer Map' } };
+// ExplorationMapFunction: the structure it looks for (villages of one style), the marker, the zoom (2 unless the loot says otherwise)
+const EXPLORER = { buried_treasure: { scale: 1, mark: 'red_x', name: 'Buried Treasure Map' }, trial_chambers: { scale: 2, mark: 'trial_chambers', name: 'Trial Explorer Map' },
+  ocean_monument: { scale: 2, mark: 'monument', name: 'Ocean Explorer Map' }, woodland_mansion: { scale: 2, mark: 'mansion', name: 'Woodland Explorer Map' },
+  jungle_temple: { scale: 2, mark: 'jungle_temple', name: 'Jungle Explorer Map' }, swamp_hut: { scale: 2, mark: 'swamp_hut', name: 'Swamp Explorer Map' } };
+for (const st of ['desert', 'plains', 'savanna', 'snowy', 'taiga']) EXPLORER['village_' + st] = { scale: 2, struct: 'village', style: st, mark: 'village_' + st, name: titleCase(st) + ' Village Map' };
 Game.prototype.createExplorerMap = function (dest, x, z) {
-  const S = STRUCTURES.find(q => q.name === dest), E = EXPLORER[dest];
+  const E = EXPLORER[dest], name = E && E.struct || dest, S = STRUCTURES.find(q => q.name === name);
   if (!S || !E || this.world.dim !== 'overworld') return null;
-  const p = nearestStructure(this.genInfo(), dest, x, z, Math.ceil(800 / S.region) + 1);
+  // within 100 chunks, as the trades and loot ask
+  const p = nearestStructure(this.genInfo(), name, x, z, Math.ceil(1600 / S.region) + 1, E.style ? q => q.style === E.style : null);
   if (!p) return null;
   const id = this.createMap(p.X, p.Z, E.scale, 'overworld', { unlimited: true, marks: [{ k: E.mark, x: p.X, z: p.Z }] });
   this.biomePreview(this.mapById(id));
@@ -29235,13 +29331,20 @@ function paperCanvas(checker) {
 }
 defSkin('map/map_background', 64, 64, () => paperCanvas(false));
 defSkin('map/map_background_checkerboard', 64, 64, () => paperCanvas(true));
-const DECO_PAL = { w: [255, 255, 255], k: [40, 40, 40], r: [190, 30, 30], o: [216, 120, 50], O: [150, 76, 30], g: [70, 200, 70], G: [30, 110, 30] };
+const DECO_PAL = { w: [255, 255, 255], k: [40, 40, 40], r: [190, 30, 30], o: [216, 120, 50], O: [150, 76, 30], g: [70, 200, 70], G: [30, 110, 30], y: [222, 200, 120],
+  b: [70, 110, 190], B: [100, 70, 40], c: [60, 160, 160], C: [30, 90, 90] };
 for (const [n, rows] of [
   ['player', ['   ww   ', '   ww   ', '  wwww  ', '  wwww  ', ' wwwwww ', ' wwwwww ', 'wwwkkwww', 'ww    ww']],
   ['player_off_map', ['', '', '  www   ', ' wwwww  ', ' wwwww  ', ' wwwww  ', '  www   ', '']],
   ['player_off_limits', ['', '', '', '   ww   ', '   ww   ', '', '', '']],
   ['red_x', ['r      r', 'rr    rr', ' rr  rr ', '  rrrr  ', '  rrrr  ', ' rr  rr ', 'rr    rr', 'r      r']],
   ['trial_chambers', ['  oooo  ', ' oOOOOo ', 'oOooooOo', 'oOo  oOo', 'oOo  oOo', 'oOooooOo', ' oOOOOo ', '  oooo  ']],
+  // a house for each village style (roof colour), a temple, a hut, the monument and the mansion
+  ...[['desert', 'y'], ['plains', 'b'], ['savanna', 'o'], ['snowy', 'w'], ['taiga', 'B']].map(([st, c]) => ['village_' + st, ['   ' + c + c + '   ', '  ' + c + c + c + c + '  ', ' ' + c.repeat(6) + ' ', c.repeat(8), ' kkkkkk ', ' kk  kk ', ' kk  kk ', ' kkkkkk ']]),
+  ['jungle_temple', ['   GG   ', '  GGGG  ', '  kkkk  ', ' GGGGGG ', ' kkkkkk ', 'GGGGGGGG', 'kk kk kk', 'kkkkkkkk']],
+  ['swamp_hut', ['  kkkk  ', ' kkkkkk ', 'kkkkkkkk', ' kO  Ok ', ' kOOOOk ', ' k    k ', ' k    k ', '']],
+  ['monument', ['   cc   ', '  cccc  ', ' cCCCCc ', 'cccccccc', 'cCcCCcCc', 'cccccccc', 'cC cc Cc', 'cc cc cc']],
+  ['mansion', ['  kkkk  ', ' kkkkkk ', 'kOkOOkOk', 'kkkkkkkk', 'kOkOOkOk', 'kkkkkkkk', 'kOk  kOk', 'kkk  kkk']],
   ['frame', ['   gg   ', '   gg   ', '  gggg  ', '  gggg  ', ' gggggg ', ' gggggg ', 'gggGGggg', 'gg    gg']],
 ]) defSkin('map/decorations/' + n, 8, 8, () => skinFromRows(8, 8, rows.map(r => r.padEnd(8)), DECO_PAL));
 // map pixels as RGBA (transparent where nothing was drawn)
@@ -29489,7 +29592,6 @@ lootStack = function (e, R) {
   if (x && x.explore) return { id: I.FILLED_MAP, count: 1, tag: { post: 'explore', dest: x.explore, name: EXPLORER[x.explore].name } };
   return _lootStackM(e, R);
 };
-if (TRADES.cartographer && TRADES.cartographer[2]) TRADES.cartographer[2][1] = T_('explorer', 'trial_chambers', 1, 12, 12, 10, ['compass', 1]);
 const _makeOfferM = makeOffer;
 makeOffer = function (tp, R) {
   if (tp.kind === 'explorer') return { buy: [I.EMERALD, tp.price], buy2: [I.COMPASS, 1], sell: { id: I.FILLED_MAP, count: 1, tag: { post: 'explore', dest: tp.item, name: EXPLORER[tp.item].name } }, uses: 0, max: tp.uses, xp: tp.xp };
@@ -46559,7 +46661,7 @@ function vPriceMul(o) {
   return 0.05;
 }
 const _makeOfferVL = makeOffer;
-makeOffer = function (tp, R) { const o = _makeOfferVL(tp, R); if (o) { o.pm = vPriceMul(o); o.demand = 0; } return o; };
+makeOffer = function (tp, R) { const o = _makeOfferVL(tp, R); if (o) { o.pm = tp.x && tp.x.pm !== undefined ? tp.x.pm : tp.kind === 'buy' || tp.kind === 'sell' || tp.kind === 'tipped' ? 0.05 : vPriceMul(o); o.demand = 0; } return o; };
 // MerchantOffer.updateDemand
 const vUpdateDemand = d => { for (const o of d.trades) { if (o.pm === undefined) o.pm = vPriceMul(o); o.demand = (o.demand || 0) + o.uses - (o.max - o.uses); } };
 // Villager.shouldRestock and restock: at work, at most twice a day and 2400 ticks apart. On a new day (or 12000 ticks after the last
@@ -57830,6 +57932,165 @@ Game.prototype.waterFog = function (env, eye) {
   env.fogStart = -8;
   env.fogEnd = Math.min(OPTIONS.renderDist * 16, 96 * Math.max(0.25, u) * (CLOSER_WATER_FOG.has(b) ? 0.85 : 1));
 };
+})();
+
+/* @file 177_bundles.js */
+/* ===================================================================
+   Part 71: bundles (Java 1.21.2) — a bag holding up to a stack's worth of mixed items: an item that stacks to 64 takes
+   1/64 of it, one that stacks to 16 takes 1/16, one that doesn't stack fills it, a bundle inside takes 1/16 and what it
+   holds; shulker boxes don't go in. With a bundle in hand, a left click on a slot puts what's there into it and a right
+   click on an empty slot takes out a stack; with a stack in hand, a left click on a bundle puts the stack in, and an empty
+   hand's right click takes a stack out. The mouse wheel over a bundle picks the stack that comes out next (the last one
+   put in otherwise). Using one throws its stacks out one by one. Its tooltip shows what it holds and how full it is, and
+   a bar on the slot how full it is. Bundles come in sixteen colours; dyeing one keeps what's inside.
+   =================================================================== */
+(() => {
+const FULL = 64;   // a bundle's room, in 64ths
+const isBundle = st => !!(st && ITEMS[st.id] && ITEMS[st.id].bundle);
+const contents = st => (st && st.tag && st.tag.bundle) || [];
+// BundleContents.getWeight of one item, in 64ths
+function unitWeight(st) {
+  if (isBundle(st)) return 4 + fillOf(st);
+  if ((st.id === B.BEEHIVE || st.id === B.BEE_NEST) && st.tag && st.tag.bees && st.tag.bees.length) return FULL;
+  return FULL / maxStack(st.id);
+}
+const fillOf = st => contents(st).reduce((a, s) => a + unitWeight(s) * s.count, 0);
+const canHold = st => !!st && st.count > 0 && !/shulker_box$/.test(ITEMS[st.id] ? ITEMS[st.id].name : '');
+function setContents(bundle, list) {
+  bundle.tag = Object.assign({}, bundle.tag || {});
+  if (list.length) bundle.tag.bundle = list; else delete bundle.tag.bundle;
+  delete bundle.tag.sel;
+  if (!Object.keys(bundle.tag).length) delete bundle.tag;
+}
+// BundleContents.Mutable.tryInsert: as many as there is room for, merged into a stack of the same kind (which moves to the
+// front) or put in front; how many went in
+function bundleInsert(bundle, st) {
+  if (!canHold(st) || st === bundle) return 0;
+  const n = Math.min(st.count, Math.max(0, Math.floor((FULL - fillOf(bundle)) / unitWeight(st) + 1e-9)));
+  if (n <= 0) return 0;
+  const list = contents(bundle).slice(), k = maxStack(st.id) > 1 ? list.findIndex(s => sameItem(s, st)) : -1;
+  if (k >= 0) { const s = list.splice(k, 1)[0]; list.unshift(Object.assign(copyStack(s), { count: s.count + n })); }
+  else list.unshift(copyStack(st, n));
+  st.count -= n;
+  setContents(bundle, list);
+  return n;
+}
+// BundleContents.Mutable.removeOne: the chosen stack, or the first one
+function bundleRemove(bundle) {
+  const list = contents(bundle).slice();
+  if (!list.length) return null;
+  const sel = bundle.tag && bundle.tag.sel, i = sel !== undefined && sel < list.length ? sel : 0;
+  const st = list.splice(i, 1)[0];
+  setContents(bundle, list);
+  return st;
+}
+Object.assign(window, { isBundle, bundleInsert, bundleRemove, bundleFill: fillOf });
+
+/* ---------------- in the inventory ---------------- */
+const BUNDLE_SOUND = { insert: 'bundle_insert', fail: 'bundle_insert_fail', remove: 'bundle_remove_one' };
+const _slotClickBU = UI.prototype.slotClick;
+UI.prototype.slotClick = function (c, i, btn) {
+  const st = this.getSlot(c, i), cur = this.cursor, g = this.game;
+  const done = snd => { const p = g.player; g.sound(snd, p.x, p.y + 1, p.z); this.renderInv(); this.refreshHotbar(); this.showTip(); };
+  // BundleItem.overrideStackedOnOther: the bundle in hand
+  if (isBundle(cur) && c !== 'out' && c !== 'palette') {
+    if (btn === 0 && st) { const n = bundleInsert(cur, st); this.setSlot(c, i, st.count > 0 ? st : null); return done(n > 0 ? BUNDLE_SOUND.insert : BUNDLE_SOUND.fail); }
+    if (btn === 2 && !st) { const out = bundleRemove(cur); if (out) { if (this.accepts(c, i, out)) this.setSlot(c, i, out); else bundleInsert(cur, out); } return done(BUNDLE_SOUND.remove); }
+  }
+  // BundleItem.overrideOtherStackedOnMe: the bundle in the slot
+  if (isBundle(st) && c !== 'out' && c !== 'palette') {
+    if (btn === 0 && cur && !isBundle(cur)) { const n = bundleInsert(st, cur); if (cur.count <= 0) this.cursor = null; this.setSlot(c, i, st); return done(n > 0 ? BUNDLE_SOUND.insert : BUNDLE_SOUND.fail); }
+    if (btn === 0 && cur && isBundle(cur)) { const n = bundleInsert(st, cur); if (n) this.cursor = null; this.setSlot(c, i, st); return done(n > 0 ? BUNDLE_SOUND.insert : BUNDLE_SOUND.fail); }
+    if (btn === 2 && !cur && contents(st).length) { this.cursor = bundleRemove(st); this.setSlot(c, i, st); return done(BUNDLE_SOUND.remove); }
+  }
+  return _slotClickBU.call(this, c, i, btn);
+};
+// the mouse wheel over a bundle with something in it: which stack comes out next (BundleMouseActions)
+document.addEventListener('wheel', e => {
+  const ui = window.game && window.game.ui;
+  if (!ui || !ui.inv || !ui.hover || ui.cursor) return;
+  const st = ui.getSlot(ui.hover[0], ui.hover[1]), n = contents(st).length;
+  if (!isBundle(st) || !n) return;
+  e.preventDefault();
+  const cur = st.tag.sel === undefined ? -1 : st.tag.sel, step = e.deltaY > 0 ? 1 : -1;
+  st.tag.sel = ((cur + step) % n + n) % n;
+  ui.showTip();
+}, { passive: false });
+// the bar that shows how full it is: blue, red when full
+const _itemHTMLBU = UI.prototype.itemHTML;
+UI.prototype.itemHTML = function (st) {
+  let h = _itemHTMLBU.call(this, st);
+  if (isBundle(st) && contents(st).length) {
+    const f = fillOf(st), w = Math.min(1 + Math.floor(12 * f / FULL), 13);
+    h = h.replace(/<\/div>$/, `<div class="dur"><i style="width:${w * 2}px;background:${f >= FULL ? '#ff5555' : '#7087ff'}"></i></div></div>`);
+  }
+  return h;
+};
+// the tooltip: the stacks it holds (twelve at most, then how many more), the one that comes out next outlined, and how full
+const _showTipBU = UI.prototype.showTip;
+UI.prototype.showTip = function () {
+  _showTipBU.call(this);
+  const st = this.hover && !this.cursor ? this.getSlot(this.hover[0], this.hover[1]) : null;
+  if (!isBundle(st)) return;
+  const list = contents(st), t = $('tooltip'), sel = st.tag && st.tag.sel !== undefined ? Math.min(st.tag.sel, list.length - 1) : -1, f = fillOf(st);
+  const cells = list.slice(0, list.length > 12 ? 11 : 12).map((s, k) => `<span class="bslot${k === sel ? ' sel' : ''}"><img src="${iconFor(s.id, s.tag)}">${s.count > 1 ? `<span class="cnt">${s.count}</span>` : ''}</span>`);
+  if (list.length > 12) cells.push(`<span class="bslot more">+${list.length - 11}</span>`);
+  const bar = `<div class="bbar"><i style="width:${Math.round(100 * Math.min(1, f / FULL))}%;background:${f >= FULL ? '#ff5555' : '#7087ff'}"></i><span>${!list.length ? 'Empty' : f >= FULL ? 'Full' : ''}</span></div>`;
+  // ClientBundleTooltip.drawSelectedItemTooltip: the picked stack's name in its own little box above, once one is picked
+  const pick = sel >= 0 ? `<div class="bpick">${escapeHTML(stackName(list[sel]))}</div>` : '';
+  t.innerHTML = pick + t.innerHTML.replace(/^(<div[^>]*class="tt0"[^>]*>.*?<\/div>)/, '$1') + `<div class="bgrid">${cells.join('')}</div>` + bar;
+  this.posCursor();
+};
+const css = document.createElement('style');
+css.textContent = `.bgrid{display:grid;grid-template-columns:repeat(4,36px);gap:2px;margin:4px 0}.bslot{position:relative;width:36px;height:36px;background:#8b8b8b;
+border:2px solid #373737;box-sizing:border-box}.bslot img{width:32px;height:32px;image-rendering:pixelated}.bslot.sel{border-color:#ffffff}.bslot .cnt{position:absolute;right:1px;bottom:0}
+.bslot.more{display:flex;align-items:center;justify-content:center;color:#fff}.bpick{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);margin-bottom:4px;
+white-space:nowrap;padding:3px 5px;background:rgba(16,0,16,.94);border:2px solid #2a0a5e;color:#fff}.bbar{position:relative;height:12px;background:#373737;border:1px solid #000;margin-top:2px}
+.bbar i{position:absolute;left:0;top:0;bottom:0}.bbar span{position:absolute;left:0;right:0;text-align:center;font-size:10px;line-height:12px;color:#fff}`;
+document.head.appendChild(css);
+
+/* ---------------- using one: its stacks thrown out one by one ---------------- */
+const _useKindBU = Player.prototype.useKind;
+Player.prototype.useKind = function (st) { if (isBundle(st)) return contents(st).length ? 'bundle' : null; return _useKindBU.call(this, st); };
+const _useTickBU = Player.prototype.useTick;
+// BundleItem.onUseTick: the first stack at once, then after half a second one every other tick, for at most 10 seconds
+Player.prototype.useTick = function (u, st) {
+  if (u.kind !== 'bundle') return _useTickBU.call(this, u, st);
+  if (u.t === 1 || (u.t > 11 && u.t % 2 === 0)) {
+    const out = bundleRemove(st);
+    if (out) { this.game.dropItem(this.x, this.y + 1.3, this.z, out, true, true); this.game.sound('bundle_drop_contents', this.x, this.y + 1, this.z); this.game.ui.refreshHotbar(); }
+  }
+  if (!contents(st).length || u.t >= 200) { this.using = null; this.useCd = 4; }
+};
+// sounds of a leather bag
+for (const [n, t] of [['bundle_insert', 'Item packaged'], ['bundle_insert_fail', 'Bundle full'], ['bundle_remove_one', 'Item unpackaged'], ['bundle_drop_contents', 'Bundle empties']]) { SND_CAT[n] = 'player'; SUB_TEXT[n] = t; }
+const _audioPlayBU = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^bundle_/.test(name)) return _audioPlayBU.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  if (name === 'bundle_insert_fail') this.tone(dst, 'square', 200, 160, 0.06, 0.08);
+  else this.noiseHit(dst, 'bandpass', name === 'bundle_remove_one' ? 900 : 650, 1.2, 0.08, name === 'bundle_drop_contents' ? 0.35 : 0.25);
+};
+
+/* ---------------- crafting and looks ---------------- */
+shaped('bundle', 1, ['-', '#'], { '-': 'string', '#': 'leather' });
+// crafting_transmute: a bundle of any colour and a dye make a bundle of that colour, with what it held
+const BUNDLE_IDS = ['bundle', ...COLORS.map(c => c + '_bundle')].map(itemOf);
+for (const c of COLORS) RECIPES.push({ type: 'special', out: itemOf(c + '_bundle'), count: 1,
+  test: g => g.length === 2 && g.some(id => BUNDLE_IDS.includes(id) && id !== itemOf(c + '_bundle')) && g.some(id => id === itemOf(c + '_dye')),
+  fn: (grid, out) => { const b = grid.find(s => s && BUNDLE_IDS.includes(s.id)); if (b && b.tag) out.tag = JSON.parse(JSON.stringify(b.tag)); return out; } });
+TEXGEN.push(function texBundles() {
+  const leather = [150, 92, 56];
+  const draw = col => (d, r) => {
+    fillEl(d, 8, 10, 5.6, 4.6, (x, y) => mul(col, 0.82 + (y < 9 ? 0.18 : 0) + r() * 0.08));
+    for (let x = 5; x <= 10; x++) sp(d, x, 6, mul(col, 0.7));
+    for (const [x, y] of [[6, 4], [7, 3], [8, 3], [9, 4], [6, 5], [9, 5]]) sp(d, x, y, [200, 180, 140]);
+  };
+  IT('bundle', draw(leather));
+  for (const c of COLORS) { const v = DYE_RGB[c]; IT(c + '_bundle', draw([(v >> 16) & 255, (v >> 8) & 255, v & 255].map(x => x * 0.85 + 20))); }
+});
 })();
 
 </script>
