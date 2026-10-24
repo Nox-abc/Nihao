@@ -983,6 +983,39 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   26.3, crafted and (for concrete) stonecut like other stairs and slabs, in the Colored Blocks tab.
 - **Dropping with Q keeps an item's data** (Part 71): an item thrown with the drop key keeps its enchantments, name,
   damage and contents (it used to come out as a plain copy).
+- **The Copper Age's blocks** (Part 72): copper torches (a copper nugget over coal or charcoal over a stick make four)
+  burn with a green flame; copper lanterns (eight copper nuggets around a copper torch), copper chains (an ingot between
+  two nuggets) and copper bars (six ingots make sixteen) come in all four stages of weathering, and lightning rods now
+  weather too. Each has a waxed twin made with honeycomb, an axe scrapes a stage off, and lanterns and hanging signs hang
+  from copper chains as well. The chain is called the iron chain now, as in 26.3 (chains in older worlds and inventories
+  carry over).
+- **Netherite horse armor** (Part 72): diamond horse armor upgrades at the smithing table with a netherite upgrade
+  template and a netherite ingot: 19 armor points, 3 toughness and a tenth of knockback resistance, and it doesn't burn.
+  Horse armor's toughness now counts too (diamond's 2).
+- **Copper weathers like Java's** (Part 72): a random tick on unwaxed copper tries about one time in eighteen; then the
+  copper looks at the weathering copper within four blocks: if any of it is fresher, nothing happens, and otherwise the
+  more of it is already further along, the likelier it is to move on (fresh copper a quarter less likely still). Lightning
+  striking weathering copper, or the copper a lightning rod stands on, polishes it back to new and wanders through the
+  copper around it, taking a stage off as it goes.
+- **The world around you moves like Java's** (Part 73): every tick the game picks 1,334 random blocks around you as Java
+  does (most of them close by) and lets each make its particles and sounds. Torches smoke and flicker (on walls too),
+  redstone torches, powered dust, repeaters and levers give off red specks, lit furnaces puff smoke and flame from their
+  fronts and crackle, smokers smoke and brewing stands steam, candles burn with little flames, end rods shed sparkles.
+  Lava pops, spits embers that trail smoke and rumbles; water seeps through ceilings and drips (lava too), pointed
+  dripstone drips from the water or lava above it, wet sponges and crying obsidian weep. Leaves let fall a leaf now and
+  then (tinted like the leaves; cherry petals drift off, pale oak and poplar leaves swirl) and drip in the rain, spore
+  blossoms shower green specks, mycelium smokes faintly. Fire smokes and crackles, nether portals swirl and hum, ender
+  chests and end gateways shimmer, charged respawn anchors draw particles up, spawners smoke and flicker while you are
+  near, campfires send up Java's big puffs (a tall signal column over a hay bale) and wisps off the food on them, and bookshelves send glyphs flying into an enchanting table's book. Crimson and warped forests fill with
+  drifting spores, the soul sand valley with ash and the basalt deltas with white ash, at Java's odds.
+- **Enchanting table shelves count like Java's** (Part 73): each of the 32 spots two blocks out counts when the block
+  halfway to the table, on the shelf's own level, is air or something as thin (grass, snow, water...). The old count
+  wanted both levels clear and looked through the corners.
+- **Redstone ore glows when touched** (Part 73): punching it, walking on it (not sneaking; mobs and items lying on it
+  too) or clicking it lights it up (light 9, with red specks on its open faces) until a random tick puts it out, as in
+  Java; clicking it with a block in hand still places the block.
+- **Pack smoke the right way round** (Part 73): with a resource pack, smoke and other puffs now shrink as they fade like
+  Java's (the pack's frames were taken in the reverse order).
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own

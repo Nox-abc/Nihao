@@ -532,10 +532,13 @@ function copperName(pre, kind) {
     case 'cut': return pre + 'cut_copper';
     case 'cut_stairs': return pre + 'cut_copper_stairs';
     case 'cut_slab': return pre + 'cut_copper_slab';
+    case 'lightning_rod': return pre + 'lightning_rod';
     default: return pre + 'copper_' + kind;
   }
 }
 const COPPER_KINDS = ['block', 'chiseled', 'grate', 'cut', 'cut_stairs', 'cut_slab', 'door', 'trapdoor', 'bulb'];
+// the copper blocks of the Copper Age (1.21.9) that weather too
+const COPPER_KINDS2 = ['bars', 'chain', 'lantern', 'lightning_rod'];
 const FLOWERS = ['dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'oxeye_daisy', 'cornflower',
   'lily_of_the_valley', 'torchflower', 'wither_rose'];
 const TALL_PLANTS = ['tall_grass', 'large_fern', 'sunflower', 'lilac', 'rose_bush', 'peony', 'pitcher_plant'];
@@ -575,8 +578,8 @@ function buildBlockNames() {
   };
   for (const [b, f] of STONE_SETS) if (!NEW_STONES.has(b)) stoneSet(b, f);
   add('nether_brick_fence');
-  add(...METAL_BLOCKS, 'iron_bars', 'iron_door', 'iron_trapdoor', 'heavy_weighted_pressure_plate', 'light_weighted_pressure_plate', 'chain');
-  for (const wx of ['', 'waxed_']) for (const ox of OXID) for (const k of COPPER_KINDS) add(copperName(wx + ox, k));
+  add(...METAL_BLOCKS, 'iron_bars', 'iron_door', 'iron_trapdoor', 'heavy_weighted_pressure_plate', 'light_weighted_pressure_plate', 'iron_chain');
+  for (const wx of ['', 'waxed_']) for (const ox of OXID) for (const k of [...COPPER_KINDS, ...COPPER_KINDS2]) add(copperName(wx + ox, k));
   // ---- coloured
   add('terracotta', 'glass_pane', 'tinted_glass', 'shulker_box', 'candle');
   for (const c of COLORS) add(c + '_wool', c + '_carpet', c + '_terracotta', c + '_concrete', c + '_concrete_powder', c + '_glazed_terracotta',
@@ -600,7 +603,7 @@ function buildBlockNames() {
     'ochre_froglight', 'verdant_froglight', 'pearlescent_froglight', 'sculk', 'sculk_vein', 'sculk_catalyst', 'sculk_shrieker', 'sculk_sensor', 'calibrated_sculk_sensor',
     'cobweb', 'suspicious_sand', 'suspicious_gravel');
   // ---- functional
-  add('torch', 'soul_torch', 'redstone_torch', 'lantern', 'soul_lantern', 'end_rod', 'redstone_lamp', 'crafting_table', 'stonecutter', 'cartography_table',
+  add('torch', 'soul_torch', 'copper_torch', 'redstone_torch', 'lantern', 'soul_lantern', 'end_rod', 'redstone_lamp', 'crafting_table', 'stonecutter', 'cartography_table',
     'fletching_table', 'smithing_table', 'grindstone', 'loom', 'furnace', 'lit_furnace', 'smoker', 'blast_furnace', 'campfire', 'soul_campfire',
     'anvil', 'chipped_anvil', 'damaged_anvil', 'composter', 'note_block', 'jukebox', 'enchanting_table', 'brewing_stand', 'cauldron', 'bell', 'beacon', 'conduit',
     'lodestone', 'ladder', 'scaffolding', 'beehive', 'lightning_rod', 'flower_pot', 'decorated_pot', 'bookshelf', 'chiseled_bookshelf', 'lectern',
@@ -637,7 +640,7 @@ BLOCK_NAMES.forEach((n, i) => { B[n.toUpperCase()] = i; });
 const LEGACY_BLOCKS = ["air","stone","grass_block","dirt","cobblestone","oak_planks","bedrock","water","lava","sand","gravel","oak_log","oak_leaves","glass","coal_ore","iron_ore","copper_ore","gold_ore","redstone_ore","lapis_ore","diamond_ore","emerald_ore","deepslate","cobbled_deepslate","deepslate_coal_ore","deepslate_iron_ore","deepslate_copper_ore","deepslate_gold_ore","deepslate_redstone_ore","deepslate_lapis_ore","deepslate_diamond_ore","deepslate_emerald_ore","birch_log","birch_leaves","birch_planks","spruce_log","spruce_leaves","spruce_planks","cherry_log","cherry_leaves","cherry_planks","sandstone","red_sand","cactus","snow_block","snow","ice","clay","short_grass","fern","dandelion","poppy","cornflower","dead_bush","sugar_cane","torch","crafting_table","furnace","lit_furnace","chest","bookshelf","glowstone","bricks","stone_bricks","mossy_cobblestone","obsidian","tnt","granite","diorite","andesite","tuff","calcite","terracotta","orange_terracotta","yellow_terracotta","red_terracotta","white_terracotta","brown_terracotta","moss_block","amethyst_block","pumpkin","mud","mud_bricks","oak_sapling","birch_sapling","spruce_sapling","cherry_sapling","iron_block","gold_block","diamond_block","emerald_block","copper_block","coal_block","lapis_block","redstone_block","white_wool","orange_wool","magenta_wool","light_blue_wool","yellow_wool","lime_wool","pink_wool","gray_wool","light_gray_wool","cyan_wool","purple_wool","blue_wool","brown_wool","green_wool","red_wool","black_wool","packed_ice","smooth_stone","deepslate_bricks","oxeye_daisy","allium","azure_bluet","farmland","wheat","red_bed","oak_slab","stone_slab","cobblestone_slab","stone_brick_slab","sandstone_slab","brick_slab","spruce_slab","birch_slab","cherry_slab","ladder","oak_stairs","spruce_stairs","birch_stairs","cherry_stairs","cobblestone_stairs","stone_brick_stairs","brick_stairs","sandstone_stairs","nether_brick_stairs","blackstone_stairs","quartz_stairs","purpur_stairs","oak_fence","spruce_fence","nether_brick_fence","oak_door","spruce_door","glass_pane","iron_bars","lantern","white_concrete","orange_concrete","magenta_concrete","light_blue_concrete","yellow_concrete","lime_concrete","pink_concrete","gray_concrete","light_gray_concrete","cyan_concrete","purple_concrete","blue_concrete","brown_concrete","green_concrete","red_concrete","black_concrete","exposed_copper","weathered_copper","oxidized_copper","cut_copper","polished_granite","polished_diorite","polished_andesite","cracked_stone_bricks","chiseled_stone_bricks","smooth_sandstone","polished_deepslate","deepslate_tiles","budding_amethyst","amethyst_cluster","smooth_basalt","bone_block","jack_o_lantern","melon","hay_block","coarse_dirt","podzol","red_mushroom","brown_mushroom","cobweb","netherrack","nether_quartz_ore","nether_gold_ore","ancient_debris","soul_sand","soul_soil","basalt","polished_basalt","blackstone","polished_blackstone","magma_block","nether_bricks","red_nether_bricks","nether_wart_block","warped_wart_block","crimson_nylium","warped_nylium","crimson_stem","warped_stem","crimson_planks","warped_planks","shroomlight","crying_obsidian","quartz_block","netherite_block","nether_portal","crimson_fungus","warped_fungus","crimson_roots","warped_roots","end_stone","end_stone_bricks","purpur_block","purpur_pillar","end_portal_frame","end_portal","void_reed","sentinel_core"];
 const LEGACY_ITEMS = ["stick","coal","charcoal","raw_iron","raw_gold","raw_copper","iron_ingot","gold_ingot","copper_ingot","diamond","emerald","redstone","lapis_lazuli","flint","flint_and_steel","clay_ball","brick","snowball","paper","book","leather","feather","apple","porkchop","cooked_porkchop","beef","cooked_beef","chicken","cooked_chicken","mutton","cooked_mutton","rotten_flesh","wheat_seeds","wheat","bread","string","bucket","water_bucket","lava_bucket","quartz","nether_brick","gold_nugget","netherite_scrap","netherite_ingot","amethyst_shard","melon_slice","ember_dust","void_pearl","eye_of_the_void","bow","arrow","wooden_pickaxe","wooden_axe","wooden_shovel","wooden_sword","wooden_hoe","stone_pickaxe","stone_axe","stone_shovel","stone_sword","stone_hoe","iron_pickaxe","iron_axe","iron_shovel","iron_sword","iron_hoe","golden_pickaxe","golden_axe","golden_shovel","golden_sword","golden_hoe","diamond_pickaxe","diamond_axe","diamond_shovel","diamond_sword","diamond_hoe","netherite_pickaxe","netherite_axe","netherite_shovel","netherite_sword","netherite_hoe"];
 // names that changed since then
-const RENAMED = { void_reed: 'chorus_flower', sentinel_core: 'dragon_egg', void_pearl: 'ender_pearl', eye_of_the_void: 'ender_eye', ember_dust: 'blaze_powder' };
+const RENAMED = { chain: 'iron_chain', void_reed: 'chorus_flower', sentinel_core: 'dragon_egg', void_pearl: 'ender_pearl', eye_of_the_void: 'ender_eye', ember_dust: 'blaze_powder' };
 // legacy (8-bit) block id -> current id
 const LEGACY_BLOCK_MAP = (() => { const m = new Uint16Array(256); LEGACY_BLOCKS.forEach((n, i) => { const id = B[(RENAMED[n] || n).toUpperCase()]; m[i] = id === undefined ? 0 : id; }); return m; })();
 
@@ -3786,7 +3789,7 @@ function buildBastion(p, ctx) {
   const chest = (x, y, z, d, loot) => { const i = Wr.set(x, y, z, B.CHEST, M_FACING(d)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot }]); };
   chest(X - 9, Y, Z - 9, 2, 'bastion_other'); chest(X + 9, Y, Z + 9, 0, 'bastion_other');
   chest(X, Y + 8, Z, 2, p.treasure ? 'bastion_treasure' : 'bastion_other');
-  for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) Wr.set(X + dx, Y + 8, Z + dz, p.treasure ? B.GILDED_BLACKSTONE : B.CHAIN);
+  for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) Wr.set(X + dx, Y + 8, Z + dz, p.treasure ? B.GILDED_BLACKSTONE : B.IRON_CHAIN);
   if (p.treasure) for (const [dx, dz] of [[-6, -6], [6, 6]]) { const i = Wr.set(X + dx, Y + 8, Z + dz, B.SPAWNER); if (i >= 0) ctx.be.push([i, { type: 'spawner', mob: 'magma_cube' }]); }
   for (const [dx, dz] of [[-5, 4], [5, -4], [3, 6], [-4, -6]]) Wr.set(X + dx, Y, Z + dz, B.GOLD_BLOCK);
   const mob = (type, x, y, z) => { if (x >> 4 === ctx.cx && z >> 4 === ctx.cz) ctx.mobs.push([type, x + 0.5, y, z + 0.5, {}]); };
@@ -10011,7 +10014,7 @@ defB('iron_door', { shape: SH.DOOR, hard: 5, tool: PICK, lvl: 0, sound: 'metal',
 defB('iron_trapdoor', { shape: SH.TRAPDOOR, hard: 5, tool: PICK, lvl: 0, sound: 'metal', trapdoor: true, cutout: true, redstoneOnly: true });
 defB('heavy_weighted_pressure_plate', { shape: SH.PLATE, hard: 0.5, tool: PICK, lvl: 0, sound: 'metal', tex: 'iron_block', noCollide: true, needs: 'solid_below', plate: 'weight' });
 defB('light_weighted_pressure_plate', { shape: SH.PLATE, hard: 0.5, tool: PICK, lvl: 0, sound: 'metal', tex: 'gold_block', noCollide: true, needs: 'solid_below', plate: 'weight' });
-defB('chain', { shape: SH.CHAIN, hard: 5, tool: PICK, lvl: 0, sound: 'metal', cutout: true, icon: 'chain' });
+defB('iron_chain', { shape: SH.CHAIN, hard: 5, tool: PICK, lvl: 0, sound: 'metal', cutout: true, tex: 'chain', icon: 'chain' });
 // copper: four stages of weathering, each with a waxed twin that stays put
 for (const wx of ['', 'waxed_']) for (let s = 0; s < 4; s++) {
   const pre = wx + OXID[s], tpre = OXID[s], blockTex = s ? OXID[s] + 'copper' : 'copper_block';
@@ -10027,7 +10030,16 @@ for (const wx of ['', 'waxed_']) for (let s = 0; s < 4; s++) {
   defB(C('trapdoor'), Object.assign({}, base, { shape: SH.TRAPDOOR, tex: T('trapdoor'), trapdoor: true, cutout: true }));
   defB(C('bulb'), Object.assign({}, base, { tex: T('bulb'), bulb: true, light: [15, 12, 8, 4][s] }));
   EMITF[B[C('bulb').toUpperCase()]] = m => (m & 1) ? [15, 12, 8, 4][s] : 0;
+  // the Copper Age's bars, chains, lanterns and lightning rods
+  defB(C('bars'), Object.assign({}, base, { shape: SH.PANE, hard: 5, lvl: 0, tex: T('bars'), pane: true, cutout: true }));
+  defB(C('chain'), Object.assign({}, base, { shape: SH.CHAIN, hard: 5, lvl: 0, tex: T('chain'), cutout: true, icon: T('chain') }));
+  defB(C('lantern'), Object.assign({}, base, { shape: SH.LANTERN, hard: 3.5, lvl: 0, tex: T('lantern'), light: 15, cutout: true, needs: 'lantern', icon: T('lantern') }));
+  defB(C('lightning_rod'), Object.assign({}, base, { shape: SH.ROD, tex: T('lightning_rod'), cutout: true, rod: 'lightning_rod' }));
 }
+// chains (a lantern or hanging sign can hang from one) and lightning rods, of every metal and stage
+const CHAINS = new Uint8Array(MAXB), LIGHTNING_RODS = new Uint8Array(MAXB);
+CHAINS[B.IRON_CHAIN] = 1;
+for (const wx of ['', 'waxed_']) for (let s = 0; s < 4; s++) { CHAINS[B[copperName(wx + OXID[s], 'chain').toUpperCase()]] = 1; LIGHTNING_RODS[B[copperName(wx + OXID[s], 'lightning_rod').toUpperCase()]] = 1; }
 
 /* ---------------- coloured blocks ---------------- */
 defB('terracotta', ROCK(1.25));
@@ -10217,12 +10229,12 @@ defB('suspicious_gravel', { hard: 0.25, sound: 'gravel', tex: 'suspicious_gravel
 /* ---------------- functional blocks ---------------- */
 defB('torch', { shape: SH.TORCH, hard: 0, sound: 'wood', light: 14, needs: 'torch', noCollide: true, cutout: true });
 defB('soul_torch', { shape: SH.TORCH, hard: 0, sound: 'wood', light: 10, needs: 'torch', noCollide: true, cutout: true });
+defB('copper_torch', { shape: SH.TORCH, hard: 0, sound: 'wood', light: 14, needs: 'torch', noCollide: true, cutout: true });
 defB('redstone_torch', { shape: SH.TORCH, hard: 0, sound: 'wood', light: 7, needs: 'torch', noCollide: true, cutout: true, rtorch: true });
 EMITF[B.REDSTONE_TORCH] = m => (m & 8) ? 0 : 7;
 defB('lantern', { shape: SH.LANTERN, hard: 3.5, tool: PICK, lvl: 0, sound: 'metal', light: 15, cutout: true, needs: 'lantern', icon: 'lantern' });
 defB('soul_lantern', { shape: SH.LANTERN, hard: 3.5, tool: PICK, lvl: 0, sound: 'metal', light: 10, cutout: true, needs: 'lantern', icon: 'soul_lantern' });
 defB('end_rod', { shape: SH.ROD, hard: 0, sound: 'wood', light: 14, cutout: true, rod: 'end_rod' });
-defB('lightning_rod', { shape: SH.ROD, hard: 3, tool: PICK, lvl: 1, sound: 'metal', cutout: true, rod: 'lightning_rod' });
 defB('redstone_lamp', { hard: 0.3, sound: 'glass', light: 15, lamp: true });
 EMITF[B.REDSTONE_LAMP] = m => (m & 1) ? 15 : 0;
 defB('crafting_table', { hard: 2.5, tool: AXE, sound: 'wood', tex: { top: 'crafting_table_top', bottom: 'oak_planks', side: 'crafting_table_side', north: 'crafting_table_front', west: 'crafting_table_front' }, use: 'craft', fuel: 300 });
@@ -10351,7 +10363,7 @@ BLOCK_NAMES.forEach((n, i) => { if (/^(stripped_)?[a-z_]+_(log|wood)$/.test(n) &
 const COPPER_STAGES = [B.COPPER_BLOCK, B.EXPOSED_COPPER, B.WEATHERED_COPPER, B.OXIDIZED_COPPER];
 // next / previous weathering stage and waxed twin of every copper block
 const COPPER_NEXT = {}, COPPER_PREV = {}, COPPER_WAX = {}, COPPER_UNWAX = {};
-for (const k of COPPER_KINDS) for (let s = 0; s < 4; s++) {
+for (const k of [...COPPER_KINDS, ...COPPER_KINDS2]) for (let s = 0; s < 4; s++) {
   const id = B[copperName(OXID[s], k).toUpperCase()], wid = B[copperName('waxed_' + OXID[s], k).toUpperCase()];
   if (s < 3) COPPER_NEXT[id] = B[copperName(OXID[s + 1], k).toUpperCase()];
   if (s > 0) COPPER_PREV[id] = B[copperName(OXID[s - 1], k).toUpperCase()];
@@ -10414,7 +10426,7 @@ for (const [mat, pts, tough, mult, ench, rep] of ARMOR_MATS) ARMOR_PIECES.forEac
 });
 defI('turtle_helmet', { stack: 1, dur: 275, armor: { slot: 0, pts: 2, tough: 0, kb: 0, mat: 'turtle' }, ench: 9, repair: 'turtle_scute', enchType: 'armor_helmet' });
 defI('elytra', { stack: 1, dur: 432, armor: { slot: 1, pts: 0, tough: 0, kb: 0, mat: 'elytra' }, rarity: 3, repair: 'phantom_membrane', ench: 1, enchType: 'elytra' });
-for (const m of ['leather', 'copper', 'iron', 'golden', 'diamond']) defI(m + '_horse_armor', { stack: 1 });
+for (const m of ['leather', 'copper', 'iron', 'golden', 'diamond', 'netherite']) defI(m + '_horse_armor', { stack: 1, fireproof: m === 'netherite' });
 defI('wolf_armor', { stack: 1, dur: 64 });
 defI('totem_of_undying', { stack: 1, rarity: 1, offhand: true });
 defI('end_crystal', { glint: true, place: 'end_crystal' });
@@ -10644,7 +10656,7 @@ for (const w of [...WOODS, 'bamboo', ...STEMS]) {
   shapeless(w + '_button', 1, [P]);
   shaped(w + '_sign', 3, ['###', '###', ' S '], { '#': P, S: 'stick' });
   const strip = bam ? 'stripped_bamboo_block' : 'stripped_' + (nether ? w + '_stem' : w + '_log');
-  shaped(w + '_hanging_sign', 6, ['C C', '###', '###'], { '#': strip, C: 'chain' });
+  shaped(w + '_hanging_sign', 6, ['C C', '###', '###'], { '#': strip, C: 'iron_chain' });
   if (!nether) {
     const boat = bam ? 'bamboo_raft' : w + '_boat', cboat = bam ? 'bamboo_chest_raft' : w + '_chest_boat';
     shaped(boat, 1, ['# #', '###'], { '#': P });
@@ -10801,7 +10813,7 @@ shaped('iron_bars', 16, ['###', '###'], { '#': 'iron_ingot' });
 shaped('iron_door', 3, ['##', '##', '##'], { '#': 'iron_ingot' });
 shaped('iron_trapdoor', 1, SQ2, { '#': 'iron_ingot' });
 shaped('heavy_weighted_pressure_plate', 1, ['##'], { '#': 'iron_ingot' }); shaped('light_weighted_pressure_plate', 1, ['##'], { '#': 'gold_ingot' });
-shaped('chain', 1, ['N', 'I', 'N'], { N: 'iron_nugget', I: 'iron_ingot' });
+shaped('iron_chain', 1, ['N', 'I', 'N'], { N: 'iron_nugget', I: 'iron_ingot' });
 shaped('anvil', 1, ['BBB', ' I ', 'III'], { B: 'iron_block', I: 'iron_ingot' });
 shaped('cauldron', 1, ['# #', '# #', '###'], { '#': 'iron_ingot' });
 shaped('hopper', 1, ['I I', 'ICI', ' I '], { I: 'iron_ingot', C: 'chest' });
@@ -10858,7 +10870,7 @@ for (const [pat, x] of [['flower', 'oxeye_daisy'], ['creeper', 'creeper_head'], 
   ['bordure_indented', 'vine']]) shapeless(pat + '_banner_pattern', 1, ['paper', x]);
 shaped('leather_horse_armor', 1, ['X X', 'XXX', 'X X'], { X: 'leather' });
 for (const t of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + t), I.NETHERITE_INGOT, itemOf('netherite_' + t)]);
-for (const p of ARMOR_PIECES) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + p), I.NETHERITE_INGOT, itemOf('netherite_' + p)]);
+for (const p of [...ARMOR_PIECES, 'horse_armor']) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + p), I.NETHERITE_INGOT, itemOf('netherite_' + p)]);
 // a smithing template is copied with seven diamonds and a block of what it is made of
 const TEMPLATE_BLOCK = { netherite_upgrade: 'netherrack', bolt: ['copper_block', 'waxed_copper_block'], coast: 'cobblestone', dune: 'sandstone', eye: 'end_stone', flow: 'breeze_rod',
   host: 'terracotta', raiser: 'terracotta', rib: 'netherrack', sentry: 'cobblestone', shaper: 'terracotta', silence: 'cobbled_deepslate', snout: 'blackstone', spire: 'purpur_block',
@@ -12607,7 +12619,7 @@ TEXGEN.push(function texItems() {
   });
   IT('turtle_helmet', (d) => { ARMOR_SHAPE.helmet(d, ARMOR_COL.turtle); for (const [x, y] of [[5, 4], [9, 4], [7, 5]]) sp(d, x, y, [60, 120, 50]); });
   IT('elytra', (d, r) => { fillPoly(d, [[7, 2], [2, 4], [1, 14], [5, 11], [7, 13]], (x) => mul([140, 140, 170], 0.85 + x * 0.03)); fillPoly(d, [[8, 2], [13, 4], [14, 14], [10, 11], [8, 13]], (x) => mul([130, 130, 160], 1.1 - (x - 8) * 0.03)); });
-  for (const m of ['leather', 'copper', 'iron', 'golden', 'diamond']) IT(m + '_horse_armor', (d) => { const c = ARMOR_COL[m]; rect(d, 2, 5, 12, 9, c); rect(d, 11, 2, 14, 5, mul(c, 1.1)); rect(d, 3, 10, 4, 13, mul(c, 0.85)); rect(d, 9, 10, 10, 13, mul(c, 0.85)); sp(d, 13, 3, [40, 40, 40]); });
+  for (const m of ['leather', 'copper', 'iron', 'golden', 'diamond', 'netherite']) IT(m + '_horse_armor', (d) => { const c = ARMOR_COL[m]; rect(d, 2, 5, 12, 9, c); rect(d, 11, 2, 14, 5, mul(c, 1.1)); rect(d, 3, 10, 4, 13, mul(c, 0.85)); rect(d, 9, 10, 10, 13, mul(c, 0.85)); sp(d, 13, 3, [40, 40, 40]); });
   // wolf armor: an arch of scute plates over a wolf's back, a neck guard and two straps; the overlay is what a dye colours
   const waTop = x => 5 - Math.round(Math.sin((x - 1) / 13 * Math.PI) * 2);
   const waPlate = (x, y) => { const k = y - waTop(x), band = k % 3, seam = (x + Math.floor(k / 3)) % 3 === 0; return band === 2 || seam ? 0 : band === 0 ? 2 : 1; };
@@ -13297,7 +13309,7 @@ class World {
       case 'nonair_below': return below !== 0 && !BLK[below].liquid;
       case 'nylium': return below === B.CRIMSON_NYLIUM || below === B.WARPED_NYLIUM || below === B.SOUL_SOIL || SOIL[below] === 1 || below === B.NETHERRACK;
       case 'endstone': return below === B.END_STONE;
-      case 'lantern': return meta === 1 ? solid(above) || above === B.CHAIN : solid(below);
+      case 'lantern': return meta === 1 ? solid(above) || CHAINS[above] === 1 : solid(below);
       case 'door': return (meta & 8) ? below === id : (solid(below) && this.getBlock(x, y + 1, z) === id);
       case 'portal': {
         const ok = b => b === B.NETHER_PORTAL || b === B.OBSIDIAN;
@@ -13311,7 +13323,7 @@ class World {
       case 'attached': case 'attached6': return solid(nb(meta & 7));
       case 'attached_side': return solid(nb([4, 1, 5, 0][meta & 3] ^ 1));
       case 'sign': case 'banner': return (meta & 16) ? solid(nb([4, 1, 5, 0][meta & 3] ^ 1)) : solid(below);
-      case 'hanging': return solid(above) || above === B.CHAIN;
+      case 'hanging': return solid(above) || CHAINS[above] === 1;
       case 'propagule': return SOIL[below] === 1 || below === B.MUD || below === B.MANGROVE_LEAVES || above === B.MANGROVE_LEAVES;
       case 'wither_rose': return SOIL[below] === 1 || below === B.SOUL_SAND || below === B.SOUL_SOIL || below === B.NETHERRACK;
       case 'dripstone': return (meta & 1) ? (solid(below) || below === id) : (solid(above) || above === id);
@@ -13583,7 +13595,7 @@ const MESH_OPQ = new MeshBuf(65536), MESH_TRN = new MeshBuf(16384);
 const NOMIP = new Uint8Array(MAXB);
 const NOMIP_SHAPES = new Set([SH.CROSS, SH.TORCH, SH.CROP, SH.LADDER, SH.DOOR, SH.TRAPDOOR, SH.TALL, SH.VINE, SH.RAIL, SH.WIRE, SH.FAN, SH.FIRE, SH.LEVER, SH.CHORUS, SH.BAMBOO, SH.FLAT, SH.POT, SH.LANTERN, SH.CACTUS]);
 function initNoMip() {
-  const mipped = new Set([B.GRASS_BLOCK, B.IRON_BARS, B.GLASS_PANE, B.CHAIN, B.HOPPER, B.TRIPWIRE_HOOK, B.MANGROVE_ROOTS]);
+  const mipped = new Set([B.GRASS_BLOCK, B.IRON_BARS, B.GLASS_PANE, B.IRON_CHAIN, B.HOPPER, B.TRIPWIRE_HOOK, B.MANGROVE_ROOTS]);
   for (let id = 1; id < BLOCK_NAMES.length; id++) {
     const d = BLK[id];
     NOMIP[id] = (d.cutout || NOMIP_SHAPES.has(d.shape)) && !d.leaves && !d.translucent && !d.liquid && !mipped.has(id) ? 1 : 0;
@@ -14487,7 +14499,7 @@ MDL[SH.SIGN] = (d, m) => {
 };
 MDL[SH.HSIGN] = (d, m) => [BX(1, 0, 7, 15, 10, 9), plane(3, 8, 4, 8, 10, 16, 'chain'), plane(12, 8, 13, 8, 10, 16, 'chain')].map(p => Object.assign(p, { yaw: (m & 15) * Math.PI / 8 }));
 MDL[SH.CHAIN] = (d, m) => {
-  const ps = [plane(8, 6.5, 8, 9.5, 0, 16, 'chain'), plane(6.5, 8, 9.5, 8, 0, 16, 'chain')];
+  const t = typeof d.tex === 'string' ? d.tex : 'chain', ps = [plane(8, 6.5, 8, 9.5, 0, 16, t), plane(6.5, 8, 9.5, 8, 0, 16, t)];
   const a = m & 3;
   return a === 1 ? orientParts(ps, 1) : a === 2 ? orientParts(ps, 5) : ps;
 };
@@ -15950,7 +15962,7 @@ class EyeEntity extends Entity {
 /* ---------------- particles ---------------- */
 class Particles {
   constructor(game) { this.game = game; this.list = []; }
-  add(p) { if (p.max === undefined) p.max = p.life; if (this.list.length < 4000) this.list.push(p); }
+  add(p) { if (p.max === undefined) p.max = p.life; if (this.list.length < 8192) this.list.push(p); }
   // animated puff: frames particle_generic_0 (big) .. _7 (small) over the particle's life
   gen() { return [texL('particle_generic_0'), 8]; }
   blockBreak(x, y, z, id) {
@@ -15995,6 +16007,8 @@ class Particles {
     const w = this.game.world;
     for (const p of this.list) {
       p.life--;
+      // a particle that moves its own way (Part 73's Java particles)
+      if (p.fn) { p.fn(p, w, this); continue; }
       p.vy -= p.g; p.x += p.vx; p.y += p.vy; p.z += p.vz;
       if (p.drag) { p.vx *= p.drag; p.vy *= p.drag; p.vz *= p.drag; }
       if (p.coll && SOLID[w.getBlock(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z))]) { p.y = Math.floor(p.y) + 1.001; p.vy = 0; p.vx *= 0.7; p.vz *= 0.7; }
@@ -18071,7 +18085,7 @@ class Mob extends Entity {
     const g = this.game;
     if (!cool && (this.T.sounds || soaked)) g.sound(soaked || this.T.sounds[1], this.x, this.y + this.h / 2, this.z);
     if (attacker && attacker !== this) {
-      const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1, kb = 0.4 * (1 - (this.T.kbRes || 0));
+      const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1, kb = 0.4 * (1 - (this.T.kbRes || 0) - (this.kbBonus ? this.kbBonus() : 0));
       if (!cool && source !== 'thorns' && kb > 0) { this.vx = this.vx * 0.5 + dx / l * kb; this.vz = this.vz * 0.5 + dz / l * kb; if (this.onGround) this.vy = Math.max(this.vy, 0.36 * (1 - (this.T.kbRes || 0))); }
       this.lastAttacker = attacker; this.lastHurtAge = this.age;
       // hurt by a player or a tamed pet: counts as the player's kill for the next 5 seconds (lastHurtByPlayerTime)
@@ -20604,9 +20618,9 @@ function buildCreativeTabs() {
     if (b === 'nether_bricks') add('nether_brick_fence');
     if (b === 'mud_bricks') add('resin_block');
   }
-  add('coal_block', 'iron_block', 'iron_bars', 'iron_door', 'iron_trapdoor', 'heavy_weighted_pressure_plate', 'chain', 'gold_block', 'light_weighted_pressure_plate',
+  add('coal_block', 'iron_block', 'iron_bars', 'iron_door', 'iron_trapdoor', 'heavy_weighted_pressure_plate', 'iron_chain', 'gold_block', 'light_weighted_pressure_plate',
     'redstone_block', 'emerald_block', 'lapis_block', 'diamond_block', 'netherite_block', 'amethyst_block');
-  for (const wx of ['', 'waxed_']) for (const ox of OXID) for (const k of COPPER_KINDS) add(copperName(wx + ox, k));
+  for (const wx of ['', 'waxed_']) for (const ox of OXID) for (const k of [...COPPER_KINDS, 'bars', 'chain']) add(copperName(wx + ox, k));
   CREATIVE.building = take();
   // ---- colored blocks
   const C = (pat) => COLORS.map(c => pat.replace('#', c));
@@ -20637,11 +20651,12 @@ function buildCreativeTabs() {
     'ochre_froglight', 'verdant_froglight', 'pearlescent_froglight', 'sculk', 'sculk_vein', 'sculk_catalyst', 'sculk_shrieker', 'sculk_sensor', 'cobweb', 'bedrock');
   CREATIVE.natural = take();
   // ---- functional blocks
-  add('torch', 'soul_torch', 'redstone_torch', 'lantern', 'soul_lantern', 'chain', 'end_rod', 'sea_lantern', 'redstone_lamp', 'copper_bulb', 'exposed_copper_bulb', 'weathered_copper_bulb',
+  add('torch', 'soul_torch', 'copper_torch', 'redstone_torch', 'lantern', 'soul_lantern', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'lantern'))), 'iron_chain',
+    ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'chain'))), 'end_rod', 'sea_lantern', 'redstone_lamp', 'copper_bulb', 'exposed_copper_bulb', 'weathered_copper_bulb',
     'oxidized_copper_bulb', 'glowstone', 'shroomlight', 'ochre_froglight', 'verdant_froglight', 'pearlescent_froglight', 'crying_obsidian', 'glow_lichen', 'magma_block',
     'crafting_table', 'stonecutter', 'cartography_table', 'fletching_table', 'smithing_table', 'grindstone', 'loom', 'furnace', 'smoker', 'blast_furnace', 'campfire', 'soul_campfire',
     'anvil', 'chipped_anvil', 'damaged_anvil', 'composter', 'note_block', 'jukebox', 'enchanting_table', 'end_crystal', 'brewing_stand', 'cauldron', 'bell', 'beacon', 'conduit',
-    'lodestone', 'ladder', 'scaffolding', 'bee_nest', 'beehive', 'suspicious_sand', 'suspicious_gravel', 'lightning_rod', 'flower_pot', 'decorated_pot', 'armor_stand',
+    'lodestone', 'ladder', 'scaffolding', 'bee_nest', 'beehive', 'suspicious_sand', 'suspicious_gravel', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'lightning_rod'))), 'flower_pot', 'decorated_pot', 'armor_stand',
     'item_frame', 'glow_item_frame', 'painting', 'bookshelf', 'chiseled_bookshelf', 'lectern', 'tinted_glass');
   for (const w of woods) add(w + '_sign', w + '_hanging_sign');
   add('chest', 'barrel', 'ender_chest', 'shulker_box', C('#_shulker_box'), 'respawn_anchor', C('#_bed'), 'candle', C('#_candle'), C('#_banner'), HEADS, 'dragon_egg',
@@ -20672,7 +20687,7 @@ function buildCreativeTabs() {
   for (const t of ['wooden', 'stone', 'copper', 'iron', 'golden', 'diamond', 'netherite']) add(t + '_axe');
   add('mace', 'trident', 'shield');
   for (const [m] of ARMOR_MATS) add(ARMOR_PIECES.map(p => m + '_' + p));
-  add('turtle_helmet', 'leather_horse_armor', 'copper_horse_armor', 'iron_horse_armor', 'golden_horse_armor', 'diamond_horse_armor', 'wolf_armor', 'totem_of_undying', 'tnt', 'end_crystal', 'snowball',
+  add('turtle_helmet', 'leather_horse_armor', 'copper_horse_armor', 'iron_horse_armor', 'golden_horse_armor', 'diamond_horse_armor', 'netherite_horse_armor', 'wolf_armor', 'totem_of_undying', 'tnt', 'end_crystal', 'snowball',
     'egg', 'wind_charge', 'bow', 'crossbow', { id: I.FIREWORK_ROCKET, tag: { flight: 1 } }, 'arrow', 'spectral_arrow');
   if (typeof POTION_TYPES !== 'undefined') for (const p of POTION_TYPES) if (p.arrow !== false && p.key !== 'water' && p.key !== 'mundane' && p.key !== 'thick' && p.key !== 'awkward') add({ id: I.TIPPED_ARROW, tag: { potion: p.key } });
   CREATIVE.combat = take();
@@ -21969,7 +21984,8 @@ function packTexMap() {
   set('compass', 'item/compass_00', 'item/compass'); set('recovery_compass', 'item/recovery_compass_00'); set('clock', 'item/clock_00', 'item/clock');
   set('crossbow', 'item/crossbow_standby', 'item/crossbow');
   for (const n in ITEM_BY_NAME) if (ITEM_BY_NAME[n].egg) set(n, 'item/' + n);
-  for (let k = 0; k < 8; k++) set('particle_generic_' + k, 'particle/generic_' + k);
+  // the game's generic_0 is its biggest puff; Java's generic_0 is a single pixel and generic_7 the biggest
+  for (let k = 0; k < 8; k++) set('particle_generic_' + k, 'particle/generic_' + (7 - k));
   set('particle_flame', 'particle/flame'); set('particle_lava', 'particle/lava'); set('particle_bubble', 'particle/bubble');
   set('particle_crit', 'particle/critical_hit'); set('particle_splash', 'particle/splash_0');
   for (const g in PACK_ANIM) for (let k = 1; k < PACK_ANIM[g]; k++) m[g + '_' + k] = m[g];
@@ -25485,7 +25501,7 @@ Object.assign(Game.prototype, {
         return;
       }
     }
-    if (d.copper !== undefined && !d.waxed && COPPER_NEXT[id] !== undefined) { if (R() < 0.02) w.setBlock(x, y, z, COPPER_NEXT[id], w.getMeta(x, y, z)); return; }
+    if (d.copper !== undefined && !d.waxed && COPPER_NEXT[id] !== undefined) { this.weatherCopper(x, y, z, id, R); return; }
   },
 });
 // blocks fire can spread to
@@ -27315,7 +27331,7 @@ const LOOT = {
     ['spectral_arrow', 10, 10, 22], ['piglin_banner_pattern', 9], ['music_disc_pigstep', 5], ['golden_carrot', 12, 6, 17], ['golden_apple', 9], ['enchanted_book', 10, 1, 1, { book: 'soul_speed' }]]],
     [[2, 2], [['iron_sword', 2, 1, 1, { dmg: [0.1, 0.9], rand: true }], ['iron_block', 2], ['golden_boots', 1, 1, 1, { rand: ['soul_speed'] }], ['golden_axe', 1, 1, 1, { rand: true }], ['gold_block', 2], ['crossbow', 1],
       ['gold_ingot', 2, 1, 6], ['iron_ingot', 2, 1, 6], ['golden_sword', 1], ['golden_chestplate', 1], ['golden_helmet', 1], ['golden_leggings', 1], ['golden_boots', 1], ['crying_obsidian', 2, 1, 5]]],
-    [[3, 4], [['gilded_blackstone', 2, 1, 5], ['chain', 1, 2, 10], ['magma_cream', 2, 2, 6], ['bone_block', 1, 3, 6], ['iron_nugget', 1, 2, 8], ['obsidian', 1, 4, 6], ['gold_nugget', 1, 2, 8], ['string', 1, 4, 6],
+    [[3, 4], [['gilded_blackstone', 2, 1, 5], ['iron_chain', 1, 2, 10], ['magma_cream', 2, 2, 6], ['bone_block', 1, 3, 6], ['iron_nugget', 1, 2, 8], ['obsidian', 1, 4, 6], ['gold_nugget', 1, 2, 8], ['string', 1, 4, 6],
       ['arrow', 2, 5, 17], ['cooked_porkchop', 1]]],
     [[1, 1], [[null, 11], ['snout_armor_trim_smithing_template', 1]]], [[1, 1], [[null, 9], ['netherite_upgrade_smithing_template', 1]]]],
   stronghold_corridor: [[[2, 3], [['ender_pearl', 10], ['diamond', 3, 1, 3], ['iron_ingot', 10, 1, 5], ['gold_ingot', 5, 1, 3], ['redstone', 5, 4, 9], ['bread', 15, 1, 3], ['apple', 15, 1, 3], ['iron_pickaxe', 5], ['iron_sword', 5],
@@ -31536,7 +31552,7 @@ Game.prototype.strikeNear = function (x, y, z) {
     const c = w.getChunk((x + dx) >> 4, (z + dz) >> 4);
     if (!c || !c.hmap) continue;
     const top = c.hmap[(((z + dz) & 15) << 4) | ((x + dx) & 15)];
-    for (let yy = Math.max(1, top - 2); yy <= top; yy++) if (w.getBlock(x + dx, yy, z + dz) === B.LIGHTNING_ROD) { const d = dx * dx + dz * dz; if (d < bd) { bd = d; best = [x + dx, yy, z + dz]; } }
+    for (let yy = Math.max(1, top - 2); yy <= top; yy++) if (LIGHTNING_RODS[w.getBlock(x + dx, yy, z + dz)]) { const d = dx * dx + dz * dz; if (d < bd) { bd = d; best = [x + dx, yy, z + dz]; } }
   }
   if (best) return this.strikeAt(best[0] + 0.5, best[1] + 1, best[2] + 0.5, best);
   const near = this.mobsAndPlayer().filter(e => !e.dead && Math.abs(e.x - x - 0.5) < 3 && Math.abs(e.z - z - 0.5) < 3 && sky(Math.floor(e.x), Math.floor(e.y + e.h), Math.floor(e.z)) && !(e === this.player && e.mode === 1));
@@ -31595,14 +31611,14 @@ Game.prototype.convertMob = function (m, type) {
 };
 const _onScheduledWT = Game.prototype.onScheduled;
 Game.prototype.onScheduled = function (kind, x, y, z) {
-  if (kind === 'rod_off') { const w = this.world; if (w.getBlock(x, y, z) === B.LIGHTNING_ROD) { w.setMeta(x, y, z, w.getMeta(x, y, z) & ~8); if (this.redstoneChanged) this.redstoneChanged(x, y, z); } return; }
+  if (kind === 'rod_off') { const w = this.world; if (LIGHTNING_RODS[w.getBlock(x, y, z)]) { w.setMeta(x, y, z, w.getMeta(x, y, z) & ~8); if (this.redstoneChanged) this.redstoneChanged(x, y, z); } return; }
   return _onScheduledWT.call(this, kind, x, y, z);
 };
 // a struck rod gives full redstone power for those 8 ticks
-RS_SRC[B.LIGHTNING_ROD] = 15; RS_ANY[B.LIGHTNING_ROD] = 1;
+for (let i = 1; i < MAXB; i++) if (LIGHTNING_RODS[i]) { RS_SRC[i] = 15; RS_ANY[i] = 1; }
 const _emitWT = RS.emit;
 RS.emit = function (w, x, y, z, f, strong) {
-  if (w.getBlock(x, y, z) === B.LIGHTNING_ROD) return (w.getMeta(x, y, z) & 8) ? 15 : 0;
+  if (LIGHTNING_RODS[w.getBlock(x, y, z)]) return (w.getMeta(x, y, z) & 8) ? 15 : 0;
   return _emitWT.call(this, w, x, y, z, f, strong);
 };
 // /weather thunder
@@ -32664,9 +32680,8 @@ Game.prototype.tickCampfires = function () {
       be.items[i] = null; be.times[i] = 0;
       if (out) this.dropItem(x + 0.5, y + 1, z + 0.5, { id: out, count: 1 });
     });
-    // a tall column of smoke rises from lit campfires
-    if (lit && Math.random() < 0.12) this.particles.add({ x: x + 0.5 + (Math.random() - 0.5) * 0.4, y: y + 0.6, z: z + 0.5 + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.004, vy: 0.07, vz: (Math.random() - 0.5) * 0.004, life: 90 + Math.random() * 60, anim: this.particles.gen(), u: 0, v: 0, us: 1, size: 0.3 + Math.random() * 0.12, g: 0, col: [0.55, 0.55, 0.57], grow: false });
-    if (lit && be.items.some(Boolean) && Math.random() < 0.15) this.particles.smoke(x + 0.5, y + 0.55, z + 0.5, 1);
+    // CampfireBlockEntity.particleTick: the column of smoke (taller over a hay bale), and wisps off the food
+    if (lit) this.campfireParticles(x, y, z, be);
   }
 };
 // the food lies on the grill, one piece by each side
@@ -32764,7 +32779,7 @@ Projectile.prototype.impact = function (e) {
   const w = g.world, l = Math.hypot(this.dir ? this.dir[0] : 0, this.dir ? this.dir[1] : 0, this.dir ? this.dir[2] : 0) || 1;
   for (let k = 0; k <= 2; k++) {
     const x = Math.floor(this.x + (this.dir ? this.dir[0] / l * 0.3 * k : 0)), y = Math.floor(this.y + (this.dir ? this.dir[1] / l * 0.3 * k : 0)), z = Math.floor(this.z + (this.dir ? this.dir[2] / l * 0.3 * k : 0));
-    if (w.getBlock(x, y, z) === B.LIGHTNING_ROD) { this._channeled = true; g.strikeAt(x + 0.5, y + 1, z + 0.5, [x, y, z]); return; }
+    if (LIGHTNING_RODS[w.getBlock(x, y, z)]) { this._channeled = true; g.strikeAt(x + 0.5, y + 1, z + 0.5, [x, y, z]); return; }
   }
 };
 
@@ -33942,7 +33957,7 @@ Object.assign(Game.prototype, {
 Game.prototype.tickMobSpawner = function (x, y, z, be) {
   const w = this.world, p = this.player, R = Math.random;
   if (p.dead || p.mode === 3 || Math.hypot(p.x - x - 0.5, p.y - y - 0.5, p.z - z - 0.5) > 16) return;
-  if (R() < 0.25) { this.particles.smoke(x + 0.5, y + 0.5, z + 0.5, 1); this.particles.flame(x + 0.5, y + 0.3, z + 0.5); }
+  this.spawnerParticles(x, y, z);
   if (be.delay === undefined) be.delay = 20;
   if (be.delay > 0) { be.delay--; return; }
   const mob = be.mob || 'pig', T = MOB_TYPES[mob], again = () => { be.delay = 200 + Math.floor(R() * 600); };
@@ -35351,6 +35366,9 @@ for (const n in HARDNESS_FIX) { const id = B[n.toUpperCase()]; if (id !== undefi
 const BLAST_RES = new Float32Array(MAXB);
 for (let id = 1; id < BLOCK_NAMES.length; id++) { const d = BLK[id]; if (d) BLAST_RES[id] = d.hard < 0 ? 3600000 : d.hard; }
 for (const [v, names] of BLAST_RES_LIST) for (const n of names.split(' ')) { const id = B[n.toUpperCase()]; if (id !== undefined) BLAST_RES[id] = v; }
+// the Copper Age's bars, chains and lightning rods resist like iron bars and chains
+for (const wx of ['', 'waxed_']) for (const ox of OXID) for (const k of ['bars', 'chain', 'lightning_rod']) { const id = B[copperName(wx + ox, k).toUpperCase()]; if (id !== undefined) BLAST_RES[id] = 6; }
+BLAST_RES[B.IRON_CHAIN] = 6;
 BLAST_RES[B.WATER] = BLAST_RES[B.LAVA] = 100;
 if (B.LIT_FURNACE !== undefined) BLAST_RES[B.LIT_FURNACE] = BLAST_RES[B.FURNACE];
 
@@ -42163,7 +42181,7 @@ function drawStandPreview(cv, res) {
 const SMITH_HINTS = {
   template: ['sentry_armor_trim_smithing_template', 'netherite_upgrade_smithing_template'],
   trim: [['helmet', 'chestplate', 'leggings', 'boots'].map(n => 'iron_' + n), ['iron_ingot', 'redstone', 'lapis_lazuli', 'quartz', 'diamond', 'emerald', 'amethyst_shard']],
-  netherite: [['diamond_helmet', 'diamond_sword', 'diamond_chestplate', 'diamond_pickaxe', 'diamond_leggings', 'diamond_axe', 'diamond_boots', 'diamond_hoe', 'diamond_shovel'], ['netherite_ingot']],
+  netherite: [['diamond_helmet', 'diamond_sword', 'diamond_chestplate', 'diamond_pickaxe', 'diamond_leggings', 'diamond_axe', 'diamond_boots', 'diamond_hoe', 'diamond_shovel', 'diamond_horse_armor'], ['netherite_ingot']],
 };
 const HINT_ICONS = {};
 function hintIcon(name) {
@@ -43833,7 +43851,7 @@ Mob.prototype.canDisableShield = function (source) {
    =================================================================== */
 
 /* ---------------- what each kind carries ---------------- */
-const HORSE_ARMOR = { leather_horse_armor: ['leather', 3], copper_horse_armor: ['copper', 4], iron_horse_armor: ['iron', 5], golden_horse_armor: ['gold', 7], diamond_horse_armor: ['diamond', 11] };
+const HORSE_ARMOR = { leather_horse_armor: ['leather', 3], copper_horse_armor: ['copper', 4], iron_horse_armor: ['iron', 5], golden_horse_armor: ['gold', 7], diamond_horse_armor: ['diamond', 11, 2], netherite_horse_armor: ['netherite', 19, 3, 0.1] };
 const HORSE_KIND = {
   horse: { saddle: true, armor: 'horse' }, donkey: { saddle: true, cols: 5 }, mule: { saddle: true, cols: 5 },
   skeleton_horse: { saddle: true }, zombie_horse: { saddle: true }, camel: { saddle: true },
@@ -43850,6 +43868,11 @@ function horseBodyFits(m, st) {
 const horseArmorPts = m => { const b = m.data.body, a = b && HORSE_ARMOR[ITEMS[b.id].name]; return a && m.type === 'horse' ? a[1] : 0; };
 const _armorPointsHA = Mob.prototype.armorPoints;
 Mob.prototype.armorPoints = function () { return _armorPointsHA.call(this) + (this.data.body ? horseArmorPts(this) : 0); };
+// the toughness of diamond (2) and netherite (3) horse armor, and netherite's tenth of knockback resistance
+const horseArmorOf = m => { const b = m.data && m.data.body, a = b && m.type === 'horse' && HORSE_ARMOR[ITEMS[b.id].name]; return a || null; };
+const _armorToughnessHA = Mob.prototype.armorToughness;
+Mob.prototype.armorToughness = function () { const a = horseArmorOf(this); return _armorToughnessHA.call(this) + (a ? a[2] || 0 : 0); };
+Mob.prototype.kbBonus = function () { const a = horseArmorOf(this); return a ? a[3] || 0 : 0; };
 
 /* ---------------- the screen ---------------- */
 // HorseInventoryScreen: saddle (8,18) and armor (8,36) slots, the horse in a 52x52 frame at (26,18), the chest from (80,18)
@@ -43981,7 +44004,7 @@ UI.prototype.singleSlot = function (c, i) { const L = this.inv && SCREEN_LOGIC[t
 
 /* ---------------- drawn on the animal ---------------- */
 // horse armor: plates over the back and sides, a neck and face guard and the tops of the legs (HorseArmorLayer, inflated 0.1)
-const HA_COL = { leather: [[214, 214, 214], [244, 244, 244], [150, 150, 150]], copper: [[204, 112, 76], [236, 150, 110], [140, 70, 48]], iron: [[212, 212, 214], [240, 240, 242], [148, 148, 154]], gold: [[244, 210, 64], [255, 240, 140], [186, 146, 28]], diamond: [[92, 224, 214], [170, 255, 248], [36, 146, 146]] };
+const HA_COL = { leather: [[214, 214, 214], [244, 244, 244], [150, 150, 150]], copper: [[204, 112, 76], [236, 150, 110], [140, 70, 48]], iron: [[212, 212, 214], [240, 240, 242], [148, 148, 154]], gold: [[244, 210, 64], [255, 240, 140], [186, 146, 28]], diamond: [[92, 224, 214], [170, 255, 248], [36, 146, 146]], netherite: [[76, 70, 78], [110, 102, 112], [44, 40, 46]] };
 const HA_PARTS = ['body', 'head_parts', 'head', 'upper_mouth', 'left_hind_leg', 'right_hind_leg', 'left_front_leg', 'right_front_leg'];
 function horseArmorSkin(mat) {
   const [base, light, dark] = HA_COL[mat];
@@ -43994,7 +44017,7 @@ function horseArmorSkin(mat) {
     '*': (f, x, y, W, H, R) => f !== 'top' && f !== 'bottom' && y < 5 ? (y === 4 ? nz(dark, R, 0.04) : plate(x, y, R)) : null,
   }, 167 + mat.length);
 }
-for (const mat of ['leather', 'copper', 'iron', 'gold', 'diamond']) defSkin('entity/horse/armor/horse_armor_' + mat, 64, 64, () => horseArmorSkin(mat));
+for (const mat of ['leather', 'copper', 'iron', 'gold', 'diamond', 'netherite']) defSkin('entity/horse/armor/horse_armor_' + mat, 64, 64, () => horseArmorSkin(mat));
 const LEATHER_DEFAULT = [0xA0 / 255, 0x65 / 255, 0x40 / 255];
 const _skinsHorseHA = MOB_SKINS.horse;
 MOB_SKINS.horse = m => {
@@ -54858,7 +54881,7 @@ const PACK_ALIASES = (() => {
   for (const v of ['black', 'brown', 'caerbannog', 'gold', 'salt', 'toast', 'white', 'white_splotched']) set('entity/rabbit/' + v, 'entity/rabbit/rabbit_' + v);
   set('entity/sheep/sheep_fur', 'entity/sheep/sheep_wool');
   set('entity/turtle/big_sea_turtle', 'entity/turtle/turtle');
-  for (const m of ['leather', 'copper', 'iron', 'gold', 'diamond']) set('entity/horse/armor/horse_armor_' + m, 'entity/equipment/horse_body/' + m);
+  for (const m of ['leather', 'copper', 'iron', 'gold', 'diamond', 'netherite']) set('entity/horse/armor/horse_armor_' + m, 'entity/equipment/horse_body/' + m);
   set('entity/wolf/wolf_armor', 'entity/equipment/wolf_body/armadillo_scute'); set('entity/wolf/wolf_armor_overlay', 'entity/equipment/wolf_body/armadillo_scute_overlay');
   for (const m of ['leather', 'copper', 'chainmail', 'iron', 'gold', 'diamond', 'netherite']) {
     set('models/armor/' + m + '_layer_1', 'entity/equipment/humanoid/' + m); set('models/armor/' + m + '_layer_2', 'entity/equipment/humanoid_leggings/' + m);
@@ -58092,6 +58115,890 @@ TEXGEN.push(function texBundles() {
   for (const c of COLORS) { const v = DYE_RGB[c]; IT(c + '_bundle', draw([(v >> 16) & 255, (v >> 8) & 255, v & 255].map(x => x * 0.85 + 20))); }
 });
 })();
+
+/* @file 178_ambient.js */
+/* ===================================================================
+   Part 73: the blocks around you come alive like Java's
+   - every tick Java picks 1,334 random blocks around the player (667
+     within 16 blocks and 667 within 32, most of them close by) and
+     lets each make its particles and sounds; the game now does the
+     same instead of checking 100 blocks
+   - torches and soul torches smoke and flicker, on walls too;
+     redstone torches give off red specks; lit furnaces puff smoke and
+     flames from their fronts and crackle, smokers smoke from the top,
+     blast furnaces from the front; brewing stands steam; candles burn
+     with little flames; end rods shed sparkles
+   - powered redstone dust, repeaters and levers give off red specks
+   - lava pops and spits embers that trail smoke, and rumbles; still
+     water has tiny drifting specks and flowing water gurgles; water
+     and lava seep through ceilings and drip, pointed dripstone drips
+     from the water or lava above it, wet sponges and crying obsidian
+     weep
+   - leaves let fall a leaf now and then, tinted like the leaves
+     (cherry petals drift off, pale oak and poplar leaves swirl), and
+     drip in the rain; spore blossoms shower green specks; mycelium
+     smokes faintly
+   - fire smokes and crackles; nether portals swirl and hum like
+     Java's; the end portal smokes; ender chests and end gateways
+     shimmer; charged respawn anchors draw particles up
+   - bookshelves around an enchanting table send glyphs into its book,
+     and the shelves count as Java counts them: the 32 spots two blocks
+     out, each one needing the block halfway to the table to be air or
+     something as thin (the old count wanted both levels clear and
+     counted corners through the corner)
+   - crimson and warped forests fill with drifting spores, the soul
+     sand valley with ash and the basalt deltas with white ash, at the
+     odds of Java's biomes
+   - spawners smoke and flicker every tick while a player is near
+   - with a resource pack the smoke and other puffs now shrink as they
+     fade like Java's (the pack's generic particles were taken in the
+     reverse order)
+   =================================================================== */
+
+/* ---------------- particles that move like Java's ---------------- */
+const LEAF_AVG = {};   // the average colour of each untinted kind of leaves (filled in with the textures)
+const PJ = (() => {
+  const R = Math.random;
+  // Particle(level, x, y, z, xd, yd, zd): a particle given a speed also gets a random push, up a little
+  const push = (xa, ya, za) => {
+    const x = xa + (R() * 2 - 1) * 0.4, y = ya + (R() * 2 - 1) * 0.4, z = za + (R() * 2 - 1) * 0.4;
+    const s = (R() + R() + 1) * 0.15 * 0.4 / (Math.hypot(x, y, z) || 1);
+    return [x * s, y * s + 0.1, z * s];
+  };
+  // SingleQuadParticle.quadSize: half the particle's width
+  const quad = () => 0.1 * (R() * 0.5 + 0.5) * 2;
+  // whether a point is inside a block's collision boxes (a particle's box is so small its middle stands for it)
+  const solidAt = (w, x, y, z) => {
+    const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z), id = w.getBlock(bx, by, bz);
+    if (!SOLID[id]) return false;
+    if (SHAPE[id] === SH.CUBE) return true;
+    const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(bx, by, bz, id) : null;
+    const fx = (x - bx) * 16, fy = (y - by) * 16, fz = (z - bz) * 16;
+    for (const b of shapeBoxes(id, w.getMeta(bx, by, bz), ctx ? ctx.conn : 0, true, ctx)) if (fx >= b[0] && fx < b[3] && fy >= b[1] && fy < b[4] && fz >= b[2] && fz < b[5]) return true;
+    return false;
+  };
+  // Particle.move: with physics each axis stops where something is in the way (up or down first), and that speed is lost
+  function move(p, w) {
+    p.onGround = false; p.blockedY = false;
+    if (!p.phys) { p.x += p.vx; p.y += p.vy; p.z += p.vz; return; }
+    const axis = (k, d) => {
+      if (!d) return;
+      const o = [p.x, p.y, p.z], n = o.slice(); n[k] += d;
+      if (!solidAt(w, n[0], n[1], n[2])) { p.x = n[0]; p.y = n[1]; p.z = n[2]; return; }
+      // as far as it gets before touching
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 5; i++) { const m = (lo + hi) / 2; n[k] = o[k] + d * m; if (solidAt(w, n[0], n[1], n[2])) hi = m; else lo = m; }
+      n[k] = o[k] + d * lo; p.x = n[0]; p.y = n[1]; p.z = n[2];
+      if (k === 1) { p.blockedY = true; if (d < 0) p.onGround = true; p.vy = 0; } else if (k === 0) p.vx = 0; else p.vz = 0;
+    };
+    axis(1, p.vy);
+    if (Math.abs(p.vx) < Math.abs(p.vz)) { axis(2, p.vz); axis(0, p.vx); } else { axis(0, p.vx); axis(2, p.vz); }
+  }
+  // Particle.tick: gravity, the move, friction, and slower along the ground
+  function step(p, w) {
+    p.vy -= 0.04 * p.grav;
+    move(p, w);
+    if (p.speedUp && p.blockedY) { p.vx *= 1.1; p.vz *= 1.1; }
+    p.vx *= p.fr; p.vy *= p.fr; p.vz *= p.fr;
+    if (p.onGround) { p.vx *= 0.7; p.vz *= 0.7; }
+  }
+  return { push, quad, solidAt, move, step };
+})();
+
+(() => {
+  const R = Math.random, P = Particles.prototype;
+  const life = (n, k) => Math.max(1, Math.floor(n / (R() * 0.8 + 0.2) * (k || 1)));
+  const tex = n => texL(n);
+  // the frames of a puff from big to small, and of an end rod's sparkle
+  const puff = () => [texL('particle_generic_0'), 8], glitter = () => [texL('particle_glitter_7'), 8];
+  // FlameParticle: shrinks as it burns down
+  const flameTick = (p, w) => { PJ.step(p, w); const f = 1 - p.life / p.max; p.size = p.s0 * (1 - f * f * 0.5); };
+  // LavaParticle: shrinks, and trails smoke less often as it ages
+  const lavaTick = (p, w, P) => { PJ.step(p, w); const f = 1 - p.life / p.max; p.size = p.s0 * (1 - f * f); if (p.life > 0 && R() > f) P.jSmoke(p.x, p.y, p.z, p.vx, p.vy, p.vz); };
+  // PortalParticle: from far out it swirls in on the spot it came from, growing, and settles from a block above
+  const portalTick = p => {
+    const age = p.max - p.life, f = age / (p.max - 1), f1 = -f + f * f * 2, f2 = 1 - f1, g = 1 - (1 - f) * (1 - f);
+    p.x = p.x0 + p.vx * f2; p.y = p.y0 + p.vy * f2 + (1 - f); p.z = p.z0 + p.vz * f2; p.size = p.s0 * g;
+  };
+  // ReversePortalParticle: drifts off ever faster, shrinking
+  const revPortalTick = p => { const age = p.max - p.life, f = age / (p.max - 1); p.x += p.vx * f; p.y += p.vy * f; p.z += p.vz * f; p.size = p.s0 * Math.max(0, 1 - age / ((p.max - 1) * 1.5)); };
+  // FlyTowardsPositionParticle: an enchanting glyph flies from its shelf into the book, dipping at the end
+  const enchantTick = p => {
+    const age = p.max - p.life, f = 1 - age / (p.max - 1); let f1 = 1 - f; f1 *= f1; f1 *= f1;
+    p.x = p.x0 + p.vx * f; p.y = p.y0 + p.vy * f - f1 * 1.2; p.z = p.z0 + p.vz * f;
+  };
+  // SimpleAnimatedParticle (end rod): fades and turns peach in the second half of its life
+  const rodTick = (p, w) => {
+    PJ.step(p, w);
+    const age = p.max - p.life, lt = p.max;
+    if (age > lt / 2) { p.alpha = Math.max(0, 1 - (age - Math.floor(lt / 2)) / lt); const c = p.col; c[0] += (0.949 - c[0]) * 0.2; c[1] += (0.871 - c[1]) * 0.2; c[2] += (0.788 - c[2]) * 0.2; }
+  };
+  // DripParticle: a drop hangs (the falling of a drip is DripHangParticle's tiny gravity, its speed kept to 2%), lets go,
+  // falls, and splashes or lands; one falling into its own liquid is gone
+  const DRIP = {
+    water: { col: [0.2, 0.3, 1], fluid: B.WATER, land: 'splash' },
+    lava: { col: [1, 0.2857143, 0.083333336], fluid: B.LAVA, land: 'lava', cool: true },
+    dripstone_water: { col: [0.2, 0.3, 1], fluid: B.WATER, land: 'splash', sound: 'drip_water' },
+    dripstone_lava: { col: [1, 0.2857143, 0.083333336], fluid: B.LAVA, land: 'lava', cool: true, sound: 'drip_lava' },
+    tear: { col: [0.51171875, 0.03125, 0.890625], land: 'tear', glow: true, hang: 100, hangG: 0.06 * 0.01, fallG: 0.01, landLife: 28 },
+  };
+  const inOwnFluid = (p, w) => {
+    const K = DRIP[p.kind]; if (!K.fluid) return false;
+    const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z), id = w.getBlock(bx, by, bz);
+    if (!(id === K.fluid || (K.fluid === B.WATER && WATERY[id] === 1))) return false;
+    const m = id === K.fluid ? w.getMeta(bx, by, bz) : 0, h = m === 0 || (m & 8) ? 8 / 9 : (8 - (m & 7)) / 9;
+    return p.y < by + h;
+  };
+  const dripTick = (p, w, Ps) => {
+    const K = DRIP[p.kind];
+    if (p.stage === 0) {
+      // DripHangParticle.preMoveUpdate; the cooling lava drop goes from yellow to deep orange
+      if (K.cool) { const t = p.max - p.life; p.col[1] = 16 / (t + 16); p.col[2] = 4 / (t + 8); }
+      if (p.life <= 0) {
+        p.stage = 1; p.life = p.max = life(K.fallLife || 64) + 1; p.grav = K.fallG || 0.06; p.layer = tex('particle_drip_fall');
+        if (K.cool) p.col = K.col.slice();
+        return;
+      }
+    }
+    p.vy -= p.grav; PJ.move(p, w);
+    if (p.stage === 0) { p.vx *= 0.02; p.vy *= 0.02; p.vz *= 0.02; }
+    else if (p.stage === 1 && p.onGround) {
+      // FallAndLandParticle.postMoveUpdate: gone, and in its place a splash or a landed drop
+      p.life = 0;
+      if (K.land === 'splash') Ps.jSplash(p.x, p.y, p.z);
+      else Ps.jDripLand(p.x, p.y, p.z, p.kind);
+      if (K.sound) Ps.game.sound(K.sound, p.x, p.y, p.z);
+      return;
+    }
+    p.vx *= 0.98; p.vy *= 0.98; p.vz *= 0.98;
+    if (inOwnFluid(p, w)) p.life = 0;
+  };
+  // WaterDropParticle (a splash): hops up and falls, half of them gone at each bounce
+  const splashTick = (p, w) => {
+    p.vy -= p.grav; PJ.move(p, w); p.vx *= 0.98; p.vy *= 0.98; p.vz *= 0.98;
+    if (p.onGround) { if (R() < 0.5) p.life = 0; p.vx *= 0.7; p.vz *= 0.7; }
+    const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z), id = w.getBlock(bx, by, bz);
+    if (id === B.WATER || WATERY[id] === 1 || (SOLID[id] && SHAPE[id] === SH.CUBE)) p.life = 0;
+  };
+  // FallingLeavesParticle: falls slowly with a swirl (pale oak, tinted leaves) or drifts off one way (cherry petals);
+  // gone when it lands or bumps into something sideways
+  const leafTick = (p, w) => {
+    const f1 = Math.min((300 - p.life) / 300, 1);
+    let dx = 0, dz = 0;
+    if (p.flow) { const k = Math.pow(f1, 1.25); dx += p.fx * k; dz += p.fz * k; }
+    if (p.swirl) { dx += f1 * Math.cos(f1 * p.period) * p.wind; dz += f1 * Math.sin(f1 * p.period) * p.wind; }
+    p.vx += dx * 0.0025; p.vz += dz * 0.0025; p.vy -= p.grav;
+    PJ.move(p, w);
+    if (p.onGround || (p.life < 299 && (p.vx === 0 || p.vz === 0))) p.life = 0;
+  };
+
+  Object.assign(P, {
+    // LevelRenderer.addParticle: none further than 32 blocks from the camera
+    near(x, y, z) { const p = this.game.player; if (!p) return true; const dx = p.x - x, dy = p.y + 1.62 - y, dz = p.z - z; return dx * dx + dy * dy + dz * dz <= 1024; },
+    // SmokeParticle (BaseAshSmokeParticle): dark grey, rising faster and faster; large smoke is 2.5 times bigger and longer
+    jSmoke(x, y, z, xd, yd, zd, mul) {
+      if (!this.near(x, y, z)) return;
+      mul = mul || 1;
+      const [a, b, c] = PJ.push(0, 0, 0), f = R() * 0.3;
+      this.add({ x, y, z, vx: a * 0.1 + (xd || 0), vy: b * 0.1 + (yd || 0), vz: c * 0.1 + (zd || 0), life: life(8, mul), anim: puff(), u: 0, v: 0, us: 1,
+        size: PJ.quad() * 0.75 * mul, col: [f, f, f], grav: -0.1, fr: 0.96, phys: true, speedUp: true, fn: PJ.step });
+    },
+    // FlameParticle (and the soul and copper flames, and a candle's small one): hardly moves, glows, shrinks
+    jFlame(x, y, z, t, small) {
+      if (!this.near(x, y, z)) return;
+      const [a, b, c] = PJ.push(0, 0, 0), s = PJ.quad() * (small ? 0.5 : 1);
+      this.add({ x: x + (R() - R()) * 0.05, y: y + (R() - R()) * 0.05, z: z + (R() - R()) * 0.05, vx: a * 0.01, vy: b * 0.01, vz: c * 0.01,
+        life: Math.floor(8 / (R() * 0.8 + 0.2)) + 4, layer: tex(t || 'particle_flame'), u: 0, v: 0, us: 1, size: s, s0: s, col: [1, 1, 1], bright: true, grav: 0, fr: 0.96, fn: flameTick });
+    },
+    // LavaParticle: an ember thrown up out of lava
+    jLava(x, y, z) {
+      if (!this.near(x, y, z)) return;
+      const [a, , c] = PJ.push(0, 0, 0), s = PJ.quad() * (R() * 2 + 0.2);
+      this.add({ x, y, z, vx: a * 0.8, vy: R() * 0.4 + 0.05, vz: c * 0.8, life: life(16), layer: tex('particle_lava'), u: 0, v: 0, us: 1, size: s, s0: s, col: [1, 1, 1], bright: true,
+        grav: 0.75, fr: 0.999, phys: true, fn: lavaTick });
+    },
+    // DustParticle: a speck of colour (redstone's red), lit by the world
+    jDust(x, y, z, r, g, b, scale) {
+      if (!this.near(x, y, z)) return;
+      scale = scale || 1;
+      const [a, bb, c] = PJ.push(0, 0, 0), f = R() * 0.4 + 0.6, k = () => (R() * 0.2 + 0.8) * f;
+      this.add({ x, y, z, vx: a * 0.1, vy: bb * 0.1, vz: c * 0.1, life: Math.max(1, Math.floor(Math.floor(8 / (R() * 0.8 + 0.2)) * scale)), anim: puff(), u: 0, v: 0, us: 1,
+        size: PJ.quad() * 0.75 * scale, col: [r * k(), g * k(), b * k()], grav: 0, fr: 0.96, phys: true, speedUp: true, fn: PJ.step });
+    },
+    jPortal(x, y, z, xd, yd, zd) {
+      if (!this.near(x, y, z)) return;
+      const f = R() * 0.6 + 0.4;
+      this.add({ x: x + xd, y: y + yd + 1, z: z + zd, x0: x, y0: y, z0: z, vx: xd, vy: yd, vz: zd, life: Math.floor(R() * 10) + 41, layer: tex('particle_generic_' + Math.floor(R() * 8)), u: 0, v: 0, us: 1,
+        size: 0, s0: 0.1 * (R() * 0.2 + 0.5), col: [f * 0.9, f * 0.3, f], bright: true, fn: portalTick });
+    },
+    jRevPortal(x, y, z, xd, yd, zd) {
+      if (!this.near(x, y, z)) return;
+      const f = R() * 0.6 + 0.4, s = 0.1 * (R() * 0.2 + 0.5) * 1.5;
+      this.add({ x, y, z, vx: xd, vy: yd, vz: zd, life: Math.floor(R() * 2) + 61, layer: tex('particle_generic_' + Math.floor(R() * 8)), u: 0, v: 0, us: 1,
+        size: s, s0: s, col: [f * 0.9, f * 0.3, f], bright: true, fn: revPortalTick });
+    },
+    jEnchant(x, y, z, xd, yd, zd) {
+      if (!this.near(x, y, z)) return;
+      const f = R() * 0.6 + 0.4;
+      this.add({ x: x + xd, y: y + yd, z: z + zd, x0: x, y0: y, z0: z, vx: xd, vy: yd, vz: zd, life: Math.floor(R() * 10) + 31, layer: tex('particle_sga_' + 'abcdefghijklmnopqrstuvwxyz'[Math.floor(R() * 26)]),
+        u: 0, v: 0, us: 1, size: 0.1 * (R() * 0.5 + 0.2), col: [0.9 * f, 0.9 * f, f], bright: true, fn: enchantTick });
+    },
+    jEndRod(x, y, z, xd, yd, zd) {
+      if (!this.near(x, y, z)) return;
+      this.add({ x, y, z, vx: xd, vy: yd, vz: zd, life: 60 + Math.floor(R() * 12), anim: glitter(), u: 0, v: 0, us: 1, size: PJ.quad() * 0.75, col: [1, 1, 1], bright: true,
+        grav: 0.0125, fr: 0.91, fn: rodTick });
+    },
+    jDrip(x, y, z, kind) {
+      if (!this.near(x, y, z)) return;
+      const K = DRIP[kind];
+      this.add({ x, y, z, vx: 0, vy: 0, vz: 0, life: (K.hang || 40) + 1, kind, stage: 0, layer: tex('particle_drip'), u: 0, v: 0, us: 1, size: PJ.quad(), col: K.col.slice(), bright: !!K.glow,
+        grav: (K.hangG || 0.06 * 0.02), phys: true, fn: dripTick });
+    },
+    jDripLand(x, y, z, kind) {
+      const K = DRIP[kind];
+      this.add({ x, y, z, vx: 0, vy: 0, vz: 0, life: life(K.landLife || 16), kind, stage: 2, layer: tex('particle_drip_land'), u: 0, v: 0, us: 1, size: PJ.quad(), col: K.col.slice(), bright: !!K.glow,
+        grav: 0.06, phys: true, fn: dripTick });
+    },
+    jSplash(x, y, z) {
+      const [a, , c] = PJ.push(0, 0, 0);
+      this.add({ x, y, z, vx: a * 0.3, vy: R() * 0.2 + 0.1, vz: c * 0.3, life: life(8), layer: tex('particle_splash'), u: 0, v: 0, us: 1, size: PJ.quad(), col: [1, 1, 1], grav: 0.04, phys: true, fn: splashTick });
+    },
+    // SuspendedParticle: tiny specks in water, spores in the nether forests and spore blossom dust, a little below where asked
+    jSuspended(x, y, z, col, opts) {
+      if (!this.near(x, y, z)) return;
+      const o = opts || {}, v = o.push ? PJ.push(o.push[0], o.push[1], o.push[2]) : [0, 0, 0];
+      this.add({ x, y: y - 0.125, z, vx: v[0], vy: v[1], vz: v[2], life: o.life || life(16), layer: tex('particle_generic_7'), u: 0, v: 0, us: 1,
+        size: PJ.quad() * (o.push ? R() * 0.6 + 0.6 : R() * 0.6 + 0.2), col, grav: o.grav || 0, fr: 1, fn: PJ.step, group: o.group });
+    },
+    // AshParticle and WhiteAshParticle (BaseAshSmokeParticle): ash sinks, white ash blows sideways
+    jAsh(x, y, z, white) {
+      if (!this.near(x, y, z)) return;
+      const [a, b, c] = PJ.push(0, 0, 0);
+      let xd = 0, yd = 0, zd = 0, col;
+      if (white) { xd = R() * -1.9 * R() * 0.1; yd = R() * -0.5 * R() * 0.1 * 5; zd = R() * -1.9 * R() * 0.1; col = [0.7294118, 0.69411767, 0.7607843]; }
+      else { const f = R() * 0.5; col = [f, f, f]; }
+      this.add({ x, y, z, vx: a * 0.1 + xd, vy: b * -0.1 + yd, vz: c * 0.1 + zd, life: life(20), layer: tex('particle_generic_7'), u: 0, v: 0, us: 1, size: PJ.quad() * 0.75, col,
+        grav: white ? 0.0125 : 0.1, fr: 0.96, fn: PJ.step });
+    },
+    // SuspendedTownParticle (mycelium): a dark speck that hardly moves
+    jMycelium(x, y, z) {
+      if (!this.near(x, y, z)) return;
+      const [a, b, c] = PJ.push(0, 0, 0), f = R() * 0.1 + 0.2;
+      this.add({ x, y, z, vx: a * 0.02, vy: b * 0.02, vz: c * 0.02, life: life(20), layer: tex('particle_generic_7'), u: 0, v: 0, us: 1, size: PJ.quad() * (R() * 0.6 + 0.5), col: [f, f, f],
+        grav: 0, fr: 0.99, phys: true, fn: PJ.step });
+    },
+    // FallingParticle (spore blossom): a green speck falling slowly, gone on the ground
+    jSporeFall(x, y, z) {
+      if (!this.near(x, y, z)) return;
+      this.add({ x, y, z, vx: 0, vy: 0, vz: 0, life: Math.floor(64 / (0.1 + R() * 0.8)), kind: 'spore', stage: 1, layer: tex('particle_drip_fall'), u: 0, v: 0, us: 1, size: PJ.quad(), col: [0.32, 0.5, 0.22],
+        grav: 0.005, phys: true, fn: (p, w) => { p.vy -= p.grav; PJ.move(p, w); p.vx *= 0.98; p.vy *= 0.98; p.vz *= 0.98; if (p.onGround) p.life = 0; } });
+    },
+    // CampfireSmokeParticle: a big puff drifting straight up, seen from far, fading in its last three seconds
+    jCampfireSmoke(x, y, z, signal) {
+      this.add({ x, y, z, vx: 0, vy: 0.07 + R() / 500, vz: 0, life: (signal ? 280 : 80) + Math.floor(R() * 50) + 1, layer: tex('particle_big_smoke_' + Math.floor(R() * 12)), u: 0, v: 0, us: 1,
+        size: PJ.quad() * 3, col: [1, 1, 1], alpha: signal ? 0.95 : 0.9, grav: 3e-6, phys: true, fn: (p, w) => {
+          p.vx += R() / 5000 * (R() < 0.5 ? 1 : -1); p.vz += R() / 5000 * (R() < 0.5 ? 1 : -1); p.vy -= p.grav;
+          PJ.move(p, w);
+          if (p.life <= 60 && p.alpha > 0.01) p.alpha -= 0.015;
+          if (p.alpha <= 0) p.life = 0;
+        } });
+    },
+    jLeaf(x, y, z, kind, col) {
+      if (!this.near(x, y, z)) return;
+      const L = LEAF_FX[kind], rnd = R(), scale = L.scale * (R() < 0.5 ? 0.05 : 0.075);
+      this.add({ x, y, z, vx: 0, vy: -L.v0, vz: 0, life: 300, layer: tex(L.tex + (L.first + Math.floor(R() * L.n))), u: 0, v: 0, us: 1, size: scale, col: col || [1, 1, 1],
+        grav: L.fall * 1.2 * 0.0025, wind: L.wind, swirl: L.swirl, flow: L.flow, fx: Math.cos(rnd * Math.PI / 3) * L.wind, fz: Math.sin(rnd * Math.PI / 3) * L.wind,
+        period: (1000 + rnd * 3000) * Math.PI / 180, phys: true, fn: leafTick });
+    },
+  });
+  // the providers of the falling leaves: [fall acceleration, wind, swirl, drift away, size, start speed]
+  const LEAF_FX = {
+    tinted: { tex: 'particle_leaf_', first: 0, n: 12, fall: 0.07, wind: 10, swirl: true, flow: false, scale: 2, v0: 0.021 },
+    pale_oak: { tex: 'particle_pale_oak_', first: 0, n: 12, fall: 0.07, wind: 10, swirl: true, flow: false, scale: 2, v0: 0.021 },
+    cherry: { tex: 'particle_cherry_', first: 0, n: 12, fall: 0.25, wind: 2, swirl: false, flow: true, scale: 1, v0: 0 },
+  };
+  for (const c of ['red', 'orange', 'yellow']) LEAF_FX[c + '_poplar'] = Object.assign({}, LEAF_FX.pale_oak, { tex: 'particle_' + c + '_poplar_', first: 1, n: 4 });
+  window.LEAF_FX = LEAF_FX;
+})();
+
+/* ---------------- the blocks ---------------- */
+// Block.animateTick for each kind of block, called for the blocks ClientLevel.doAnimateTick picks
+const ANIM = new Array(MAXB);
+(() => {
+  const R = Math.random, idOf = n => B[n.toUpperCase()];
+  const set = (names, f) => { for (const n of names) { const id = idOf(n); if (id !== undefined) ANIM[id] = f; } };
+  const sturdy = id => SOLID[id] === 1 && SHAPE[id] === SH.CUBE;
+  // torches: smoke and a flame at the tip every time; wall torches lean 0.27 toward the wall and sit 0.22 higher
+  const tip = (x, y, z, m) => {
+    const a = m & 7;
+    if (a >= 1 && a <= 4) { const f = TORCH_ATT[a]; return [x + 0.5 + 0.27 * DX[f], y + 0.92, z + 0.5 + 0.27 * DZ[f]]; }
+    return [x + 0.5, y + 0.7, z + 0.5];
+  };
+  const torch = flame => (g, w, x, y, z, m, P) => { const [a, b, c] = tip(x, y, z, m); P.jSmoke(a, b, c); P.jFlame(a, b, c, flame); };
+  set(['torch'], torch('particle_flame'));
+  set(['soul_torch'], torch('particle_soul_flame'));
+  set(['copper_torch'], torch('particle_copper_fire_flame'));
+  // RedstoneTorchBlock: while lit, a red speck near the tip
+  set(['redstone_torch'], (g, w, x, y, z, m, P) => {
+    if (m & 8) return;
+    const [a, b, c] = tip(x, y, z, m);
+    P.jDust(a + (R() - 0.5) * 0.2, b + (R() - 0.5) * 0.2, c + (R() - 0.5) * 0.2, 1, 0, 0);
+  });
+  // furnaces: smoke (and a furnace's flame) from the lower part of the front; a crackle one time in ten
+  const front = (x, y, z, m, h, flame, P) => {
+    const f = FRONT4[m & 3], d4 = R() * 0.6 - 0.3, ox = DX[f] ? DX[f] * 0.52 : d4, oz = DZ[f] ? DZ[f] * 0.52 : d4, oy = R() * h / 16;
+    P.jSmoke(x + 0.5 + ox, y + oy, z + 0.5 + oz);
+    if (flame) P.jFlame(x + 0.5 + ox, y + oy, z + 0.5 + oz);
+  };
+  set(['lit_furnace'], (g, w, x, y, z, m, P) => { if (R() < 0.1) g.sound('furnace_crackle', x + 0.5, y, z + 0.5); front(x, y, z, m, 6, true, P); });
+  set(['blast_furnace'], (g, w, x, y, z, m, P) => { if (!(m & 4)) return; if (R() < 0.1) g.sound('furnace_crackle', x + 0.5, y, z + 0.5); front(x, y, z, m, 9, false, P); });
+  set(['smoker'], (g, w, x, y, z, m, P) => { if (!(m & 4)) return; if (R() < 0.1) g.sound('smoker_smoke', x + 0.5, y, z + 0.5); P.jSmoke(x + 0.5, y + 1.1, z + 0.5); });
+  set(['brewing_stand'], (g, w, x, y, z, m, P) => P.jSmoke(x + 0.4 + R() * 0.2, y + 0.7 + R() * 0.3, z + 0.4 + R() * 0.2));
+  // candles: each wick has a small flame, and now and then smoke and a crackle (AbstractCandleBlock)
+  const WICKS = [[[0.5, 0.5, 0.5]], [[0.375, 0.44, 0.5], [0.625, 0.5, 0.44]], [[0.5, 0.313, 0.625], [0.375, 0.44, 0.5], [0.56, 0.5, 0.44]],
+    [[0.44, 0.313, 0.56], [0.625, 0.44, 0.56], [0.375, 0.44, 0.375], [0.56, 0.5, 0.375]]];
+  const candle = (g, w, x, y, z, m, P) => {
+    if (!(m & 4)) return;
+    for (const o of WICKS[m & 3]) {
+      const f = R(), a = x + o[0], b = y + o[1], c = z + o[2];
+      if (f < 0.3) { P.jSmoke(a, b, c); if (f < 0.17) g.sound('candle_ambient', x + 0.5, y + 0.5, z + 0.5); }
+      P.jFlame(a, b, c, 'particle_flame', true);
+    }
+  };
+  for (let i = 1; i < MAXB; i++) if (BLK[i] && BLK[i].candle) ANIM[i] = candle;
+  // EndRodBlock: one time in five a sparkle somewhere along the rod
+  set(['end_rod'], (g, w, x, y, z, m, P) => {
+    if (R() >= 0.2) return;
+    const f = m & 7, d = 0.4 - (R() + R()) * 0.4;
+    P.jEndRod(x + 0.55 - R() * 0.1 + DX[f] * d, y + 0.55 - R() * 0.1 + DY[f] * d, z + 0.55 - R() * 0.1 + DZ[f] * d, gaussR() * 0.005, gaussR() * 0.005, gaussR() * 0.005);
+  });
+  // RedstoneWireBlock: powered dust gives off specks of its colour along each side, more up a wall
+  const wireCol = p => { const f = p / 15; return [f * 0.6 + (f > 0 ? 0.4 : 0.3), Math.max(0, f * f * 0.7 - 0.5), Math.max(0, f * f * 0.6 - 0.7)]; };
+  const line = (P, x, y, z, col, a, b, lo, hi) => {
+    const span = hi - lo;
+    if (R() >= 0.2 * span) return;
+    const t = lo + span * R();
+    P.jDust(x + 0.5 + 0.4375 * a[0] + t * b[0], y + 0.5 + 0.4375 * a[1] + t * b[1], z + 0.5 + 0.4375 * a[2] + t * b[2], col[0], col[1], col[2]);
+  };
+  set(['redstone_wire'], (g, w, x, y, z, m, P) => {
+    const pw = m & 15;
+    if (!pw) return;
+    const col = wireCol(pw), k = wireMask((dx, dy, dz) => w.getBlock(x + dx, y + dy, z + dz)), DOWN = [0, -1, 0], UP = [0, 1, 0];
+    for (let h = 0; h < 4; h++) {
+      const f = WIRE_DIR[h], d = [DX[f], 0, DZ[f]];
+      if (k & (16 << h)) { line(P, x, y, z, col, d, UP, -0.5, 0.5); line(P, x, y, z, col, DOWN, d, 0, 0.5); }
+      else if (k & (1 << h)) line(P, x, y, z, col, DOWN, d, 0, 0.5);
+      else line(P, x, y, z, col, DOWN, d, 0, 0.3);
+    }
+  });
+  // RepeaterBlock: a powered repeater's torches give off specks (the fixed one 5/16 toward the output, the other by its delay)
+  set(['repeater'], (g, w, x, y, z, m, P) => {
+    if (!(m & 8)) return;
+    const o = FACE_OF_LOOK[m & 3], t = (R() < 0.5 ? -5 : ((m >> 4) & 3) * 2 + 1) / 16;
+    P.jDust(x + 0.5 + (R() - 0.5) * 0.2 - t * DX[o], y + 0.4 + (R() - 0.5) * 0.2, z + 0.5 + (R() - 0.5) * 0.2 - t * DZ[o], 1, 0, 0);
+  });
+  // LeverBlock: a quarter of the time, a small red speck near the base of a pulled lever
+  set(['lever'], (g, w, x, y, z, m, P) => {
+    if (!(m & 8) || R() >= 0.25) return;
+    const f = m & 7, k = DY[f] ? 0.2 : 0.3;
+    P.jDust(x + 0.5 + k * DX[f], y + 0.5 + k * DY[f], z + 0.5 + k * DZ[f], 1, 0, 0, 0.5);
+  });
+  // RespawnAnchorBlock: charged, it draws particles up off its top, and hums now and then
+  set(['respawn_anchor'], (g, w, x, y, z, m, P) => {
+    if (!(m & 7)) return;
+    if (R() < 0.01) g.sound('respawn_anchor_ambient', x + 0.5, y + 0.5, z + 0.5);
+    P.jRevPortal(x + 0.5 + (0.5 - R()), y + 1, z + 0.5 + (0.5 - R()), 0, R() * 0.04, 0);
+  });
+  // drops seeping out of a side or the bottom that isn't covered by a full face (CryingObsidianBlock, WetSpongeBlock)
+  set(['crying_obsidian'], (g, w, x, y, z, m, P) => {
+    if (R() >= 0.2) return;
+    const f = Math.floor(R() * 6);
+    if (f === 2 || sturdy(w.getBlock(x + DX[f], y + DY[f], z + DZ[f]))) return;
+    P.jDrip(x + (DX[f] ? 0.5 + DX[f] * 0.6 : R()), y + (DY[f] ? 0.5 + DY[f] * 0.6 : R()), z + (DZ[f] ? 0.5 + DZ[f] * 0.6 : R()), 'tear');
+  });
+  set(['wet_sponge'], (g, w, x, y, z, m, P) => {
+    const f = Math.floor(R() * 6);
+    if (f === 2 || sturdy(w.getBlock(x + DX[f], y + DY[f], z + DZ[f]))) return;
+    let a = x, b = y, c = z;
+    if (f === 3) { b -= 0.05; a += R(); c += R(); }
+    else { b += R() * 0.8; if (DX[f]) { c += R(); a += f === 0 ? 1 : 0.05; } else { a += R(); c += f === 4 ? 1 : 0.05; } }
+    P.jDrip(a, b, c, 'water');
+  });
+  set(['mycelium'], (g, w, x, y, z, m, P) => { if (R() < 0.1) P.jMycelium(x + R(), y + 1.1, z + R()); });
+  // SporeBlossomBlock: a falling speck under it, and fourteen tries for floating dust in the 21 x 10 x 21 space below
+  set(['spore_blossom'], (g, w, x, y, z, m, P) => {
+    P.jSporeFall(x + R(), y + 0.7, z + R());
+    // ParticleGroup.SPORE_BLOSSOM: a thousand at most
+    let n = P.count('spore');
+    for (let k = 0; k < 14; k++) {
+      const a = x + Math.floor(R() * 21) - 10, b = y - Math.floor(R() * 10), c = z + Math.floor(R() * 21) - 10;
+      if (sturdy(w.getBlock(a, b, c))) continue;
+      if (n++ >= 1000) break;
+      P.jSuspended(a + R(), b + R(), c + R(), [0.32, 0.5, 0.22], { push: [0, -0.8, 0], life: 500 + Math.floor(R() * 501), grav: 0.01, group: 'spore' });
+    }
+  });
+  // PointedDripstoneBlock: the tip of a stalactite drips from the water or lava above the block it hangs from (now and
+  // then even with nothing there: water, or lava in the nether)
+  set(['pointed_dripstone'], (g, w, x, y, z, m, P) => {
+    if (m & 1) return;
+    const f = R();
+    if (f > 0.12 || speleothemThickness(w, B.POINTED_DRIPSTONE, 0, x, y, z) !== 'tip') return;
+    let ry = y + 1;
+    for (let k = 1; k < 11 && w.getBlock(x, ry, z) === B.POINTED_DRIPSTONE && !(w.getMeta(x, ry, z) & 1); k++) ry++;
+    if (w.getBlock(x, ry, z) === B.POINTED_DRIPSTONE) return;
+    const above = w.getBlock(x, ry + 1, z);
+    let fl = above === B.MUD && w.dim !== 'nether' ? B.WATER : above === B.LAVA ? B.LAVA : above === B.WATER || WATERY[above] === 1 ? B.WATER : 0;
+    if (!fl && f >= 0.02) return;
+    if (!fl) fl = w.dim === 'nether' ? B.LAVA : B.WATER;
+    P.jDrip(x + 0.5, y + 0.25, z + 0.5, fl === B.LAVA ? 'dripstone_lava' : 'dripstone_water');
+  });
+  // leaves: a drip in the rain where nothing solid is under them (1 in 15), and a falling leaf now and then
+  const LEAF_KIND = {}, LEAF_CHANCE = {};
+  for (let i = 1; i < MAXB; i++) {
+    const d = BLK[i];
+    if (!d || !d.leaves) continue;
+    const n = d.name;
+    LEAF_KIND[i] = n === 'cherry_leaves' ? 'cherry' : n === 'pale_oak_leaves' ? 'pale_oak' : /_poplar_leaves$/.test(n) ? n.replace('_leaves', '') : 'tinted';
+    LEAF_CHANCE[i] = n === 'cherry_leaves' ? 0.1 : n === 'pale_oak_leaves' || LEAF_KIND[i] !== 'tinted' ? 0.02 : 0.01;
+  }
+  const leafCol = (w, x, z, id) => {
+    const k = TINT[id];
+    if (k === 3) return [128 / 255, 167 / 255, 85 / 255];
+    if (k === 4) return [97 / 255, 153 / 255, 97 / 255];
+    if (k === 2) {
+      const c = w.getChunk(x >> 4, z >> 4);
+      if (c && c.tint) { const o = (((z & 15) << 4) | (x & 15)) * 9; return [c.tint[o + 3] / 255, c.tint[o + 4] / 255, c.tint[o + 5] / 255]; }
+      const bc = BIOME_COL[c && c.biomes ? c.biomes[((z & 15) << 4) | (x & 15)] : BI.PLAINS] || BIOME_COL[BI.PLAINS];
+      return [bc[1][0] / 255, bc[1][1] / 255, bc[1][2] / 255];
+    }
+    return LEAF_AVG[id] || [0.4, 0.6, 0.25];
+  };
+  const leaves = (g, w, x, y, z, m, P, id) => {
+    const below = w.getBlock(x, y - 1, z);
+    if (R() < 1 / 15 && !sturdy(below) && g.rainingAt(x, y + 1, z)) P.jDrip(x + R(), y - 0.05, z + R(), 'water');
+    if (R() < LEAF_CHANCE[id] && !sturdy(below)) {
+      const kind = LEAF_KIND[id];
+      P.jLeaf(x + R(), y - 0.05, z + R(), kind, kind === 'tinted' ? leafCol(w, x, z, id) : null);
+    }
+  };
+  for (const i in LEAF_KIND) ANIM[i] = leaves;
+  // fire: a crackle one time in 24; big smoke off what burns beside it, or over the fire itself
+  const burns = id => FIRE_IGNITE[id] > 0;
+  const fire = soul => (g, w, x, y, z, m, P) => {
+    if (R() < 1 / 24) g.sound('fire_ambient', x + 0.5, y + 0.5, z + 0.5);
+    const below = w.getBlock(x, y - 1, z), L = 2.5;
+    if (!soul && !burns(below) && !sturdy(below)) {
+      for (const [dx, dy, dz, px, py, pz] of [[-1, 0, 0, () => R() * 0.1, R, R], [1, 0, 0, () => 1 - R() * 0.1, R, R], [0, 0, -1, R, R, () => R() * 0.1], [0, 0, 1, R, R, () => 1 - R() * 0.1], [0, 1, 0, R, () => 1 - R() * 0.1, R]])
+        if (burns(w.getBlock(x + dx, y + dy, z + dz))) for (let k = 0; k < 2; k++) P.jSmoke(x + px(), y + py(), z + pz(), 0, 0, 0, L);
+    } else for (let k = 0; k < 3; k++) P.jSmoke(x + R(), y + R() * 0.5 + 0.5, z + R(), 0, 0, 0, L);
+  };
+  set(['fire'], fire(false));
+  set(['soul_fire'], fire(true));
+  // CampfireBlock: a crackle one time in ten, and from a campfire (not a soul campfire) an ember one time in five
+  const campfire = embers => (g, w, x, y, z, m, P) => {
+    if (m & 4) return;
+    if (R() < 0.1) g.sound('campfire_crackle', x + 0.5, y + 0.5, z + 0.5);
+    if (embers && R() < 0.2) P.jLava(x + 0.5, y + 0.5, z + 0.5);
+  };
+  set(['campfire'], campfire(true));
+  set(['soul_campfire'], campfire(false));
+  // NetherPortalBlock: a hum one time in a hundred, and four particles swirling in to the portal's faces
+  set(['nether_portal'], (g, w, x, y, z, m, P) => {
+    if (R() < 0.01) g.sound('portal', x + 0.5, y + 0.5, z + 0.5);
+    const alongX = w.getBlock(x - 1, y, z) === B.NETHER_PORTAL || w.getBlock(x + 1, y, z) === B.NETHER_PORTAL;
+    for (let k = 0; k < 4; k++) {
+      let a = x + R(), b = y + R(), c = z + R(), da = (R() - 0.5) * 0.5, db = (R() - 0.5) * 0.5, dc = (R() - 0.5) * 0.5;
+      const j = R() < 0.5 ? -1 : 1;
+      if (!alongX) { a = x + 0.5 + 0.25 * j; da = R() * 2 * j; } else { c = z + 0.5 + 0.25 * j; dc = R() * 2 * j; }
+      P.jPortal(a, b, c, da, db, dc);
+    }
+  });
+  // EnderChestBlock: three particles swirling in to its corners
+  set(['ender_chest'], (g, w, x, y, z, m, P) => {
+    for (let k = 0; k < 3; k++) {
+      const j = R() < 0.5 ? -1 : 1, l = R() < 0.5 ? -1 : 1;
+      P.jPortal(x + 0.5 + 0.25 * j, y + R(), z + 0.5 + 0.25 * l, R() * j, (R() - 0.5) * 0.125, R() * l);
+    }
+  });
+  // EndGatewayBlock: a portal particle for each open face
+  set(['end_gateway'], (g, w, x, y, z, m, P) => {
+    let n = 0;
+    for (let f = 0; f < 6; f++) if (!OPAQUE[w.getBlock(x + DX[f], y + DY[f], z + DZ[f])]) n++;
+    for (let k = 0; k < n; k++) {
+      let a = x + R(), b = y + R(), c = z + R(), da = (R() - 0.5) * 0.5, db = (R() - 0.5) * 0.5, dc = (R() - 0.5) * 0.5;
+      const j = R() < 0.5 ? -1 : 1;
+      if (R() < 0.5) { c = z + 0.5 + 0.25 * j; dc = R() * 2 * j; } else { a = x + 0.5 + 0.25 * j; da = R() * 2 * j; }
+      P.jPortal(a, b, c, da, db, dc);
+    }
+  });
+  set(['end_portal'], (g, w, x, y, z, m, P) => P.jSmoke(x + R(), y + 0.8, z + R()));
+  // EnchantingTableBlock: from each bookshelf that counts, one time in 16, a glyph flies into the book
+  set(['enchanting_table'], (g, w, x, y, z, m, P) => {
+    for (const o of SHELF_OFFSETS) if (R() < 1 / 16 && validShelf(w, x, y, z, o)) P.jEnchant(x + 0.5, y + 2, z + 0.5, o[0] + R() - 0.5, o[1] - R() - 1, o[2] + R() - 0.5);
+  });
+  // FireflyBushBlock: fireflies where it is dark enough, in a box 10 wide and 5 high above the bush
+  set(['firefly_bush'], (g, w, x, y, z, m, P) => {
+    const l = w.getLightRaw(x, y, z);
+    if (Math.max((l >> 4) - (w.dim === 'overworld' ? g.skyDarken() : 0), l & 15) <= 13 && R() <= 0.7)
+      P.add({ x: x + R() * 10 - 5, y: y + R() * 5, z: z + R() * 10 - 5, vx: (R() - 0.5) * 0.01, vy: (R() - 0.5) * 0.004, vz: (R() - 0.5) * 0.01, life: 200 + R() * 100, layer: texL('particle_firefly'), u: 0, v: 0, us: 1, size: 0.05, g: 0, col: [1, 1, 1], bright: true });
+  });
+  // lava: with air above, an ember and a pop one time in a hundred, a rumble one time in 200
+  const lava = (g, w, x, y, z, m, P) => {
+    if (w.getBlock(x, y + 1, z) === 0) {
+      if (R() < 0.01) { const a = x + R(), c = z + R(); P.jLava(a, y + 1, c); g.sound('lavapop', a, y + 1, c); }
+      if (R() < 0.005) g.sound('lava_ambient', x, y, z);
+    }
+    drip(w, x, y, z, 'lava', P);
+  };
+  // water: flowing water gurgles one time in 64; still or falling water has a speck one time in ten
+  const water = (g, w, x, y, z, m, P, id) => {
+    const src = id !== B.WATER || m === 0 || (m & 8);
+    if (!src) { if (R() < 1 / 64) g.sound('water_ambient', x + 0.5, y + 0.5, z + 0.5); }
+    else if (R() < 0.1) P.jSuspended(x + R(), y + R(), z + R(), [0.4, 0.4, 0.7]);
+    drip(w, x, y, z, 'water', P);
+  };
+  // Level.trySpawnDripParticles: one time in ten a drop seeps through a full block under the liquid (not glass) and hangs
+  // under it, when there is room below
+  const IMPERMEABLE = new Set(['glass', 'tinted_glass', 'barrier', ...COLORS.map(c => c + '_stained_glass')].map(idOf).filter(v => v !== undefined));
+  const drip = (w, x, y, z, kind, P) => {
+    if (R() >= 0.1) return;
+    const b = w.getBlock(x, y - 1, z);
+    if (!sturdy(b) || IMPERMEABLE.has(b)) return;
+    const b2 = w.getBlock(x, y - 2, z);
+    if (sturdy(b2) || b2 === B.WATER || b2 === B.LAVA || WATERY[b2] === 1) return;
+    P.jDrip(x + R(), y - 1 - 0.05, z + R(), kind);
+  };
+  ANIM[B.LAVA] = lava;
+  for (let i = 1; i < MAXB; i++) if (i === B.WATER || (WATERY[i] === 1 && !ANIM[i])) ANIM[i] = water;
+})();
+
+/* ---------------- the enchanting table's bookshelves ---------------- */
+// EnchantingTableBlock.BOOKSHELF_OFFSETS and isValidBookShelf: a bookshelf two out on either level, with the block halfway
+// (rounded toward the table) letting power through (#enchantment_power_transmitter: air and thin replaceable blocks)
+const SHELF_OFFSETS = [];
+for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) if (Math.abs(x) === 2 || Math.abs(z) === 2) for (let y = 0; y <= 1; y++) SHELF_OFFSETS.push([x, y, z]);
+const SHELF_TRANSMIT = new Uint8Array(MAXB);
+SHELF_TRANSMIT[0] = 1;
+for (const n of ['water', 'lava', 'short_grass', 'fern', 'dead_bush', 'bush', 'red_shrub', 'short_dry_grass', 'tall_dry_grass', 'seagrass', 'tall_seagrass', 'fire', 'soul_fire', 'snow', 'vine', 'glow_lichen',
+  'resin_clump', 'light', 'tall_grass', 'large_fern', 'structure_void', 'bubble_column', 'warped_roots', 'nether_sprouts', 'crimson_roots', 'leaf_litter', 'hanging_roots']) {
+  const id = B[n.toUpperCase()]; if (id !== undefined) SHELF_TRANSMIT[id] = 1;
+}
+const validShelf = (w, x, y, z, o) => w.getBlock(x + o[0], y + o[1], z + o[2]) === B.BOOKSHELF && SHELF_TRANSMIT[w.getBlock(x + Math.trunc(o[0] / 2), y + o[1], z + Math.trunc(o[2] / 2))] === 1;
+countBookshelves = function (w, x, y, z) { let n = 0; for (const o of SHELF_OFFSETS) if (validShelf(w, x, y, z, o)) n++; return Math.min(15, n); };
+
+/* ---------------- ClientLevel.animateTick ---------------- */
+// biome particles (BiomeSpecialEffects.ambientParticle): their odds for each picked block that isn't a full block
+const BIOME_AMBIENT = {};
+for (const [n, p, k] of [['crimson_forest', 0.025, 'crimson'], ['warped_forest', 0.01428, 'warped'], ['soul_sand_valley', 0.00625, 'ash'], ['basalt_deltas', 0.118093334, 'white_ash']]) {
+  const b = BI[n.toUpperCase()]; if (b !== undefined) BIOME_AMBIENT[b] = [p, k];
+}
+Particles.prototype.count = function (group) { let n = 0; for (const p of this.list) if (p.group === group) n++; return n; };
+Game.prototype.displayTicks = function () {
+  const w = this.world, p = this.player, P = this.particles;
+  if (!w || !p) return;
+  const px = Math.floor(p.x), py = Math.floor(p.y), pz = Math.floor(p.z), R = Math.random, r = n => (R() * n) | 0;
+  const one = (x, y, z) => {
+    const id = w.getBlock(x, y, z), f = ANIM[id];
+    if (f) f(this, w, x, y, z, w.getMeta(x, y, z), P, id);
+    if (SOLID[id] === 1 && SHAPE[id] === SH.CUBE) return;
+    const c = w.getChunk(x >> 4, z >> 4), amb = c && c.biomes && BIOME_AMBIENT[c.biomes[((z & 15) << 4) | (x & 15)]];
+    if (!amb || R() > amb[0]) return;
+    const a = x + R(), b = y + R(), cz = z + R();
+    if (amb[1] === 'crimson') P.jSuspended(a, b, cz, [0.9, 0.4, 0.5], { push: [gaussR() * 1e-6, gaussR() * 1e-4, gaussR() * 1e-6] });
+    else if (amb[1] === 'warped') P.jSuspended(a, b, cz, [0.1, 0.1, 0.3], { push: [0, R() * -1.9 * R() * 0.1, 0] });
+    else P.jAsh(a, b, cz, amb[1] === 'white_ash');
+  };
+  // 667 times: one block within 16 and one within 32, nearer ones likelier
+  for (let k = 0; k < 667; k++) {
+    one(px + r(16) - r(16), py + r(16) - r(16), pz + r(16) - r(16));
+    one(px + r(32) - r(32), py + r(32) - r(32), pz + r(32) - r(32));
+  }
+};
+// BaseSpawner.clientTick: smoke and a flame somewhere in a spawner every tick while a player is near
+Game.prototype.spawnerParticles = function (x, y, z) { const R = Math.random, a = x + R(), b = y + R(), c = z + R(); this.particles.jSmoke(a, b, c); this.particles.jFlame(a, b, c); };
+
+/* ---------------- sounds ---------------- */
+Object.assign(SUB_TEXT, { furnace_crackle: 'Furnace crackles', smoker_smoke: 'Smoker smokes', candle_ambient: 'Candle crackles', fire_ambient: 'Fire crackles', campfire_crackle: 'Campfire crackles',
+  lava_ambient: 'Lava bubbles', water_ambient: 'Water trickles', respawn_anchor_ambient: 'Respawn Anchor hums', drip_water: 'Water drips', drip_lava: 'Lava drips' });
+const _audioPlayAM = AUDIO.play;
+AUDIO.play = function (name, x, y, z) {
+  const S = {
+    furnace_crackle: d => { for (let i = 0; i < 3; i++) this.noiseHit(d, 'bandpass', 1800 + Math.random() * 1500, 2, 0.04, 0.12, this.ctx.currentTime + Math.random() * 0.25); },
+    campfire_crackle: d => { for (let i = 0; i < 4; i++) this.noiseHit(d, 'bandpass', 1500 + Math.random() * 2000, 2, 0.04, 0.14, this.ctx.currentTime + Math.random() * 0.35); },
+    fire_ambient: d => { for (let i = 0; i < 5; i++) this.noiseHit(d, 'bandpass', 900 + Math.random() * 2500, 1.5, 0.05, 0.16, this.ctx.currentTime + Math.random() * 0.6); this.noiseHit(d, 'lowpass', 600, 0.7, 0.8, 0.08); },
+    candle_ambient: d => this.noiseHit(d, 'bandpass', 2500 + Math.random() * 1500, 3, 0.03, 0.08),
+    smoker_smoke: d => this.noiseHit(d, 'lowpass', 700, 0.7, 0.5, 0.12),
+    lava_ambient: d => { this.tone(d, 'sine', 90, 60, 0.6, 0.12); this.noiseHit(d, 'lowpass', 300, 1, 0.6, 0.15); },
+    water_ambient: d => { for (let i = 0; i < 3; i++) this.tone(d, 'sine', 500 + Math.random() * 500, 300 + Math.random() * 300, 0.12, 0.04, this.ctx.currentTime + i * 0.09); },
+    respawn_anchor_ambient: d => { this.tone(d, 'sawtooth', 70, 85, 1.2, 0.06); this.tone(d, 'sine', 140, 170, 1.2, 0.05); },
+    drip_water: d => this.tone(d, 'sine', 1400 + Math.random() * 600, 700, 0.07, 0.08),
+    drip_lava: d => this.tone(d, 'sine', 500 + Math.random() * 200, 250, 0.1, 0.1),
+  }[name];
+  if (!S) return _audioPlayAM.call(this, name, x, y, z);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (dst) S(dst);
+};
+
+/* ---------------- textures ---------------- */
+TEXGEN.push(function texAmbient() {
+  // falling leaves: grey (tinted when drawn), pale oak and poplar in their own colours, cherry petals
+  const leafShape = (d, r, cols) => {
+    const a = r() * Math.PI, L = 5.5 + r() * 1.5, W = 2.4 + r() * 1.2, cx = 8, cy = 8;
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const dx = x + 0.5 - cx, dy = y + 0.5 - cy, u = dx * Math.cos(a) + dy * Math.sin(a), v = -dx * Math.sin(a) + dy * Math.cos(a);
+      const t = 1 - (u / L) * (u / L);
+      if (t > 0 && Math.abs(v) <= W * t) sp(d, x, y, Math.abs(v) < 0.6 ? cols[0] : r() < 0.3 ? cols[2] : cols[1]);
+    }
+  };
+  for (let k = 0; k < 12; k++) {
+    T('particle_leaf_' + k, (d, r) => leafShape(d, r, [[99, 99, 99], [132, 132, 132], [117, 117, 117]]));
+    T('particle_pale_oak_' + k, (d, r) => leafShape(d, r, [[98, 102, 96], [131, 136, 128], [116, 120, 113]]));
+    T('particle_cherry_' + k, (d, r) => { const a = r() * Math.PI; fillEl(d, 8, 8, 4.5, 3, (x, y) => (x + y + Math.round(a)) % 5 ? [247, 185, 220] : [239, 167, 205]); });
+  }
+  for (const [c, cols] of [['red', [[160, 40, 30], [205, 66, 44], [182, 52, 38]]], ['orange', [[200, 100, 30], [237, 143, 50], [215, 120, 40]]], ['yellow', [[209, 150, 41], [255, 196, 36], [237, 170, 50]]]])
+    for (let k = 1; k <= 4; k++) T('particle_' + c + '_poplar_' + k, (d, r) => leafShape(d, r, cols));
+  // the end rod's sparkle, from a dot (glitter_0) to a star (glitter_7); made in that order backwards so the frames run big to small
+  for (let k = 7; k >= 0; k--) T('particle_glitter_' + k, d => {
+    const n = 1 + k * 0.85;
+    for (let i = -Math.round(n); i <= Math.round(n); i++) { sp(d, 8 + i, 8, [255, 255, 255]); sp(d, 8, 8 + i, [255, 255, 255]); }
+    if (k >= 4) for (const [a, b] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) sp(d, 8 + a, 8 + b, [255, 255, 255]);
+  });
+  // enchanting glyphs: little runes of three to five strokes
+  for (const ch of 'abcdefghijklmnopqrstuvwxyz') T('particle_sga_' + ch, (d, r) => {
+    const pts = [[4, 3], [8, 3], [12, 3], [4, 8], [8, 8], [12, 8], [4, 13], [8, 13], [12, 13]], n = 3 + Math.floor(r() * 3);
+    for (let s = 0; s < n; s++) {
+      const a = pts[Math.floor(r() * 9)], b = pts[Math.floor(r() * 9)], steps = Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]), 1);
+      for (let i = 0; i <= steps; i++) { const x = Math.round(a[0] + (b[0] - a[0]) * i / steps), y = Math.round(a[1] + (b[1] - a[1]) * i / steps); sp(d, x, y, [255, 255, 255]); sp(d, x + 1, y, [255, 255, 255]); }
+    }
+  });
+  // a drop letting go and a drop on the ground
+  T('particle_drip_fall', d => fillEl(d, 8, 8, 1.8, 3.2, [255, 255, 255]));
+  // the campfire's big puffs of smoke: soft grey clouds
+  for (let k = 0; k < 12; k++) T('particle_big_smoke_' + k, (d, r) => {
+    const blobs = []; for (let i = 0; i < 4; i++) blobs.push([5 + r() * 6, 5 + r() * 6, 2.5 + r() * 2.5]);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      let v = 0; for (const [bx, by, br] of blobs) v = Math.max(v, 1 - Math.hypot(x + 0.5 - bx, y + 0.5 - by) / br);
+      if (v > 0) { const g = 150 + Math.round(v * 70 + r() * 12); sp(d, x, y, [g, g, g, Math.min(255, Math.round(v * 400))]); }
+    }
+  });
+  T('particle_drip_land', d => fillEl(d, 8, 12, 4, 1.5, [255, 255, 255]));
+  T('particle_copper_fire_flame', d => fillPoly(d, [[8, 1], [12, 8], [11.5, 13], [8, 15], [4.5, 13], [4, 8]], (x, y) => y < 7 ? [210, 255, 210] : y < 11 ? [105, 178, 110] : [70, 130, 77]));
+  // the average colour of untinted leaves, for their falling leaves
+  for (let i = 1; i < MAXB; i++) {
+    const b = BLK[i];
+    if (!b || !b.leaves || TINT[i]) continue;
+    const ti = TEX.idx[b.name];
+    if (ti === undefined) continue;
+    const img = TEX.imgs[ti];
+    let r = 0, g = 0, bl = 0, n = 0;
+    for (let j = 0; j < 1024; j += 4) if (img[j + 3] > 0) { r += img[j]; g += img[j + 1]; bl += img[j + 2]; n++; }
+    if (n) LEAF_AVG[i] = [r / n / 255, g / n / 255, bl / n / 255];
+  }
+});
+// where a resource pack keeps these
+for (let k = 0; k < 12; k++) { PACK_ALIASES['block/particle_leaf_' + k] = ['particle/leaf_' + k]; PACK_ALIASES['block/particle_pale_oak_' + k] = ['particle/pale_oak_' + k]; PACK_ALIASES['block/particle_cherry_' + k] = ['particle/cherry_' + k]; }
+for (const c of ['red', 'orange', 'yellow']) for (let k = 1; k <= 4; k++) PACK_ALIASES['block/particle_' + c + '_poplar_' + k] = ['particle/' + c + '_poplar_' + k];
+for (let k = 0; k < 8; k++) PACK_ALIASES['block/particle_glitter_' + k] = ['particle/glitter_' + k];
+for (const ch of 'abcdefghijklmnopqrstuvwxyz') PACK_ALIASES['block/particle_sga_' + ch] = ['particle/sga_' + ch];
+PACK_ALIASES['block/particle_drip_fall'] = ['particle/drip_fall']; for (let k = 0; k < 12; k++) PACK_ALIASES['block/particle_big_smoke_' + k] = ['particle/big_smoke_' + k]; PACK_ALIASES['block/particle_drip_land'] = ['particle/drip_land'];
+PACK_ALIASES['block/particle_copper_fire_flame'] = ['particle/copper_fire_flame'];
+
+/* ---------------- campfire smoke ---------------- */
+Game.prototype.campfireParticles = function (x, y, z, be) {
+  const w = this.world, P = this.particles, R = Math.random, signal = w.getBlock(x, y - 1, z) === B.HAY_BLOCK;
+  // CampfireBlock.makeParticles, two or three at a time one tick in nine
+  if (R() < 0.11) for (let i = 0, n = 2 + Math.floor(R() * 2); i < n; i++)
+    P.jCampfireSmoke(x + 0.5 + R() / 3 * (R() < 0.5 ? 1 : -1), y + R() + R(), z + 0.5 + R() / 3 * (R() < 0.5 ? 1 : -1), signal);
+  // four wisps of smoke off a cooking item, one tick in five
+  const f = w.getMeta(x, y, z) & 3;
+  be.items.forEach((st, i) => {
+    if (!st || R() >= 0.2) return;
+    const a = ((f + i) & 3) * Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
+    for (let k = 0; k < 4; k++) P.jSmoke(x + 0.5 - 0.3125 * c - 0.3125 * s, y + 0.5, z + 0.5 + 0.3125 * s - 0.3125 * c, 0, 5e-4, 0);
+  });
+};
+
+/* ---------------- redstone ore glows when touched ---------------- */
+// RedStoneOreBlock: a punch, a step (not sneaking; mobs and lying items too) or a click lights it (light 9, red specks on
+// its open faces); a random tick puts it out. A click with a block in hand still places the block
+const REDSTONE_ORES = new Set([B.REDSTONE_ORE, B.DEEPSLATE_REDSTONE_ORE]);
+for (const id of REDSTONE_ORES) { BLK[id].light = EMIT[id] = 9; EMITF[id] = m => (m & 1) ? 9 : 0; }
+const oreSpecks = (g, w, x, y, z) => {
+  const R = Math.random;
+  for (let f = 0; f < 6; f++) {
+    if (OPAQUE[w.getBlock(x + DX[f], y + DY[f], z + DZ[f])]) continue;
+    g.particles.jDust(x + (DX[f] ? 0.5 + 0.5625 * DX[f] : R()), y + (DY[f] ? 0.5 + 0.5625 * DY[f] : R()), z + (DZ[f] ? 0.5 + 0.5625 * DZ[f] : R()), 1, 0, 0);
+  }
+};
+Game.prototype.touchRedstoneOre = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  if (!REDSTONE_ORES.has(id)) return false;
+  oreSpecks(this, w, x, y, z);
+  const m = w.getMeta(x, y, z);
+  if (!(m & 1)) w.setBlock(x, y, z, id, m | 1);
+  return true;
+};
+for (const id of REDSTONE_ORES) ANIM[id] = (g, w, x, y, z, m) => { if (m & 1) oreSpecks(g, w, x, y, z); };
+const _attackBlockAM = Game.prototype.attackBlock;
+Game.prototype.attackBlock = function (p, x, y, z, id) { if (REDSTONE_ORES.has(id)) this.touchRedstoneOre(x, y, z); return _attackBlockAM.call(this, p, x, y, z, id); };
+const _useBlockAM = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (REDSTONE_ORES.has(hit.id) && !(p.sneaking && held)) {
+    this.touchRedstoneOre(hit.x, hit.y, hit.z);
+    if (!(held && ITEMS[held.id] && ITEMS[held.id].block !== undefined)) { p.doSwing && p.doSwing(); return true; }
+  }
+  return _useBlockAM.call(this, p, hit, held);
+};
+const _randomTickAM = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  if (REDSTONE_ORES.has(id)) { const w = this.world, m = w.getMeta(x, y, z); if (m & 1) w.setBlock(x, y, z, id, m & ~1); return; }
+  return _randomTickAM.call(this, x, y, z, id);
+};
+// Entity.move's stepOn: what stands on it lights it, every tick for walkers, every fourth for items lying there
+const _gameTickAM = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickAM.call(this);
+  const w = this.world, p = this.player;
+  if (!w || !p) return;
+  const on = e => { const x = Math.floor(e.x), y = Math.floor(e.y - 0.2), z = Math.floor(e.z); if (REDSTONE_ORES.has(w.getBlock(x, y, z))) this.touchRedstoneOre(x, y, z); };
+  if (!p.dead && p.mode !== 3 && p.onGround && !p.sneaking) on(p);
+  for (const e of this.entities) {
+    if (e.dead || !e.onGround) continue;
+    if (e instanceof Mob) on(e);
+    else if (e instanceof ItemEntity && w.tick % 4 === 0) on(e);
+  }
+};
+
+/* @file 179_copper_age.js */
+/* ===================================================================
+   Part 72: the Copper Age's blocks (Java 1.21.9 and 26.3)
+   - copper torches (a copper nugget, coal or charcoal and a stick make
+     four), light 14, with a green flame
+   - copper lanterns (eight copper nuggets around a copper torch),
+     copper chains (two nuggets and an ingot), copper bars (six ingots
+     make 16), and lightning rods that weather like other copper: each
+     in four stages, each with a waxed twin (honeycomb), scraped back
+     a stage with an axe; lanterns hang from copper chains too
+   - the chain is the iron chain now, as 26.3 calls it (worlds and
+     items from before keep theirs)
+   - copper weathers as Java's ChangeOverTimeBlock does: a random tick
+     tries one time in about 17.6, then looks at the weathering copper
+     within 4 blocks (counting steps along the axes): if any of it is
+     fresher nothing happens, otherwise the more of it is already
+     further along, the likelier it moves on, and fresh copper is a
+     quarter slower still (it used to be a flat 2% a random tick)
+   - lightning that strikes weathering copper, or the copper a
+     lightning rod stands on, polishes it back to new and wanders off
+     through the copper next to it, taking a stage off as it goes
+   =================================================================== */
+
+/* ---------------- weathering like Java ---------------- */
+// ChangeOverTimeBlock.changeOverTime / getNextState; a door weathers by its lower half and takes the upper along
+const COPPER_BALL = [];
+for (let dy = -4; dy <= 4; dy++) for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+  const d = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
+  if (d >= 1 && d <= 4) COPPER_BALL.push([dx, dy, dz]);
+}
+const weatheringAge = id => { const d = BLK[id]; return d && d.copper !== undefined && !d.waxed && (COPPER_NEXT[id] !== undefined || COPPER_PREV[id] !== undefined) ? d.copper : -1; };
+Game.prototype.weatherCopper = function (x, y, z, id, R) {
+  const w = this.world, d = BLK[id], m = w.getMeta(x, y, z);
+  if (d.door && (m & 8)) return;
+  if (R() >= 0.05688889) return;
+  const age = d.copper;
+  let same = 0, older = 0;
+  for (const [dx, dy, dz] of COPPER_BALL) {
+    const a = weatheringAge(w.getBlock(x + dx, y + dy, z + dz));
+    if (a < 0) continue;
+    if (a < age) return;
+    if (a > age) older++; else same++;
+  }
+  const f = (older + 1) / (older + same + 1), chance = f * f * (age === 0 ? 0.75 : 1);
+  if (R() >= chance || COPPER_NEXT[id] === undefined) return;
+  const nx = COPPER_NEXT[id];
+  w.setBlock(x, y, z, nx, m);
+  if (d.door && w.getBlock(x, y + 1, z) === id) w.setBlock(x, y + 1, z, nx, w.getMeta(x, y + 1, z));
+};
+
+/* ---------------- lightning polishes copper ---------------- */
+// LightningBolt.clearCopperOnLightningStrike: the struck copper (or what a struck rod stands on) back to new, then three
+// to five walks of one to eight steps through the copper around it, each step a stage cleaner, with sparks
+Game.prototype.clearCopper = function (x, y, z) {
+  const w = this.world, R = Math.random;
+  let id = w.getBlock(x, y, z);
+  if (LIGHTNING_RODS[id]) { const f = w.getMeta(x, y, z) & 7; x -= DX[f]; y -= DY[f]; z -= DZ[f]; id = w.getBlock(x, y, z); }
+  if (weatheringAge(id) < 0) return;
+  let first = id;
+  while (COPPER_PREV[first] !== undefined) first = COPPER_PREV[first];
+  if (first !== id) w.setBlock(x, y, z, first, w.getMeta(x, y, z));
+  const spark = (a, b, c) => { for (let k = 0; k < 6; k++) this.particles.add({ x: a + R(), y: b + R(), z: c + R(), vx: (R() - 0.5) * 0.05, vy: (R() - 0.5) * 0.05, vz: (R() - 0.5) * 0.05, life: 8 + R() * 6, layer: texL('particle_generic_6'), u: 0, v: 0, us: 1, size: 0.05, g: 0, col: [0.8, 0.9, 1], bright: true }); };
+  const walks = 3 + Math.floor(R() * 3);
+  for (let k = 0; k < walks; k++) {
+    let px = x, py = y, pz = z;
+    const steps = 1 + Math.floor(R() * 8);
+    for (let s = 0; s < steps; s++) {
+      // BlockPos.randomInCube: ten tries within one block for weathering copper
+      let found = null;
+      for (let t = 0; t < 10 && !found; t++) {
+        const a = px + Math.floor(R() * 3) - 1, b = py + Math.floor(R() * 3) - 1, c = pz + Math.floor(R() * 3) - 1, bid = w.getBlock(a, b, c);
+        if (weatheringAge(bid) >= 0) { if (COPPER_PREV[bid] !== undefined) w.setBlock(a, b, c, COPPER_PREV[bid], w.getMeta(a, b, c)); spark(a, b, c); found = [a, b, c]; }
+      }
+      if (!found) break;
+      [px, py, pz] = found;
+    }
+  }
+};
+const _strikeAtCA = Game.prototype.strikeAt;
+Game.prototype.strikeAt = function (x, y, z, rod) {
+  const r = _strikeAtCA.call(this, x, y, z, rod);
+  if (rod) this.clearCopper(rod[0], rod[1], rod[2]); else this.clearCopper(Math.floor(x), Math.floor(y - 1e-6), Math.floor(z));
+  return r;
+};
+
+/* ---------------- pistons break copper lanterns like lanterns ---------------- */
+for (const wx of ['', 'waxed_']) for (const ox of OXID) { const id = B[copperName(wx + ox, 'lantern').toUpperCase()]; if (id !== undefined) PISTON_DESTROY[id] = 1; }
+if (B.COPPER_TORCH !== undefined && PISTON_DESTROY[B.TORCH]) PISTON_DESTROY[B.COPPER_TORCH] = 1;
+
+/* ---------------- recipes ---------------- */
+shaped('copper_torch', 4, ['C', 'X', '#'], { C: 'copper_nugget', X: ids(['coal', 'charcoal']), '#': 'stick' });
+shaped('copper_lantern', 1, ['XXX', 'X#X', 'XXX'], { X: 'copper_nugget', '#': 'copper_torch' });
+shaped('copper_chain', 1, ['N', 'I', 'N'], { N: 'copper_nugget', I: 'copper_ingot' });
+shaped('copper_bars', 16, ['###', '###'], { '#': 'copper_ingot' });
+for (const k of COPPER_KINDS2) for (let s = 0; s < 4; s++) shapeless(copperName('waxed_' + OXID[s], k), 1, [copperName(OXID[s], k), 'honeycomb']);
+
+/* ---------------- textures ---------------- */
+TEXGEN.push(function texCopperAge() {
+  const STAGE = [[198, 110, 80], [166, 128, 106], [108, 154, 112], [82, 162, 132]];
+  const lum = (r, g, b) => 0.3 * r + 0.59 * g + 0.11 * b;
+  // a texture's metal in a copper stage's colour, keeping its light and shade; a lantern's warm glow turns copper-flame green
+  const recolor = (src, s, all) => d => {
+    d.set(copyOf(src));
+    const c = STAGE[s];
+    for (let i = 0; i < 1024; i += 4) {
+      if (!d[i + 3]) continue;
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      if (!all && r > 170 && g > 110 && r - b > 60) { d[i] = Math.min(255, b * 0.6 + 60); d[i + 1] = Math.min(255, r); d[i + 2] = Math.min(255, g * 0.55 + 40); continue; }
+      const k = lum(r, g, b) / (all ? 150 : 120);
+      d[i] = Math.min(255, c[0] * k); d[i + 1] = Math.min(255, c[1] * k); d[i + 2] = Math.min(255, c[2] * k);
+    }
+  };
+  for (let s = 0; s < 4; s++) {
+    T(copperName(OXID[s], 'lantern'), recolor('lantern', s));
+    T(copperName(OXID[s], 'chain'), recolor('chain', s));
+    T(copperName(OXID[s], 'bars'), recolor('iron_bars', s));
+    if (s) T(copperName(OXID[s], 'lightning_rod'), recolor('lightning_rod', s, true));
+    T('itemspr_' + copperName(OXID[s], 'lantern'), recolor('itemspr_lantern', s));
+    T('itemspr_' + copperName(OXID[s], 'chain'), recolor('itemspr_chain', s));
+  }
+  // the copper torch: the torch's stick under a green flame
+  T('copper_torch', d => {
+    d.set(copyOf('torch'));
+    for (let i = 0; i < 1024; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      if (d[i + 3] && r > 170 && g > 110 && r - b > 60) { d[i] = Math.min(255, b * 0.6 + 60); d[i + 1] = Math.min(255, r); d[i + 2] = Math.min(255, g * 0.55 + 40); }
+    }
+  });
+});
 
 </script>
 </body>
