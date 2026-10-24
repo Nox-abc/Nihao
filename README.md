@@ -633,6 +633,18 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   or break; anvils keep their facing as they fall.
 - **Soul sand and mud** (Part 83) are 2 pixels lower to stand on than they look, as in Java, so you, mobs, items and
   boats sink into them a little.
+- **Experience from mobs like Java's** (Part 84): a zombie gives 5 points and 1 to 3 more for each thing it wears or
+  holds (a skeleton with its bow 6 to 8), a baby zombie two and a half times as much, a baby animal nothing and a grown
+  one 1 to 3, a slime as many as its size, and a chicken jockey's chicken 10.
+- **Pack details** (Part 85): tipped arrows show your resource pack's arrow with the potion's colour on its head (the
+  pack's blue when it has no potion).
+- **Lecterns and enchanting tables** (Part 86): an enchanting table has its book floating above it, turning slowly;
+  come within 3 blocks and it opens, turns to face you and flips its pages. A lectern holding a book shows it
+  lying open on its slanted top. Lecterns have Java's shape (the slanted top, the books in the post, the cloth on the
+  base, in the inventory too) and you stand on the post, not on the slant. A resource pack's book texture is used.
+- **Shading like Java's** (Part 87): grass, flowers, saplings, crops, vines, ladders, fire, torches, lantern handles,
+  chains, redstone dust and the like are drawn at full brightness, as Java draws them (they were a little darker), other
+  upright faces are as bright as the direction they face, and in the Nether tops and bottoms are lit alike.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

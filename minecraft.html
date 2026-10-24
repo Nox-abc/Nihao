@@ -13574,6 +13574,8 @@ const FV = [
 const PD = (x, y, z) => y * PAD2 + z * PADW + x;
 const FND = [PD(1, 0, 0), PD(-1, 0, 0), PD(0, 1, 0), PD(0, -1, 0), PD(0, 0, 1), PD(0, 0, -1)];
 const FSHADE = [0.6, 0.6, 1.0, 0.5, 0.8, 0.8];
+// blocks whose faces Java lights as from above whatever way they face (Part 87): 1 its free-standing faces, 2 all of it
+const SHADE_FLAT = new Uint8Array(MAXB);
 const AOC = [0.48, 0.66, 0.83, 1.0];
 const AOO = [];
 for (let f = 0; f < 6; f++) {
@@ -13943,11 +13945,14 @@ function emitBoxPart(mb, p, X, Y, Z, pi, l, id, meta, r, g, b, fl) {
     }
     // block-locked coordinates of parts that stick out of the block wrap to the next tile
     const du = umin < 0 ? Math.ceil(-umin / 16) * 16 : 0, dv = vmin < 0 ? Math.ceil(-vmin / 16) * 16 : 0;
-    const s = FSHADE[f];
+    const s = p.su || SHADE_FLAT[id] === 2 ? FSHADE[2] : FSHADE[f];
     for (let k = 0; k < 4; k++) mb.v(X + _px[k], Y + _py[k], Z + _pz[k], layer, _uu[k] + du, _vv[k] + dv, sky, blk, r * s, g * s, b * s, fl);
   }
 }
 const quadShade = ny => ny > 0.7 ? 1 : ny < -0.7 ? 0.5 : 0.85;
+// Java's shade for a quad: that of the direction nearest its normal (FaceBakery.calculateFacing: up and down win ties, then north
+// and south), for the parts baked from Java's model elements (p.jsh)
+const jShade = (x, y, z, S) => { S = S || FSHADE; const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z); return ay >= ax && ay >= az ? (y > 0 ? S[2] : S[3]) : az >= ax ? S[4] : S[0]; };
 function emitQuadPart(mb, p, X, Y, Z, l, id, r, g, b, fl) {
   let L = p._L;
   if (L === undefined) L = p._L = p.t ? texLayer(p.t, FACETEX[id * 6]) : FACETEX[id * 6];
@@ -13964,10 +13969,11 @@ function emitQuadPart(mb, p, X, Y, Z, l, id, r, g, b, fl) {
   // shade from the quad's normal
   const ax = _px[1] - _px[0], ay = _py[1] - _py[0], az = _pz[1] - _pz[0], bx = _px[3] - _px[0], by = _py[3] - _py[0], bz = _pz[3] - _pz[0];
   const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx, nl = Math.hypot(nx, ny, nz) || 1;
-  let s = quadShade(ny / nl);
+  const up = p.su || SHADE_FLAT[id];
+  let s = up ? FSHADE[2] : jShade(nx, ny, nz);
   for (let k = 0; k < 4; k++) mb.v(X + _px[k], Y + _py[k], Z + _pz[k], L, _uu[k], _vv[k], sky, blk, r * s, g * s, b * s, flq);
   if (p.two) {
-    s = quadShade(-ny / nl);
+    s = up ? FSHADE[2] : jShade(-nx, -ny, -nz);
     for (const k of [1, 0, 3, 2]) mb.v(X + _px[k], Y + _py[k], Z + _pz[k], L, _uu[k], _vv[k], sky, blk, r * s, g * s, b * s, flq);
   }
 }
@@ -14022,7 +14028,7 @@ function speleothemThickness(world, id, up, wx, wy, wz) {
 }
 function meshCross(mb, id, meta, pi, X, Y, Z, tint, to, world, wx, wy, wz) {
   const d = BLK[id], l = pLight[pi], sky = (l >> 4) * 16, blk = (l & 15) * 16;
-  const tc = tintRGB(TINT[id], tint, to, meta), r = tc[0] * 0.9, g = tc[1] * 0.9, b = tc[2] * 0.9;
+  const tc = tintRGB(TINT[id], tint, to, meta), k0 = d.stem || SHADE_FLAT[id] === 0 ? FSHADE[4] : FSHADE[2], r = tc[0] * k0, g = tc[1] * k0, b = tc[2] * k0;
   if (d.bud) {
     let ps = BUD_CACHE.get(id * 8 + (meta & 7));
     if (!ps) { ps = orientParts(cross(TEX.names[FACETEX[id * 6]], 16, 0, 16), meta & 7); BUD_CACHE.set(id * 8 + (meta & 7), ps); }
@@ -14033,11 +14039,11 @@ function meshCross(mb, id, meta, pi, X, Y, Z, tint, to, world, wx, wy, wz) {
     // melon and pumpkin stems grow taller with age and bend toward a grown fruit
     const age = meta & 7, fruit = B[d.stem.toUpperCase()];
     if (age === 7) for (const f of [0, 1, 4, 5]) if (pBlk[pi + FND[f]] === fruit) {
-      const L = texLayer('attached_' + d.stem + '_stem', FACETEX[id * 6]), t7 = tintRGB(7, tint, to, 7);
+      const L = texLayer('attached_' + d.stem + '_stem', FACETEX[id * 6]), t7 = tintRGB(7, tint, to, 7).map(v => v * (f < 2 ? FSHADE[4] : FSHADE[0]));
       const P = f === 0 ? [[0, 8], [16, 8]] : f === 1 ? [[16, 8], [0, 8]] : f === 4 ? [[8, 0], [8, 16]] : [[8, 16], [8, 0]];
       const pts = [[X + P[0][0], Y, Z + P[0][1]], [X + P[1][0], Y, Z + P[1][1]], [X + P[1][0], Y + 16, Z + P[1][1]], [X + P[0][0], Y + 16, Z + P[0][1]]];
-      quad(mb, pts, L, UV_FULL, sky, blk, t7[0] * 0.9, t7[1] * 0.9, t7[2] * 0.9, 0);
-      quad(mb, [pts[1], pts[0], pts[3], pts[2]], L, [[16, 16], [0, 16], [0, 0], [16, 0]], sky, blk, t7[0] * 0.9, t7[1] * 0.9, t7[2] * 0.9, 0);
+      quad(mb, pts, L, UV_FULL, sky, blk, t7[0], t7[1], t7[2], 0);
+      quad(mb, [pts[1], pts[0], pts[3], pts[2]], L, [[16, 16], [0, 16], [0, 0], [16, 0]], sky, blk, t7[0], t7[1], t7[2], 0);
       return;
     }
     const h = (age + 1) * 2, uv = [[0, 16], [16, 16], [16, 16 - h], [0, 16 - h]], L = FACETEX[id * 6];
@@ -14167,8 +14173,9 @@ function meshSection(world, c, sy) {
         else if (meta === 2) pts = [[X + e, Y, Z], [X + e, Y, Z + 16], [X + e, Y + 16, Z + 16], [X + e, Y + 16, Z]];
         else if (meta === 3) pts = [[X, Y, Z + e1], [X + 16, Y, Z + e1], [X + 16, Y + 16, Z + e1], [X, Y + 16, Z + e1]];
         else pts = [[X + 16, Y, Z + e], [X, Y, Z + e], [X, Y + 16, Z + e], [X + 16, Y + 16, Z + e]];
-        quad(opq, pts, layer, UV_FULL, sky, blk, 220, 220, 220, 0);
-        quad(opq, [pts[1], pts[0], pts[3], pts[2]], layer, UV_FULL, sky, blk, 160, 160, 160, 0);
+        const ls = 255 * FSHADE[2];
+        quad(opq, pts, layer, UV_FULL, sky, blk, ls, ls, ls, 0);
+        quad(opq, [pts[1], pts[0], pts[3], pts[2]], layer, UV_FULL, sky, blk, ls, ls, ls, 0);
         break;
       }
       case SH.CROP: {
@@ -14178,8 +14185,9 @@ function meshSection(world, c, sy) {
           const px = [[X + o, Y - 1, Z], [X + o, Y - 1, Z + 16], [X + o, Y + 15, Z + 16], [X + o, Y + 15, Z]];
           const pz = [[X + 16, Y - 1, Z + o], [X, Y - 1, Z + o], [X, Y + 15, Z + o], [X + 16, Y + 15, Z + o]];
           for (const pts of [px, pz]) {
-            quad(opq, pts, layer, UV_FULL, sky, blk, 230, 230, 230, FL_WAVE, true);
-            quad(opq, [pts[1], pts[0], pts[3], pts[2]], layer, UV_FULL, sky, blk, 230, 230, 230, FL_WAVE, true);
+            const cs = 255 * FSHADE[2];
+            quad(opq, pts, layer, UV_FULL, sky, blk, cs, cs, cs, FL_WAVE, true);
+            quad(opq, [pts[1], pts[0], pts[3], pts[2]], layer, UV_FULL, sky, blk, cs, cs, cs, FL_WAVE, true);
           }
         }
         break;
@@ -14265,7 +14273,7 @@ function meshLantern(mb, X, Y, Z, pi, l, layer, hanging) {
       const us = order[0] === 0 ? [uv[0], uv[2], uv[2], uv[0]] : [uv[2], uv[0], uv[0], uv[2]];
       for (let k = 0; k < 4; k++) {
         const p = Q[order[k]];
-        mb.v(X + p[0], Y + p[1], Z + p[2], layer, us[k], k < 2 ? vb : uv[1], sky, blk, 230, 230, 230, 0);
+        mb.v(X + p[0], Y + p[1], Z + p[2], layer, us[k], k < 2 ? vb : uv[1], sky, blk, 255 * FSHADE[2], 255 * FSHADE[2], 255 * FSHADE[2], 0);
       }
     }
   }
@@ -14287,11 +14295,9 @@ function meshTorch(mb, x, y, z, meta, l, layer) {
     [[b, 0, b], [b, 0, a], [b, h, a], [b, h, b], 0.6], [[a, 0, a], [a, 0, b], [a, h, b], [a, h, a], 0.6],
     [[a, 0, b], [b, 0, b], [b, h, b], [a, h, b], 0.8], [[b, 0, a], [a, 0, a], [a, h, a], [b, h, a], 0.8],
   ];
-  for (const fc of faces) {
-    const s = 255 * fc[4];
-    quad(mb, [T(...fc[0]), T(...fc[1]), T(...fc[2]), T(...fc[3])], layer, [[7, 16], [9, 16], [9, v0], [7, v0]], sky, blk, s, s, s, 0);
-  }
-  quad(mb, [T(a, h, b), T(b, h, b), T(b, h, a), T(a, h, a)], layer, [[7, 8], [9, 8], [9, 6], [7, 6]], sky, blk, 255, 255, 255, 0);
+  const s = 255 * FSHADE[2];
+  for (const fc of faces) quad(mb, [T(...fc[0]), T(...fc[1]), T(...fc[2]), T(...fc[3])], layer, [[7, 16], [9, 16], [9, v0], [7, v0]], sky, blk, s, s, s, 0);
+  quad(mb, [T(a, h, b), T(b, h, b), T(b, h, a), T(a, h, a)], layer, [[7, 8], [9, 8], [9, 6], [7, 6]], sky, blk, s, s, s, 0);
 }
 
 /* ---------------- liquids ---------------- */
@@ -18139,6 +18145,8 @@ class Mob extends Entity {
   }
   dropLoot() {
     const g = this.game, T = this.T, loot = this.killedByPlayer ? this.lootingLevel || 0 : 0;
+    // experience for a player's kill, at its feet, babies too (a baby zombie's is the most): Part 84
+    if (this.killedByPlayer) { const xp = mobXP(this); if (xp > 0) g.spawnXP(this.x, this.y, this.z, xp); }
     if (this.noDrops || this.baby) return;
     for (const d of T.drops) {
       if (d.killed && !this.killedByPlayer) continue;
@@ -18158,12 +18166,6 @@ class Mob extends Entity {
     [this.data.hand, this.data.offhand, ...(this.data.armor || [])].forEach((st, slot) => { if (st && !noDrop.includes(slot) && Math.random() < (this.data.gearDrop || 0.085) + 0.01 * loot && this.killedByPlayer) g.dropItem(this.x, this.y + 0.5, this.z, Object.assign({}, st, { dmg: Math.floor(Math.random() * ((ITEMS[st.id] && ITEMS[st.id].dur) || 1) * 0.8) })); });
     if (this.data.saddle) g.dropItem(this.x, this.y + 0.5, this.z, { id: I.SADDLE, count: 1 });
     if (this.data.chest) { g.dropItem(this.x, this.y + 0.5, this.z, { id: B.CHEST, count: 1 }); for (const st of this.data.items || []) if (st) g.dropItem(this.x, this.y + 0.5, this.z, st); }
-    if (this.killedByPlayer) {
-      let xp = typeof T.xp === 'number' ? T.xp : T.xp ? T.xp[0] + Math.floor(Math.random() * (T.xp[1] - T.xp[0] + 1)) : 0;
-      if (this.data.size) xp = this.data.size;
-      if (T.cat === 'monster' && this.data.armor) xp += this.data.armor.filter(s => s).length * 2;
-      if (xp > 0) g.spawnXP(this.x, this.y + 0.5, this.z, xp);
-    }
   }
   // ---------- per tick ----------
   tick() {
@@ -21259,11 +21261,21 @@ function isoP(x, y, z) { return [32 + ((x - 8) - (z - 8)) * 0.7071 * ISO_K, 32 +
 function drawIsoParts(g, id, meta, ps, tintFor) {
   const faces = [];
   const FACE_SHADE = [0.62, 0.62, 1, 0.5, 0.8, 0.8];
+  // a model made only of faces baked from Java's elements is sorted by depth along the view (towards up, south and east)
+  const allJ = ps.length && ps.every(p => p.jsh);
   for (const p of ps) {
     if (p.q) {
       const L = p.t ? texLayer(p.t, FACETEX[id * 6]) : FACETEX[id * 6];
       const q = p.q, cx = (q[0][0] + q[2][0]) / 2, cy = (q[0][1] + q[2][1]) / 2, cz = (q[0][2] + q[2][2]) / 2;
-      faces.push({ depth: cx + cz + cy * 0.01, pts: [q[0], q[1], q[3]].map(v => [v[0], v[1], v[2]]), uv: [[q[0][3], q[0][4]], [q[1][3], q[1][4]], [q[3][3], q[3][4]]], L, shade: 0.9, tint: p.tint, rect: p.uvr });
+      let shade = 0.9;
+      // a face of a model baked from Java's elements: only if it faces the viewer (up, south and east), shaded by its direction
+      if (p.jsh) {
+        const ax = q[1][0] - q[0][0], ay = q[1][1] - q[0][1], az = q[1][2] - q[0][2], bx = q[3][0] - q[0][0], by = q[3][1] - q[0][1], bz = q[3][2] - q[0][2];
+        const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+        if (nx * 0.6124 + ny * 0.5 + nz * 0.6124 <= 1e-6) continue;
+        shade = jShade(nx, ny, nz, FACE_SHADE);
+      }
+      faces.push({ depth: allJ ? 0.6124 * (cx + cz) + 0.5 * cy : cx + cz + cy * 0.01, pts: [q[0], q[1], q[3]].map(v => [v[0], v[1], v[2]]), uv: [[q[0][3], q[0][4]], [q[1][3], q[1][4]], [q[3][3], q[3][4]]], L, shade, tint: p.tint, rect: p.uvr });
       continue;
     }
     const b = p.b;
@@ -21342,6 +21354,8 @@ function blockTintFor(id) {
 }
 // colour of a stack that depends on its data (potions, dyed leather)
 function stackTint(st) {
+  // a tipped arrow with no potion has the potion tint's default (Part 85)
+  if (st && st.id === I.TIPPED_ARROW && !(st.tag && (st.tag.potion || st.tag.color !== undefined))) return [56, 93, 198];
   if (!st || !st.tag) return null;
   if (st.tag.color !== undefined) return [(st.tag.color >> 16) & 255, (st.tag.color >> 8) & 255, st.tag.color & 255];
   if (st.tag.potion && typeof potionColor === 'function') return potionColor(st.tag.potion);
@@ -21367,8 +21381,9 @@ function iconFor(id, tag) {
     if (stT && it && it.potionItem) {
       g.drawImage(tileC(layer, null), 0, 0, 64, 64);
       const ov = texLayer('potion_overlay', -1);
-      if (ov >= 0 && id !== I.TIPPED_ARROW) g.drawImage(tileC(ov, stT), 0, 0, 64, 64);
-      else if (id === I.TIPPED_ARROW) g.drawImage(tileC(layer, stT), 0, 0, 64, 64);
+      // a tipped arrow's head takes the potion's colour, its shaft doesn't (Part 85)
+      if (id === I.TIPPED_ARROW) g.drawImage(tileC(texLayer('tipped_arrow_head', layer), stT), 0, 0, 64, 64);
+      else if (ov >= 0) g.drawImage(tileC(ov, stT), 0, 0, 64, 64);
     } else g.drawImage(tileC(layer, stT || tint), 0, 0, 64, 64);
   }
   return ICONS[key] = c.toDataURL();
@@ -24643,10 +24658,10 @@ class Game {
     let tint = [1, 1, 1];
     if (isBlockId(id) && ITEM_SPRITE_LAYER[id] === undefined && TINT[id]) tint = TINT[id] === 1 ? [0.5, 0.75, 0.35] : TINT[id] === 2 ? [0.47, 0.67, 0.18] : TINT[id] === 6 ? [0.13, 0.5, 0.19] : [1, 1, 1];
     const stT = st.id !== undefined ? stackTint(st) : null;
-    if (stT && ITEMS[id].potionItem && id !== I.TIPPED_ARROW) {
-      // bottle first, then the tinted liquid on top
+    if (stT && ITEMS[id].potionItem) {
+      // bottle first, then the tinted liquid on top (a tipped arrow: the shaft, then its tinted head, Part 85)
       for (const quad of mdl.q) for (const v of quad) { const p = M4.xform(m, v[0], v[1], v[2]); r.dv(p[0], p[1], p[2], v[3], v[4], mdl.layer, v[5], v[5], v[5], 1, l[0], l[1]); }
-      const ov = this.itemModel(id, texLayer('potion_overlay', mdl.layer)), k = 1.001;
+      const ov = this.itemModel(id, texLayer(id === I.TIPPED_ARROW ? 'tipped_arrow_head' : 'potion_overlay', mdl.layer)), k = 1.001;
       for (const quad of ov.q) for (const v of quad) { const p = M4.xform(m, v[0] * k, v[1] * k, v[2] * k); r.dv(p[0], p[1], p[2], v[3], v[4], ov.layer, stT[0] / 255 * v[5], stT[1] / 255 * v[5], stT[2] / 255 * v[5], 1, l[0], l[1]); }
       return;
     }
@@ -47977,16 +47992,9 @@ function jockeyUp(m) {
     if (b) { b.growth = -24000; b._jockey = null; g.entities.push(b); mobMount(b, m); }
   }
 }
-// Chicken: a jockey's chicken lays no eggs and gives 10 experience
+// Chicken: a jockey's chicken lays no eggs (and gives 10 experience: mobXP)
 const _chickenTickRD = MOB_TICK.chicken;
 MOB_TICK.chicken = m => { if (m.data.jockey) return; return _chickenTickRD ? _chickenTickRD(m) : undefined; };
-const _dieJK = Mob.prototype.die;
-Mob.prototype.die = function (source, attacker) {
-  const jock = this.type === 'chicken' && this.data.jockey && !(this.deathTime > 0);
-  const r = _dieJK.call(this, source, attacker);
-  if (jock && attacker instanceof Player && this.game.rule('doMobLoot') !== false) this.game.spawnXP(this.x, this.y + 0.5, this.z, 10 - (this.T.xp ? 2 : 0));
-  return r;
-};
 const _keepRD = Mob.prototype.keepWhenUnloaded;
 Mob.prototype.keepWhenUnloaded = function () {
   if (this.type === 'chicken' && this.data.jockey) return !!(this.persistent || this.customName);
@@ -56515,13 +56523,20 @@ Game.prototype.gameTick = function () {
     if (w.isLoadedAt(cat.x, cat.z)) scUpdateCursors(this, w, cat);
   }
 };
-// a mob's experience, as it would drop (LivingEntity.getExperienceReward)
+// a mob's experience, as it would drop (LivingEntity.getExperienceReward, Part 84): a set amount, 1 to 3 more for each thing it
+// wears or holds (Mob.getBaseExperienceReward); for animals 1 to 3 and none from a baby; a baby zombie two and a half times as
+// much (Zombie); a slime its size; a jockey's chicken 10
+const XP_ZOMBIES = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'zombified_piglin']);
 function mobXP(m) {
-  const T = m.T;
-  if (m.baby || m.noDrops) return 0;
-  let xp = typeof T.xp === 'number' ? T.xp : T.xp ? T.xp[0] + Math.floor(Math.random() * (T.xp[1] - T.xp[0] + 1)) : 0;
-  if (m.data.size) xp = m.data.size;
-  if (T.cat === 'monster' && m.data.armor) xp += m.data.armor.filter(s => s).length * 2;
+  const T = m.T, d = m.data;
+  if (m.noDrops) return 0;
+  if (m.type === 'chicken' && d.jockey) return 10;
+  if (d.size) return d.size;
+  if (Array.isArray(T.xp)) return m.baby ? 0 : T.xp[0] + Math.floor(Math.random() * (T.xp[1] - T.xp[0] + 1));
+  let xp = T.xp || 0;
+  if (xp <= 0) return 0;
+  if (m.baby) { if (!XP_ZOMBIES.has(m.type)) return 0; xp = Math.floor(xp * 2.5); }
+  for (const s of [d.hand, d.offhand, ...(d.armor || [])]) if (s) xp += 1 + Math.floor(Math.random() * 3);
   return xp;
 }
 const _mobDieSC = Mob.prototype.die;
@@ -60854,6 +60869,320 @@ FallingBlock.prototype.landed = function (dist) {
      fifth of a block above its feet), so it still digs on mud
    =================================================================== */
 CUBE_TOP[B.SOUL_SAND] = CUBE_TOP[B.MUD] = 14 / 16;
+
+/* @file 190_mob_xp.js */
+/* ===================================================================
+   Part 84: experience from mobs like Java's
+   - a monster's set amount (5 for most) and 1 to 3 more for each piece
+     of armour it wears and each thing it holds (Mob.getBaseExperience
+     Reward), so a skeleton with its bow gives 6 to 8; a baby zombie
+     (or husk, drowned, zombie villager or zombified piglin) gives two
+     and a half times as much; animals give 1 to 3 and their babies
+     nothing; a slime or magma cube its size; a jockey's chicken 10
+   - the orbs come out at the mob's feet
+   (the sums are in mobXP, Part 57's file; the drop in Mob.dropLoot)
+   =================================================================== */
+
+/* @file 191_pack_details.js */
+/* ===================================================================
+   Part 85: details as the default resource pack draws them
+   - a tipped arrow is the pack's arrow shaft with its head in the
+     potion's colour (item/tipped_arrow_base and tipped_arrow_head),
+     in the inventory and in hand
+   =================================================================== */
+TEXGEN.push(function texTippedHead() {
+  T('tipped_arrow_head', (d) => fillPoly(d, [[10, 2.5], [14, 2], [13.5, 6]], [255, 255, 255]));
+});
+const _packTexMapPD = packTexMap;
+packTexMap = function () {
+  if (PACKS.texMap) return PACKS.texMap;
+  const m = _packTexMapPD();
+  m.tipped_arrow = ['item/tipped_arrow_base', 'item/tipped_arrow'];
+  m.tipped_arrow_head = ['item/tipped_arrow_head'];
+  return m;
+};
+
+/* @file 192_books.js */
+/* ===================================================================
+   Part 86: lecterns and enchanting tables like Java
+   - an enchanting table has its book floating above it (Java's
+     EnchantTableRenderer): it bobs, and turns slowly while nobody is
+     near; with a player within 3 blocks it opens, turns to face them
+     and flips its pages (EnchantingTableBlockEntity.bookAnimationTick)
+   - a lectern holding a book shows it lying open on its slanted top
+     (LecternRenderer)
+   - both are Java's book model (BookModel), with a resource pack's
+     entity/enchantment/enchanting_table_book texture or the game's own
+     drawing of it
+   - the lectern is Java's model: its top a slab tilted 22.5 degrees,
+     its post and base textured the way Java's are; you stand on the
+     post (its collision), not on the slant
+   - the model is built from Java's element format (from/to, face UVs
+     and their rotation, an element's rotation): jElementQuads, faces
+     shaded by the direction they face like Java's
+   =================================================================== */
+
+/* ---------------- Java model elements as free quads ---------------- */
+// FaceInfo: each face's corners in Java's order (1 = the element's far side on that axis)
+const JFACE = { down: [[0, 0, 1], [0, 0, 0], [1, 0, 0], [1, 0, 1]], up: [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]],
+  north: [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0]], south: [[0, 1, 1], [0, 0, 1], [1, 0, 1], [1, 1, 1]],
+  west: [[0, 1, 0], [0, 0, 0], [0, 0, 1], [0, 1, 1]], east: [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]] };
+// a face's texture rectangle when the model gives none (BlockElement.uvsByDefault)
+function jDefaultUV(dir, f, t) {
+  switch (dir) {
+    case 'down': return [f[0], 16 - t[2], t[0], 16 - f[2]];
+    case 'up': return [f[0], f[2], t[0], t[2]];
+    case 'north': return [16 - t[0], 16 - t[1], 16 - f[0], 16 - f[1]];
+    case 'south': return [f[0], 16 - t[1], t[0], 16 - f[1]];
+    case 'west': return [f[2], 16 - t[1], t[2], 16 - f[1]];
+    default: return [16 - t[2], 16 - t[1], 16 - f[2], 16 - f[1]];
+  }
+}
+// an element's rotation about its origin; rescaled, the two axes across the turn stretch by 1/cos (FaceBakery.applyElementRotation)
+function jRotate(p, R) {
+  const a = R.angle * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), o = R.origin, k = R.rescale ? 1 / Math.cos(a) : 1;
+  let x = p[0] - o[0], y = p[1] - o[1], z = p[2] - o[2];
+  if (R.axis === 'x') { const ny = y * c - z * s; z = (y * s + z * c) * k; y = ny * k; }
+  else if (R.axis === 'y') { const nx = x * c + z * s; z = (-x * s + z * c) * k; x = nx * k; }
+  else { const nx = x * c - y * s; y = (x * s + y * c) * k; x = nx * k; }
+  return [x + o[0], y + o[1], z + o[2]];
+}
+// one element { from, to, rotation?, faces: { north: { uv?, rotation?, texture }, ... } } -> a quad per face, the texture corners
+// taken the way BlockFaceUV turns them
+function jElementQuads(el) {
+  const out = [];
+  for (const dir in el.faces) {
+    const fc = el.faces[dir], uv = fc.uv || jDefaultUV(dir, el.from, el.to), r = ((fc.rotation || 0) / 90) & 3;
+    const q = JFACE[dir].map((c, i) => {
+      let p = [c[0] ? el.to[0] : el.from[0], c[1] ? el.to[1] : el.from[1], c[2] ? el.to[2] : el.from[2]];
+      if (el.rotation) p = jRotate(p, el.rotation);
+      const k = (i + r) & 3;
+      return [p[0], p[1], p[2], k < 2 ? uv[0] : uv[2], k === 0 || k === 3 ? uv[1] : uv[3]];
+    });
+    out.push({ q, t: fc.texture, jsh: 1 });
+  }
+  return out;
+}
+// a model drawn facing north in Java, turned to face south (+Z), the way the game's turning models are built
+const jFaceSouth = ps => ps.map(p => Object.assign({}, p, { q: p.q.map(v => [16 - v[0], v[1], 16 - v[2], v[3], v[4]]) }));
+
+/* ---------------- the lectern ---------------- */
+const LECTERN_QUADS = jFaceSouth([
+  { from: [0, 0, 0], to: [16, 2, 16], faces: { north: { uv: [0, 14, 16, 16], texture: 'lectern_base' }, east: { uv: [0, 6, 16, 8], texture: 'lectern_base' },
+    south: { uv: [0, 6, 16, 8], texture: 'lectern_base' }, west: { uv: [0, 6, 16, 8], texture: 'lectern_base' }, up: { uv: [0, 0, 16, 16], rotation: 180, texture: 'lectern_base' },
+    down: { texture: 'oak_planks' } } },
+  { from: [4, 2, 4], to: [12, 15, 12], faces: { north: { uv: [0, 0, 8, 13], texture: 'lectern_front' }, east: { uv: [2, 16, 15, 8], rotation: 90, texture: 'lectern_sides' },
+    south: { uv: [8, 3, 16, 16], texture: 'lectern_front' }, west: { uv: [2, 8, 15, 16], rotation: 90, texture: 'lectern_sides' } } },
+  { from: [0.0125, 12, 3], to: [15.9875, 16, 16], rotation: { origin: [8, 8, 8], axis: 'x', angle: -22.5 }, faces: { north: { uv: [0, 0, 16, 4], texture: 'lectern_sides' },
+    east: { uv: [0, 4, 13, 8], texture: 'lectern_sides' }, south: { uv: [0, 4, 16, 8], texture: 'lectern_sides' }, west: { uv: [0, 4, 13, 8], texture: 'lectern_sides' },
+    up: { uv: [0, 1, 16, 14], rotation: 180, texture: 'lectern_top' }, down: { uv: [0, 0, 16, 13], texture: 'oak_planks' } } },
+].flatMap(jElementQuads));
+// the book is drawn by the renderer below now, not as part of the block
+BOX_MODELS.lectern = (d, m) => rotParts(LECTERN_QUADS, m & 3);
+// LecternBlock's collision: the base and the post
+const _modelCollisionBK = modelCollision;
+modelCollision = function (id, meta, ctx) { return id === B.LECTERN ? [[0, 0, 0, 16, 2, 16], [4, 2, 4, 12, 14, 12]] : _modelCollisionBK(id, meta, ctx); };
+
+/* ---------------- the book ---------------- */
+// BookModel: [u, v, x, y, z, w, h, d] in its 64x32 texture
+const BOOK_CUBES = { leftLid: [0, 0, -6, -5, -0.005, 6, 10, 0.005], rightLid: [16, 0, 0, -5, -0.005, 6, 10, 0.005], seam: [12, 0, -1, -5, 0, 2, 10, 0.005],
+  leftPages: [0, 10, 0, -4, -0.99, 5, 8, 1], rightPages: [12, 10, 0, -4, -0.01, 5, 8, 1], flipPage: [24, 10, 0, -4, 0, 5, 8, 0.005] };
+// the game's own drawing: brown leather covers (a dark rim and a lighter inset line outside), cream pages with lines of writing
+function bookSkin() {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 32;
+  const g = c.getContext('2d'), img = g.createImageData(64, 32), d = img.data, R = mulberry32(8601);
+  const rect = (x0, y0, x1, y1, f) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const col = f(x - x0, y - y0, x1 - x0, y1 - y0), o = (y * 64 + x) * 4; d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = 255; }
+  };
+  const leather = [104, 62, 34], inner = [146, 98, 56], paper = [238, 230, 208], ink = [150, 138, 120];
+  const outside = (x, y, W, H) => { const e = Math.min(x, y, W - 1 - x, H - 1 - y); return nz(e === 0 ? shd(leather, 0.72) : e === 1 && y > 0 && y < H - 1 ? shd(leather, 1.22) : leather, R, 0.06); };
+  rect(6, 0, 12, 10, outside); rect(22, 0, 28, 10, outside);
+  rect(0, 0, 6, 10, () => nz(inner, R, 0.05)); rect(16, 0, 22, 10, () => nz(inner, R, 0.05));
+  rect(12, 0, 14, 10, (x, y) => nz(y === 2 || y === 7 ? shd(leather, 1.3) : shd(leather, 0.85), R, 0.05));
+  rect(14, 0, 16, 10, () => nz(inner, R, 0.05));
+  const sheets = (x, y) => nz((x + y) % 2 ? shd(paper, 0.9) : paper, R, 0.03);
+  const page = (x, y, W, H) => y % 2 === 1 && y < H - 1 && x > 0 && x < W - 1 && R() < 0.8 ? nz(ink, R, 0.08) : nz(paper, R, 0.03);
+  rect(1, 10, 11, 11, sheets); rect(13, 10, 23, 11, sheets);
+  for (const x of [0, 6, 12, 18]) rect(x, 11, x + 1, 19, sheets);
+  for (const x of [1, 7, 13, 19]) rect(x, 11, x + 5, 19, page);
+  rect(24, 10, 29, 18, page); rect(29, 10, 34, 18, page);
+  g.putImageData(img, 0, 0);
+  return c;
+}
+defSkin('entity/enchanting_table_book', 64, 32, bookSkin);
+// 3x4 transforms (rows of [r r r t])
+const BKM = {
+  mul(a, b) { const o = new Array(12); for (let i = 0; i < 12; i += 4) { for (let j = 0; j < 3; j++) o[i + j] = a[i] * b[j] + a[i + 1] * b[4 + j] + a[i + 2] * b[8 + j]; o[i + 3] = a[i] * b[3] + a[i + 1] * b[7] + a[i + 2] * b[11] + a[i + 3]; } return o; },
+  t: (x, y, z) => [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z],
+  ry: a => { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0]; },
+  rz: a => { const c = Math.cos(a), s = Math.sin(a); return [c, -s, 0, 0, s, c, 0, 0, 0, 0, 1, 0]; },
+  ap: (m, x, y, z) => [m[0] * x + m[1] * y + m[2] * z + m[3], m[4] * x + m[5] * y + m[6] * z + m[7], m[8] * x + m[9] * y + m[10] * z + m[11]],
+};
+// BookModel.setupAnim(time, right page flip, left page flip, how open) drawn with the transform m (blocks)
+function drawBook(r, m, time, flip1, flip2, open, light) {
+  const vt = VTEX['entity/enchanting_table_book'];
+  if (!vt) return;
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th, uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+  const f = (Math.sin(time * 0.02) * 0.1 + 1.25) * open, px = Math.sin(f), C = BOOK_CUBES;
+  for (const [c, x, z, yr] of [[C.leftLid, 0, -1, Math.PI + f], [C.rightLid, 0, 1, -f], [C.seam, 0, 0, Math.PI / 2], [C.leftPages, px, 0, f], [C.rightPages, px, 0, -f],
+    [C.flipPage, px, 0, f - f * 2 * flip1], [C.flipPage, px, 0, f - f * 2 * flip2]]) {
+    const pm = BKM.mul(m, BKM.mul(BKM.t(x / 16, 0, z / 16), BKM.ry(yr)));
+    emitVCube(r, c, q => BKM.ap(pm, q[0] / 16, q[1] / 16, q[2] / 16), uvx, [1, 1, 1, 1], light, 0);
+  }
+}
+
+/* ---------------- enchanting tables ---------------- */
+// the tables of a chunk, found again after a table is placed or removed there
+function chunkTables(c) {
+  if (!c._etab || c._etabB !== c.blocks) {
+    const l = [];
+    for (let i = c.blocks.indexOf(B.ENCHANTING_TABLE); i >= 0; i = c.blocks.indexOf(B.ENCHANTING_TABLE, i + 1)) l.push(i);
+    c._etab = l; c._etabB = c.blocks;
+  }
+  return c._etab;
+}
+const _setBlockBK = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id) {
+  const old = this.getBlock(x, y, z), r = _setBlockBK.apply(this, arguments);
+  if (old === B.ENCHANTING_TABLE || id === B.ENCHANTING_TABLE) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._etab = null; this._booksDirty = true; }
+  return r;
+};
+const _setBEBK = World.prototype.setBE;
+World.prototype.setBE = function (x, y, z, be) { if (be && be.type === 'lectern') this._booksDirty = true; return _setBEBK.apply(this, arguments); };
+// the tables and lecterns within three chunks, each table with its book's state
+Game.prototype.listBooks = function () {
+  const w = this.world, p = this.player, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, old = w._tables || new Map(), tables = new Map(), lecterns = [];
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.blocks) continue;
+    for (const i of chunkTables(c)) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), k = x + ',' + y + ',' + z;
+      tables.set(k, old.get(k) || { x, y, z, time: 0, flip: 0, oFlip: 0, flipT: 0, flipA: 0, open: 0, oOpen: 0, rot: 0, oRot: 0, tRot: 0 });
+    }
+    for (const [i, v] of c.be) if (v.type === 'lectern') lecterns.push([c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15)]);
+  }
+  w._tables = tables; w._lecterns = lecterns; w._booksDirty = false;
+};
+// EnchantingTableBlockEntity.bookAnimationTick
+function bookTick(s, p) {
+  s.oOpen = s.open; s.oRot = s.rot;
+  const TAU = Math.PI * 2, near = p && !p.dead && p.mode !== 3 && (p.x - s.x - 0.5) ** 2 + (p.y - s.y - 0.5) ** 2 + (p.z - s.z - 0.5) ** 2 < 9;
+  if (near) {
+    s.tRot = Math.atan2(p.z - (s.z + 0.5), p.x - (s.x + 0.5));
+    s.open += 0.1;
+    if (s.open < 0.5 || Math.floor(Math.random() * 40) === 0) { const f1 = s.flipT; do { s.flipT += Math.floor(Math.random() * 4) - Math.floor(Math.random() * 4); } while (f1 === s.flipT); }
+  } else { s.tRot += 0.02; s.open -= 0.1; }
+  while (s.rot >= Math.PI) s.rot -= TAU; while (s.rot < -Math.PI) s.rot += TAU;
+  while (s.tRot >= Math.PI) s.tRot -= TAU; while (s.tRot < -Math.PI) s.tRot += TAU;
+  let d = s.tRot - s.rot;
+  while (d >= Math.PI) d -= TAU; while (d < -Math.PI) d += TAU;
+  s.rot += d * 0.4;
+  s.open = Math.max(0, Math.min(1, s.open));
+  s.time++;
+  s.oFlip = s.flip;
+  const f = Math.max(-0.2, Math.min(0.2, (s.flipT - s.flip) * 0.4));
+  s.flipA += (f - s.flipA) * 0.9;
+  s.flip += s.flipA;
+}
+const _gameTickBK = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickBK.apply(this, arguments);
+  const w = this.world, p = this.player;
+  if (!w || !p) return;
+  if (!w._tables || w._booksDirty || w.tick % 20 === 0) this.listBooks();
+  for (const s of w._tables.values()) bookTick(s, p);
+};
+
+/* ---------------- drawing them ---------------- */
+const _renderSpawnerMobsBK = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, a) {
+  if (_renderSpawnerMobsBK) _renderSpawnerMobsBK.call(this, r, a);
+  const w = this.world, p = this.player;
+  if (!w || !p || !w._tables || !VTEX['entity/enchanting_table_book']) return;
+  const far = (x, z) => (p.x - x - 0.5) ** 2 + (p.z - z - 0.5) ** 2 > 64 * 64, frac = v => v - Math.floor(v), cl = v => Math.max(0, Math.min(1, v));
+  // EnchantTableRenderer: 0.85 up and bobbing, turned to face rot, tipped 80 degrees
+  for (const s of w._tables.values()) {
+    if (far(s.x, s.z) || w.getBlock(s.x, s.y, s.z) !== B.ENCHANTING_TABLE) continue;
+    const t = s.time + a;
+    let dr = s.rot - s.oRot;
+    while (dr >= Math.PI) dr -= Math.PI * 2; while (dr < -Math.PI) dr += Math.PI * 2;
+    const fl = s.oFlip + (s.flip - s.oFlip) * a, lr = w.getLightRaw(s.x, s.y, s.z);
+    const m = BKM.mul(BKM.t(s.x + 0.5, s.y + 0.85 + Math.sin(t * 0.1) * 0.01, s.z + 0.5), BKM.mul(BKM.ry(-(s.oRot + dr * a)), BKM.rz(80 * Math.PI / 180)));
+    drawBook(r, m, t, cl(frac(fl + 0.25) * 1.6 - 0.3), cl(frac(fl + 0.75) * 1.6 - 0.3), s.oOpen + (s.open - s.oOpen) * a, [lr >> 4, lr & 15]);
+  }
+  // LecternRenderer: open, on the slant, its spine across the lectern's facing
+  for (const [x, y, z] of w._lecterns) {
+    if (far(x, z) || w.getBlock(x, y, z) !== B.LECTERN) continue;
+    const meta = w.getMeta(x, y, z);
+    if (!(meta & 4)) continue;
+    // Direction.getClockWise().toYRot() of the way it faces
+    const yr = { 5: 270, 0: 0, 4: 90, 1: 180 }[FRONT4[meta & 3]] * Math.PI / 180, lr = w.getLightRaw(x, y, z);
+    const m = BKM.mul(BKM.t(x + 0.5, y + 1.0625, z + 0.5), BKM.mul(BKM.ry(-yr), BKM.mul(BKM.rz(67.5 * Math.PI / 180), BKM.t(0, -0.125, 0))));
+    drawBook(r, m, 0, 0.1, 0.9, 1.2, [lr >> 4, lr & 15]);
+  }
+};
+
+/* ---------------- the game's own lectern art ---------------- */
+// laid out the way Java's model takes its parts: the post's front is the left half of lectern_front (books on a shelf under the
+// slant's shadow), and a red cloth hangs over the base's front edge (the bottom rows of lectern_base)
+TEXGEN.push(function texLecternParts() {
+  const f = TEX.imgs[texL('lectern_front')], b = TEX.imgs[texL('lectern_base')], R = mulberry32(8602);
+  const books = [[150, 40, 40], [60, 80, 160], [70, 130, 50], [170, 140, 60], [120, 60, 130], [150, 40, 40]];
+  for (let y = 0; y < 13; y++) for (let x = 0; x < 8; x++) {
+    const edge = x === 0 || x === 7 || y === 12;
+    sp(f, x, y, edge ? [90, 64, 36] : y < 3 ? mul([70, 48, 26], 0.9 + R() * 0.1) : y >= 4 && y <= 9 ? (y === 4 ? [60, 40, 22] : mul(books[(x - 1) % 6], y === 5 ? 1.1 : 0.9 + R() * 0.1)) : mul([150, 112, 66], 0.9 + R() * 0.1));
+  }
+  for (let y = 12; y < 16; y++) for (let x = 5; x < 11; x++) sp(b, x, y, mul([160, 36, 36], (y === 12 ? 0.8 : 1) * (0.92 + R() * 0.08)));
+});
+
+/* @file 193_shading.js */
+/* ===================================================================
+   Part 87: block shading like Java
+   - a face is as bright as the direction it faces: tops 1, bottoms
+     0.5, north and south 0.8, east and west 0.6 (ClientLevel.getShade)
+     and now so are slanted and free-standing faces, by the direction
+     nearest the way they face (FaceBakery.calculateFacing), instead
+     of 0.85 for anything upright
+   - the faces Java's models light as from above whichever way they
+     face ("shade_direction_override": "up"; "shade": false before
+     1.21.5) are at full brightness: grass, flowers, saplings and every
+     other cross-shaped plant, crops, vines, ladders, fire, torches and
+     the lit torches of repeaters and comparators, the handles of
+     lanterns, chains, campfire flames, redstone dust, tripwire, coral
+     fans, dripleaves, spore blossoms, pointed dripstone, bamboo
+     leaves, the plants in flower pots, amethyst buds and the tendrils
+     of calibrated sculk sensors (they were drawn at 0.6 to 0.9)
+   - melon and pumpkin stems, mangrove propagules, glow lichen and the
+     like have no such mark in Java, and are shaded by direction
+   - in the Nether, whose light is the same from every side (its
+     constant ambient light), tops, bottoms and the faces lit as from
+     above are all 0.9
+   =================================================================== */
+
+(function () {
+  const flat = (v, ...ids) => { for (const id of ids) if (id !== undefined && id >= 0) SHADE_FLAT[id] = v; };
+  for (let id = 0; id < MAXB; id++) {
+    const d = BLK[id];
+    if (!d) continue;
+    const sh = SHAPE[id];
+    if ((sh === SH.CROSS || sh === SH.TALL) && !d.stem && d.name !== 'mangrove_propagule') SHADE_FLAT[id] = 1;
+    if (sh === SH.CROP || sh === SH.FIRE || sh === SH.WIRE || sh === SH.FAN || sh === SH.POT || sh === SH.BAMBOO || sh === SH.CHAIN || sh === SH.LANTERN || sh === SH.LADDER || d.bud) SHADE_FLAT[id] = 1;
+    if (sh === SH.TORCH) SHADE_FLAT[id] = 2;
+    if (d.campfire) SHADE_FLAT[id] = 1;
+  }
+  flat(1, B.VINE, B.SPORE_BLOSSOM, B.CALIBRATED_SCULK_SENSOR);
+  flat(2, B.BIG_DRIPLEAF, B.BIG_DRIPLEAF_STEM, B.SMALL_DRIPLEAF, B.TRIPWIRE);
+})();
+// the torches of a powered repeater or comparator glow (Java's *_on models light them as from above), the rest is shaded
+const _diodeModelSH = MDL[SH.DIODE];
+MDL[SH.DIODE] = (d, m) => _diodeModelSH(d, m).map(p => p.t && p.t[0] === 'redstone_torch' ? Object.assign({}, p, { su: 1 }) : p);
+// the Nether's constant ambient light: tops and bottoms (and the faces lit as from above) at 0.9 there
+const _meshSectionSH = meshSection;
+meshSection = function (world, c, sy) {
+  const nether = world && world.dim === 'nether';
+  FSHADE[2] = nether ? 0.9 : 1; FSHADE[3] = nether ? 0.9 : 0.5;
+  return _meshSectionSH.apply(this, arguments);
+};
 
 </script>
 </body>
