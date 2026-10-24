@@ -222,15 +222,16 @@ starts and the strongholds against cubiomes.
   Java's order, drawing Java's random numbers for that chunk and that feature. Checked block for
   block against Pumpkin's 26.3 generator on 52 chunks: 35 come out identical, and the others differ
   only where the reference itself leaves out or simplifies a 26.3 feature (sculk patches, dripstone,
-  the sulfur caves, and the plants Java removes at the edge of a tree). The new biomes of Part 64 too: a pale
+  the sulfur caves, geodes, whose noise the reference seeds from the feature's own random numbers where Java seeds it
+  from the world's seed, and the plants Java removes at the edge of a tree). The new biomes of Part 64 too: a pale
   garden and a dappled forest come out identical once the two things the reference leaves out are left out here
   (the moss patch at the foot of a pale oak, and shelf mushrooms, whose placement Blockcraft has to guess as no
   reference has it), and the sulfur caves' stone bands match the reference except that Blockcraft samples them
   in 3D as 26.3's data asks (the reference flattens them). Where the features of two
   chunks overlap at their border, Java's result depends on which chunk it decorated first; Blockcraft
-  gives one of those results, the same however the world is explored. Fossils and desert wells
-  (which Java builds from structure files) aren't placed yet, nor the sulfur caves' springs and 26.3's abandoned
-  camps (structure files too). Chunks of worlds made before this
+  gives one of those results, the same however the world is explored. Fossils and desert wells,
+  which Java builds from structure files, are placed where Java places them but built to the game's own designs; the
+  sulfur caves' springs and 26.3's abandoned camps (structure files too) aren't placed yet. Chunks of worlds made before this
   version keep their old decoration, so a tree can be cut off where old and new chunks meet.
 
 ### Creating a world
@@ -688,6 +689,21 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   dry, and a campfire in water goes out. Water held in a block counts for farmland, sugar cane and conduits, turns lava
   beside it into obsidian or cobblestone and shields the block from explosions; a sponge soaks it up, and pistons push
   such blocks out dry. Concrete powder now hardens into concrete when it touches water, as in Java.
+- **Frost Walker like Java's** (Part 97): boots with Frost Walker turn the still water around you into frosted ice as
+  you walk (3 blocks around at level I, 4 at level II), so you can walk across lakes; mobs wearing such boots do it too.
+  Frosted ice cracks and melts back into water in the light, a little at a time, and keeps in the dark. Frost Walker also
+  keeps magma blocks and campfires from burning you. Lit campfires now burn whatever stands in them, and magma blocks
+  burn mobs as well as players, as in Java. Ice you break leaves water only over something solid or over water.
+- **Pitcher crops like Java's** (Part 98): a pitcher pod grows into a crop with a seed pod you can stand on, then grows
+  two blocks tall into the pitcher plant (it needs room above to do so). Bone meal works on either half, breaking either
+  half takes the whole plant, and a fully grown one gives you a pitcher plant, as in Java.
+- **Ocean ruins** (Part 99): Java worlds now have their ocean ruins, at the same places as in Java for the same seed:
+  stone brick ruins (with mossy and cracked bricks) in cold and ordinary oceans, sandstone ones in warm oceans. Some are
+  big, often with a ring of smaller ruins around them. Their chests hold what Java's do (with buried treasure maps,
+  enchanted books and fishing rods), drowned lurk in the big ones, and some of their gravel and sand is suspicious, with
+  pottery sherds (and in warm ruins a sniffer egg) to brush out. The ruins themselves are the game's own designs.
+  Fossils are back too: spines and skulls of bone blocks (with a little coal, or diamonds deep down) buried under
+  deserts and swamps where Java's seed puts them (the bones' shapes are the game's own).
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

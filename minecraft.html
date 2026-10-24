@@ -628,6 +628,8 @@ function buildBlockNames() {
   add('pale_moss_block', 'pale_moss_carpet', 'pale_hanging_moss', 'open_eyeblossom', 'closed_eyeblossom', 'creaking_heart', 'resin_clump', 'resin_block',
     'red_shrub', 'golden_dandelion', 'shelf_mushroom', 'potent_sulfur', 'sulfur_spike');
   for (const [b, f] of STONE_SETS) if (NEW_STONES.has(b)) stoneSet(b, f);
+  // ---- frosted ice, made by Frost Walker (Part 97)
+  add('frosted_ice');
   return out;
 }
 const BLOCK_NAMES = buildBlockNames();
@@ -9860,6 +9862,63 @@ VanillaWorldGen.prototype.vDecorate = function (cx, cz, blocks, meta, be, mobs, 
 };
 })();
 
+/* @file 19_vfeat_fossils.js */
+/* ===================================================================
+   VANILLA DECORATION: FOSSILS — FossilFeature: where Java's
+   fossil_upper (deserts, swamps) and fossil_lower (deep down, with
+   diamonds) place one, drawing its random numbers in Java's order (the
+   turn, which of the 8 fossils, how deep under the lowest floor of its
+   footprint), given up with more than 4 of its box's corners in air or
+   a fluid, its bone kept 9 times in 10 (fossil_rot) and a tenth of it
+   ore (the coal or diamond overlay)
+   - the bones are the game's own: four spines with ribs and four skulls
+     (not Java's structure files), bone blocks along their length
+   =================================================================== */
+(() => {
+const F = VF.FEATURES, S = ST;
+const BONE = S.def[S.blockId('bone_block')], BONE_AXES = ['x', 'y', 'z'];
+// the fossils: [size x, size y, size z, cells [x, y, z, axis 0 x / 1 y / 2 z]]
+const spine = (len, ribs, h) => {
+  const c = [];
+  for (let x = 0; x < len; x++) c.push([x, h, 2, 0]);
+  for (const x of ribs) { c.push([x, h - 1, 0, 2], [x, h - 1, 4, 2]); for (let y = h - 2; y >= 0; y--) { c.push([x, y, 0, 1], [x, y, 4, 1]); } c.push([x, 0, 1, 2], [x, 0, 3, 2]); }
+  return [len, h + 1, 5, c];
+};
+const skull = (w, h, d, horns) => {
+  const c = [];
+  for (let x = 0; x < w; x++) for (let z = 0; z < d; z++) for (let y = 0; y < h; y++) {
+    const shell = x === 0 || x === w - 1 || z === 0 || z === d - 1 || y === h - 1, eye = z === 0 && y === h - 2 && (x === 1 || x === w - 2), jaw = y === 0 && z > 0 && z < d - 1 && x > 0 && x < w - 1;
+    if ((shell && !eye && y > 0) || jaw) c.push([x, y, z, 1]);
+  }
+  if (horns) { c.push([0, h, d - 1, 1], [w - 1, h, d - 1, 1], [0, h + 1, d - 1, 1], [w - 1, h + 1, d - 1, 1]); h += 2; }
+  return [w, h, d, c];
+};
+const FOSSILS = [spine(9, [1, 3, 5, 7], 3), spine(12, [1, 3, 5, 7, 9], 4), spine(6, [1, 4], 3), spine(11, [2, 5, 8], 2),
+  skull(5, 4, 5, false), skull(6, 5, 6, true), skull(4, 4, 4, false), skull(7, 5, 6, false)];
+F.fossil = (C, cf, r, ox, oy, oz) => {
+  const R = C.R, rot = r.nextInt(4), i = r.nextInt(cf.fossil_structures.length), [fx, fy, fz, cells] = FOSSILS[i % FOSSILS.length];
+  const sx = (rot & 1) ? fz : fx, sz = (rot & 1) ? fx : fz, bx = ox - (sx >> 1), bz = oz - (sz >> 1);
+  // the lowest ocean floor under it, and 15 to 24 below that (no lower than 10 above the bottom)
+  let j = oy;
+  for (let x = 0; x < sx; x++) for (let z = 0; z < sz; z++) j = Math.min(j, R.height(1, bx + x, bz + z));
+  const y0 = Math.max(j - 15 - r.nextInt(10), -64 + 10);
+  // FossilFeature.countEmptyCorners
+  let empty = 0;
+  for (const x of [bx, bx + sx - 1]) for (const y of [y0, y0 + fy - 1]) for (const z of [bz, bz + sz - 1]) {
+    const st = R.get(x, y, z), b = S.blockOf[st];
+    if (S.isAir(st) || b === S.blockId('water') || b === S.blockId('lava')) empty++;
+  }
+  if (empty > cf.max_empty_corners_allowed) return false;
+  const cannot = S.tag('features_cannot_replace'), ore = S.def[S.blockId(cf.overlay_processors === 'fossil_diamonds' ? 'diamond_ore' : 'coal_ore')];
+  const at = (x, z) => rot === 0 ? [x, z] : rot === 1 ? [fz - 1 - z, x] : rot === 2 ? [fx - 1 - x, fz - 1 - z] : [z, fx - 1 - x];
+  const put = (cell, st) => { const [lx, lz] = at(cell[0], cell[2]), x = bx + lx, y = y0 + cell[1], z = bz + lz; if (!cannot[S.blockOf[R.get(x, y, z)]]) R.set(x, y, z, st); };
+  // the bones (fossil_rot: integrity 0.9), then the overlay's ore (integrity 0.1)
+  for (const cell of cells) if (r.nextFloat() <= 0.9) put(cell, S.set(BONE, 'axis', BONE_AXES[cell[3] === 1 ? 1 : (cell[3] === 0) !== !!(rot & 1) ? 0 : 2]));
+  for (const cell of cells) if (r.nextFloat() <= 0.1) put(cell, ore);
+  return true;
+};
+})();
+
 /* @file 19_waterlog_gen.js */
 /* ===================================================================
    Part 96 (generation): waterlogged blocks
@@ -9939,6 +9998,160 @@ if (typeof VanillaWorldGen !== 'undefined') {
     const res = _vJobWL.apply(this, arguments);
     if (res && res.msg && res.msg.blocks && this._lastWl) { res.msg.wl = this._lastWl; res.transfer.push(this._lastWl.buffer); }
     return res;
+  };
+}
+
+/* @file 19_ocean_ruins.js */
+/* ===================================================================
+   Part 99 (generation): ocean ruins
+   - where Java's ocean_ruins structure set puts a start (spacing 20,
+     separation 8, salt 14357621), on the ocean floor at the chunk's
+     middle: a warm ruin in lukewarm and warm oceans, a cold one in the
+     other oceans but frozen ones' rivers (OceanRuinStructure)
+   - 3 in 10 are big (kept 9 blocks in 10), the rest small (8 in 10);
+     9 big ruins in 10 have 4 to 8 small ones around them, each turned
+     its own way, at Java's offsets around the big one, none on top of
+     it (OceanRuinPieces.addClusterRuins); each ruin sits on the lowest
+     floor under it
+   - the game's own ruins (not Java's templates): broken arches, wall
+     corners, plinths and columns, and big ruined halls and stepped
+     temples; cold ones of stone bricks, a mix of plain, mossy and
+     cracked (as Java lays its brick, cracked and mossy templates over
+     one another), warm ones of sandstone, cut and smooth sandstone
+   - chests with Java's underwater_ruin_big and _small loot (their water
+     kept in them), a drowned in each big ruin, and up to 5 gravel or
+     sand blocks of a ruin made suspicious with Java's ocean ruin
+     archaeology loot (the archaeology processor's cap of 5)
+   =================================================================== */
+
+const OR_WARM = new Set([BI.LUKEWARM_OCEAN, BI.WARM_OCEAN, BI.DEEP_LUKEWARM_OCEAN]);
+const OR_COLD = new Set([BI.FROZEN_OCEAN, BI.COLD_OCEAN, BI.OCEAN, BI.DEEP_FROZEN_OCEAN, BI.DEEP_COLD_OCEAN, BI.DEEP_OCEAN]);
+// the ruins: [size x, size z, cells(put, R)], cells put(lx, ly, lz, kind, dir) with kinds: f floor, w wall, p pillar, s stairs,
+// h slab, g gravel or sand, c chest, d a drowned
+const OR_SMALL = [
+  // a broken arch over a cracked floor
+  [5, 5, (put, R) => {
+    for (let x = 0; x < 5; x++) for (let z = 1; z < 4; z++) if (R() < 0.7) put(x, 0, z, R() < 0.25 ? 'g' : 'f');
+    for (let y = 0; y <= 3; y++) { put(0, y, 2, y === 3 ? 'p' : 'w'); put(4, y, 2, y === 3 ? 'p' : 'w'); }
+    for (let x = 1; x <= 3; x++) put(x, 4, 2, 'h');
+    put(1, 3, 2, 's', 1); put(3, 3, 2, 's', 3);
+  }],
+  // the corner of a fallen room, a chest in it now and then
+  [6, 6, (put, R) => {
+    for (let x = 0; x < 6; x++) for (let z = 0; z < 6; z++) if (R() < 0.8) put(x, 0, z, R() < 0.2 ? 'g' : 'f');
+    for (let k = 0; k < 6; k++) { const h = 3 - (k >> 1); for (let y = 1; y <= h; y++) { put(k, y, 0, 'w'); put(0, y, k, 'w'); } }
+    put(0, 4, 0, 'p');
+    if (R() < 0.5) put(2, 1, 2, 'c', 2);
+  }],
+  // a plinth with steps up its sides and a stub of a column
+  [5, 5, (put, R) => {
+    for (let x = 0; x < 5; x++) for (let z = 0; z < 5; z++) put(x, 0, z, (x === 0 || z === 0 || x === 4 || z === 4) && R() < 0.3 ? 'g' : 'f');
+    for (let x = 1; x <= 3; x++) for (let z = 1; z <= 3; z++) put(x, 1, z, 'f');
+    put(2, 1, 0, 's', 0); put(2, 1, 4, 's', 2); put(0, 1, 2, 's', 3); put(4, 1, 2, 's', 1);
+    put(2, 2, 2, 'p'); if (R() < 0.6) put(2, 3, 2, 'w');
+  }],
+  // three broken columns on a strip of floor
+  [7, 3, (put, R) => {
+    for (let x = 0; x < 7; x++) for (let z = 0; z < 3; z++) if (R() < 0.75) put(x, 0, z, R() < 0.2 ? 'g' : 'f');
+    for (const x of [0, 3, 6]) { const h = 1 + Math.floor(R() * 4); for (let y = 1; y <= h; y++) put(x, y, 1, y === h ? 'p' : 'w'); if (h >= 3) put(x, h + 1, 1, 'h'); }
+  }],
+];
+const OR_BIG = [
+  // a ruined hall: walls with windows and a doorway, four pillars, a fallen roof, two chests and a drowned
+  [13, 13, (put, R) => {
+    for (let x = 0; x < 13; x++) for (let z = 0; z < 13; z++) put(x, 0, z, R() < 0.12 ? 'g' : 'f');
+    for (let y = 1; y <= 4; y++) for (let k = 0; k < 13; k++) {
+      const win = y >= 2 && y <= 3 && k % 4 === 2, door = k === 6 && y <= 2;
+      if (!win && !door) put(k, y, 0, 'w');
+      if (!win) { put(k, y, 12, 'w'); put(0, y, k, 'w'); put(12, y, k, 'w'); }
+    }
+    for (const [x, z] of [[3, 3], [3, 9], [9, 3], [9, 9]]) for (let y = 1; y <= 4; y++) put(x, y, z, y === 4 ? 'p' : 'w');
+    for (let x = 0; x < 13; x++) for (let z = 0; z < 13; z++) if ((x + z * 3) % 5 < 3) put(x, 5, z, x === 0 || z === 0 || x === 12 || z === 12 ? 'w' : 'h');
+    put(6, 1, 2, 'c', 0); put(6, 1, 10, 'c', 2); put(6, 1, 6, 'd');
+  }],
+  // a stepped temple round a chamber with a chest, a drowned at its door
+  [13, 13, (put, R) => {
+    for (let s = 0; s <= 2; s++) for (let x = s; x < 13 - s; x++) for (let z = s; z < 13 - s; z++) put(x, s, z, s === 0 && R() < 0.15 ? 'g' : 'f');
+    for (let y = 3; y <= 6; y++) for (let k = 3; k <= 9; k++) {
+      const door = k === 6 && y <= 4;
+      if (!door) put(k, y, 3, 'w');
+      put(k, y, 9, 'w'); put(3, y, k, 'w'); put(9, y, k, 'w');
+    }
+    for (const [x, z] of [[3, 3], [3, 9], [9, 3], [9, 9]]) put(x, 7, z, 'p');
+    for (let x = 4; x <= 8; x++) for (let z = 4; z <= 8; z++) if (R() < 0.55) put(x, 7, z, 'h');
+    for (let k = 4; k <= 8; k++) put(k, 2, 2, 's', 0);
+    put(6, 3, 7, 'c', 0); put(6, 3, 2, 'd');
+  }],
+];
+// what each kind is made of: cold stone bricks (with mossy and cracked ones), warm sandstone
+function orBlock(kind, warm, r) {
+  if (warm) return kind === 'p' ? B.CHISELED_SANDSTONE : kind === 's' ? B.SANDSTONE_STAIRS : kind === 'h' ? B.SANDSTONE_SLAB : kind === 'g' ? B.SAND
+    : kind === 'f' ? (r < 0.25 ? B.SMOOTH_SANDSTONE : B.SANDSTONE) : (r < 0.3 ? B.CUT_SANDSTONE : B.SANDSTONE);
+  if (kind === 'p') return B.CHISELED_STONE_BRICKS;
+  if (kind === 's') return B.STONE_BRICK_STAIRS;
+  if (kind === 'h') return B.STONE_BRICK_SLAB;
+  if (kind === 'g') return B.GRAVEL;
+  return r < 0.3 ? B.MOSSY_STONE_BRICKS : r < 0.45 ? B.CRACKED_STONE_BRICKS : B.STONE_BRICKS;
+}
+// one ruin at (ox, oz) (its corner before turning), turned r quarter turns, on the lowest floor under it
+function orPiece(ctx, design, ox, oz, r, warm, big, integrity, seed) {
+  const [sx, sz, cells] = design, R = mulberry32(seed), wr = worldWriter(ctx), gen = ctx.gen;
+  const ex = (r & 1) ? sz : sx, ez = (r & 1) ? sx : sz;
+  // the floor: the lowest of its corners and middle (OceanRuinPiece.getHeight keeps a ruin down on uneven ground)
+  let y = Infinity;
+  for (const [x, z] of [[0, 0], [ex - 1, 0], [0, ez - 1], [ex - 1, ez - 1], [ex >> 1, ez >> 1]]) y = Math.min(y, gen.columnAt(ox + x, oz + z).h);
+  const turn = (lx, lz) => r === 0 ? [lx, lz] : r === 1 ? [sz - 1 - lz, lx] : r === 2 ? [sx - 1 - lx, sz - 1 - lz] : [lz, sx - 1 - lx];
+  const hash = (x, yy, z, k) => hash3(x, yy, z, (seed | 0) + k);
+  let sus = 0;
+  cells((lx, ly, lz, kind, dir) => {
+    const [tx, tz] = turn(lx, lz), x = ox + tx, z = oz + tz, yy = y + ly;
+    if (kind === 'd') { if (x >> 4 === ctx.cx && z >> 4 === ctx.cz) ctx.mobs.push(['drowned', x + 0.5, yy, z + 0.5, {}]); return; }
+    // BlockRotProcessor: some blocks are gone (never the chest)
+    if (kind !== 'c' && hash(x, yy, z, 1) >= integrity) return;
+    const d = dir === undefined ? 0 : (dir + r) & 3;
+    if (kind === 'c') { const i = wr.set(x, yy, z, B.CHEST, M_FACING(d)); if (i >= 0) ctx.be.push([i, { type: 'chest', kind: 'chest', loot: big ? 'underwater_ruin_big' : 'underwater_ruin_small' }]); return; }
+    if (kind === 'g' && sus < 5 && hash(x, yy, z, 2) < 0.5) {
+      // the archaeology processor: up to 5 of a ruin's gravel or sand blocks hold something
+      sus++;
+      const i = wr.set(x, yy, z, warm ? B.SUSPICIOUS_SAND : B.SUSPICIOUS_GRAVEL, 0);
+      if (i >= 0) ctx.be.push([i, { type: 'brushable', table: warm ? 'ocean_ruin_warm_archaeology' : 'ocean_ruin_cold_archaeology' }]);
+      return;
+    }
+    wr.set(x, yy, z, orBlock(kind, warm, hash(x, yy, z, 3)), kind === 's' ? M_STAIRS(d, false) : 0);
+  }, R);
+}
+addStructure('ocean_ruin', 384, { salt: 9701, chance: 0.5, biomes: new Set([...OR_WARM, ...OR_COLD]), size: [56, 56], surface: false,
+  level: (col, lo, hi, r, gen) => col.h < gen.sea - 4 ? col.h : null }, (W, R, p, ctx) => {
+  const warm = p.start ? !!p.start.warm : OR_WARM.has(ctx.gen.columnAt(p.X, p.Z).b);
+  const big = R() < 0.3, seed = p.seed;
+  if (!big) {
+    const d = OR_SMALL[Math.floor(R() * OR_SMALL.length)], r = Math.floor(R() * 4);
+    orPiece(ctx, d, p.X - (d[0] >> 1), p.Z - (d[1] >> 1), r, warm, false, 0.8, seed + 1);
+    return;
+  }
+  const d = OR_BIG[Math.floor(R() * OR_BIG.length)], r = Math.floor(R() * 4), x0 = p.X - 6, z0 = p.Z - 6;
+  orPiece(ctx, d, x0, z0, r, warm, true, 0.9, seed + 1);
+  if (R() >= 0.9) return;
+  // OceanRuinPieces.allPositions around the big ruin's corner, 4 to 8 of them, none overlapping it
+  const n = (a, b) => a + Math.floor(R() * (b - a + 1));
+  const spots = [[-16 + n(1, 8), 16 + n(1, 7)], [-16 + n(1, 8), n(1, 7)], [-16 + n(1, 8), -16 + n(4, 8)], [n(1, 7), 16 + n(1, 7)], [n(1, 7), -16 + n(4, 6)],
+    [16 + n(1, 7), 16 + n(3, 8)], [16 + n(1, 7), n(1, 7)], [16 + n(1, 7), -16 + n(4, 8)]];
+  const k = n(4, 8);
+  for (let j = 0; j < k && spots.length; j++) {
+    const [dx, dz] = spots.splice(Math.floor(R() * spots.length), 1)[0], sd = OR_SMALL[Math.floor(R() * OR_SMALL.length)], sr = Math.floor(R() * 4);
+    const ex = (sr & 1) ? sd[1] : sd[0], ez = (sr & 1) ? sd[0] : sd[1];
+    if (x0 + dx < x0 + 13 && x0 + dx + ex > x0 && z0 + dz < z0 + 13 && z0 + dz + ez > z0) continue;
+    orPiece(ctx, sd, x0 + dx, z0 + dz, sr, warm, false, 0.8, seed + 100 + j);
+  }
+});
+// the vanilla start: the chunk's middle on the ocean floor, warm or cold by its biome
+if (typeof VanillaWorldGen !== 'undefined') {
+  const _vStartComputeOR = VanillaWorldGen.prototype.vStartCompute;
+  VanillaWorldGen.prototype.vStartCompute = function (name, rx, rz) {
+    if (name !== 'ocean_ruin') return _vStartComputeOR.apply(this, arguments);
+    const [cx, cz] = VS.candidate(this.v.seed, VS.SETS.ocean_ruin, rx, rz), mx = cx * 16 + 8, mz = cz * 16 + 8;
+    const b = this.qb(mx, this.approxTop(mx, mz), mz);
+    return OR_WARM.has(b) ? { cx, cz, X: mx, Z: mz, warm: true } : OR_COLD.has(b) ? { cx, cz, X: mx, Z: mz, warm: false } : null;
   };
 }
 
@@ -10267,7 +10480,7 @@ defB('carrots', Object.assign({}, CROP, { tex: 'carrots_stage0', stages: 4, stag
 defB('potatoes', Object.assign({}, CROP, { tex: 'potatoes_stage0', stages: 4, stageOf: [0, 0, 1, 1, 2, 2, 2, 3], item: 'potato' }));
 defB('beetroots', Object.assign({}, CROP, { tex: 'beetroots_stage0', stages: 4, maxAge: 3, item: 'beetroot_seeds' }));
 defB('torchflower_crop', Object.assign({}, CROP, { shape: SH.CROSS, tex: 'torchflower_crop_stage0', stages: 2, maxAge: 2, item: 'torchflower_seeds' }));
-defB('pitcher_crop', Object.assign({}, CROP, { shape: SH.CROSS, tex: 'pitcher_crop_bottom_stage_0', stages: 5, maxAge: 4, item: 'pitcher_pod' }));
+defB('pitcher_crop', Object.assign({}, CROP, { shape: SH.BOX, model: 'pitcher_crop', noCollide: false, tex: 'pitcher_crop_top', stages: 5, maxAge: 4, item: 'pitcher_pod' }));
 defB('melon_stem', Object.assign({}, CROP, { shape: SH.CROSS, tex: 'melon_stem', tint: 7, stem: 'melon', item: 'melon_seeds' }));
 defB('pumpkin_stem', Object.assign({}, CROP, { shape: SH.CROSS, tex: 'pumpkin_stem', tint: 7, stem: 'pumpkin', item: 'pumpkin_seeds' }));
 defB('cocoa', { shape: SH.BOX, hard: 0.2, tool: AXE, sound: 'wood', model: 'cocoa', needs: 'jungle_log', tex: 'cocoa_stage2', cutout: true, item: 'cocoa_beans', noCollide: true });
@@ -10422,6 +10635,8 @@ defB('moving_piston', { shape: SH.MOVING, hard: -1, item: null, drop: null, tex:
 // like dripstone; meta 1 points up)
 defB('potent_sulfur', ROCK(1.5, 0, { potentSulfur: true }));
 defB('sulfur_spike', { shape: SH.CROSS, hard: 1.5, tool: PICK, sound: 'stone', cutout: true, needs: 'dripstone', tex: 'sulfur_spike_down_tip', noWave: true, dripstone: 'sulfur_spike', icon: 'sulfur_spike' });
+// Frost Walker's frosted ice (meta: age 0 to 3), melting back to water (Part 97); no item
+defB('frosted_ice', { hard: 0.5, tool: PICK, sound: 'glass', translucent: true, cullSame: true, drop: null, item: null, slip: 0.98, tex: 'frosted_ice_0' });
 const NONSOLID_SHAPES = new Set([SH.NONE, SH.CROSS, SH.TORCH, SH.LIQUID, SH.CROP, SH.PORTAL, SH.TALL, SH.VINE, SH.FAN, SH.WIRE, SH.RAIL, SH.FIRE, SH.LEVER]);
 for (let id = 0; id < BLOCK_NAMES.length; id++) {
   const d = BLK[id];
@@ -12394,7 +12609,7 @@ TEXGEN.push(function texBlocks() {
   cropStage(['potatoes_stage0', 'potatoes_stage1', 'potatoes_stage2', 'potatoes_stage3'], [80, 156, 50], [200, 170, 90]);
   cropStage(['beetroots_stage0', 'beetroots_stage1', 'beetroots_stage2', 'beetroots_stage3'], [90, 140, 50], [160, 40, 50]);
   cropStage(['torchflower_crop_stage0', 'torchflower_crop_stage1'], [80, 140, 50], [240, 120, 40]);
-  cropStage(['pitcher_crop_bottom_stage_0', 'pitcher_crop_bottom_stage_1', 'pitcher_crop_bottom_stage_2', 'pitcher_crop_bottom_stage_3', 'pitcher_crop_bottom_stage_4'], [70, 120, 110], [140, 90, 200]);
+  cropStage(['pitcher_crop_bottom_stage_0', 'pitcher_crop_bottom_stage_1', 'pitcher_crop_bottom_stage_2'], [70, 120, 110], [140, 90, 200]);
   const stemTex = attached => (d, r) => { clear(d); let x = 7; for (let y = 15; y > (attached ? 6 : 2); y--) { sp(d, Math.round(x), y, [200, 200, 200]); x += attached ? 0.4 : (r() - 0.5) * 0.4; } if (attached) for (let x2 = 8; x2 < 16; x2++) sp(d, x2, 7, [190, 190, 190]); else { sp(d, 6, 4, [180, 180, 180]); sp(d, 8, 5, [180, 180, 180]); } };
   T('melon_stem', stemTex(false)); T('pumpkin_stem', stemTex(false)); T('attached_melon_stem', stemTex(true)); T('attached_pumpkin_stem', stemTex(true));
   for (let s = 0; s < 3; s++) T('cocoa_stage' + s, (d, r) => fillF(d, () => mul([[120, 150, 50], [170, 120, 50], [150, 90, 40]][s], 0.85 + r() * 0.2)));
@@ -25604,7 +25819,7 @@ Object.assign(Game.prototype, {
       if (it && it.tool && d.hard > 0) p.damageHeld(it.tool.type === 'sword' ? 2 : 1);
       p.exh += 0.005;
       if (d.xp && harvest && !(p.toolInfo && p.toolInfo().silk) && this.rule('doTileDrops')) { const [a, b] = d.xp; const n = d.xpRoll ? d.xpRoll() : a + Math.floor(Math.random() * (b - a + 1)); if (n > 0) this.spawnXP ? this.spawnXP(x + 0.5, y + 0.5, z + 0.5, n) : p.addXP(n); }
-      if (id === B.ICE && w.dim !== 'nether' && !(p.toolInfo && p.toolInfo().silk)) w.setBlock(x, y, z, B.WATER, 0);
+      if ((id === B.ICE || id === B.FROSTED_ICE) && w.dim !== 'nether' && !(p.toolInfo && p.toolInfo().silk)) { const b = w.getBlock(x, y - 1, z); if (SOLID[b] || BLK[b].liquid || WATERY[b]) w.setBlock(x, y, z, B.WATER, 0); }
     }
     this.remeshNear(x, z);
     this.ui.refreshHotbar();
@@ -32076,7 +32291,7 @@ Game.prototype.onChat = function (msg) {
       return say('Gamerule keepInventory is now set to: ' + this.keepInventory);
     case 'locate': {
       const r = a.slice(1).join(' ').replace(/^(biome|structure)\s+/i, ''), k = key(r);
-      const v = LOCATE_ALIAS[k] || (/^village_/.test(k) ? 'village' : /^ruined_portal/.test(k) ? 'ruined_portal' : /^shipwreck/.test(k) ? 'shipwreck' : /^mineshaft/.test(k) ? 'mineshaft' : null);
+      const v = LOCATE_ALIAS[k] || (/^village_/.test(k) ? 'village' : /^ruined_portal/.test(k) ? 'ruined_portal' : /^shipwreck/.test(k) ? 'shipwreck' : /^mineshaft/.test(k) ? 'mineshaft' : /^ocean_ruin/.test(k) ? 'ocean_ruin' : null);
       if (v) return _onChatCM.call(this, '/locate ' + v);
       break;
     }
@@ -62954,6 +63169,269 @@ function wlFromOldSave(blocks, meta) {
   }
   return wl;
 }
+
+/* @file 203_frost_walker.js */
+/* ===================================================================
+   Part 97: Frost Walker, frosted ice and stepping burns like Java
+   - boots with Frost Walker, on the ground and riding nothing, turn the
+     still water under the wearer (water sources with air above and
+     nothing in the way) within 3 blocks (4 at level II) into frosted
+     ice each time the wearer steps into another block (the enchantment's
+     replace_disk effect); mobs wearing them too
+   - frosted ice (FrostedIceBlock): a random tick sets a tick 3 to 6
+     seconds off; at a tick, one time in three or with fewer than 4
+     frosted ice blocks beside it, and lit above 10 less its age, it
+     ages, at age 3 melting into water and ageing its frosted neighbours
+     (those that don't melt tick again in 1 to 2 seconds); else it
+     ticks again in 1 to 2 seconds; when frosted ice beside it melts or
+     is broken, it melts too if fewer than 2 frosted ice blocks are left
+     beside it; it melts to water, or to nothing in the Nether, and
+     drops nothing
+   - ice and frosted ice broken without Silk Touch leave water only
+     over something solid or a liquid (IceBlock.playerDestroy)
+   - a lit campfire burns what stands in it (1, a soul campfire 2), and
+     a magma block burns mobs on it as it does players; Frost Walker,
+     fire resistance and fire immunity keep them from it
+   =================================================================== */
+
+TEXGEN.push(function texFrostWalker() {
+  // ice with frost on it; the older, the more it is cracked
+  for (let a = 0; a < 4; a++) T('frosted_ice_' + a, (d, r) => {
+    fillF(d, (x, y) => { const s = (x + y * 2) % 11, f = s === 0 ? 1.1 : 0.95 + r() * 0.06; return [150 * f, 194 * f, 252 * Math.min(1.02, f), 190]; });
+    for (let k = 0; k < 22; k++) sp(d, Math.floor(r() * 16), Math.floor(r() * 16), [228, 240, 255], 215);
+    for (let k = 0; k < a * 3; k++) {
+      let x = Math.floor(r() * 16), y = Math.floor(r() * 16);
+      const dx = r() < 0.5 ? -1 : 1, dy = r() < 0.5 ? -1 : 1, n = 3 + Math.floor(r() * 4);
+      for (let s = 0; s < n; s++) { sp(d, x, y, [240, 248, 255], 235); if (r() < 0.5) x += dx; else y += dy; }
+    }
+  });
+});
+// its faces by age
+{
+  const _resolveFaceTexturesFW = resolveFaceTextures;
+  resolveFaceTextures = function () {
+    _resolveFaceTexturesFW();
+    const sets = [0, 1, 2, 3].map(a => { const l = texLayer('frosted_ice_' + a, FACETEX[B.FROSTED_ICE * 6]); return Int16Array.of(l, l, l, l, l, l); });
+    VARTEX[B.FROSTED_ICE] = m => sets[m & 3];
+  };
+}
+
+/* ---------------- frosted ice ---------------- */
+const fwRand = (a, b) => a + Math.floor(Math.random() * (b - a));
+// FrostedIceBlock.fewerNeigboursThan
+function frostedFewer(w, x, y, z, n) {
+  let k = 0;
+  for (let f = 0; f < 6; f++) if (w.getBlock(x + DX[f], y + DY[f], z + DZ[f]) === B.FROSTED_ICE && ++k >= n) return false;
+  return true;
+}
+// IceBlock.melt: water, or nothing in the Nether
+function frostedMelt(g, x, y, z) {
+  const w = g.world;
+  w.setBlock(x, y, z, w.dim === 'nether' ? 0 : B.WATER, 0);
+  g.remeshNear(x, z);
+}
+// FrostedIceBlock.slightlyMelt: a year older, melting at 3 (true when it melts)
+function frostedAge(g, x, y, z) {
+  const w = g.world, a = w.getMeta(x, y, z) & 3;
+  if (a < 3) { w.setBlock(x, y, z, B.FROSTED_ICE, a + 1, false); g.remeshNear(x, z); return false; }
+  frostedMelt(g, x, y, z);
+  return true;
+}
+// FrostedIceBlock.neighborChanged: the neighbours of frosted ice that melts or goes are told it was frosted ice, and those left
+// with fewer than 2 frosted ice blocks beside them melt as well
+const _setBlockFW = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  const was = this.getBlock(x, y, z), r = _setBlockFW.apply(this, arguments);
+  if (was === B.FROSTED_ICE && id !== B.FROSTED_ICE && notify !== false && typeof game !== 'undefined' && game.world === this)
+    for (let f = 0; f < 6; f++) {
+      const nx = x + DX[f], ny = y + DY[f], nz = z + DZ[f];
+      if (this.getBlock(nx, ny, nz) === B.FROSTED_ICE && frostedFewer(this, nx, ny, nz, 2)) frostedMelt(game, nx, ny, nz);
+    }
+  return r;
+};
+const _randomTickFW = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  if (id === B.FROSTED_ICE) { this.world.schedule(x, y, z, fwRand(60, 120), 'frosted'); return; }
+  return _randomTickFW.apply(this, arguments);
+};
+const _onScheduledFW = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind !== 'frosted') return _onScheduledFW.apply(this, arguments);
+  const w = this.world;
+  if (w.getBlock(x, y, z) !== B.FROSTED_ICE) return;
+  const age = w.getMeta(x, y, z) & 3, l = w.getLightRaw(x, y, z);
+  const bright = Math.max((l >> 4) - (w.dim === 'overworld' ? this.skyDarken() : 0), l & 15);
+  // FrostedIceBlock.tick (its light block is 1)
+  if ((Math.random() < 1 / 3 || frostedFewer(w, x, y, z, 4)) && bright > 11 - age - 1 && frostedAge(this, x, y, z)) {
+    for (let f = 0; f < 6; f++) {
+      const nx = x + DX[f], ny = y + DY[f], nz = z + DZ[f];
+      if (w.getBlock(nx, ny, nz) === B.FROSTED_ICE && !frostedAge(this, nx, ny, nz)) w.schedule(nx, ny, nz, fwRand(20, 40), 'frosted');
+    }
+  } else w.schedule(x, y, z, fwRand(20, 40), 'frosted');
+};
+
+/* ---------------- Frost Walker ---------------- */
+const fwBoots = e => e.armor ? e.armor[3] : e.data && e.data.armor ? e.data.armor[3] : null;
+// the replace_disk effect around a wearer standing at its new block
+function frostWalk(e, lvl) {
+  const g = e.game, w = g.world, r = Math.min(16, 3 + lvl - 1), bx = Math.floor(e.x), by = Math.floor(e.y) - 1, bz = Math.floor(e.z);
+  const near = g.entities.filter(o => !o.dead && Math.abs(o.x - e.x) < r + 2 && Math.abs(o.z - e.z) < r + 2 && o.y < by + 1.5 && o.y + (o.h || 0) > by - 0.5);
+  const p = g.player;
+  if (p && p !== e && !p.dead && p.mode !== 3) near.push(p);
+  for (let x = bx - r; x <= bx + r; x++) for (let z = bz - r; z <= bz + r; z++) {
+    if ((x + 0.5 - e.x) ** 2 + (z + 0.5 - e.z) ** 2 >= r * r) continue;
+    // still water (a water block's source), air above, and nothing standing in the way (unobstructed)
+    if (w.getBlock(x, by, z) !== B.WATER || w.getMeta(x, by, z) !== 0 || w.getBlock(x, by + 1, z) !== 0) continue;
+    if (near.some(o => { const hw = (o.w || 0) / 2; return o.x + hw > x && o.x - hw < x + 1 && o.z + hw > z && o.z - hw < z + 1 && o.y < by + 1 && o.y + (o.h || 0) > by; })) continue;
+    w.setBlock(x, by, z, B.FROSTED_ICE, 0);
+    w.schedule(x, by, z, fwRand(60, 120), 'frosted');
+    if (g.vibrate) g.vibrate(x + 0.5, by + 0.5, z + 0.5, 'block_place', e);
+  }
+  g.remeshNear(bx, bz);
+}
+// burns from what's stepped on (#burn_from_stepping) don't hurt the wearer, nor the fire-immune or fire resistant
+const fwBurnProof = e => enchLevel(fwBoots(e), 'frost_walker') > 0 || (e.T && e.T.fireproof) || (e.effectLevel && e.effectLevel('fire_resistance') > 0) || e.mode === 1 || e.mode === 3;
+const _updateFluidsFW = Entity.prototype.updateFluids;
+Entity.prototype.updateFluids = function () {
+  const res = _updateFluidsFW.apply(this, arguments);
+  if (this.dead || !this.game || !this.game.world || typeof this.hurt !== 'function' || this.health === undefined) return res;
+  const w = this.game.world, isPlayer = this === this.game.player;
+  // Frost Walker: when the wearer's block changes (EnchantmentHelper.runLocationChangedEffects)
+  const at = Math.floor(this.x) + ',' + Math.floor(this.y) + ',' + Math.floor(this.z);
+  if (at !== this._fwAt) {
+    this._fwAt = at;
+    const lvl = enchLevel(fwBoots(this), 'frost_walker');
+    if (lvl > 0 && this.onGround && !this.riding && !this.vehicle && !(isPlayer && this.mode === 3)) frostWalk(this, lvl);
+  }
+  if (fwBurnProof(this)) return res;
+  // CampfireBlock.entityInside: a lit campfire in the box burns (1, soul 2)
+  const hw = (this.w || 0.6) / 2;
+  for (let y = Math.floor(this.y); y <= Math.floor(this.y + (this.h || 1)); y++) for (let z = Math.floor(this.z - hw); z <= Math.floor(this.z + hw); z++) for (let x = Math.floor(this.x - hw); x <= Math.floor(this.x + hw); x++) {
+    const id = w.getBlock(x, y, z);
+    if ((id === B.CAMPFIRE || id === B.SOUL_CAMPFIRE) && !(w.getMeta(x, y, z) & 4) && this.y < y + 7 / 16) { this.hurt(id === B.SOUL_CAMPFIRE ? 2 : 1, 'in_fire'); return res; }
+  }
+  // MagmaBlock.stepOn for mobs (the player's own check is in Player.tick)
+  if (!isPlayer && this.onGround && BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z))].magma) this.hurt(1, 'magma');
+  return res;
+};
+
+/* @file 204_pitcher_crops.js */
+/* ===================================================================
+   Part 98: pitcher crops like Java (PitcherCropBlock)
+   - ages 0 to 4; from age 3 the crop is two blocks tall (meta bit 8
+     marks the upper half, which carries the same age); it grows one
+     time in 25 / growth speed + 1 of its random ticks, in light 8 or
+     more, and to age 3 only with air (or its own upper half) above;
+     bone meal grows it one age, used on either half
+   - breaking either half takes both; it drops a pitcher pod, or a
+     pitcher plant once fully grown
+   - Java's models: a seed pod (pitcher_crop_side, _top and _bottom; a
+     small one at age 0, a wider one after, a pixel down in the farmland)
+     under crossed leaves (pitcher_crop_bottom_stage_1 to 4, 5 pixels up
+     at ages 1 and 2), and the upper half's leaves at ages 3 and 4
+     (pitcher_crop_top_stage_3 and 4), the leaves lit as from above
+   - the pod can be stood on (COLLISION_SHAPE_BULB, COLLISION_SHAPE_CROP)
+   =================================================================== */
+
+TEXGEN.push(function texPitcherCrop() {
+  // the seed pod: teal sides with darker ribs and a pale band under the rim, a top with its opening, a dark underside
+  T('pitcher_crop_side', (d, r) => fillF(d, (x, y) => { const rib = x % 3 === 0 ? 0.78 : 1, band = y === 10 || y === 11 ? 1.18 : 1; return mul([84, 124, 108], rib * band * (0.92 + r() * 0.12)); }));
+  T('pitcher_crop_top', (d, r) => fillF(d, (x, y) => { const c = Math.hypot(x - 7.5, y - 7.5); return c < 1.6 ? [46, 66, 58] : mul([98, 142, 120], (c < 3.2 ? 0.86 : 1) * (0.92 + r() * 0.12)); }));
+  T('pitcher_crop_bottom', (d, r) => fillF(d, () => mul([66, 92, 76], 0.9 + r() * 0.12)));
+  // ages 3 and 4: the grown plant's stems below, its top above (at age 3 a bud without the flower)
+  T('pitcher_crop_bottom_stage_4', d => { d.set(copyOf('pitcher_plant_bottom')); });
+  T('pitcher_crop_bottom_stage_3', d => { const s = copyOf('pitcher_plant_bottom'); for (let y = 0; y < 4; y++) for (let x = 0; x < 16; x++) s[(((y << 4) | x) << 2) + 3] = 0; d.set(s); });
+  T('pitcher_crop_top_stage_4', d => { d.set(copyOf('pitcher_plant_top')); });
+  T('pitcher_crop_top_stage_3', d => { const s = copyOf('pitcher_plant_top'); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const i = ((y << 4) | x) << 2; if (y < 7) s[i + 3] = 0; } d.set(s); });
+});
+{
+  const PC = B.PITCHER_CROP, upper = m => (m & 8) !== 0, age = m => Math.min(4, m & 7);
+  const t = n => 'pitcher_crop_' + n;
+  const box = (a, b, h, su, tu) => jE([a, -1, a], [b, h, b], { north: [su, t('side')], east: [su, t('side')], south: [su, t('side')], west: [su, t('side')], up: [tu, t('top')], down: [tu, t('bottom')] });
+  const POD0 = box(5, 11, 3, [3, 10, 9, 14], [5, 5, 11, 11]), POD = box(3, 13, 5, [3, 10, 13, 16], [3, 3, 13, 13]);
+  const leaves = (tex, y0) => jQuads([45, -45].map(a => jE([0, y0, 8], [16, y0 + 16, 8], { north: [[0, 0, 16, 16], tex], south: [[0, 0, 16, 16], tex] }, { origin: [8, y0, 8], axis: 'y', angle: a }))).map(q => Object.assign(q, { su: 1 }));
+  // [lower, upper] per age
+  const MODELS = [0, 1, 2, 3, 4].map(a => [
+    a === 0 ? jQuads([POD0]) : leaves(t('bottom_stage_' + a), a < 3 ? 5 : 0).concat(jQuads([POD])),
+    a >= 3 ? leaves(t('top_stage_' + a), 0) : [],
+  ]);
+  BOX_MODELS.pitcher_crop = (d, m) => MODELS[age(m)][upper(m) ? 1 : 0];
+  const _mc = modelCollision;
+  modelCollision = function (id, meta, ctx) {
+    if (id !== PC) return _mc(id, meta, ctx);
+    return upper(meta) ? [] : age(meta) === 0 ? [[5, 0, 5, 11, 3, 11]] : [[3, 0, 3, 13, 5, 13]];
+  };
+  // DoublePlantBlock / PitcherCropBlock.canSurvive and updateShape: the lower half on farmland (with its upper half once two
+  // tall), the upper half on its lower half
+  const _canStayPC = World.prototype.canStay;
+  World.prototype.canStay = function (id, x, y, z, meta) {
+    if (id !== PC) return _canStayPC.apply(this, arguments);
+    const m = meta === undefined ? this.getMeta(x, y, z) : meta;
+    if (upper(m)) { const bm = this.getMeta(x, y - 1, z); return this.getBlock(x, y - 1, z) === PC && !upper(bm) && age(bm) >= 3; }
+    if (this.getBlock(x, y - 1, z) !== B.FARMLAND) return false;
+    return age(m) < 3 || (this.getBlock(x, y + 1, z) === PC && upper(this.getMeta(x, y + 1, z)));
+  };
+  const _otherHalfPC = Game.prototype.otherHalf;
+  Game.prototype.otherHalf = function (x, y, z, id, meta) {
+    if (id !== PC) return _otherHalfPC.apply(this, arguments);
+    return upper(meta) ? [x, y - 1, z] : age(meta) >= 3 ? [x, y + 1, z] : null;
+  };
+  const _dropsForPC = Game.prototype.dropsFor;
+  Game.prototype.dropsFor = function (id, meta, tool) {
+    if (id !== PC) return _dropsForPC.apply(this, arguments);
+    return [{ id: itemOf(age(meta) >= 4 ? 'pitcher_plant' : 'pitcher_pod'), count: 1 }];
+  };
+  // PitcherCropBlock.grow and canGrow
+  const pcGrow = (g, x, y, z, n) => {
+    const w = g.world, m = w.getMeta(x, y, z), a = Math.min(age(m) + n, 4), l = w.getLightRaw(x, y, z);
+    if (age(m) >= 4 || Math.max(l >> 4, l & 15) < 8) return false;
+    if (a >= 3) { const up = w.getBlock(x, y + 1, z); if (up !== 0 && up !== PC) return false; }
+    w.setBlock(x, y, z, PC, a, false);
+    if (a >= 3) w.setBlock(x, y + 1, z, PC, a | 8);
+    g.remeshNear(x, z);
+    return true;
+  };
+  const _randomTickPC = Game.prototype.randomTick;
+  Game.prototype.randomTick = function (x, y, z, id) {
+    if (id !== PC) return _randomTickPC.apply(this, arguments);
+    const w = this.world, m = w.getMeta(x, y, z);
+    if (upper(m) || age(m) >= 4) return;
+    if (fmRand(Math.floor(25 / cropSpeed(w, x, y, z, id)) + 1) === 0) pcGrow(this, x, y, z, 1);
+  };
+  const _boneMealPC = Game.prototype.boneMeal;
+  Game.prototype.boneMeal = function (x, y, z) {
+    const w = this.world;
+    if (w.getBlock(x, y, z) !== PC) return _boneMealPC.apply(this, arguments);
+    if (upper(w.getMeta(x, y, z))) { y--; if (w.getBlock(x, y, z) !== PC) return false; }
+    return pcGrow(this, x, y, z, 1);
+  };
+}
+
+/* @file 205_ocean_ruins.js */
+/* ===================================================================
+   Part 99: ocean ruins like Java (the ruins themselves are built in
+   19_ocean_ruins.js with the world)
+   - chests: Java's underwater_ruin_small (coal, wheat, rotten flesh, a
+     stone axe, an emerald; and a buried treasure map, an enchanted
+     fishing rod, a leather tunic or a golden helmet) and
+     underwater_ruin_big (gold nuggets in place of the flesh and axe;
+     and also enchanted books and golden apples)
+   - suspicious gravel and sand: Java's ocean_ruin_cold and
+     ocean_ruin_warm archaeology (pottery sherds, and in warm ruins a
+     sniffer egg)
+   - /locate structure ocean_ruin_cold or ocean_ruin_warm finds them
+   =================================================================== */
+Object.assign(LOOT, {
+  underwater_ruin_small: [[[2, 8], [['coal', 10, 1, 4], ['stone_axe', 2], ['rotten_flesh', 5], ['emerald', 1], ['wheat', 10, 2, 3]]],
+    [[1, 1], [['leather_chestplate', 1], ['golden_helmet', 1], ['fishing_rod', 5, 1, 1, { rand: true }], ['filled_map', 10, 1, 1, { explore: 'buried_treasure' }]]]],
+  underwater_ruin_big: [[[2, 8], [['coal', 10, 1, 4], ['gold_nugget', 10, 1, 3], ['emerald', 1], ['wheat', 10, 2, 3]]],
+    [[1, 1], [['golden_apple', 1], ['enchanted_book', 5, 1, 1, { book: true }], ['leather_chestplate', 1], ['golden_helmet', 1], ['fishing_rod', 5, 1, 1, { rand: true }],
+      ['filled_map', 10, 1, 1, { explore: 'buried_treasure' }]]]],
+  ocean_ruin_cold_archaeology: [[[1, 1], [['blade_pottery_sherd', 1], ['explorer_pottery_sherd', 1], ['mourner_pottery_sherd', 1], ['plenty_pottery_sherd', 1], ['iron_axe', 1],
+    ['emerald', 2], ['wheat', 2], ['wooden_hoe', 2], ['coal', 2], ['gold_nugget', 2]]]],
+  ocean_ruin_warm_archaeology: [[[1, 1], [['angler_pottery_sherd', 1], ['shelter_pottery_sherd', 1], ['snort_pottery_sherd', 1], ['sniffer_egg', 1], ['iron_axe', 1],
+    ['emerald', 2], ['wheat', 2], ['wooden_hoe', 2], ['coal', 2], ['gold_nugget', 2]]]],
+});
 
 </script>
 </body>
