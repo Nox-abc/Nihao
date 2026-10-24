@@ -772,10 +772,34 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   for each biome. Java builds them from structure files, so the camp itself is the game's own: a canvas tent over a
   straw bed and a barrel, a cold campfire with log seats, a chest, and sometimes a stash buried under the ashes, in the
   wood and colours of its biome. Chests and barrels hold 26.3's loot, with camp maps that lead to a camp of another
-  biome and, in the stash, maps to far-off structures (the spears and cushions on Java's lists aren't in the game yet,
-  so those draws come up empty). 26.3's other new explorer maps work too: buried ancient city, mineshaft, desert
-  pyramid and warm ocean ruins maps; an explorer map found in loot with nothing to lead to vanishes, as in 26.3.
-  /locate finds the camps.
+  biome and, in the stash, maps to far-off structures. 26.3's other new explorer maps work too: buried ancient city,
+  mineshaft, desert pyramid and warm ocean ruins maps; an explorer map found in loot with nothing to lead to vanishes,
+  as in 26.3. /locate finds the camps.
+- **Cushions** (Part 112, from 26.3): sixteen colours of cushion. Three wool slabs of a colour in a row make one, and
+  a dye with a cushion of another colour makes one in the dye's colour. Used on the top or a side of a block, a cushion
+  is set down in front of that face if nothing is in the way, turned towards you in steps of 45 degrees, and it stays
+  where it was put. Right-click it to sit down and press Shift to get up; a dye recolours it, and any hit knocks it off
+  as an item (a creative player gets nothing back). A resource pack's cushion pictures are used when it has them,
+  otherwise the game draws its own. The barrels in abandoned camps now hold the white cushions on 26.3's list.
+- **Furnace fuel like 26.3** (Part 113): everything burns in a furnace as long as 26.3's data says. A sign smelts one
+  item (it was one and a half), a hanging sign four, a wooden button half and a wooden pressure plate one and a half;
+  wool stairs, azaleas, dead bushes, dry grass and leaf litter (half an item each), wool slabs and cushions (a quarter)
+  and mangrove roots (one and a half) burn now, a dried kelp block lasts 4001 ticks, and beehives, bee nests and
+  shields no longer burn. Smokers and blast furnaces use fuel up twice as fast, the half rounded down as in Java.
+- **Spears** (Part 114, from 26.3): seven spears, wooden to netherite (a stick and the material corner to corner,
+  netherite with the smithing upgrade), with 26.3's numbers. Attacking jabs: the spear hits every mob on a line from 2
+  to 4.5 blocks ahead (6.5 in creative) that nothing solid hides, but nothing closer, and only once the attack has
+  recharged. Holding use charges: after a moment the spear is lowered and you can run with it at full speed; whatever
+  it meets is hurt more the faster you close on it, knocked back while you're fast and knocked off its mount at a
+  gallop, each only for so long into the charge. The new Lunge enchantment throws you forward after a jab, and spears
+  also take Sharpness, Smite, Bane of Arthropods, Fire Aspect, Knockback, Looting, Unbreaking, Mending and Vanishing.
+  Zombies, piglins and zombified piglins sometimes spawn holding one, spears turn up in camps, ocean ruins, buried
+  treasure, weaponsmiths, bastions and end cities as in 26.3, and five mobs in one charge earn an advancement. A
+  pack's long in-hand spear pictures are used when it has them. The F3 screen and F3+C now give your facing in Java's
+  numbers (north is 180). As in 26.3, every item in use slows you down, a spyglass too; only a spear lets you run.
+- **Item and loot check against 26.3**: every item's data and every chest list was compared with 26.3's. Nether stars
+  now burn in fire and lava like other items (explosions still can't hurt them), and small ocean ruins hold buried
+  treasure maps half as often as before.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

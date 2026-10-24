@@ -11023,7 +11023,7 @@ Object.assign(ITEM_BY_NAME.nether_wart, { place: 'nether_wart' }); Object.assign
 Object.assign(ITEM_BY_NAME.melon_seeds, { place: 'melon_stem' }); Object.assign(ITEM_BY_NAME.beetroot_seeds, { place: 'beetroots' }); Object.assign(ITEM_BY_NAME.torchflower_seeds, { place: 'torchflower_crop' });
 Object.assign(ITEM_BY_NAME.pitcher_pod, { place: 'pitcher_crop' }); Object.assign(ITEM_BY_NAME.cocoa_beans, { place: 'cocoa' });
 Object.assign(ITEM_BY_NAME.quartz, { display: 'Nether Quartz' }); Object.assign(ITEM_BY_NAME.experience_bottle, { display: "Bottle o' Enchanting", throw: 'xp', rarity: 1, glint: true });
-Object.assign(ITEM_BY_NAME.nether_star, { rarity: 2, glint: true, fireproof: true }); Object.assign(ITEM_BY_NAME.heart_of_the_sea, { rarity: 1 });
+Object.assign(ITEM_BY_NAME.nether_star, { rarity: 2, glint: true }); Object.assign(ITEM_BY_NAME.heart_of_the_sea, { rarity: 1 });
 for (const n of ['nautilus_shell', 'echo_shard', 'disc_fragment_5']) ITEM_BY_NAME[n].rarity = 1;
 Object.assign(ITEM_BY_NAME.dragon_breath, { rarity: 1 }); Object.assign(ITEM_BY_NAME.disc_fragment_5, { display: 'Disc Fragment' });
 Object.assign(ITEM_BY_NAME.netherite_ingot, { fireproof: true }); Object.assign(ITEM_BY_NAME.netherite_scrap, { fireproof: true });
@@ -11076,6 +11076,18 @@ for (const e of [['happy_ghast', 0xf9f9f9, 0xbcbcbc]]) { SPAWN_EGGS.push(e); def
 
 // blue and brown eggs, laid by cold and warm chickens (Part 106)
 defI('blue_egg', { stack: 16, throw: 'egg' }); defI('brown_egg', { stack: 16, throw: 'egg' });
+// cushions (Part 112)
+for (const c of COLORS) defI(c + '_cushion', { stack: 16, cushion: c, fuel: 50, display: titleCase(c) + ' Cushion' });
+// spears (Part 114): durability, attack damage, attack speed, enchantability, ticks of the stab; the charge: ticks before it
+// strikes, [ticks it dismounts for, speed needed], [ticks it knocks back for, speed], [ticks it hurts for, speed towards the
+// target], damage per block a second
+const SPEARS = [['wooden', 59, 1, 1.538462, 15, 13, 15, [100, 14], [200, 5.1], [300, 4.6], 0.7], ['stone', 131, 2, 1.333333, 5, 15, 14, [90, 13], [180, 5.1], [275, 4.6], 0.82],
+  ['copper', 190, 2, 1.176471, 13, 17, 13, [80, 12], [165, 5.1], [250, 4.6], 0.82], ['iron', 250, 3, 1.052632, 14, 19, 12, [50, 11], [135, 5.1], [225, 4.6], 0.95],
+  ['golden', 32, 1, 1.052632, 22, 19, 14, [70, 13], [170, 5.1], [275, 4.6], 0.7], ['diamond', 1561, 4, 0.952381, 10, 21, 10, [60, 10], [130, 5.1], [200, 4.6], 1.075],
+  ['netherite', 2031, 5, 0.869565, 15, 23, 8, [50, 9], [110, 5.1], [175, 4.6], 1.2]];
+for (const [t, dur, dmg, aspd, ench, stab, delay, dis, kb, hit, mult] of SPEARS)
+  defI(t + '_spear', { stack: 1, dur, dmg, aspd, ench, repair: TIERS.find(q => q[0] === t)[5], fuel: t === 'wooden' ? 200 : 0, fireproof: t === 'netherite', enchType: 'spear',
+    spear: { tier: t, stab, delay, dis, kb, hit, mult } });
 /* ---------------- tables used everywhere ---------------- */
 const I = {};
 for (const n in ITEM_BY_NAME) I[n.toUpperCase()] = ITEM_BY_NAME[n].id;
@@ -11209,6 +11221,8 @@ for (let s = 0; s < 4; s++) shapeless(copperName('waxed_' + OXID[s], 'chest'), 1
 for (const c of COLORS) {
   shaped(c + '_harness', 1, ['LLL', 'G#G'], { L: 'leather', G: 'glass', '#': c + '_wool' });
   shapeless(c + '_harness', 1, [c + '_dye', COLORS.filter(k => k !== c).map(k => itemOf(k + '_harness'))]);
+  shaped(c + '_cushion', 1, ['###'], { '#': c + '_wool_slab' });
+  shapeless(c + '_cushion', 1, [c + '_dye', COLORS.filter(k => k !== c).map(k => itemOf(k + '_cushion'))]);
 }
 for (const w of [...WOODS, 'bamboo', ...STEMS]) shaped(w + '_shelf', 6, ['###', '   ', '###'], { '#': w === 'bamboo' ? 'stripped_bamboo_block' : STEMS.includes(w) ? 'stripped_' + w + '_stem' : 'stripped_' + w + '_log' });
 shaped('lectern', 1, ['SSS', ' B ', ' S '], { S: '#wooden_slabs', B: 'bookshelf' });
@@ -11391,6 +11405,7 @@ for (const [tier, mat] of TOOL_MATS) {
   shaped(tier + '_shovel', 1, ['X', 'S', 'S'], { X: mat, S: 'stick' });
   shaped(tier + '_sword', 1, ['X', 'X', 'S'], { X: mat, S: 'stick' });
   shaped(tier + '_hoe', 1, ['XX', ' S', ' S'], { X: mat, S: 'stick' });
+  shaped(tier + '_spear', 1, ['  X', ' S ', 'S  '], { X: mat, S: 'stick' });
 }
 const ARMOR_CRAFT = [['leather', 'leather'], ['copper', 'copper_ingot'], ['iron', 'iron_ingot'], ['golden', 'gold_ingot'], ['diamond', 'diamond']];
 for (const [mat, x] of ARMOR_CRAFT) {
@@ -11405,7 +11420,7 @@ shaped('wolf_armor', 1, ['X  ', 'XXX', 'X X'], { X: 'armadillo_scute' });
 for (const [pat, x] of [['flower', 'oxeye_daisy'], ['creeper', 'creeper_head'], ['skull', 'wither_skeleton_skull'], ['mojang', 'enchanted_golden_apple'], ['field_masoned', 'bricks'],
   ['bordure_indented', 'vine']]) shapeless(pat + '_banner_pattern', 1, ['paper', x]);
 shaped('leather_horse_armor', 1, ['X X', 'XXX', 'X X'], { X: 'leather' });
-for (const t of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + t), I.NETHERITE_INGOT, itemOf('netherite_' + t)]);
+for (const t of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe', 'spear']) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + t), I.NETHERITE_INGOT, itemOf('netherite_' + t)]);
 for (const p of [...ARMOR_PIECES, 'horse_armor']) SMITHING.push([I.NETHERITE_UPGRADE_SMITHING_TEMPLATE, itemOf('diamond_' + p), I.NETHERITE_INGOT, itemOf('netherite_' + p)]);
 // a smithing template is copied with seven diamonds and a block of what it is made of
 const TEMPLATE_BLOCK = { netherite_upgrade: 'netherrack', bolt: ['copper_block', 'waxed_copper_block'], coast: 'cobblestone', dune: 'sandstone', eye: 'end_stone', flow: 'breeze_rod',
@@ -18665,7 +18680,7 @@ class Mob extends Entity {
     if (!cool && (this.T.sounds || soaked)) g.sound(soaked || this.T.sounds[1], this.x, this.y + this.h / 2, this.z);
     if (attacker && attacker !== this) {
       const dx = this.x - attacker.x, dz = this.z - attacker.z, l = Math.hypot(dx, dz) || 1, kb = 0.4 * (1 - (this.T.kbRes || 0) - (this.kbBonus ? this.kbBonus() : 0));
-      if (!cool && source !== 'thorns' && kb > 0) { this.vx = this.vx * 0.5 + dx / l * kb; this.vz = this.vz * 0.5 + dz / l * kb; if (this.onGround) this.vy = Math.max(this.vy, 0.36 * (1 - (this.T.kbRes || 0))); }
+      if (!cool && source !== 'thorns' && !attacker.noHurtKnockback && kb > 0) { this.vx = this.vx * 0.5 + dx / l * kb; this.vz = this.vz * 0.5 + dz / l * kb; if (this.onGround) this.vy = Math.max(this.vy, 0.36 * (1 - (this.T.kbRes || 0))); }
       this.lastAttacker = attacker; this.lastHurtAge = this.age;
       // hurt by a player or a tamed pet: counts as the player's kill for the next 5 seconds (lastHurtByPlayerTime)
       if (attacker instanceof Player || attacker.data && attacker.data.tame) this.playerHurtAge = this.age;
@@ -19754,7 +19769,7 @@ Object.assign(MOB_INIT, {
   vindicator(m, o) { if (!o.loading) m.data.hand = { id: I.IRON_AXE, count: 1 }; },
   piglin(m, o) { if (o.loading) return; if (Math.random() < 0.2) m.growth = -1e9; m.data.hand = Math.random() < 0.5 ? { id: I.CROSSBOW, count: 1 } : { id: I.GOLDEN_SWORD, count: 1 }; if (Math.random() < 0.1) m.data.armor = armorSet('golden').map(s => Math.random() < 0.3 ? s : null); },
   piglin_brute(m, o) { if (!o.loading) m.data.hand = { id: I.GOLDEN_AXE, count: 1 }; },
-  zombified_piglin(m, o) { if (!o.loading) m.data.hand = { id: I.GOLDEN_SWORD, count: 1 }; },
+  zombified_piglin(m, o) { if (!o.loading) m.data.hand = { id: Math.floor(Math.random() * 20) === 0 ? I.GOLDEN_SPEAR : I.GOLDEN_SWORD, count: 1 }; },
   villager(m, o) { if (!o.loading) initVillager(m, o); },
   wandering_trader(m, o) { if (!o.loading) initTrader(m); },
   iron_golem(m, o) { if (!o.loading && o.home) m.home = o.home; },
@@ -20306,7 +20321,8 @@ class Player extends Entity {
     if (inp.pressed('KeyW')) { if (this.age - this.lastW < 7) this.sprintReq = true; this.lastW = this.age; }
     if (inp.enabled && (inp.key('ControlLeft') || inp.key('ControlRight'))) this.sprintReq = true;
     this.sneaking = sneakKey && !this.flying && !this.gliding;
-    const usingSlow = this.using && this.using.kind !== 'spyglass';
+    // (26.3's use_effects: every item in use slows you to a fifth and stops sprinting, a spyglass too; a spear doesn't)
+    const usingSlow = this.using && this.using.kind !== 'spear';
     const canSprint = fwd > 0 && (!(this.sneaking || this.movingSlowly) || this.headInWater) && (this.food > 6 || creative) && !usingSlow && !this.effectLevel('blindness') && !(this.inWater && !this.headInWater && !this.swimming);
     if (this.sprintReq && canSprint) this.sprinting = true;
     if (!canSprint || (this.sprinting && fwd <= 0)) { this.sprinting = false; this.sprintReq = false; }
@@ -20532,7 +20548,7 @@ class Player extends Entity {
       if (inp.mousePressed(0) && !(this.missTime > 0)) {
         if (ent) this.attack(ent);
         else if (hit) broke = this.startDestroy(hit);
-        else { if (this.mode !== 1) this.missTime = 10; this.lastAttack = this.age; }
+        else if (!(this.attackAir && this.attackAir())) { if (this.mode !== 1) this.missTime = 10; this.lastAttack = this.age; }
         this.doSwing();
       }
       if (broke) { this.missTime = 0; this.stopDestroy(); }
@@ -21231,7 +21247,7 @@ function buildCreativeTabs() {
   // ---- colored blocks
   const C = (pat) => COLORS.map(c => pat.replace('#', c));
   add(C('#_wool'), C('#_wool_stairs'), C('#_wool_slab'), C('#_carpet'), 'terracotta', C('#_terracotta'), C('#_concrete'), C('#_concrete_stairs'), C('#_concrete_slab'), C('#_concrete_powder'), C('#_glazed_terracotta'), 'glass', C('#_stained_glass'),
-    'glass_pane', C('#_stained_glass_pane'), 'shulker_box', C('#_shulker_box'), C('#_bed'), 'candle', C('#_candle'), C('#_banner'));
+    'glass_pane', C('#_stained_glass_pane'), 'shulker_box', C('#_shulker_box'), C('#_bed'), C('#_cushion'), 'candle', C('#_candle'), C('#_banner'));
   CREATIVE.colored = take();
   // ---- natural blocks
   add('grass_block', 'podzol', 'mycelium', 'dirt_path', 'dirt', 'coarse_dirt', 'rooted_dirt', 'farmland', 'mud', 'clay', 'gravel', 'sand', 'sandstone', 'red_sand', 'red_sandstone',
@@ -21265,7 +21281,7 @@ function buildCreativeTabs() {
     'lodestone', 'ladder', 'scaffolding', 'bee_nest', 'beehive', 'suspicious_sand', 'suspicious_gravel', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'lightning_rod'))), 'flower_pot', 'decorated_pot', 'armor_stand',
     'item_frame', 'glow_item_frame', 'painting', 'bookshelf', 'chiseled_bookshelf', 'lectern', 'tinted_glass');
   for (const w of woods) add(w + '_sign', w + '_hanging_sign');
-  add('chest', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'chest'))), 'barrel', 'ender_chest', 'shulker_box', C('#_shulker_box'), 'respawn_anchor', C('#_bed'), 'straw_bed', 'candle', C('#_candle'), C('#_banner'), HEADS, 'dragon_egg',
+  add('chest', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'chest'))), 'barrel', 'ender_chest', 'shulker_box', C('#_shulker_box'), 'respawn_anchor', C('#_bed'), 'straw_bed', C('#_cushion'), 'candle', C('#_candle'), C('#_banner'), HEADS, 'dragon_egg',
     'end_portal_frame', 'ender_eye', 'vault', 'heavy_core', 'infested_stone', 'infested_cobblestone', 'infested_stone_bricks', 'infested_mossy_stone_bricks',
     'infested_cracked_stone_bricks', 'infested_chiseled_stone_bricks', 'infested_deepslate');
   CREATIVE.functional = take();
@@ -21290,6 +21306,7 @@ function buildCreativeTabs() {
   CREATIVE.tools = take();
   // ---- combat
   for (const t of ['wooden', 'stone', 'copper', 'iron', 'golden', 'diamond', 'netherite']) add(t + '_sword');
+  for (const t of ['wooden', 'stone', 'copper', 'iron', 'golden', 'diamond', 'netherite']) add(t + '_spear');
   for (const t of ['wooden', 'stone', 'copper', 'iron', 'golden', 'diamond', 'netherite']) add(t + '_axe');
   add('mace', 'trident', 'shield');
   for (const [m] of ARMOR_MATS) add(ARMOR_PIECES.map(p => m + '_' + p));
@@ -24402,7 +24419,7 @@ class Game {
       const wasBurning = be.burn > 0;
       if (be.burn > 0) be.burn--;
       if (be.burn === 0 && can && it[1] && ITEMS[it[1].id].fuel) {
-        be.burn = be.burnMax = Math.round(ITEMS[it[1].id].fuel * (kind === 'furnace' ? 1 : 0.5));
+        be.burn = be.burnMax = kind === 'furnace' ? ITEMS[it[1].id].fuel : Math.floor(ITEMS[it[1].id].fuel / 2);
         if (it[1].id === I.LAVA_BUCKET) it[1] = { id: I.BUCKET, count: 1 };
         else { it[1].count--; if (it[1].count <= 0) it[1] = null; }
       }
@@ -25299,7 +25316,7 @@ class Game {
       `XYZ: ${p.x.toFixed(3)} / ${(p.y - w.yOff).toFixed(5)} / ${p.z.toFixed(3)}`,
       `Block: ${x} ${y - w.yOff} ${z}`,
       `Chunk: ${x & 15} ${(y - w.yOff) & 15} ${z & 15} in ${x >> 4} ${(y - w.yOff) >> 4} ${z >> 4}`,
-      `Facing: ${facing} (${(((-p.yaw * 180 / Math.PI) + 540) % 360 - 180).toFixed(1)} / ${(-p.pitch * 180 / Math.PI).toFixed(1)})`,
+      `Facing: ${facing} (${toJYaw(p.yaw).toFixed(1)} / ${(-p.pitch * 180 / Math.PI).toFixed(1)})`,
       `Light: ${Math.max(l >> 4, l & 15)} (${l >> 4} sky, ${l & 15} block)`,
       `Biome: ${biome}`,
       ...(this.localDifficultyLine ? [this.localDifficultyLine(x, z)] : []),
@@ -38138,7 +38155,7 @@ window.addEventListener('keydown', e => {
     case 'KeyT': if (typeof PACKS !== 'undefined' && PACKS.apply) PACKS.apply(); fb('Reloaded resource packs'); break;
     case 'KeyC': {
       const dimId = { overworld: 'minecraft:overworld', nether: 'minecraft:the_nether', end: 'minecraft:the_end' }[w.dim];
-      copyText(`/execute in ${dimId} run tp @s ${p.x.toFixed(2)} ${(p.y - w.yOff).toFixed(2)} ${p.z.toFixed(2)} ${(((-p.yaw * 180 / Math.PI) + 540) % 360 - 180).toFixed(2)} ${(-p.pitch * 180 / Math.PI).toFixed(2)}`);
+      copyText(`/execute in ${dimId} run tp @s ${p.x.toFixed(2)} ${(p.y - w.yOff).toFixed(2)} ${p.z.toFixed(2)} ${toJYaw(p.yaw).toFixed(2)} ${(-p.pitch * 180 / Math.PI).toFixed(2)}`);
       fb('Copied location to clipboard'); break;
     }
     case 'KeyI': {
@@ -50127,7 +50144,7 @@ MOB_INIT.piglin = function (m, o) {
   if (o.loading) return;
   const R = Math.random, young = o.baby || R() < 0.2;
   if (young) { if (!o.baby) m.growth = -1e9; }
-  else m.data.hand = R() < 0.5 ? { id: I.CROSSBOW, count: 1 } : { id: I.GOLDEN_SWORD, count: 1 };
+  else m.data.hand = R() < 0.5 ? { id: I.CROSSBOW, count: 1 } : { id: Math.floor(R() * 10) === 0 ? I.GOLDEN_SPEAR : I.GOLDEN_SWORD, count: 1 };
   if (!young) { const set = armorSet('golden'); if (set.some(s => s)) { const a = set.map(s => R() < 0.1 ? s : null); if (a.some(s => s)) { m.data.armor = a; m.data.armorPts = a.reduce((t, s) => t + (s && ITEMS[s.id].armor ? ITEMS[s.id].armor.pts : 0), 0); } } }
   m.data.huntT = 600 + Math.floor(R() * 1801);
 };
@@ -50978,7 +50995,8 @@ function zombieSpawn(m, o) {
     // Drowned.populateDefaultEquipmentSlots keeps only its trident or fishing rod
     d.armor = null; d.armorPts = 0;
     if (m.type !== 'drowned') { d.hand = null; javaArmor(m, f, R); }
-    if (m.type !== 'drowned' && R() < (OPTIONS.difficulty === 3 ? 0.05 : 0.01)) d.hand = { id: itemOf(Math.floor(R() * 3) === 0 ? 'iron_sword' : 'iron_shovel'), count: 1 };
+    // (26.3: nextInt(6), a sword, a spear, else a shovel)
+    if (m.type !== 'drowned' && R() < (OPTIONS.difficulty === 3 ? 0.05 : 0.01)) { const i = Math.floor(R() * 6); d.hand = { id: itemOf(i === 0 ? 'iron_sword' : i === 1 ? 'iron_spear' : 'iron_shovel'), count: 1 }; }
   }
   d.canPickUp = R() < 0.55 * f;
   d.breakDoors = DOOR_BREAKERS.has(m.type) && R() < f * 0.1;
@@ -63656,7 +63674,7 @@ TEXGEN.push(function texPitcherCrop() {
    =================================================================== */
 Object.assign(LOOT, {
   underwater_ruin_small: [[[2, 8], [['coal', 10, 1, 4], ['stone_axe', 2], ['rotten_flesh', 5], ['emerald', 1], ['wheat', 10, 2, 3]]],
-    [[1, 1], [['leather_chestplate', 1], ['golden_helmet', 1], ['fishing_rod', 5, 1, 1, { rand: true }], ['filled_map', 10, 1, 1, { explore: 'buried_treasure' }]]]],
+    [[1, 1], [['leather_chestplate', 1], ['golden_helmet', 1], ['fishing_rod', 5, 1, 1, { rand: true }], ['filled_map', 5, 1, 1, { explore: 'buried_treasure' }]]]],
   underwater_ruin_big: [[[2, 8], [['coal', 10, 1, 4], ['gold_nugget', 10, 1, 3], ['emerald', 1], ['wheat', 10, 2, 3]]],
     [[1, 1], [['golden_apple', 1], ['enchanted_book', 5, 1, 1, { book: true }], ['leather_chestplate', 1], ['golden_helmet', 1], ['fishing_rod', 5, 1, 1, { rand: true }],
       ['filled_map', 10, 1, 1, { explore: 'buried_treasure' }]]]],
@@ -64891,9 +64909,7 @@ Game.prototype.newWorld = function (dim, st) {
    how they are built: 19_abandoned_camps.js)
    - loot: 26.3's abandoned_camp_barrel, abandoned_camp_common_chest
      (with a map to a camp of another biome) and
-     abandoned_camp_secret_chest (with a map to a far structure); the
-     spears and cushions the tables name aren't in the game, so those
-     rolls come up empty
+     abandoned_camp_secret_chest (with a map to a far structure)
    - abandoned camp maps (ExplorationMapFunction, decoration
      abandoned_camp) find the nearest camp of their biome; 26.3's
      buried ancient city, mineshaft, desert pyramid and warm ocean ruins
@@ -64903,15 +64919,14 @@ Game.prototype.newWorld = function (dim, st) {
    =================================================================== */
 
 /* ---------------- loot ---------------- */
-// rolls of an item the game doesn't have yet (spears, cushions) come up empty: [null, weight]
 Object.assign(LOOT, {
   abandoned_camp_barrel: [[[4, 8], [['arrow', 1, 1, 3], ['bone', 1, 2, 4], ['bowl', 1, 1, 2], ['bread', 1, 1, 3], ['coal', 1, 2, 4], ['cobweb', 1], ['glass_bottle', 1, 1, 3],
-    ['leather', 1, 1, 3], ['rabbit_hide', 1, 1, 4], ['string', 1, 1, 2], ['wheat', 1, 1, 4], ['white_candle', 1, 1, 3], [null, 1], ['straw_bed', 1, 2, 4]]],
+    ['leather', 1, 1, 3], ['rabbit_hide', 1, 1, 4], ['string', 1, 1, 2], ['wheat', 1, 1, 4], ['white_candle', 1, 1, 3], ['white_cushion', 1, 1, 2], ['straw_bed', 1, 2, 4]]],
     [[1, 1], [['bundle', 1], ['wooden_axe', 1], ['fishing_rod', 1]]]],
   abandoned_camp_secret_chest: [[[2, 2], [['diamond', 1], ['potion', 1, 1, 1, { potion: 'healing' }], ['potion', 1, 1, 1, { potion: 'leaping' }],
     ['potion', 1, 1, 1, { potion: 'night_vision' }], ['potion', 1, 1, 1, { potion: 'swiftness' }]]],
     [[4, 6], [['map', 1], ['copper_ingot', 1, 1, 2], ['gold_ingot', 1, 1, 2], ['iron_ingot', 1]]],
-    [[0, 1], [['iron_axe', 1], ['iron_boots', 1], ['iron_leggings', 1], [null, 1]]],
+    [[0, 1], [['iron_axe', 1], ['iron_boots', 1], ['iron_leggings', 1], ['iron_spear', 1]]],
     [[1, 1], ['ancient_city', 'trial_chambers', 'mineshaft', 'desert_pyramid', 'jungle_temple', 'ocean_ruin_warm', 'woodland_mansion'].map(d => ['filled_map', 1, 1, 1, { explore: d }])]],
 });
 // the common chest's last roll: a map to a camp of another biome (each map leaves out the biome it is found in), named for it
@@ -64921,7 +64936,7 @@ const CAMP_MAPS = [['bamboo_jungle', 'Bamboo Camp Map'], ['cherry_grove', 'Cherr
 const campCommon = here => [[[4, 6], [['arrow', 1, 4, 4], ['map', 1], ['bone', 1, 2, 4], ['cobweb', 1], ['compass', 1], ['map', 1, 1, 2], ['gunpowder', 1, 2, 4],
   ['fishing_rod', 1], ['flint_and_steel', 1], ['glass_bottle', 1, 1, 4], ['lead', 1, 1, 3], ['leather', 1, 1, 4], ['bundle', 1], ['rabbit_hide', 1, 1, 4], ['saddle', 1],
   ['white_candle', 1, 1, 3]]],
-  [[2, 2], [['bow', 1], ['bucket', 1], ['copper_axe', 1], ['copper_boots', 1], ['copper_chestplate', 1], ['copper_leggings', 1], [null, 1], ['copper_sword', 1], ['spyglass', 1], ['shears', 1]]],
+  [[2, 2], [['bow', 1], ['bucket', 1], ['copper_axe', 1], ['copper_boots', 1], ['copper_chestplate', 1], ['copper_leggings', 1], ['copper_spear', 1], ['copper_sword', 1], ['spyglass', 1], ['shears', 1]]],
   [[1, 1], CAMP_MAPS.filter(([t]) => t !== here).map(([t, name]) => ['filled_map', 1, 1, 1, { explore: 'abandoned_camp_' + t, name }])]];
 LOOT.abandoned_camp_common_chest = campCommon(null);
 for (const t of CAMP_TYPES) LOOT['abandoned_camp_common_chest_' + t] = campCommon(t);
@@ -64965,6 +64980,640 @@ for (const [n, rows] of [
 ]) defSkin('map/decorations/' + n, 8, 8, () => skinFromRows(8, 8, rows.map(r => r.padEnd(8)), DECO_PAL));
 // /locate structure abandoned_camp_<biome> finds the camps
 for (const t of CAMP_TYPES) LOCATE_ALIAS['abandoned_camp_' + t] = 'abandoned_camp';
+
+/* @file 215_cushions.js */
+/* ===================================================================
+   Part 112: cushions (26.3)
+   - sixteen colours: three wool slabs of a colour in a row make one, a
+     dye and a cushion of another colour make one of the dye's; they
+     stack to 16 and burn like wool slabs
+   - CushionItem.useOn: used on the top or a side of a block (not its
+     underside) a cushion is set down at the bottom centre of the space
+     in front of that face, if nothing solid and no entity is in the
+     way of its 1 x 0.25 x 1 box; it is turned to face you in steps of
+     45 degrees and stays where it was put (it doesn't fall)
+   - right-click it to sit on it (not while sneaking or riding, and one
+     at a time); Shift gets you up. A dye of another colour recolours it
+     and is used up. Any hit knocks it off as its item (none for a
+     creative player, nor without doEntityDrops), arrows, snowballs and
+     explosions too; a cushion a block ends up inside comes off
+   - the model: a 16 x 4 x 16 box; the texture a pack's
+     entity/cushion/<colour>_cushion (64 x 64), the game's own without;
+     the icons a pack's item/<colour>_cushion
+   - sounds: placed, sat on, got up from, broken
+   =================================================================== */
+
+/* ---------------- the entity ---------------- */
+defMob('cushion', { w: 1, h: 0.25, hp: 1, walk: 0, run: 0, cat: 'misc', ai: [], persistent: true, sounds: null, noPush: true });
+MOB_MODELS.cushion = { tw: 64, th: 64, parts: [P_('body', [0, 24, 0], [[0, 0, -8, -4, -8, 16, 4, 16]])] };
+MOB_SKINS.cushion = m => [{ key: 'entity/cushion/' + (m.data.color || 'white') + '_cushion' }];
+const CUSHION_OF = {};
+for (const c of COLORS) CUSHION_OF[itemOf(c + '_cushion')] = c;
+// damage that doesn't reach a cushion (what only living things take)
+const CUSHION_SAFE = new Set(['fire', 'in_fire', 'lava', 'magma', 'drown', 'fall', 'in_wall', 'starve', 'magic', 'wither', 'poison', 'freeze', 'dry', 'melt', 'cramming', 'fly_into_wall', 'berry', 'thorns']);
+// nothing solid (blocks, or things to stand on like shulkers) in the box
+function cushionClear(w, b) {
+  const E = 1e-7;
+  for (const q of collectBoxes(w, b[0], b[1], b[2], b[3], b[4], b[5])) if (q[3] > b[0] + E && q[0] < b[3] - E && q[4] > b[1] + E && q[1] < b[4] - E && q[5] > b[2] + E && q[2] < b[5] - E) return false;
+  return true;
+}
+class Cushion extends Mob {
+  constructor(game, type, x, y, z, opts) {
+    super(game, type, x, y, z, opts);
+    this.persistent = true; this.stepH = 0;
+    if (!(opts && opts.loading)) { this.data.color = (opts && opts.color) || 'white'; this.yaw = this.bodyYaw = (opts && opts.yaw) || 0; }
+  }
+  keepWhenUnloaded() { return true; }
+  envDamage() { }
+  landed() { }
+  afterLoad() { if (!this.data.color) this.data.color = 'white'; this.yaw = this.bodyYaw = Math.round(this.yaw / (Math.PI / 4)) * (Math.PI / 4); }
+  animState() { return {}; }
+  itemOf() { return itemOf((this.data.color || 'white') + '_cushion'); }
+  // it doesn't move; now and then it checks it isn't inside a block
+  tick() {
+    this.savePrev(); this.age++;
+    if (this.hurtTime > 0) this.hurtTime--;
+    if (this.age % 100 === 0 && !this.survives()) this.breakOff(false);
+    if (this.y < -64) this.die();
+  }
+  survives() { return cushionClear(this.game.world, [this.x - 0.5, this.y, this.z - 0.5, this.x + 0.5, this.y + 0.25, this.z + 0.5]); }
+  // a dye of another colour recolours it; otherwise you sit down on it
+  interact(p, held) {
+    const g = this.game;
+    if (p.mode === 3) return false;
+    const dye = held && ITEMS[held.id] && ITEMS[held.id].dye;
+    if (dye && dye !== this.data.color) {
+      this.data.color = dye;
+      g.sound('dye_use', this.x, this.y, this.z);
+      p.consumeHeld(1);
+      return true;
+    }
+    if (p.sneaking || p.riding || this.rider) return false;
+    g.sound('cushion_sit', this.x, this.y, this.z);
+    g.mount(p, this);
+    return true;
+  }
+  hurt(amount, source, attacker) {
+    if (this.dead || CUSHION_SAFE.has(source)) return false;
+    const g = this.game, p = g.player;
+    if (source === 'void' || source === 'kill') { this.die(); return true; }
+    if (attacker === p && !p.mayBuild) return false;
+    if (attacker instanceof Mob && !g.rule('mobGriefing')) return false;
+    this.breakOff(attacker === p && p.mode === 1);
+    return true;
+  }
+  breakOff(creative) {
+    if (this.dead) return;
+    const g = this.game;
+    this.dead = true;
+    if (this.rider) g.dismount(this.rider);
+    g.sound('cushion_break', this.x, this.y, this.z);
+    if (!creative && g.rule('doEntityDrops')) g.dropItem(this.x, this.y, this.z, { id: this.itemOf(), count: 1 });
+  }
+  // gone without a drop (/kill, out of the world)
+  die() { if (this.rider) this.game.dismount(this.rider); this.dead = true; }
+}
+MOB_CLASSES.cushion = Cushion;
+
+/* ---------------- setting one down ---------------- */
+const _useItemSpecialCU = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (hit && held && CUSHION_OF[held.id] && p.mayBuild) return this.placeCushion(p, hit, held);
+  return _useItemSpecialCU.call(this, p, hit, held, it);
+};
+Game.prototype.placeCushion = function (p, hit, held) {
+  const w = this.world, f = hit.face;
+  if (f === 3) return false;
+  const d = HANG_DIRS[f], x = hit.x + d[0] + 0.5, y = hit.y + d[1], z = hit.z + d[2] + 0.5, b = [x - 0.5, y, z - 0.5, x + 0.5, y + 0.25, z + 0.5];
+  if (!cushionClear(w, b)) return false;
+  const inBox = e => { const hw = e.w / 2; return e.x + hw > b[0] && e.x - hw < b[3] && e.y + e.h > b[1] && e.y < b[4] && e.z + hw > b[2] && e.z - hw < b[5]; };
+  if (p.mode !== 3 && inBox(p)) return false;
+  for (const e of this.entities) if (!e.dead && e.w !== undefined && inBox(e)) return false;
+  // facing you: (your Java yaw - 180) wrapped, to the nearest 45 degrees (the game's yaw 0 looks north, Java's 180)
+  const deg = ((-p.yaw * 180 / Math.PI) % 360 + 540) % 360 - 180, rot = Math.floor((deg + 22.5) / 45) * 45;
+  const m = this.spawnMob('cushion', x, y, z, { color: CUSHION_OF[held.id], yaw: -rot * Math.PI / 180 });
+  if (!m) return false;
+  this.sound('cushion_place', x, y, z);
+  p.consumeHeld(1);
+  return true;
+};
+
+/* ---------------- sitting ---------------- */
+// a rider sits at the cushion's top (its height), the player 0.6 under that point as Java's riders are
+const _rideTickCU = Player.prototype.rideTick;
+Player.prototype.rideTick = function (inp) {
+  const r = _rideTickCU.call(this, inp);
+  if (r && this.riding instanceof Cushion) this.y = this.riding.y + this.riding.h - 0.6;
+  return r;
+};
+const _dismountCU = Game.prototype.dismount;
+Game.prototype.dismount = function (p, thrown) {
+  const m = p && p.riding;
+  const r = _dismountCU.apply(this, arguments);
+  if (m instanceof Cushion && !p.riding) this.sound('cushion_get_up', m.x, m.y, m.z);
+  return r;
+};
+// saved while sitting (riding isn't saved): stood up on top of the cushion, not sunk into the floor
+const _playerDataCU = Game.prototype.playerData;
+Game.prototype.playerData = function () {
+  const o = _playerDataCU.apply(this, arguments), m = this.player && this.player.riding;
+  if (o && m instanceof Cushion) o.y = m.y + m.h;
+  return o;
+};
+
+/* ---------------- pictures ---------------- */
+// the game's own: a puffed-up square of wool with a seam round it and a button in the middle, creased to the corners
+const CUSHION_RGB = c => COLOR_RGB[c] || [233, 236, 236];
+for (const c of COLORS) defSkin('entity/cushion/' + c + '_cushion', 64, 64, () => {
+  const base = CUSHION_RGB(c);
+  return skinParts(64, 64, MOB_MODELS.cushion.parts, {
+    body: (f, x, y, W, H, R) => {
+      if (f === 'bottom') return nz(shd(base, 0.74), R, 0.04);
+      if (f !== 'top') return nz(shd(base, y === 0 ? 0.8 : y === H - 1 ? 0.7 : 0.9 + (x % 3 === 0 ? 0.03 : 0)), R, 0.035);
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) return nz(shd(base, 0.8), R, 0.03);
+      const cx = x - 7.5, cy = y - 7.5, ax = Math.abs(cx), ay = Math.abs(cy);
+      if (ax < 1 && ay < 1) return nz(shd(base, 0.62), R, 0.03);
+      if (Math.abs(ax - ay) < 0.6 && Math.max(ax, ay) < 6.5) return nz(shd(base, 0.86), R, 0.03);
+      return nz(shd(base, 1.04 - 0.12 * Math.hypot(cx, cy) / 10.6), R, 0.035);
+    },
+  }, 1120 + COLORS.indexOf(c));
+});
+// the icon: seen from a little above, the top narrowing away from you, creased from the button to its corners, piped round,
+// the side darker under it
+const CUSHION_ICON_TOP = [[3, 3, 12], [4, 2, 13], [5, 1, 14], [6, 1, 14], [7, 1, 14], [8, 1, 14]];
+TEXGEN.push(() => {
+  for (const c of COLORS) IT(c + '_cushion', (d, r) => {
+    const base = CUSHION_RGB(c).map(v => Math.max(v, 40)), crease = [[2, 4], [13, 4], [1, 8], [14, 8]];
+    const nearCrease = (x, y) => crease.some(([kx, ky]) => {
+      const vx = kx - 7.5, vy = ky - 6, t = ((x - 7.5) * vx + (y - 6) * vy) / (vx * vx + vy * vy);
+      return t > 0.3 && t < 1 && Math.hypot(x - 7.5 - t * vx, y - 6 - t * vy) < 0.5;
+    });
+    for (const [y, x0, x1] of CUSHION_ICON_TOP) for (let x = x0; x <= x1; x++) {
+      let k = 1.04 - 0.05 * Math.abs(x - 7.5) / 7 + (y <= 4 ? 0.06 : 0);
+      if (y === 6 && (x === 7 || x === 8)) k = 0.6;
+      else if (nearCrease(x, y)) k -= 0.12;
+      sp(d, x, y, mul(base, k * (0.97 + r() * 0.06)));
+    }
+    for (let x = 1; x <= 14; x++) {
+      sp(d, x, 9, mul(base, x % 2 ? 0.86 : 0.74));
+      sp(d, x, 10, mul(base, 0.8 * (0.97 + r() * 0.06))); sp(d, x, 11, mul(base, 0.72 * (0.97 + r() * 0.06)));
+      if (x > 1 && x < 14) sp(d, x, 12, mul(base, 0.6));
+    }
+  });
+});
+
+/* ---------------- sounds ---------------- */
+for (const [n, t] of [['cushion_place', 'Cushion set down'], ['cushion_sit', 'Someone sits on a cushion'], ['cushion_get_up', 'Someone gets up off a cushion'], ['cushion_break', 'Cushion knocked off']]) { SND_CAT[n] = 'block'; SUB_TEXT[n] = t; }
+const _audioPlayCU = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^cushion_(place|sit|get_up|break)$/.test(name)) return _audioPlayCU.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime;
+  switch (name) {
+    case 'cushion_place': this.noiseHit(dst, 'lowpass', 650, 1, 0.12, 0.35); break;
+    case 'cushion_sit': this.noiseHit(dst, 'lowpass', 480, 0.8, 0.28, 0.4); this.noiseHit(dst, 'bandpass', 900, 1.2, 0.2, 0.08, t0 + 0.05); break;
+    case 'cushion_get_up': this.noiseHit(dst, 'bandpass', 800, 1, 0.2, 0.18); break;
+    case 'cushion_break': this.noiseHit(dst, 'lowpass', 900, 1, 0.1, 0.35); this.noiseHit(dst, 'bandpass', 1500, 2, 0.08, 0.12, t0 + 0.04); break;
+  }
+};
+
+/* @file 216_fuel.js */
+/* ===================================================================
+   Part 113: furnace fuel like 26.3
+   - each item burns as long as 26.3's cooking_fuel says (the data
+     pack's cooking providers): signs 200 ticks, hanging signs 800,
+     wooden buttons 100, wooden pressure plates 300, wool stairs 100
+     and wool slabs 50 (as cushions), azaleas, dead bushes, dry grass
+     and leaf litter 100, mangrove roots 300, a dried kelp block 4001;
+     beehives, bee nests and shields aren't fuel. Nether wood still
+     doesn't burn
+   - smokers and blast furnaces get through it twice as fast, the half
+     rounded down
+   =================================================================== */
+{
+  const set = (n, t) => { const it = ITEM_BY_NAME[n]; if (it) it.fuel = t; };
+  // the woods that burn: their planks do
+  const burns = w => { const p = ITEM_BY_NAME[w + '_planks']; return !!(p && p.fuel); };
+  for (const n in ITEM_BY_NAME) {
+    let m;
+    if ((m = n.match(/^(.+)_button$/)) && burns(m[1])) set(n, 100);
+    else if ((m = n.match(/^(.+)_pressure_plate$/)) && burns(m[1])) set(n, 300);
+    else if ((m = n.match(/^(.+)_hanging_sign$/)) && burns(m[1])) set(n, 800);
+    else if ((m = n.match(/^(.+)_sign$/)) && burns(m[1])) set(n, 200);
+  }
+  for (const c of COLORS) { set(c + '_wool_stairs', 100); set(c + '_wool_slab', 50); }
+  for (const n of ['azalea', 'flowering_azalea', 'dead_bush', 'short_dry_grass', 'tall_dry_grass', 'leaf_litter']) set(n, 100);
+  set('mangrove_roots', 300); set('dried_kelp_block', 4001);
+  for (const n of ['bee_nest', 'beehive', 'shield']) set(n, 0);
+}
+
+/* @file 217_spears.js */
+/* ===================================================================
+   Part 114: spears (26.3)
+   - seven spears, wooden to netherite (a stick and the material corner
+     to corner, netherite by the smithing upgrade) with 26.3's
+     durability, damage, attack speed and enchantability (the items are
+     in 21_items.js); they take Sharpness, Smite, Bane of Arthropods,
+     Fire Aspect, Knockback, Looting, Unbreaking, Mending and Vanishing,
+     and Lunge, which is new
+   - the jab (attack, piercing_weapon): once the attack has charged it
+     hits every living thing on the line from 2 to 4.5 blocks ahead of
+     the eyes (6.5 in creative, further by what you move forward in a
+     tick) that nothing solid hides: a melee hit's damage and
+     enchantments, 0.8 knockback (more with Knockback), a point of
+     durability per thing hit; nothing closer than 2 blocks is reached
+   - Lunge (post_piercing_attack, levels I-III): after a jab, unless
+     riding, gliding or in water, and with food above 6 (or in
+     creative), a push along the look of 0.458 a level (sideways only),
+     4 exhaustion a level and a point of durability
+   - the charge (hold use, kinetic_weapon): after the spear's delay,
+     each tick, everything on that line (each once in 10 ticks) is hurt
+     by 1 plus your speed towards it in blocks a second times the
+     spear's multiplier, knocked back while you are fast enough and off
+     its mount at a gallop, each only for so many ticks of the charge
+     (26.3's numbers for each spear); you aren't slowed while charging
+     and can sprint; five things in one charge: an advancement
+   - zombies (a sixth of their weapons, iron), piglins (golden, a tenth
+     of those without crossbows) and zombified piglins (1 in 20) spawn
+     with them (152_zombies.js, 150_piglins.js, 56_mob_ai.js)
+   - held: the long in-hand picture (a pack's item/<tier>_spear_in_hand,
+     32 x 32; the game draws its own) with 26.3's spear_in_hand
+     transforms, thrust forward for the length of its stab, lowered
+     like a lance while charging; the icon elsewhere
+   - sounds: the jab, the hit, the charge, the lunge (wooden spears
+     sound like wood)
+   =================================================================== */
+
+/* ---------------- enchantments ---------------- */
+for (const k of ['sharpness', 'smite', 'bane_of_arthropods', 'fire_aspect', 'knockback', 'looting']) ENCHANT_BY_KEY[k].on.push('spear');
+{
+  const lunge = { key: 'lunge', name: 'Lunge', max: 3, weight: 5, on: ['spear'], base: 5, per: 8, span: 20, treasure: false, curse: false };
+  ENCHANTS.push(lunge); ENCHANT_BY_KEY.lunge = lunge;
+}
+const _enchantCatsSP = enchantCats;
+enchantCats = function (id) { const c = _enchantCatsSP(id), it = ITEMS[id]; if (it && it.spear) c.add('spear'); return c; };
+const spearOf = st => st && ITEMS[st.id] && ITEMS[st.id].spear;
+
+/* ---------------- reaching along the line ---------------- */
+// AABB.clip: where the segment from a to b first enters the box, or null
+function spClip(bx, a, b) {
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  let s = 1, hit = false;
+  for (let ax = 0; ax < 3; ax++) {
+    const plane = d[ax] > 1e-7 ? bx[ax] : d[ax] < -1e-7 ? bx[ax + 3] : null;
+    if (plane === null) continue;
+    const t = (plane - a[ax]) / d[ax];
+    if (t <= 0 || t >= s) continue;
+    const p = (ax + 1) % 3, q = (ax + 2) % 3, pp = a[p] + t * d[p], pq = a[q] + t * d[q];
+    if (bx[p] - 1e-7 < pp && pp < bx[p + 3] + 1e-7 && bx[q] - 1e-7 < pq && pq < bx[q + 3] + 1e-7) { s = t; hit = true; }
+  }
+  return hit ? [a[0] + d[0] * s, a[1] + d[1] * s, a[2] + d[2] * s] : null;
+}
+const spInside = (bx, p) => p[0] >= bx[0] && p[0] < bx[3] && p[1] >= bx[1] && p[1] < bx[4] && p[2] >= bx[2] && p[2] < bx[5];
+// the first block collision box the segment runs into (stepping through the blocks it crosses)
+function spClipBlocks(w, a, b) {
+  if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) return null;
+  const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) * 4) + 1, seen = new Set();
+  let best = null, bd = Infinity;
+  for (let k = 0; k <= n; k++) {
+    const t = k / n, x = Math.floor(a[0] + (b[0] - a[0]) * t), y = Math.floor(a[1] + (b[1] - a[1]) * t), z = Math.floor(a[2] + (b[2] - a[2]) * t), key = x + ',' + y + ',' + z;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!SOLID[w.getBlock(x, y, z)]) continue;
+    for (const q of collectBoxes(w, x, y, z, x + 1, y + 1, z + 1)) {
+      if (q[0] < x || q[0] >= x + 1 || q[2] < z || q[2] >= z + 1 || q[1] < y - 1e-9 || q[1] >= y + 1) continue;
+      const h = spInside(q, a) ? a : spClip(q, a, b);
+      if (h) { const d = Math.hypot(h[0] - a[0], h[1] - a[1], h[2] - a[2]); if (d < bd) { bd = d; best = h; } }
+    }
+    if (best) return best;
+  }
+  return best;
+}
+// what a spear can hurt: living things, not you, not what you ride
+const spLiving = (p, e) => e instanceof Mob && !e.dead && e.deathTime === 0 && e.health > 0 && e !== p.riding && !(e instanceof Vehicle) && !(e instanceof Hanging) &&
+  !(typeof Cushion !== 'undefined' && e instanceof Cushion) && !(typeof EndCrystal !== 'undefined' && e instanceof EndCrystal);
+const spBox = e => { const hw = e.w / 2; return [e.x - hw, e.y, e.z - hw, e.x + hw, e.y + e.h, e.z + hw]; };
+// SpearItem.targetsInRange and hitsEntity: the line from min to max reach (blocks stop it short; one in front of the near end
+// stops it all); a box the line passes through, or within the margin of it with nothing solid between there and the box
+Player.prototype.spearTargets = function (st) {
+  const g = this.game, w = g.world, look = this.look(), eye = this.eye(), creative = this.mode === 1;
+  const min = creative ? 2 : 2, max = creative ? 6.5 : 4.5, margin = 0.125;
+  const from = [eye[0] + look[0] * min, eye[1] + look[1] * min, eye[2] + look[2] * min];
+  const fwd = Math.max(0, (this.x - this.px) * look[0] + (this.y - this.py) * look[1] + (this.z - this.pz) * look[2]);
+  let to = [eye[0] + look[0] * (max + fwd), eye[1] + look[1] * (max + fwd), eye[2] + look[2] * (max + fwd)];
+  const bh = spClipBlocks(w, eye, to);
+  if (bh) {
+    if (Math.hypot(bh[0] - eye[0], bh[1] - eye[1], bh[2] - eye[2]) < min) return [];
+    to = bh;
+  }
+  const out = [];
+  for (const e of g.entities) {
+    if (!spLiving(this, e)) continue;
+    const bx = spBox(e);
+    if (spInside(bx, from) || spClip(bx, from, to)) { out.push(e); continue; }
+    const outer = spClip([bx[0] - margin, bx[1] - margin, bx[2] - margin, bx[3] + margin, bx[4] + margin, bx[5] + margin], from, to);
+    if (!outer) continue;
+    let c = [(bx[0] + bx[3]) / 2, (bx[1] + bx[4]) / 2, (bx[2] + bx[5]) / 2];
+    const b2 = spClipBlocks(w, outer, c);
+    if (b2) c = b2;
+    if (spClip(bx, outer, c) || spInside(bx, outer)) out.push(e);
+  }
+  return out;
+};
+
+/* ---------------- striking ---------------- */
+// LivingEntity.knockback: the resistance taken off, half the old speed kept, up at most 0.4 if on the ground
+function spKnockback(e, k, fx, fz) {
+  k *= 1 - ((e.T && e.T.kbRes) || 0);
+  if (k <= 0) return;
+  const l = Math.hypot(fx, fz) || 1;
+  e.vx = e.vx / 2 + fx / l * k; e.vz = e.vz / 2 + fz / l * k;
+  if (e.onGround) e.vy = Math.min(0.4, e.vy / 2 + k);
+}
+// SpearItem.stabAttack: damage (scaled by the attack charge when jabbing), knockback, the mount, durability
+Player.prototype.spearStab = function (st, e, dmg, fx, charging) {
+  const g = this.game;
+  let magic = 0;
+  const sharp = enchLevel(st, 'sharpness');
+  if (sharp) magic += 0.5 * sharp + 0.5;
+  if (e.type && isUndeadType(e.type)) magic += 2.5 * enchLevel(st, 'smite');
+  if (e.type && isArthropodType(e.type)) magic += 2.5 * enchLevel(st, 'bane_of_arthropods');
+  if (!charging) { const k = this.attackStrength(0.5); magic *= k; dmg *= 0.2 + k * k * 0.8; }
+  // (the spear damage type is in #no_knockback: no knockback from the hurt itself)
+  this.noHurtKnockback = true;
+  let hurt;
+  try { hurt = fx.damage && e.hurt(dmg + magic, 'player', this); } finally { this.noHurtKnockback = false; }
+  if (fx.knockback) {
+    const lk = this.look();
+    spKnockback(e, 0.8, lk[0], lk[2]);
+    const kl = enchLevel(st, 'knockback');
+    if (kl) spKnockback(e, kl, lk[0], lk[2]);
+  }
+  let off = false;
+  if (fx.dismount && e.vehicle && typeof mobDismount === 'function') { mobDismount(e); off = true; }
+  if (!hurt && !fx.knockback && !off) return false;
+  if (hurt) {
+    e.lootingLevel = enchLevel(st, 'looting');
+    const fa = enchLevel(st, 'fire_aspect');
+    if (fa && !(e.T && e.T.fireproof)) e.fireTicks = 80 * fa;
+    const bane = e.type && isArthropodType(e.type) ? enchLevel(st, 'bane_of_arthropods') : 0;
+    if (bane && e.addEffect) e.addEffect('slowness', 20 + Math.floor(Math.random() * 10 * bane), 3);
+  }
+  return true;
+};
+const spDamageHand = (p, hand, n) => { if (p.mode !== 1) p.damageHand(hand, n); };
+// the jab (Minecraft.startAttack with a piercing weapon): nothing until the attack has charged (5 ticks of slack)
+Player.prototype.spearJab = function (st) {
+  const g = this.game, sp = spearOf(st);
+  if ((this.age - this.lastAttack + 0.5 + 5) / (20 / this.attackSpeed()) < 1) { this._noSwing = true; return false; }
+  const base = Math.max(0, (ITEMS[st.id].dmg || 1) + 3 * this.effectLevel('strength') - 4 * this.effectLevel('weakness'));
+  let hit = false;
+  for (const e of this.spearTargets(st)) {
+    if (this.spearStab(st, e, base, { damage: true, knockback: true, dismount: false }, false)) {
+      hit = true; this.exh += 0.1;
+      spDamageHand(this, 'main', 1);
+    }
+  }
+  this.lastAttack = this.age;
+  if (hit) g.sound(sp.tier === 'wooden' ? 'spear_wood_hit' : 'spear_hit', this.x, this.y + 1, this.z);
+  g.sound(sp.tier === 'wooden' ? 'spear_wood_attack' : 'spear_attack', this.x, this.y + 1, this.z);
+  this.stabT = sp.stab; this.stabDur = sp.stab;
+  // Lunge (post_piercing_attack)
+  const lv = enchLevel(st, 'lunge');
+  if (lv && !this.riding && !this.gliding && !this.inWater && (this.mode === 1 || this.food >= 7)) {
+    const lk = this.look(), m = 0.458 * lv;
+    this.vx += lk[0] * m; this.vz += lk[2] * m;
+    this.exh += 4 * lv;
+    spDamageHand(this, 'main', 1);
+    g.sound('spear_lunge', this.x, this.y, this.z);
+  }
+  g.ui.refreshHotbar();
+  return true;
+};
+const _attackSP = Player.prototype.attack;
+Player.prototype.attack = function (ent) {
+  const st = this.inv[this.sel];
+  if (spearOf(st)) return this.spearJab(st);
+  return _attackSP.call(this, ent);
+};
+// a jab at nothing in reach still jabs
+Player.prototype.attackAir = function () {
+  const st = this.inv[this.sel];
+  if (!spearOf(st)) return false;
+  this.spearJab(st);
+  return true;
+};
+const _doSwingSP = Player.prototype.doSwing;
+Player.prototype.doSwing = function () {
+  if (this._noSwing) { this._noSwing = false; return; }
+  return _doSwingSP.call(this);
+};
+
+/* ---------------- the charge ---------------- */
+const _useKindSP = Player.prototype.useKind;
+Player.prototype.useKind = function (st) { return spearOf(st) && this.mode !== 3 ? 'spear' : _useKindSP.call(this, st); };
+const spSpeed = (e, look) => ((e.x - e.px) * look[0] + (e.y - e.py) * look[1] + (e.z - e.pz) * look[2]) * 20;
+const _useTickSP = Player.prototype.useTick;
+Player.prototype.useTick = function (u, st) {
+  if (u.kind !== 'spear') return _useTickSP.call(this, u, st);
+  const g = this.game, sp = spearOf(st);
+  if (u.t === 1) g.sound(sp.tier === 'wooden' ? 'spear_wood_use' : 'spear_use', this.x, this.y + 1, this.z);
+  // SpearItem.kineticAttack: from the delay on
+  const used = u.t - 1 - sp.delay;
+  if (used < 0) return;
+  // (the base of the attack damage attribute: 1, without the spear or Strength)
+  const look = this.look(), me = spSpeed(this, look), base = 1;
+  const stabbed = u.stabbed || (u.stabbed = new Map());
+  let any = false;
+  for (const e of this.spearTargets(st)) {
+    const last = stabbed.get(e);
+    if (last !== undefined && this.age - last < 10) continue;
+    stabbed.set(e, this.age);
+    const rel = Math.max(0, me - spSpeed(e, look));
+    const fx = { damage: used <= sp.hit[0] && me >= 0 && rel >= sp.hit[1], knockback: used <= sp.kb[0] && me >= sp.kb[1], dismount: used <= sp.dis[0] && me >= sp.dis[1] };
+    if (!fx.damage && !fx.knockback && !fx.dismount) continue;
+    if (this.spearStab(st, e, base + Math.floor(rel * sp.mult), fx, true)) {
+      any = true; this.exh += 0.1;
+      spDamageHand(this, u.hand, 1);
+      (u.hitSet || (u.hitSet = new Set())).add(e);
+    }
+  }
+  if (any) {
+    g.sound(sp.tier === 'wooden' ? 'spear_wood_hit' : 'spear_hit', this.x, this.y + 1, this.z);
+    if (u.hitSet.size >= 5 && g.adv) g.adv('ev', 'spear_mobs');
+    g.ui.refreshHotbar();
+  }
+};
+
+/* ---------------- loot ---------------- */
+// 26.3's ocean ruins: stone spears among the first roll, and the nautilus armor pool (the armor isn't in the game yet)
+for (const t of ['underwater_ruin_small', 'underwater_ruin_big']) {
+  const L = LOOT[t];
+  if (!L) continue;
+  const first = L[0][1];
+  if (!first.some(e => e[0] === 'stone_spear')) first.splice(t === 'underwater_ruin_small' ? 2 : 3, 0, ['stone_spear', 2]);
+  if (L.length < 3) L.push([[1, 1], [[null, 148], ['copper_nautilus_armor', 20], ['iron_nautilus_armor', 10], ['golden_nautilus_armor', 5], ['diamond_nautilus_armor', 2]]]);
+}
+
+/* ---------------- the advancement ---------------- */
+{
+  const a = { id: 'adventure/spear_many_mobs', parent: 'adventure/kill_a_mob', icon: 'iron_spear', frame: 'goal', title: 'Skewered Five', desc: 'Hit five mobs in one charge with a spear',
+    crit: { five: ['ev', 'spear_mobs'] }, any: false, xp: 0, hidden: false, tab: 'adventure', children: [] };
+  ADV_BY_ID.set(a.id, a);
+  if (ADV_BY_ID.get(a.parent)) ADV_BY_ID.get(a.parent).children.push(a);
+  if (!ADV_BY_TRIGGER.has('ev')) ADV_BY_TRIGGER.set('ev', []);
+  ADV_BY_TRIGGER.get('ev').push([a, 'five', a.crit.five]);
+}
+
+/* ---------------- pictures ---------------- */
+// the game's own: a shaft of wood, a binding, a head of the material (the icon short, the in-hand picture long and finer)
+const SPEAR_HEAD = { wooden: [150, 112, 62], stone: [128, 128, 128], copper: [196, 112, 78], iron: [216, 216, 216], golden: [246, 208, 62], diamond: [92, 222, 214], netherite: [72, 62, 66] };
+const SPEAR_SHAFT = [124, 86, 46];
+function spearPixels(N, t, put) {
+  // a: along the diagonal from the butt (bottom left) to the tip (top right); q: across it (half a pixel a step)
+  const head = SPEAR_HEAD[t], k = N / 16, hl = 5.5 * k, h0 = N - 1 - hl, maxW = (t === 'wooden' ? 0.75 : 1) * k, shaft = N > 16 ? [-0.5, 0.5] : [-0.25, 0.25];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const a = (x + N - 1 - y) / 2, q = (x - (N - 1 - y)) / 2;
+    if (a < 0.5 || a > N - 1) continue;
+    if (a >= h0) {
+      const f = (a - h0) / hl, w = maxW * (f < 0.4 ? 0.45 + f / 0.4 * 0.55 : (1 - f) / 0.6);
+      if (q >= -w - 0.25 && q <= w + 0.25) put(x, y, shd(head, q < -0.3 ? 1.15 : q > 0.3 ? 0.78 : 1.02));
+    } else if (a >= h0 - 1.5 * k) { if (q >= shaft[0] - 0.5 && q <= shaft[1] + 0.5) put(x, y, (Math.floor(a * 2) % 2) ? [196, 186, 160] : [150, 140, 118]); }
+    else if (q >= shaft[0] && q <= shaft[1]) put(x, y, shd(SPEAR_SHAFT, q > 0.1 ? 0.74 : (Math.floor(a) % 3 === 0 ? 0.84 : 0.96)));
+  }
+}
+TEXGEN.push(() => {
+  for (const [t] of SPEARS) IT(t + '_spear', (d, r) => spearPixels(16, t, (x, y, c) => sp(d, x, y, c.map(v => Math.min(255, v * (0.96 + r() * 0.08))))));
+});
+for (const [t] of SPEARS) defSkin('item/' + t + '_spear_in_hand', 32, 32, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const g = c.getContext('2d'), img = g.createImageData(32, 32), R = mulberry32(1140 + SPEARS.findIndex(q => q[0] === t));
+  // (the in-hand picture is the other way round: the head at the top left, as 26.3's are)
+  spearPixels(32, t, (x, y, col) => { x = 31 - x; if (x < 0 || y < 0 || x > 31 || y > 31) return; const o = (y * 32 + x) * 4, k = 0.95 + R() * 0.1; img.data[o] = Math.min(255, col[0] * k); img.data[o + 1] = Math.min(255, col[1] * k); img.data[o + 2] = Math.min(255, col[2] * k); img.data[o + 3] = 255; });
+  // an outline like the item sprites have
+  const a = new Uint8ClampedArray(img.data);
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    const o = (y * 32 + x) * 4;
+    if (a[o + 3]) continue;
+    const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => { const X = x + dx, Y = y + dy; return X >= 0 && Y >= 0 && X < 32 && Y < 32 && a[(Y * 32 + X) * 4 + 3]; });
+    if (near) { img.data[o] = 40; img.data[o + 1] = 30; img.data[o + 2] = 24; img.data[o + 3] = 255; }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+});
+
+/* ---------------- the in-hand model ---------------- */
+// item/generated from the 32 x 32 in-hand picture: front and back and the edges of each pixel, centred, a pixel thick
+const SP_MODELS = new Map();
+function spearHandModel(st) {
+  const key = 'item/' + spearOf(st).tier + '_spear_in_hand', vt = VTEX[key];
+  if (!vt || !ATLAS.canvas) return null;
+  const memo = SP_MODELS.get(key);
+  if (memo && memo.atlas === ATLAS.canvas) return memo.m;
+  const rg = vt.reg, A = ATLAS.S, G = 32, px = ATLAS.canvas.getContext('2d', { willReadFrequently: true }).getImageData(rg.x, rg.y, rg.w, rg.h).data;
+  const op = (x, y) => x >= 0 && y >= 0 && x < G && y < G && px[(Math.floor((y + 0.5) * rg.h / G) * rg.w + Math.floor((x + 0.5) * rg.w / G)) * 4 + 3] > 128;
+  const uv = (u, v) => [(rg.x + u * rg.w) / A, (rg.y + v * rg.h) / A], P = (x, y) => [x / G - 0.5, 0.5 - y / G], th = 1 / 32, q = [];
+  const quad = (pts, s) => q.push(pts.map(([x, y, z, u, v]) => [x, y, z, ...uv(u, v), s]));
+  quad([[...P(0, G), th, 0, 1], [...P(G, G), th, 1, 1], [...P(G, 0), th, 1, 0], [...P(0, 0), th, 0, 0]], 1);
+  quad([[...P(G, G), -th, 1, 1], [...P(0, G), -th, 0, 1], [...P(0, 0), -th, 0, 0], [...P(G, 0), -th, 1, 0]], 0.8);
+  for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) {
+    if (!op(x, y)) continue;
+    const u0 = (x + 0.1) / G, u1 = (x + 0.9) / G, v0 = (y + 0.1) / G, v1 = (y + 0.9) / G, [ax, ay] = P(x, y), [bx, by] = P(x + 1, y + 1);
+    if (!op(x - 1, y)) quad([[ax, by, -th, u0, v1], [ax, by, th, u1, v1], [ax, ay, th, u1, v0], [ax, ay, -th, u0, v0]], 0.6);
+    if (!op(x + 1, y)) quad([[bx, by, th, u0, v1], [bx, by, -th, u1, v1], [bx, ay, -th, u1, v0], [bx, ay, th, u0, v0]], 0.6);
+    if (!op(x, y - 1)) quad([[ax, ay, th, u0, v0], [bx, ay, th, u1, v0], [bx, ay, -th, u1, v1], [ax, ay, -th, u0, v1]], 0.9);
+    if (!op(x, y + 1)) quad([[ax, by, -th, u0, v0], [bx, by, -th, u1, v0], [bx, by, th, u1, v1], [ax, by, th, u0, v1]], 0.5);
+  }
+  SP_MODELS.set(key, { atlas: ATLAS.canvas, m: q });
+  return q;
+}
+// draws the model through xf (centred model space -> the scene); glints when enchanted
+function pushSpearModel(g, r, st, l, xf) {
+  const q = spearHandModel(st);
+  if (!q) return false;
+  for (const quad of q) for (const v of quad) { const p = xf(v[0], v[1], v[2]); if (!p) return true; r.dv(p[0], p[1], p[2], v[3], v[4], -1, v[5], v[5], v[5], 1, l[0], l[1]); }
+  if (hasGlint(st)) { const G = g.glintQ || (g.glintQ = []); for (const quad of q) for (const v of quad) { const p = xf(v[0], v[1], v[2]); if (p) G.push([p[0], p[1], p[2], v[3], v[4], -1, 1, 1, 1, 1, 15, 15]); } }
+  return true;
+}
+// 26.3's spear_in_hand display: [rotation, translation, scale]
+const SPEAR_DISPLAY = { fp: [[-20, 90, -35], [3.13, 2.0, 0.13], [1.36, 1.36, 0.68]], tp: [[5, 270, -40], [0, 2, 2], [1.7, 1.7, 0.85]] };
+function spearDisplay(P, d, left) {
+  const [rot, tr, s] = d, o = left ? -1 : 1;
+  P.t(o * tr[0] / 16, tr[1] / 16, tr[2] / 16).rxyz(left ? [rot[0], -rot[1], -rot[2]] : rot).s(s[0], s[1], s[2]);
+}
+// first person: held out, thrust forward through the stab, lowered and pointed ahead while charging
+const _renderHandSideSP = Game.prototype.renderHandSide;
+Game.prototype.renderHandSide = function (held, s, alpha, l) {
+  const p = this.player, main = s > 0, o = main ? 1 : -1;
+  if (!spearOf(held) || p.mhh === undefined || !VTEX['item/' + spearOf(held).tier + '_spear_in_hand']) return _renderHandSideSP.call(this, held, s, alpha, l);
+  const use = p.using && (p.using.hand === 'main') === main && p.using.kind === 'spear' ? p.using : null;
+  const eq = equipOf(p, main, alpha), P = this.handBase(alpha);
+  if (use) {
+    // the charge: brought down and level over the first few ticks, a slight shake while held
+    const k = Math.min(1, (use.t + alpha) / 6), sh = k >= 1 ? Math.sin((use.t + alpha) * 1.3) * 0.004 : 0;
+    P.t(o * (0.56 - 0.12 * k), -0.52 + eq * -0.6 - 0.1 * k + sh, -0.72 + 0.1 * k).rx(-28 * k).ry(o * -12 * k);
+  } else {
+    const st = main && p.stabT > 0 ? 1 - Math.max(0, p.stabT - alpha) / (p.stabDur || 13) : 0;
+    // the stab: out fast for the first quarter, back over the rest
+    const f = st <= 0 ? 0 : st < 0.25 ? Math.sin(st / 0.25 * Math.PI / 2) : Math.cos((st - 0.25) / 0.75 * Math.PI / 2);
+    P.t(o * 0.56, -0.52 + eq * -0.6 + 0.04 * f, -0.72 - 0.42 * f).rx(-18 * f);
+  }
+  spearDisplay(P, SPEAR_DISPLAY.fp, !main);
+  const m = P.m;
+  pushSpearModel(this, this.r, held, l, (x, y, z) => M4.xform(m, x, y, z));
+};
+// the stab runs its own length; the arm doesn't swing as well
+const _playerTickSP = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const r = _playerTickSP.call(this, inp);
+  if (this.stabT > 0) { this.stabT--; if (spearOf(this.inv[this.sel])) this.swingT = 0; }
+  return r;
+};
+// third person (ItemInHandLayer, then the spear_in_hand transform), for players and mobs
+const _drawMobItemSP = drawMobItem;
+drawMobItem = function (r, g, st, at, part, hx, light, scale, opts) {
+  if (!spearOf(st) || !g || !VTEX['item/' + spearOf(st).tier + '_spear_in_hand'] || !at(part, [0, 0, 0])) return _drawMobItemSP(r, g, st, at, part, hx, light, scale, opts);
+  const left = part === 'left_arm', P = handPose();
+  P.rx(-90).ry(180).t((left ? -1 : 1) / 16, 0.125, -0.625);
+  spearDisplay(P, SPEAR_DISPLAY.tp, left);
+  const m = P.m;
+  pushSpearModel(g, r, st, light, (x, y, z) => { const v = M4.xform(m, x, y, z); return at(part, [v[0] * 16, v[1] * 16, v[2] * 16]); });
+};
+// the player model: the arm forward like a couched lance while charging
+const _renderPlayerModelSP = Game.prototype.renderPlayerModel;
+Game.prototype.renderPlayerModel = function (r, p, alpha) {
+  const u = p.using && p.using.kind === 'spear' ? p.using : null;
+  if (!u) return _renderPlayerModelSP.call(this, r, p, alpha);
+  const pa = p.poseAnim;
+  p.poseAnim = a => { const o = pa ? pa.call(p, a) || {} : {}; o.spearArm = u.hand === 'off' ? 'L' : 'R'; return o; };
+  try { return _renderPlayerModelSP.call(this, r, p, alpha); } finally { if (pa) p.poseAnim = pa; else delete p.poseAnim; }
+};
+const _animHumanoidSP = animHumanoid;
+animHumanoid = function (P, st, zombieArms) {
+  _animHumanoidSP(P, st, zombieArms);
+  if (st.spearArm === 'R') P.right_arm = [-Math.PI / 2 + 0.35 + st.hp * 0.5, -0.1, 0];
+  else if (st.spearArm === 'L') P.left_arm = [-Math.PI / 2 + 0.35 + st.hp * 0.5, 0.1, 0];
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t] of [['spear_attack', 'Spear thrusts'], ['spear_wood_attack', 'Spear thrusts'], ['spear_hit', 'Spear strikes'], ['spear_wood_hit', 'Spear strikes'],
+  ['spear_use', 'Spear readied for a charge'], ['spear_wood_use', 'Spear readied for a charge'], ['spear_lunge', 'Lunge with a spear']]) { SND_CAT[n] = 'player'; SUB_TEXT[n] = t; }
+const _audioPlaySP = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^spear_/.test(name)) return _audioPlaySP.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime, wood = name.includes('_wood_');
+  switch (name.replace('_wood', '')) {
+    case 'spear_attack': this.noiseHit(dst, 'bandpass', wood ? 900 : 1500, 1.4, 0.12, 0.3); break;
+    case 'spear_hit': this.noiseHit(dst, 'lowpass', wood ? 500 : 800, 1, 0.1, 0.45); this.tone(dst, wood ? 'triangle' : 'square', wood ? 180 : 320, wood ? 120 : 220, 0.06, 0.05, t0 + 0.01); break;
+    case 'spear_use': this.noiseHit(dst, 'bandpass', wood ? 700 : 1100, 2, 0.2, 0.2); if (!wood) this.tone(dst, 'triangle', 880, 660, 0.12, 0.04, t0 + 0.05); break;
+    case 'spear_lunge': this.noiseHit(dst, 'bandpass', 600, 0.8, 0.3, 0.35); break;
+  }
+};
 
 </script>
 </body>
