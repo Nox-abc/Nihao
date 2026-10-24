@@ -630,6 +630,12 @@ function buildBlockNames() {
   for (const [b, f] of STONE_SETS) if (NEW_STONES.has(b)) stoneSet(b, f);
   // ---- frosted ice, made by Frost Walker (Part 97)
   add('frosted_ice');
+  // ---- shelves (Part 101)
+  for (const w of [...WOODS, 'bamboo', ...STEMS]) add(w + '_shelf');
+  // ---- the dried ghast (Part 103)
+  add('dried_ghast');
+  // ---- copper chests (Part 104)
+  for (const wx of ['', 'waxed_']) for (const ox of OXID) add(copperName(wx + ox, 'chest'));
   return out;
 }
 const BLOCK_NAMES = buildBlockNames();
@@ -5176,7 +5182,7 @@ class VanillaWorldGen {
     const big = BigInt.asIntN(64, BigInt(this.seed64)), o = this.wo = wo || {};
     this.v = new VG.Overworld(big, { large: o.type === 'large_biomes', amplified: o.type === 'amplified', biome: o.type === 'single_biome' ? worldBiomeId(o.biome) : -1 });
     // Generate Structures off: no structure starts at all (dungeons and desert wells are features and stay)
-    if (o.structures === false) { this.noStruct = new Set(STRUCTURES.map(s => s.name).filter(n => n !== 'desert_well').concat(['dungeon'])); this.noStrongholds = true; this.noStructures = true; }
+    if (o.structures === false) { this.noStruct = new Set(STRUCTURES.map(s => s.name).concat(['dungeon'])); this.noStrongholds = true; this.noStructures = true; }
     this.seed = Number(BigInt.asIntN(32, big));
     // the decoration steps with Java's features, placements and random numbers (18_vfeat.js), where the engine is loaded
     this.vseed = big; this.vdeco = typeof VF !== 'undefined' && typeof VF.gameTable === 'function';
@@ -6020,7 +6026,7 @@ Object.assign(VanillaWorldGen.prototype, {
   cityOk(x, z) { return this.v.biomeAt(x, -27, z) === BI.DEEP_DARK; },
   trialY: h => -40 + VY + Math.floor(h * 21),        // trial chambers start between y -40 and -20
   mineY: h => -40 + VY + Math.floor(h * 71),         // mineshafts between y -40 and 30
-  noStruct: new Set(['dungeon']),                    // monster rooms are features here
+  noStruct: new Set(['dungeon', 'desert_well']),     // monster rooms and desert wells are features here
   structuresFor: Generator.prototype.structuresFor,
 });
 // parts: the decorations of the chunk's 3x3 that fall in it, when the main thread brings them (19_vfeat_game.js)
@@ -9856,6 +9862,7 @@ VanillaWorldGen.prototype.vDecorate = function (cx, cz, blocks, meta, be, mobs, 
       const idx = vIdx(x - x0, y, z - z0);
       if (e.type === 'chest' && blocks[idx] === B.CHEST) be.push([idx, { type: 'chest', kind: 'chest', loot: e.loot.replace(/^chests\//, '') }]);
       else if (e.type === 'spawner' && blocks[idx] === B.SPAWNER) be.push([idx, { type: 'spawner', mob: e.mob, delay: 20 }]);
+      else if (e.type === 'brushable' && (blocks[idx] === B.SUSPICIOUS_SAND || blocks[idx] === B.SUSPICIOUS_GRAVEL)) be.push([idx, { type: 'brushable', table: e.loot.replace(/^archaeology\/(.*)$/, '$1_archaeology') }]);
       else if (e.type === 'beehive' && blocks[idx] === B.BEE_NEST) for (let b = 0; b < e.bees.length; b++) mobs.push(['bee', x + 0.5, y + VY, z + 0.5, { hive: [x, y + VY, z] }]);
     }
   }
@@ -9916,6 +9923,57 @@ F.fossil = (C, cf, r, ox, oy, oz) => {
   for (const cell of cells) if (r.nextFloat() <= 0.9) put(cell, S.set(BONE, 'axis', BONE_AXES[cell[3] === 1 ? 1 : (cell[3] === 0) !== !!(rot & 1) ? 0 : 2]));
   for (const cell of cells) if (r.nextFloat() <= 0.1) put(cell, ore);
   return true;
+};
+})();
+
+/* @file 19_vfeat_templates.js */
+/* ===================================================================
+   VANILLA DECORATION: TEMPLATES — 26.x's template feature, which
+   places a structure file: the game builds the ones it knows itself
+   (Java's files aren't used), centred on the spot
+   - desert_well/well: the desert well 26.x places from a file, block
+     for block the one DesertWellFeature used to build: three layers of
+     sandstone, sand under a cross of water, a rim with a slab in the
+     middle of each side, four pillars and a roof of slabs round a
+     sandstone block, the air inside cleared
+   - desert_well/suspicious_sand: one suspicious sand block, its loot
+     from the template's rule processor (archaeology/desert_well)
+   =================================================================== */
+(() => {
+const F = VF.FEATURES, S = ST;
+const st = n => S.def[S.blockId(n)];
+const TEMPLATES = {
+  'desert_well/well': (C, cf, x, y, z) => {
+    const R = C.R, SS = st('sandstone'), SAND = st('sand'), WATER = st('water'), SLAB = st('sandstone_slab'), AIR = st('air');
+    for (let dy = 0; dy <= 6; dy++) for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      const ring = Math.abs(dx) === 2 || Math.abs(dz) === 2, corner = Math.abs(dx) === 1 && Math.abs(dz) === 1, cross = !ring && !corner;
+      let s = null;
+      if (dy <= 2) s = dy === 1 && cross ? SAND : dy === 2 && cross ? WATER : SS;
+      else if (dy === 3) s = ring ? (dx === 0 || dz === 0 ? SLAB : SS) : corner ? SS : AIR;
+      else if (dy <= 5) s = ring ? null : corner ? SS : AIR;
+      else s = ring ? null : dx === 0 && dz === 0 ? SS : SLAB;
+      if (s !== null) R.set(x + dx, y + dy, z + dz, s);
+    }
+    return true;
+  },
+  'desert_well/suspicious_sand': (C, cf, x, y, z) => {
+    C.R.set(x, y, z, st('suspicious_sand'));
+    let loot = null;
+    for (const p of (cf.processors && cf.processors.processors) || []) for (const rule of p.rules || []) if (rule.block_entity_modifier && rule.block_entity_modifier.loot_table) loot = rule.block_entity_modifier.loot_table;
+    if (loot && C.blockEntity) C.blockEntity(x, y, z, { type: 'brushable', loot });
+    return true;
+  },
+};
+// one of the templates by weight, then built if the game knows it
+F.template = (C, cf, r, x, y, z) => {
+  const list = cf.templates || [];
+  let t = 0; for (const e of list) t += e.weight || 1;
+  if (!t) return false;
+  let k = r.nextInt(t), pick = list[0];
+  for (const e of list) { k -= e.weight || 1; if (k < 0) { pick = e; break; } }
+  const id = pick.data && pick.data.id, fn = TEMPLATES[id];
+  if (!fn) { if (C.missing) C.missing['template ' + id] = (C.missing['template ' + id] || 0) + 1; return false; }
+  return fn(C, cf, x, y, z);
 };
 })();
 
@@ -10637,6 +10695,13 @@ defB('potent_sulfur', ROCK(1.5, 0, { potentSulfur: true }));
 defB('sulfur_spike', { shape: SH.CROSS, hard: 1.5, tool: PICK, sound: 'stone', cutout: true, needs: 'dripstone', tex: 'sulfur_spike_down_tip', noWave: true, dripstone: 'sulfur_spike', icon: 'sulfur_spike' });
 // Frost Walker's frosted ice (meta: age 0 to 3), melting back to water (Part 97); no item
 defB('frosted_ice', { hard: 0.5, tool: PICK, sound: 'glass', translucent: true, cullSame: true, drop: null, item: null, slip: 0.98, tex: 'frosted_ice_0' });
+// copper chests (Part 104): chests that weather like copper
+for (const wx of ['', 'waxed_']) for (let s = 0; s < 4; s++) defB(copperName(wx + OXID[s], 'chest'), { shape: SH.CHEST, hard: 3, tool: PICK, lvl: 1, sound: 'metal', copper: s, waxed: !!wx,
+  tex: s ? OXID[s] + 'copper' : 'copper_block', facing: true, use: 'chest' });
+// the dried ghast (Part 103): soaks up water a stage at a time and becomes a ghastling
+defB('dried_ghast', { shape: SH.BOX, model: 'dried_ghast', hard: 0, sound: 'dried_ghast', facing: true, cutout: true, tex: 'dried_ghast_hydration_0_north' });
+// shelves (Part 101): a wall shelf showing three stacks, its front turned to the player
+for (const w of [...WOODS, 'bamboo', ...STEMS]) defB(w + '_shelf', { shape: SH.BOX, model: 'shelf', hard: 2, tool: AXE, sound: 'wood', facing: true, shelf: true, fuel: STEMS.includes(w) ? 0 : 300 });
 const NONSOLID_SHAPES = new Set([SH.NONE, SH.CROSS, SH.TORCH, SH.LIQUID, SH.CROP, SH.PORTAL, SH.TALL, SH.VINE, SH.FAN, SH.WIRE, SH.RAIL, SH.FIRE, SH.LEVER]);
 for (let id = 0; id < BLOCK_NAMES.length; id++) {
   const d = BLK[id];
@@ -10770,7 +10835,7 @@ for (const w of [...WOODS, 'bamboo']) if (!NEW_WOODS.includes(w)) defBoats(w);
 defI('minecart', { stack: 1, cart: 'empty' }); defI('hopper_minecart', { stack: 1, cart: 'hopper', display: 'Minecart with Hopper' }); defI('chest_minecart', { stack: 1, cart: 'chest', display: 'Minecart with Chest' });
 defI('furnace_minecart', { stack: 1, cart: 'furnace', display: 'Minecart with Furnace' }); defI('tnt_minecart', { stack: 1, cart: 'tnt', display: 'Minecart with TNT' });
 defI('goat_horn', { stack: 1, rarity: 1 });
-const DISCS = ['13', 'cat', 'blocks', 'chirp', 'far', 'mall', 'mellohi', 'stal', 'strad', 'ward', '11', 'wait', 'otherside', '5', 'pigstep', 'relic', 'creator', 'creator_music_box', 'precipice'];
+const DISCS = ['13', 'cat', 'blocks', 'chirp', 'far', 'mall', 'mellohi', 'stal', 'strad', 'ward', '11', 'wait', 'otherside', '5', 'pigstep', 'relic', 'creator', 'creator_music_box', 'precipice', 'tears', 'lava_chicken', 'bounce'];
 for (const d of DISCS) defI('music_disc_' + d, { stack: 1, rarity: ['pigstep', 'otherside', 'creator', 'lava_chicken'].includes(d) ? 2 : 1, disc: d, display: 'Music Disc' });
 defI('trial_key'); defI('ominous_trial_key');
 defI('armor_stand', { stack: 16 }); defI('item_frame'); defI('glow_item_frame'); defI('painting');
@@ -10856,6 +10921,9 @@ for (const e of [['camel', 0xfcc369, 0xcb9337], ['donkey', 0x534539, 0x867566], 
   ['piglin_brute', 0x592a10, 0xf9f3a4], ['pillager', 0x532f36, 0x959b9b], ['ravager', 0x757470, 0x5b5049], ['shulker', 0x946794, 0x4d3852], ['skeleton_horse', 0x68684f, 0xe5e5d8],
   ['sniffer', 0x871e09, 0x199a87], ['strider', 0x9c3436, 0x4d494d], ['tadpole', 0x6d533d, 0x160a00], ['trader_llama', 0xeaa430, 0x456296], ['vex', 0x7a90a4, 0xe8edf1],
   ['vindicator', 0x959b9b, 0x275e61], ['zoglin', 0xc66e55, 0xe6e6e6], ['zombie_horse', 0x315234, 0x97c284]]) { SPAWN_EGGS.push(e); defI(e[0] + '_spawn_egg', { egg: e[0], eggCol: [e[1], e[2]] }); EGG_MOBS[e[0]] = true; }
+// harnesses for happy ghasts and the happy ghast's egg (Part 103)
+for (const c of COLORS) defI(c + '_harness', { stack: 1, harness: c, display: titleCase(c) + ' Harness' });
+for (const e of [['happy_ghast', 0xf9f9f9, 0xbcbcbc]]) { SPAWN_EGGS.push(e); defI(e[0] + '_spawn_egg', { egg: e[0], eggCol: [e[1], e[2]] }); EGG_MOBS[e[0]] = true; }
 
 /* ---------------- tables used everywhere ---------------- */
 const I = {};
@@ -10982,6 +11050,14 @@ shaped('ladder', 3, ['S S', 'SSS', 'S S'], { S: 'stick' });
 shaped('composter', 1, ['# #', '# #', '###'], { '#': '#wooden_slabs' });
 shaped('bookshelf', 1, ['###', 'BBB', '###'], { '#': '#planks', B: 'book' });
 shaped('chiseled_bookshelf', 1, ['###', 'SSS', '###'], { '#': '#planks', S: '#wooden_slabs' });
+shaped('dried_ghast', 1, ['###', '#X#', '###'], { '#': 'ghast_tear', X: 'soul_sand' });
+shaped('copper_chest', 1, ['###', '#X#', '###'], { '#': 'copper_ingot', X: 'chest' });
+for (let s = 0; s < 4; s++) shapeless(copperName('waxed_' + OXID[s], 'chest'), 1, [copperName(OXID[s], 'chest'), 'honeycomb']);
+for (const c of COLORS) {
+  shaped(c + '_harness', 1, ['LLL', 'G#G'], { L: 'leather', G: 'glass', '#': c + '_wool' });
+  shapeless(c + '_harness', 1, [c + '_dye', COLORS.filter(k => k !== c).map(k => itemOf(k + '_harness'))]);
+}
+for (const w of [...WOODS, 'bamboo', ...STEMS]) shaped(w + '_shelf', 6, ['###', '   ', '###'], { '#': w === 'bamboo' ? 'stripped_bamboo_block' : STEMS.includes(w) ? 'stripped_' + w + '_stem' : 'stripped_' + w + '_log' });
 shaped('lectern', 1, ['SSS', ' B ', ' S '], { S: '#wooden_slabs', B: 'bookshelf' });
 shaped('jukebox', 1, ['###', '#D#', '###'], { '#': '#planks', D: 'diamond' });
 shaped('note_block', 1, ['###', '#R#', '###'], { '#': '#planks', R: 'redstone' });
@@ -13027,7 +13103,7 @@ TEXGEN.push(function texItems() {
   /* ---------------- music discs ---------------- */
   const DISC_COL = { '13': [230, 210, 60], cat: [90, 200, 70], blocks: [220, 100, 40], chirp: [200, 40, 40], far: [130, 220, 100], mall: [110, 80, 200], mellohi: [200, 120, 220],
     stal: [40, 40, 40], strad: [240, 240, 240], ward: [60, 140, 90], '11': [60, 60, 60], wait: [60, 150, 220], otherside: [40, 120, 200], '5': [70, 100, 110], pigstep: [190, 80, 60],
-    relic: [70, 140, 150], creator: [230, 180, 70], creator_music_box: [160, 120, 220], precipice: [200, 90, 60] };
+    relic: [70, 140, 150], creator: [230, 180, 70], creator_music_box: [160, 120, 220], precipice: [200, 90, 60], tears: [210, 210, 225], lava_chicken: [230, 120, 30], bounce: [214, 196, 60] };
   for (const k of DISCS) IT('music_disc_' + k, (d) => fillEl(d, 8, 8, 6.8, 6.8, (x, y) => { const dd = Math.hypot(x - 7.5, y - 7.5); return dd < 1 ? [20, 20, 20] : dd < 2.6 ? DISC_COL[k] : ((Math.floor(dd) % 2) ? [44, 44, 48] : [30, 30, 34]); }));
 
   /* ---------------- food ---------------- */
@@ -17251,8 +17327,9 @@ Object.assign(MOB_MODELS, {
       P.right_front_leg = [a, 0, 0]; P.left_front_leg = [-a, 0, 0]; P.right_hind_leg = [-a, 0, 0]; P.left_hind_leg = [a, 0, 0];
     } },
   ghast: { tw: 64, th: 32, scale: 4.5, parts: [P_('body', [0, 17.6, 0], [[0, 0, -8, -8, -8, 16, 16, 16]]),
+    // GhastModel: RandomSource.create(1660), nextInt(7) + 8 for each tentacle
     ...Array.from({ length: 9 }, (_, i) => {
-      const R = mulberry32(1660 + i), len = 7 + Math.floor(R() * 7);
+      const len = [13, 11, 9, 9, 11, 10, 12, 9, 12][i];
       const x = (((i % 3) - (Math.floor(i / 3) % 2) * 0.5 + 0.25) / 2 * 2 - 1) * 5, z = (Math.floor(i / 3) / 2 * 2 - 1) * 5;
       return P_('tentacle' + i, [x, 24.6, z], [[0, 0, -1, 0, -1, 2, len, 2]]);
     })],
@@ -18763,7 +18840,7 @@ class Mob extends Entity {
     if (id === I.NAME_TAG && held.tag && held.tag.name) { this.customName = held.tag.name; this.persistent = true; p.consumeHeld(1); return true; }
     // breeding and feeding
     if (T.breed && T.breed.includes(name)) {
-      if (this.baby) { this.growth = Math.min(0, this.growth + 2400); p.consumeHeld(1); g.particles.poof(this.x, this.y + this.h, this.z, [0.4, 0.9, 0.4], 6); return true; }
+      if (this.baby) { this.growth = babyFed(this.growth); p.consumeHeld(1); g.particles.poof(this.x, this.y + this.h, this.z, [0.4, 0.9, 0.4], 6); return true; }
       if (this.love <= 0 && this.breedCd <= 0 && (!T.tameItem || this.data.tame || this.type === 'wolf' && this.data.tame)) {
         if (this.type === 'wolf' && !this.data.tame) return false;
         this.love = 600; p.consumeHeld(1); this.breeder = p; g.sound('eat', this.x, this.y, this.z); return true;
@@ -18854,6 +18931,8 @@ const deathRoll = (m, a) => m.deathTime > 0 ? -Math.min(1, Math.sqrt(Math.max(0,
 const MOB_INIT = {};      // type -> (mob, opts) set up variants, gear, size
 const MOB_INTERACT = {};  // type -> (mob, player, held, name) -> handled
 const MOB_SKINS = {};     // type -> (mob) -> skin passes
+// AgeableMob.ageUp(getSpeedUpSecondsWhenFeeding): food takes a tenth of the time left off (in whole seconds)
+const babyFed = growth => Math.min(0, growth + Math.floor(Math.floor(-growth / 20) * 0.1) * 20);
 function createMob(game, type, x, y, z, opts) {
   if (!MOB_TYPES[type]) return null;
   const C = MOB_CLASSES[type] || Mob;
@@ -21025,7 +21104,7 @@ function buildCreativeTabs() {
     'wildflowers', 'pink_petals', 'leaf_litter', 'spore_blossom', 'bamboo', 'sugar_cane',
     'cactus', 'cactus_flower', 'firefly_bush', 'crimson_roots', 'warped_roots', 'nether_sprouts',
     'weeping_vines', 'twisting_vines', 'vine', 'tall_grass', 'large_fern', 'sunflower', 'lilac', 'rose_bush', 'peony', 'pitcher_plant', 'big_dripleaf', 'small_dripleaf',
-    'chorus_plant', 'chorus_flower', 'glow_lichen', 'resin_clump', 'hanging_roots', 'frogspawn', 'turtle_egg', 'sniffer_egg',
+    'chorus_plant', 'chorus_flower', 'glow_lichen', 'resin_clump', 'hanging_roots', 'frogspawn', 'turtle_egg', 'sniffer_egg', 'dried_ghast',
     'wheat_seeds', 'cocoa_beans', 'pumpkin_seeds', 'melon_seeds', 'beetroot_seeds', 'torchflower_seeds', 'pitcher_pod', 'glow_berries', 'sweet_berries', 'nether_wart',
     'lily_pad', 'seagrass', 'sea_pickle', 'kelp', 'dried_kelp_block');
   for (const c of CORALS) add(c + '_coral_block'); for (const c of CORALS) add('dead_' + c + '_coral_block');
@@ -21042,7 +21121,7 @@ function buildCreativeTabs() {
     'lodestone', 'ladder', 'scaffolding', 'bee_nest', 'beehive', 'suspicious_sand', 'suspicious_gravel', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'lightning_rod'))), 'flower_pot', 'decorated_pot', 'armor_stand',
     'item_frame', 'glow_item_frame', 'painting', 'bookshelf', 'chiseled_bookshelf', 'lectern', 'tinted_glass');
   for (const w of woods) add(w + '_sign', w + '_hanging_sign');
-  add('chest', 'barrel', 'ender_chest', 'shulker_box', C('#_shulker_box'), 'respawn_anchor', C('#_bed'), 'candle', C('#_candle'), C('#_banner'), HEADS, 'dragon_egg',
+  add('chest', ['', 'waxed_'].flatMap(wx => OXID.map(ox => copperName(wx + ox, 'chest'))), 'barrel', 'ender_chest', 'shulker_box', C('#_shulker_box'), 'respawn_anchor', C('#_bed'), 'candle', C('#_candle'), C('#_banner'), HEADS, 'dragon_egg',
     'end_portal_frame', 'ender_eye', 'vault', 'heavy_core', 'infested_stone', 'infested_cobblestone', 'infested_stone_bricks', 'infested_mossy_stone_bricks',
     'infested_cracked_stone_bricks', 'infested_chiseled_stone_bricks', 'infested_deepslate');
   CREATIVE.functional = take();
@@ -21060,7 +21139,7 @@ function buildCreativeTabs() {
     'milk_bucket', 'fishing_rod', 'flint_and_steel', 'fire_charge', 'bone_meal', 'shears', 'brush', 'name_tag', 'lead', 'bundle', COLORS.map(c => c + '_bundle'), 'compass', 'recovery_compass', 'clock', 'spyglass', 'map',
     'writable_book', 'wind_charge', 'ender_pearl', 'ender_eye', 'elytra',
     { id: I.FIREWORK_ROCKET, tag: { flight: 1 } }, { id: I.FIREWORK_ROCKET, tag: { flight: 2 } }, { id: I.FIREWORK_ROCKET, tag: { flight: 3 } },
-    'saddle', 'carrot_on_a_stick', 'warped_fungus_on_a_stick');
+    'saddle', COLORS.map(c => c + '_harness'), 'carrot_on_a_stick', 'warped_fungus_on_a_stick');
   for (const w of WOODS) add(w + '_boat', w + '_chest_boat');
   add('bamboo_raft', 'bamboo_chest_raft', 'rail', 'powered_rail', 'detector_rail', 'activator_rail', 'minecart', 'hopper_minecart', 'chest_minecart', 'furnace_minecart', 'tnt_minecart',
     DISCS.map(d => 'music_disc_' + d), 'goat_horn');
@@ -25599,9 +25678,8 @@ Object.assign(Game.prototype, {
     if (held.id === I.END_CRYSTAL && hit && (hid === B.OBSIDIAN || hid === B.BEDROCK) && w.getBlock(hit.x, hit.y + 1, hit.z) === 0) {
       const c = new EndCrystal(this, hit.x + 0.5, hit.y + 1, hit.z + 0.5, -1); this.entities.push(c); p.consumeHeld(1); return done();
     }
-    // armor goes straight onto the body
-    if (it.armor && p.armor && !p.armor[it.armor.slot]) { p.armor[it.armor.slot] = copyStack(held); p.inv[p.sel] = null; this.sound('door', p.x, p.y + 1, p.z); return done(); }
-    if (it.wearable === 'head' && p.armor && !p.armor[0]) { p.armor[0] = copyStack(held, 1); p.consumeHeld(1); return done(); }
+    // armor changes places with what's worn in its slot (Part 100)
+    if (it.armor && p.armor) return this.swapWithEquipment(p, held, it) ? done() : true;
     return false;
   },
   useEye(p, hit) {
@@ -61554,7 +61632,8 @@ for (const id of CHEST_DRAWN) NOMESH[id] = 1;
 BKM.rx = a => { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, 0, c, -s, 0, 0, s, c, 0]; };
 // Sheets.chooseMaterial; ChestRenderer's Christmas check
 const chestXmas = () => { const d = new Date(); return d.getMonth() === 11 && d.getDate() >= 24 && d.getDate() <= 26; };
-const chestSkinKey = (id, type, xmas) => id === B.ENDER_CHEST ? 'entity/chest/ender'
+const CHEST_SKIN_OF = {};   // chests with skins of their own (Part 104: copper chests)
+const chestSkinKey = (id, type, xmas) => id === B.ENDER_CHEST ? 'entity/chest/ender' : CHEST_SKIN_OF[id] ? CHEST_SKIN_OF[id] + ['', '_left', '_right'][type]
   : 'entity/chest/' + (xmas ? 'christmas' : id === B.TRAPPED_CHEST ? 'trapped' : 'normal') + ['', '_left', '_right'][type];
 
 /* ---------------- the game's own textures ---------------- */
@@ -63432,6 +63511,787 @@ Object.assign(LOOT, {
   ocean_ruin_warm_archaeology: [[[1, 1], [['angler_pottery_sherd', 1], ['shelter_pottery_sherd', 1], ['snort_pottery_sherd', 1], ['sniffer_egg', 1], ['iron_axe', 1],
     ['emerald', 2], ['wheat', 2], ['wooden_hoe', 2], ['coal', 2], ['gold_nugget', 2]]]],
 });
+
+/* @file 206_binding.js */
+/* ===================================================================
+   Part 100: Curse of Binding and putting armor on like Java
+   - ArmorSlot.mayPickup: a worn piece with Curse of Binding (its
+     prevent_armor_change effect) stays in its armor slot outside
+     creative: clicks on it do nothing, and shift-clicks, number keys,
+     F and Q leave it where it is (an empty armor slot still takes
+     things put in it)
+   - Equippable.swapWithEquipmentSlot: armor and elytra used from the
+     hand change places with what's worn in their slot, the old piece
+     going into the hand (from a stack: one goes on, the old piece into
+     the inventory); not for the same item again, and not at all while
+     the worn piece has Curse of Binding outside creative; in creative
+     the held item stays (a stack isn't used up)
+   - heads and carved pumpkins aren't swappable: used in the air they
+     aren't put on (only placed against a block or put in the slot)
+   =================================================================== */
+
+const wornBound = (p, st) => !!st && p.mode !== 1 && enchLevel(st, 'binding_curse') > 0;
+UI.prototype.mayPickup = function (c, i) { return !(c === 'armor' && wornBound(this.game.player, this.getSlot(c, i))); };
+(() => {
+  const P = UI.prototype, _slotClick = P.slotClick, _quickMove = P.quickMove, _invKey = P.invKey;
+  P.slotClick = function (c, i, btn) { if (!this.mayPickup(c, i)) return; return _slotClick.call(this, c, i, btn); };
+  P.quickMove = function (c, i) { if (!this.mayPickup(c, i)) return; return _quickMove.call(this, c, i); };
+  P.invKey = function (e) {
+    if (this.hover && /^(Digit[1-9]|KeyF|KeyQ)$/.test(e.code) && !this.mayPickup(this.hover[0], this.hover[1])) return true;
+    return _invKey.call(this, e);
+  };
+})();
+
+// Equippable.swapWithEquipmentSlot for a held armor piece or elytra; false when it fails
+Game.prototype.swapWithEquipment = function (p, held, it) {
+  const slot = it.armor.slot, worn = p.armor[slot];
+  if (wornBound(p, worn) || (worn && sameItem(worn, held) && (worn.dmg || 0) === (held.dmg || 0))) return false;
+  const main = p.inv[p.sel] === held, setHeld = st => { if (main) p.inv[p.sel] = st; else p.offhand[0] = st; };
+  if (held.count <= 1) {
+    p.armor[slot] = copyStack(held);
+    if (worn) setHeld(worn); else if (p.mode !== 1) setHeld(null);
+  } else {
+    p.armor[slot] = copyStack(held, 1);
+    if (p.mode !== 1) held.count--;
+    if (worn) this.giveOrDrop(p, worn);
+  }
+  this.sound('equip', p.x, p.y + 1, p.z);
+  return true;
+};
+
+/* @file 207_shelves.js */
+/* ===================================================================
+   Part 101: shelves (Java 1.21.9)
+   - a shelf for each wood (oak to poplar, bamboo, crimson, warped):
+     six from six stripped logs (stems, bamboo blocks) in two rows of
+     three; 2 hard, 3 against explosions, an axe's, burns (30/20) and
+     fuels (not the Nether ones), holds water; its front turned to the
+     player; the collision of its back and two ledges
+   - the models template_shelf_body with the back plate
+     template_shelf_unpowered, or powered _unconnected, _left, _center
+     and _right by its place in a row (block/<wood>_shelf)
+   - three slots side by side on the front (left to right as seen from
+     it); using a slot swaps the stack in hand with the slot's (in
+     creative a stack put on an empty slot stays in hand); the stacks
+     shown on the shelf, a quarter size, in front of the back plate
+   - powered (ShelfBlock: a neighbour signal), up to three shelves side
+     by side facing the same way join a row; using one swaps the row's
+     slots with the hotbar's, the row's last shelf with its last three
+     slots (9 - (row length - i) x 3 + slot)
+   - comparators read it from behind only: one bit per slot holding
+     something (0 to 7); broken it drops what it holds; pistons leave it
+   =================================================================== */
+
+const SHELF_WOODS = [...WOODS, 'bamboo', ...STEMS];
+const IS_SHELF = new Uint8Array(MAXB);
+for (const w of SHELF_WOODS) { const id = B[(w + '_shelf').toUpperCase()]; IS_SHELF[id] = 1; HAS_BE[id] = 1; BLAST_RES[id] = 3; FIRE_IGNITE[id] = STEMS.includes(w) ? 0 : 30; FIRE_BURN[id] = STEMS.includes(w) ? 0 : 20; }
+// the row parts in meta bits 3-4; bit 2 powered; bits 0-1 the facing
+const SH_ALONE = 0, SH_LEFT = 1, SH_CENTER = 2, SH_RIGHT = 3;
+
+/* ---------------- textures ---------------- */
+const SHELF_COL = Object.assign({ crimson: [101, 48, 70], warped: [43, 104, 99] }, WOOD_COL);
+TEXGEN.push(() => {
+  for (const w of SHELF_WOODS) T(w + '_shelf', (d, r) => {
+    const c = SHELF_COL[w], dk = mul(c, 0.6), md = mul(c, 0.78), lt = mul(c, 1.15);
+    fillF(d, (x, y) => {
+      const n = 0.93 + r() * 0.12;
+      // the front (the top ledge, the plate between, the bottom ledge) and the back's two boards
+      if (y < 8 && x < 8) return mul(y < 2 || y >= 6 ? (y === 0 || y === 6 ? lt : c) : (x === 2 || x === 5 ? dk : md), n);
+      if (y < 8) return mul(y === 3 || y === 7 ? md : c, n);
+      // the powered plates: left and right in the upper row, the middle and a shelf alone in the lower
+      const right = x >= 8, low = y >= 12, lx = x & 7, ly = y & 3;
+      const closedL = low ? right : !right, closedR = right;
+      const edge = ly === 0 || ly === 3 || (closedL && lx === 0) || (closedR && lx === 7);
+      return mul(edge ? lt : dk, n);
+    });
+  });
+});
+
+/* ---------------- model and shape ---------------- */
+// template_shelf_body (drawn facing north in Java), the plate in front of the back by the shelf's state
+const SHELF_BODY = [
+  [[0, 0, 13], [16, 16, 16], { east: [8, 0, 9.5, 8], south: [8, 0, 16, 8], west: [14.5, 0, 16, 8], up: [16, 5, 8, 3.5], down: [16, 6, 8, 4.5] }],
+  [[0, 0, 11], [16, 4, 13], { north: [0, 6, 8, 8], east: [1.5, 6, 2.5, 8], west: [5.5, 6, 6.5, 8], up: [8, 3.5, 16, 4.5], down: [16, 4.5, 8, 3.5] }],
+  [[0, 12, 11], [16, 16, 13], { north: [0, 0, 8, 2], east: [1.5, 0, 2.5, 2], west: [5.5, 0, 6.5, 2], up: [16, 6, 8, 5], down: [8, 5, 16, 6] }]];
+// unpowered, then powered: alone (unconnected), left, center, right
+const SHELF_PLATE = [[0, 2, 8, 6], [8, 12, 16, 16], [0, 8, 8, 12], [0, 12, 8, 16], [8, 8, 16, 12]];
+const SHELF_QUADS = {};
+BOX_MODELS.shelf = (d, m) => {
+  const t = d.name, plate = (m & 4) ? 1 + ((m >> 3) & 3) : 0, key = t + plate;
+  if (!SHELF_QUADS[key]) {
+    const els = SHELF_BODY.map(([f, to, fs]) => { const o = {}; for (const k in fs) o[k] = [fs[k], t]; return jE(f, to, o); });
+    els.push(jE([0, 4, 13], [16, 12, 13], { north: [SHELF_PLATE[plate], t] }));
+    SHELF_QUADS[key] = jFaceSouth(jQuads(els));
+  }
+  return rotParts(SHELF_QUADS[key], m & 3);
+};
+// the collision: the back and the two ledges (facing south at meta 0)
+const SHELF_BOXES = [[0, 0, 0, 16, 4, 5], [0, 4, 0, 16, 16, 3], [0, 12, 3, 16, 16, 5]];
+const _modelCollisionSV = modelCollision;
+modelCollision = function (id, meta, ctx) {
+  if (!IS_SHELF[id]) return _modelCollisionSV(id, meta, ctx);
+  return SHELF_BOXES.map(b => rotPart({ b }, meta & 3).b);
+};
+
+/* ---------------- the block entity ---------------- */
+function wallShelfBE(w, x, y, z) {
+  let be = w.getBE(x, y, z);
+  if (!be || be.type !== 'shelf') { be = { type: 'shelf', items: [null, null, null] }; w.setBE(x, y, z, be); }
+  if (!be.items) be.items = [null, null, null];
+  return be;
+}
+// the front's normal and the right hand of someone facing the front (x, z)
+const shelfFront = m => { const f = FRONT4[m & 3]; return [DX[f], DZ[f]]; };
+const shelfRight = m => { const [fx, fz] = shelfFront(m); return [fz, -fx]; };
+// SelectableSlotContainer.getHitSlot: three columns across the front, left to right as seen from it
+function shelfHitSlot(p, hit, m) {
+  const fr = FRONT4[m & 3];
+  if (hit.face !== fr) return -1;
+  let rx;
+  if (hit.rel) rx = hit.rel[0];
+  else {
+    if (hit.t === undefined || !p.eye) return -1;
+    const e = p.eye(), d = p.look(), qx = e[0] + d[0] * hit.t - hit.x, qz = e[2] + d[2] * hit.t - hit.z;
+    rx = fr === 4 ? qx : fr === 5 ? 1 - qx : fr === 1 ? qz : 1 - qz;
+  }
+  return Math.max(0, Math.min(2, Math.floor(rx * 3)));
+}
+
+/* ---------------- rows of powered shelves ---------------- */
+// the same row: a powered shelf beside it, facing the same way
+function shelfJoins(w, x, y, z, m) { const id = w.getBlock(x, y, z), n = w.getMeta(x, y, z); return IS_SHELF[id] && (n & 4) && (n & 3) === (m & 3); }
+// the row a shelf is in, left to right as seen from the front
+function shelfRow(w, x, y, z) {
+  const m = w.getMeta(x, y, z);
+  if (!(m & 4) || ((m >> 3) & 3) === SH_ALONE) return [[x, y, z]];
+  const [rx, rz] = shelfRight(m);
+  let cx = x, cz = z;
+  for (let k = 0; k < 2; k++) {
+    const part = (w.getMeta(cx, y, cz) >> 3) & 3;
+    if (part === SH_LEFT || part === SH_ALONE || !shelfJoins(w, cx - rx, y, cz - rz, m)) break;
+    cx -= rx; cz -= rz;
+  }
+  const row = [[cx, y, cz]];
+  while (row.length < 3) {
+    const [ax, , az] = row[row.length - 1], part = (w.getMeta(ax, y, az) >> 3) & 3;
+    if (part === SH_RIGHT || part === SH_ALONE || !shelfJoins(w, ax + rx, y, az + rz, m)) break;
+    row.push([ax + rx, y, az + rz]);
+  }
+  return row;
+}
+// the parts of a row by its length
+function shelfLabel(w, row) {
+  const parts = row.length === 1 ? [SH_ALONE] : row.length === 2 ? [SH_LEFT, SH_RIGHT] : [SH_LEFT, SH_CENTER, SH_RIGHT];
+  row.forEach(([x, y, z], i) => { const m = w.getMeta(x, y, z), nm = (m & 7) | (parts[i] << 3); if (nm !== m) w.setMeta(x, y, z, nm); });
+}
+// powered: it joins the row on its left, its right or both, as long as the row stays at three or fewer
+function shelfJoin(w, x, y, z) {
+  const m = w.getMeta(x, y, z), [rx, rz] = shelfRight(m);
+  const left = shelfJoins(w, x - rx, y, z - rz, m) ? shelfRow(w, x - rx, y, z - rz) : [], right = shelfJoins(w, x + rx, y, z + rz, m) ? shelfRow(w, x + rx, y, z + rz) : [];
+  // only a row's end can take it
+  const L = left.length && left[left.length - 1][0] === x - rx && left[left.length - 1][2] === z - rz ? left : [];
+  const R = right.length && right[0][0] === x + rx && right[0][2] === z + rz ? right : [];
+  const me = [[x, y, z]];
+  shelfLabel(w, L.length + 1 + R.length <= 3 ? [...L, ...me, ...R] : L.length && L.length < 3 ? [...L, ...me] : R.length && R.length < 3 ? [...me, ...R] : me);
+}
+// unpowered or gone: the shelves on either side make rows of their own
+function shelfLeave(w, x, y, z, m) {
+  const [rx, rz] = shelfRight(m), part = (m >> 3) & 3;
+  if (!(m & 4) || part === SH_ALONE) return;
+  const side = (dx, dz) => {
+    const out = [];
+    let cx = x + dx, cz = z + dz;
+    while (out.length < 2 && shelfJoins(w, cx, y, cz, m)) {
+      const p = (w.getMeta(cx, y, cz) >> 3) & 3;
+      out.push([cx, y, cz]);
+      if (p === SH_ALONE || (dx === rx && dz === rz ? p === SH_RIGHT : p === SH_LEFT)) break;
+      cx += dx; cz += dz;
+    }
+    return out;
+  };
+  if (part === SH_CENTER || part === SH_RIGHT) shelfLabel(w, side(-rx, -rz).reverse());
+  if (part === SH_CENTER || part === SH_LEFT) shelfLabel(w, side(rx, rz));
+}
+// ShelfBlock.neighborChanged: powered follows the neighbour signal
+Game.prototype.shelfPower = function (x, y, z) {
+  const w = this.world, m = w.getMeta(x, y, z), on = RS.powered(w, x, y, z);
+  if (!!(m & 4) === on) return;
+  if (on) { w.setMeta(x, y, z, (m & 3) | 4); shelfJoin(w, x, y, z); }
+  else { shelfLeave(w, x, y, z, m); w.setMeta(x, y, z, m & 3); }
+  this.sound(on ? 'shelf_activate' : 'shelf_deactivate', x + 0.5, y + 0.5, z + 0.5);
+  this.remeshNear(x, z);
+};
+const _neighborChangedSV = World.prototype.neighborChanged;
+World.prototype.neighborChanged = function (x, y, z) {
+  if (y >= 0 && y <= CH_TOP && IS_SHELF[this.getBlock(x, y, z)] && window.game && game.world === this) game.shelfPower(x, y, z);
+  return _neighborChangedSV.apply(this, arguments);
+};
+// redstone reaches it as it does doors and lamps
+for (const w of SHELF_WOODS) { const id = B[(w + '_shelf').toUpperCase()]; RS_CON[id] = 18; RS_ANY[id] = 1; }
+const _reactSV = RS.react;
+RS.react = function (w, x, y, z) {
+  if (!IS_SHELF[w.getBlock(x, y, z)]) return _reactSV.call(this, w, x, y, z);
+  if (window.game && game.world === w) game.shelfPower(x, y, z);
+};
+const _afterPlaceSV = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const r = _afterPlaceSV.apply(this, arguments);
+  if (IS_SHELF[id] && IS_SHELF[this.world.getBlock(x, y, z)]) { wallShelfBE(this.world, x, y, z); this.shelfPower(x, y, z); }
+  return r;
+};
+// a shelf of a row taken away: the rest make rows of their own
+const _setBlockSV = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  const was = y >= 0 && y <= CH_TOP ? this.getBlock(x, y, z) : 0;
+  if (IS_SHELF[was] && !IS_SHELF[id]) { const m = this.getMeta(x, y, z), r = _setBlockSV.apply(this, arguments); shelfLeave(this, x, y, z, m); return r; }
+  return _setBlockSV.apply(this, arguments);
+};
+
+/* ---------------- using a shelf ---------------- */
+// ShelfBlock.swapHotbar: the row's slots against the hotbar's, the row ending at the hotbar's last slot
+Game.prototype.shelfSwapHotbar = function (x, y, z) {
+  const w = this.world, p = this.player, row = shelfRow(w, x, y, z);
+  let any = false;
+  row.forEach(([sx, sy, sz], i) => {
+    const be = wallShelfBE(w, sx, sy, sz);
+    for (let j = 0; j < 3; j++) {
+      const k = 9 - (row.length - i) * 3 + j;
+      if (k < 0 || k > 8) continue;
+      const a = p.inv[k] || null, b = be.items[j] || null;
+      if (!a && !b) continue;
+      p.inv[k] = b; be.items[j] = a; any = true;
+    }
+    w.setBE(sx, sy, sz, be);
+  });
+  return any;
+};
+const _useBlockSV = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (!IS_SHELF[hit.id]) return _useBlockSV.call(this, p, hit, held);
+  const w = this.world, { x, y, z } = hit, m = w.getMeta(x, y, z), slot = shelfHitSlot(p, hit, m);
+  if (slot < 0) return _useBlockSV.call(this, p, hit, held);
+  const at = [x + 0.5, y + 0.5, z + 0.5];
+  if (m & 4) {
+    if (this.shelfSwapHotbar(x, y, z)) { this.sound('shelf_multi_swap', ...at); this.ui.refreshHotbar(); if (this.redstoneChanged) this.redstoneChanged(x, y, z); }
+    return true;
+  }
+  const be = wallShelfBE(w, x, y, z), cur = be.items[slot] || null, hand = p.inv[p.sel] || null;
+  if (!cur && !hand) return _useBlockSV.call(this, p, hit, held);
+  be.items[slot] = hand ? copyStack(hand) : null;
+  p.inv[p.sel] = p.mode === 1 && !cur ? hand : cur;
+  w.setBE(x, y, z, be);
+  this.sound(!cur ? 'shelf_place' : hand ? 'shelf_swap' : 'shelf_take', ...at);
+  this.ui.refreshHotbar();
+  if (this.redstoneChanged) this.redstoneChanged(x, y, z);
+  return true;
+};
+
+/* ---------------- comparators ---------------- */
+// read from behind only: a bit for each slot holding something
+const _comparatorOutSV = RS.comparatorOut;
+RS.comparatorOut = function (w, x, y, z, m) { this._cmpBack = FACE_OF_LOOK[m & 3] ^ 1; try { return _comparatorOutSV.apply(this, arguments); } finally { this._cmpBack = undefined; } };
+const _containerSignalSV = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  if (!IS_SHELF[w.getBlock(x, y, z)]) return _containerSignalSV.apply(this, arguments);
+  if (this._cmpBack !== undefined && this._cmpBack !== FRONT4[w.getMeta(x, y, z) & 3]) return 0;
+  const be = w.getBE(x, y, z);
+  return be && be.items ? be.items.reduce((s, st, i) => s | (st ? 1 << i : 0), 0) : 0;
+};
+
+/* ---------------- drawing the stacks ---------------- */
+// shelves near the player, listed with the campfires once a second
+const _listFireSV = Game.prototype.listFireAndConduits;
+Game.prototype.listFireAndConduits = function () {
+  _listFireSV.apply(this, arguments);
+  const w = this.world, p = this.player, out = [], pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2) continue;
+    for (const [i, v] of c.be) if (v.type === 'shelf') out.push([c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), v]);
+  }
+  this._shelves = out;
+};
+// ShelfRenderer: a quarter size, side by side 5 pixels apart, a pixel in front of the back plate (blocks against it)
+Game.prototype.drawShelfItems = function (r) {
+  const w = this.world, p = this.player;
+  for (const [x, y, z, be] of this._shelves || []) {
+    if (!be.items || !be.items.some(Boolean) || (x - p.x) ** 2 + (z - p.z) ** 2 > 48 * 48 || !IS_SHELF[w.getBlock(x, y, z)]) continue;
+    const m = w.getMeta(x, y, z), [fx, fz] = shelfFront(m), [rx, rz] = shelfRight(m), l = w.getLightRaw(x, y, z), li = [l >> 4, l & 15];
+    be.items.forEach((st, i) => {
+      if (!st) return;
+      const sprite = itemStyle(st.id) === 'sprite', k = 0.25, back = sprite ? 0.25 : 0.18, s = (i - 1) * 0.3125;
+      const cx = x + 0.5 + rx * s - fx * back, cy = y + 0.5 + (be.bottom ? -0.25 + k * 0.5 : 0), cz = z + 0.5 + rz * s - fz * back;
+      const R = sprite ? [rx, 0, rz] : [-rx, 0, -rz], N = sprite ? [fx, 0, fz] : [-fx, 0, -fz];
+      const mm = new Float32Array([R[0] * k, 0, R[2] * k, 0, 0, k, 0, 0, N[0] * k, 0, N[2] * k, 0, cx, cy, cz, 1]);
+      if (sprite) this.pushItemXform(r, mm, st, li); else this.pushBlockItem(r, mm, st.id, li);
+    });
+  }
+};
+const _renderSpawnerMobsSV = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) { _renderSpawnerMobsSV.call(this, r, alpha); this.drawShelfItems(r); };
+
+/* ---------------- tables ---------------- */
+const _mapColorRuleSV = mapColorRule;
+mapColorRule = function (n) { const m = /^(.*)_shelf$/.exec(n); return m && WOOD_MC[m[1]] ? WOOD_MC[m[1]][0] : _mapColorRuleSV(n); };
+const _buildCreativeSV = buildCreativeTabs;
+buildCreativeTabs = function () {
+  _buildCreativeSV.apply(this, arguments);
+  const f = CREATIVE.functional, at = f.findIndex(e => e.id === itemOf('chiseled_bookshelf'));
+  if (at >= 0) f.splice(at + 1, 0, ...SHELF_WOODS.map(w => ({ id: itemOf(w + '_shelf') })));
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t] of [['shelf_place', 'Item placed'], ['shelf_take', 'Item taken'], ['shelf_swap', 'Item swapped'], ['shelf_multi_swap', 'Items swapped'],
+  ['shelf_activate', 'Shelf activates'], ['shelf_deactivate', 'Shelf deactivates']]) { SND_CAT[n] = 'block'; SUB_TEXT[n] = t; }
+const _audioPlaySV = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^shelf_(place|take|swap|multi_swap|activate|deactivate)$/.test(name)) return _audioPlaySV.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime;
+  switch (name) {
+    case 'shelf_place': this.noiseHit(dst, 'lowpass', 900, 1, 0.08, 0.35); break;
+    case 'shelf_take': this.noiseHit(dst, 'lowpass', 1200, 1, 0.07, 0.3); break;
+    case 'shelf_swap': this.noiseHit(dst, 'lowpass', 1000, 1, 0.07, 0.3); this.noiseHit(dst, 'lowpass', 800, 1, 0.07, 0.25, t0 + 0.08); break;
+    case 'shelf_multi_swap': for (let k = 0; k < 3; k++) this.noiseHit(dst, 'lowpass', 900 + k * 150, 1, 0.06, 0.25, t0 + k * 0.06); break;
+    case 'shelf_activate': this.tone(dst, 'triangle', 300, 420, 0.12, 0.08); break;
+    case 'shelf_deactivate': this.tone(dst, 'triangle', 420, 300, 0.12, 0.08); break;
+  }
+};
+
+/* @file 208_discs.js */
+/* ===================================================================
+   Part 102: music discs like Java
+   - each song's jukebox_song: what a comparator reads from a jukebox
+     holding it (13 gives 1 ... 5 gives 15, by song, not by place in a
+     list) and its credit, shown as "Now Playing" and under the disc's
+     name
+   - three more discs: Tears (a ghast killed by a fireball a player
+     sent back), Lava Chicken (a baby zombie riding a chicken killed by
+     a player) and Bounce (abandoned mineshaft chests in the sulfur
+     caves only: the entry counts toward the pool nowhere else)
+   =================================================================== */
+
+// song: [comparator output, seconds, credit]
+const DISC_SONGS = {
+  '13': [1, 178, 'C418 - 13'], cat: [2, 185, 'C418 - cat'], blocks: [3, 345, 'C418 - blocks'], chirp: [4, 185, 'C418 - chirp'], far: [5, 174, 'C418 - far'],
+  mall: [6, 197, 'C418 - mall'], mellohi: [7, 96, 'C418 - mellohi'], stal: [8, 150, 'C418 - stal'], strad: [9, 188, 'C418 - strad'], ward: [10, 251, 'C418 - ward'],
+  '11': [11, 71, 'C418 - 11'], wait: [12, 238, 'C418 - wait'], otherside: [14, 195, 'Lena Raine - otherside'], '5': [15, 178, 'Samuel Åberg - 5'],
+  pigstep: [13, 149, 'Lena Raine - Pigstep'], relic: [14, 218, 'Aaron Cherof - Relic'], creator: [12, 176, 'Lena Raine - Creator'],
+  creator_music_box: [11, 73, 'Lena Raine - Creator (Music Box)'], precipice: [13, 299, 'Aaron Cherof - Precipice'], tears: [10, 175, 'Amos Roddy - Tears'],
+  lava_chicken: [9, 134, 'Hyper Potions - Lava Chicken'], bounce: [8, 234, 'fingerspit - Bounce'] };
+
+// the jukebox's comparator output by its song
+const _containerSignalDS = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  if (w.getBlock(x, y, z) !== B.JUKEBOX) return _containerSignalDS.apply(this, arguments);
+  const be = w.getBE(x, y, z), it = be && be.disc && ITEMS[be.disc.id], s = it && DISC_SONGS[it.disc];
+  return s ? s[0] : 0;
+};
+// "Now Playing" with the song's credit, over the hotbar
+const _uiChatDS = UI.prototype.chat;
+UI.prototype.chat = function (text, col, ...rest) {
+  const m = typeof text === 'string' && /^Now Playing: Music Disc - (.*)$/.exec(text);
+  if (m) { const d = DISCS.find(k => titleCase(k) === m[1]), s = d && DISC_SONGS[d]; if (s) { if (this.actionBar) return this.actionBar('Now Playing: ' + s[2], col); text = 'Now Playing: ' + s[2]; } }
+  return _uiChatDS.call(this, text, col, ...rest);
+};
+// the tooltip line under "Music Disc"
+const _tooltipLinesDS = tooltipLines;
+tooltipLines = function (st) {
+  const out = _tooltipLinesDS.apply(this, arguments), it = st && ITEMS[st.id], s = it && it.disc && DISC_SONGS[it.disc];
+  if (s && out.length > 1) out[1] = [s[2], out[1][1]];
+  return out;
+};
+
+// the discs that come from deaths
+const _dieDS = Mob.prototype.die;
+Mob.prototype.die = function (source, attacker) {
+  this._deathBy = source;
+  this._onChicken = !!(this.vehicle && this.vehicle.type === 'chicken');
+  return _dieDS.apply(this, arguments);
+};
+const _dropLootDS = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  _dropLootDS.apply(this, arguments);
+  if (this.noDrops || !this.killedByPlayer || !this.game.rule('doMobLoot')) return;
+  const drop = name => this.game.dropItem(this.x, this.y + 0.5, this.z, { id: itemOf(name), count: 1 });
+  if (this.type === 'ghast' && this._deathBy === 'fireball') drop('music_disc_tears');
+  if (this.type === 'zombie' && this.baby && this._onChicken) drop('music_disc_lava_chicken');
+};
+
+// loot entries held to a biome ({ biome }): out of the pick where the container isn't in it
+const LOOT_AT = { w: null, x: 0, y: 0, z: 0 };
+const _pickWeightedDS = pickWeighted;
+pickWeighted = function (entries, R) {
+  if (!entries.some(e => e && e[4] && e[4].biome)) return _pickWeightedDS(entries, R);
+  const A = LOOT_AT, ok = e => !(e && e[4] && e[4].biome) || (A.w && A.w.biome3(A.x, A.y, A.z) === BI[e[4].biome.toUpperCase()]);
+  return _pickWeightedDS(entries.filter(ok), R);
+};
+// where the container being opened is (its loot is rolled then)
+const _getBEDS = World.prototype.getBE;
+World.prototype.getBE = function (x, y, z) {
+  const A = LOOT_AT, sw = A.w, sx = A.x, sy = A.y, sz = A.z;
+  A.w = this; A.x = x; A.y = y; A.z = z;
+  try { return _getBEDS.call(this, x, y, z); } finally { A.w = sw; A.x = sx; A.y = sy; A.z = sz; }
+};
+for (const pool of LOOT.abandoned_mineshaft) for (const e of pool[1]) if (e[0] === 'music_disc_bounce') e[4] = { biome: 'sulfur_caves' };
+
+/* @file 209_happy_ghast.js */
+/* ===================================================================
+   Part 103: dried ghasts, ghastlings, happy ghasts and harnesses
+   (Java 1.21.6)
+   - the dried ghast: from eight ghast tears around soul sand; breaks at
+     once, turns to face the player, holds water; the model
+     dried_ghast_hydration_0..3 (a 10-pixel body and six tentacle stubs,
+     the game's own pictures, block/dried_ghast_hydration_* from a pack)
+   - DriedGhastBlock: a random tick, holding water or not yet dry,
+     sets a tick 5000 ticks off; then in water it takes up a stage
+     (hydration 0 to 3), after the last a ghastling comes out of it
+     facing the way it faced; out of water it dries a stage
+   - the happy ghast: 20 health, 4 x 4, a passive flyer (flying speed
+     0.05); ghastlings (babies, 0.95 across) grow up in 20 minutes,
+     each snowball taking a tenth of the time left off; snowballs and
+     harnesses tempt both within 16 blocks
+   - harnesses (sixteen colours, leather over glass and wool, dyed in a
+     crafting grid): put on a grown happy ghast by using it, sheared
+     off; a harnessed one carries its rider on top, flying along the
+     rider's look (getRiddenInput: ahead and back with the pitch, back
+     at half, sideways, Space up half as much, x 3.9 flying speed;
+     travel at flying speed x 5 / 3), turning 8% of the way to where
+     the rider looks each tick; its goggles come down while it's ridden
+   - a grown one is something to stand on, and stays still while a
+     player is on top of it (and 10 ticks after)
+   =================================================================== */
+
+/* ---------------- the dried ghast ---------------- */
+const DG_DELAY = 5000;
+const DG_COL = [[132, 116, 104], [166, 154, 144], [202, 196, 190], [234, 232, 230]];
+TEXGEN.push(() => {
+  for (let h = 0; h < 4; h++) {
+    const c = DG_COL[h], dk = mul(c, 0.72), n = 'dried_ghast_hydration_' + h + '_';
+    const skin = (d, r, f) => fillF(d, (x, y) => { const v = f(x, y); return v || (r() < 0.22 - h * 0.05 ? dk : mul(c, 0.94 + r() * 0.1)); });
+    // the face: closed eyes (opening as it fills), the mouth, wrinkles that fade
+    T(n + 'north', (d, r) => skin(d, r, (x, y) => (y === 3 || (h === 3 && y === 4)) && (x === 2 || x === 3 || x === 6 || x === 7) ? [60, 54, 50]
+      : y === 6 && (x === 4 || x === 5) ? [80, 66, 62] : h < 2 && (y === 1 || y === 8) && x > 1 && x < 8 ? dk : null));
+    for (const s of ['south', 'east', 'west', 'top']) T(n + s, (d, r) => skin(d, r, (x, y) => h < 3 && (y + (s === 'top' ? x : 0)) % (3 + h) === 1 ? dk : null));
+    T(n + 'bottom', (d, r) => skin(d, r, () => null));
+    T(n + 'tentacles', (d, r) => skin(d, r, (x, y) => (x + y) % 3 === 0 ? dk : null));
+  }
+});
+// the models (drawn facing north in Java): the body, then the six tentacle stubs on its sides and back
+const DG_TENT = [
+  [[0, 0, 5], [3, 1, 7], { north: [1, 1.5, 2.5, 2], east: [0, 1.5, 1, 2], south: [3.5, 1.5, 5, 2], west: [2.5, 1.5, 3.5, 2], up: [2.5, 1.5, 1.5, 0, 90], down: [2.5, 1.5, 3.5, 0, 90] }],
+  [[0, 0, 9], [3, 1, 11], { north: [1, 3.5, 2.5, 4], east: [0, 3.5, 1, 4], south: [3.5, 3.5, 5, 4], west: [2.5, 3.5, 3.5, 4], up: [2.5, 3.5, 1.5, 2, 90], down: [2.5, 3.5, 3.5, 2, 90] }],
+  [[13, 0, 5], [16, 1, 7], { north: [2.5, 7.5, 1, 8], east: [3.5, 7.5, 2.5, 8], south: [5, 7.5, 3.5, 8], west: [1, 7.5, 0, 8], up: [2.5, 6, 1.5, 7.5, 90], down: [2.5, 6, 3.5, 7.5, 90] }],
+  [[13, 0, 9], [16, 1, 11], { north: [2.5, 5.5, 1, 6], east: [3.5, 5.5, 2.5, 6], south: [5, 5.5, 3.5, 6], west: [1, 5.5, 0, 6], up: [2.5, 4, 1.5, 5.5, 90], down: [2.5, 4, 3.5, 5.5, 90] }],
+  [[9, 0, 13], [11, 1, 16], { north: [6, 2.5, 5, 3], east: [7.5, 2.5, 6, 3], south: [8.5, 2.5, 7.5, 3], west: [10, 2.5, 8.5, 3], up: [6, 2.5, 7.5, 1.5, 90], down: [7.5, 1.5, 9, 2.5, 270] }],
+  [[5, 0, 13], [7, 1, 16], { north: [6, 1, 5, 1.5], east: [7.5, 1, 6, 1.5], south: [8.5, 1, 7.5, 1.5], west: [10, 1, 8.5, 1.5], up: [6, 1, 7.5, 0, 90], down: [7.5, 0, 9, 1, 270] }]];
+const DG_QUADS = [];
+BOX_MODELS.dried_ghast = (d, m) => {
+  const h = (m >> 2) & 3;
+  if (!DG_QUADS[h]) {
+    const n = 'dried_ghast_hydration_' + h + '_', full = [0, 0, 10, 10];
+    const els = [jE([3, 0, 3], [13, 10, 13], { north: [full, n + 'north'], east: [full, n + 'east'], south: [full, n + 'south'], west: [full, n + 'west'], up: [full, n + 'top', 180], down: [[10, 0, 0, 10], n + 'bottom'] })];
+    for (const [f, t, fs] of DG_TENT) { const o = {}; for (const k in fs) o[k] = [fs[k].slice(0, 4), n + 'tentacles', fs[k][4] || 0]; els.push(jE(f, t, o)); }
+    DG_QUADS[h] = jFaceSouth(jQuads(els));
+  }
+  return rotParts(DG_QUADS[h], m & 3);
+};
+const _modelCollisionDG = modelCollision;
+modelCollision = function (id, meta, ctx) { return id === B.DRIED_GHAST ? [[3, 0, 3, 13, 10, 13]] : _modelCollisionDG(id, meta, ctx); };
+// DriedGhastBlock.randomTick: holding water or not yet dry, the next stage 5000 ticks off
+const _randomTickDG = Game.prototype.randomTick;
+Game.prototype.randomTick = function (x, y, z, id) {
+  if (id !== B.DRIED_GHAST) return _randomTickDG.apply(this, arguments);
+  const w = this.world;
+  if (w.isWet(x, y, z) || ((w.getMeta(x, y, z) >> 2) & 3)) w.schedule(x, y, z, DG_DELAY, 'dried_ghast');
+};
+// DriedGhastBlock.tick: a stage wetter in water (the last brings the ghastling out), a stage drier out of it
+const _onScheduledDG = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind !== 'dried_ghast') return _onScheduledDG.apply(this, arguments);
+  const w = this.world;
+  if (w.getBlock(x, y, z) !== B.DRIED_GHAST) return;
+  const m = w.getMeta(x, y, z), h = (m >> 2) & 3, at = [x + 0.5, y + 0.5, z + 0.5];
+  if (w.isWet(x, y, z)) {
+    if (h < 3) { w.setMeta(x, y, z, (m & 3) | ((h + 1) << 2)); this.sound('dried_ghast_transition', ...at); this.remeshNear(x, z); return; }
+    w.setBlock(x, y, z, 0, 0); this.remeshNear(x, z);
+    const g = createMob(this, 'happy_ghast', x + 0.5, y, z + 0.5, { baby: true });
+    if (g) { g.yaw = g.bodyYaw = -(m & 3) * Math.PI / 2; g.persistent = true; g.savePrev(); this.entities.push(g); this.sound('ghastling_spawn', ...at); }
+  } else if (h > 0) { w.setMeta(x, y, z, (m & 3) | ((h - 1) << 2)); this.sound('dried_ghast_transition', ...at); this.remeshNear(x, z); }
+};
+const _afterPlaceDG = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const r = _afterPlaceDG.apply(this, arguments);
+  if (id === B.DRIED_GHAST && this.world.getBlock(x, y, z) === B.DRIED_GHAST) this.sound(this.world.isWet(x, y, z) ? 'dried_ghast_place_in_water' : 'dried_ghast_place', x + 0.5, y + 0.5, z + 0.5);
+  return r;
+};
+
+/* ---------------- harnesses ---------------- */
+const HARNESS_COL = c => { const v = DYE_RGB[c] || 0xffffff; return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+TEXGEN.push(() => {
+  for (const c of COLORS) IT(c + '_harness', (d, r) => {
+    const col = HARNESS_COL(c), leather = [120, 76, 44];
+    const paint = f => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const v = f(x, y); if (v) sp(d, x, y, v); } };
+    paint((x, y) => {
+      if (y >= 3 && y <= 7 && x >= 3 && x <= 12) return y === 3 || x === 3 || x === 12 ? mul(leather, 0.8) : mul(leather, 0.95 + r() * 0.1);
+      if ((y === 8 || y === 9) && x >= 2 && x <= 13) return mul(col, 0.9 + r() * 0.1);
+      if (y >= 10 && y <= 12 && (x >= 3 && x <= 6 || x >= 9 && x <= 12)) return (x === 3 || x === 6 || x === 9 || x === 12 || y === 10 || y === 12) ? [60, 46, 36] : [150, 210, 230];
+      if (y === 11 && (x === 7 || x === 8)) return [60, 46, 36];
+      return null;
+    });
+  });
+});
+
+/* ---------------- the happy ghast ---------------- */
+defMob('happy_ghast', { cat: 'creature', w: 4, h: 4, hp: 20, walk: 0.5, run: 0.8, xp: [1, 3], baby: true, flying: 'happy', ai: ['happyGhast'], drops: [], persistent: true,
+  tempt: ['snowball', ...COLORS.map(c => c + '_harness')], sounds: ['happy_ghast_ambient', 'happy_ghast_hurt', 'happy_ghast_death'], rideable: 'harness', noFall: true });
+// HappyGhastModel: the ghast's body (16 across) and its nine tentacles, 4 times up; a ghastling's inner body; the harness and its goggles
+const HG_TENT = [13, 11, 9, 9, 11, 10, 12, 9, 12];
+MOB_MODELS.happy_ghast = { tw: 64, th: 64, scale: 4, parts: [
+  P_('body', [0, 16, 0], [[0, 0, -8, -8, -8, 16, 16, 16]]),
+  P_('inner_body', [0, 16, 0], [[0, 32, -8, -8, -8, 16, 16, 16, -0.5]]),
+  ...HG_TENT.map((len, i) => {
+    const x = (((i % 3) - (Math.floor(i / 3) % 2) * 0.5 + 0.25) / 2 * 2 - 1) * 5, z = (Math.floor(i / 3) / 2 * 2 - 1) * 5;
+    return P_('tentacle' + i, [x, 23, z], [[0, 0, -1, 0, -1, 2, len, 2]]);
+  }),
+  P_('harness', [0, 16, 0], [[0, 0, -8, -8, -8, 16, 16, 16, 0.5]]),
+  P_('goggles', [0, 16, 0], [[0, 32, -8, -2.5, -8.6, 16, 5, 5, 0.15]])],
+  anim(P, st) {
+    for (let i = 0; i < 9; i++) P['tentacle' + i] = [0.2 * Math.sin(st.age * 0.3 + i) + 0.4, 0, 0];
+    if (!st.baby) P['inner_body#hide'] = 1;
+    // the goggles over the eyes while ridden, pushed up on the brow otherwise
+    P['goggles#y'] = st.ridden ? 13 : 9.5;
+  } };
+const HG_BASE = ['body', ...HG_TENT.map((_, i) => 'tentacle' + i)];
+MOB_SKINS.happy_ghast = m => {
+  if (m.baby) return [{ key: 'entity/ghast/happy_ghast_baby', only: [...HG_BASE, 'inner_body'] }];
+  const out = [{ key: 'entity/ghast/happy_ghast', only: HG_BASE }];
+  if (m.data.harness) out.push({ key: 'entity/equipment/happy_ghast_body/' + m.data.harness + '_harness', only: ['harness', 'goggles'] });
+  return out;
+};
+// the game's own pictures (packs have theirs): white, a sleepy smile; a ghastling's pink heart showing through; harness straps and goggles
+const hgFace = (x, y, baby) => (y === 5 && (x >= 3 && x <= 5 || x >= 10 && x <= 12)) ? [96, 96, 104] : (y === 11 && x >= 6 && x <= 9) || (y === 10 && (x === 5 || x === 10)) ? [110, 96, 100]
+  : (y === 8 && (x === 2 || x === 3 || x === 12 || x === 13)) ? (baby ? [240, 150, 170] : [236, 188, 196]) : null;
+defSkin('entity/ghast/happy_ghast', 64, 64, () => skinParts(64, 64, MOB_MODELS.happy_ghast.parts.filter(p => HG_BASE.includes(p.n)), {
+  body: (f, x, y, W, H, R) => (f === 'front' && hgFace(x, y)) || nz([246, 246, 248], R, 0.025),
+  '*': (f, x, y, W, H, R) => nz([238, 238, 240], R, 0.04),
+}, 1031));
+defSkin('entity/ghast/happy_ghast_baby', 64, 64, () => skinParts(64, 64, MOB_MODELS.happy_ghast.parts.filter(p => p.n !== 'harness' && p.n !== 'goggles'), {
+  body: (f, x, y, W, H, R) => (f === 'front' && hgFace(x, y, true)) || (f === 'front' && y >= 9 && y <= 10 && (x === 2 || x === 13) ? null : nz([248, 248, 250], R, 0.02)),
+  inner_body: (f, x, y, W, H, R) => nz([236, 140, 150], R, 0.05),
+  '*': (f, x, y, W, H, R) => nz([240, 240, 242], R, 0.04),
+}, 1032));
+for (const c of COLORS) defSkin('entity/equipment/happy_ghast_body/' + c + '_harness', 64, 64, () => {
+  const col = HARNESS_COL(c), leather = [126, 80, 46];
+  return skinParts(64, 64, MOB_MODELS.happy_ghast.parts.filter(p => p.n === 'harness' || p.n === 'goggles'), {
+    harness: (f, x, y, W, H, R) => f === 'top' ? (x === 0 || y === 0 || x === W - 1 || y === H - 1 ? nz(col, R, 0.04) : nz(leather, R, 0.06))
+      : f === 'bottom' ? null : y < 2 ? nz(col, R, 0.04) : y < 11 && (x % 8 === 3 || x % 8 === 4) ? nz(shd(leather, 0.85), R, 0.05) : y === 11 ? nz(shd(col, 0.8), R, 0.04) : null,
+    goggles: (f, x, y, W, H, R) => f !== 'front' ? (f === 'left' || f === 'right' ? (y === 2 ? [60, 46, 36] : null) : null)
+      : (x >= 2 && x <= 6 || x >= 9 && x <= 13) && y >= 1 && y <= 3 ? [160, 214, 236] : y === 2 || x >= 2 && x <= 13 ? [70, 52, 40] : null,
+  }, 1040 + COLORS.indexOf(c));
+});
+
+class HappyGhast extends Mob {
+  // a ghastling is 0.2375 the size of a grown one (the renderer halves babies already)
+  renderScale() { return this.baby ? 0.475 : 1; }
+  animState(a) { const st = super.animState(a); st.ridden = !!this.rider; return st; }
+  tick() {
+    const s = this.baby ? 0.95 : 4;
+    if (this.w !== s) { this.w = this.h = s; }
+    super.tick();
+    // HappyGhast.canBeCollidedWith: a grown one is something to stand on; a player on it keeps it still
+    if (!this.baby && !this.dead && this.deathTime === 0) {
+      this._smTick = this.game.world.tick; SOLID_MOBS.add(this);
+      const p = this.game.player;
+      if (p && !p.riding && Math.abs(p.y - (this.y + this.h)) < 0.1 && Math.abs(p.x - this.x) < this.w / 2 + 0.3 && Math.abs(p.z - this.z) < this.w / 2 + 0.3) this.data.still = 10;
+      else if (this.data.still > 0) this.data.still--;
+    } else SOLID_MOBS.delete(this);
+  }
+  // HappyGhast.getRiddenInput and travel: flying along the rider's look
+  riddenTick() {
+    const p = this.rider, g = this.game, inp = g.input;
+    if (this.baby || !this.data.harness) { g.dismount(p); return; }
+    const fw = (inp.keys.has('KeyW') ? 1 : 0) - (inp.keys.has('KeyS') ? 1 : 0), side = (inp.keys.has('KeyA') ? 1 : 0) - (inp.keys.has('KeyD') ? 1 : 0);
+    let ahead = 0, up = 0;
+    if (fw) { ahead = Math.cos(p.pitch); up = Math.sin(p.pitch); if (fw < 0) { ahead *= -0.5; up *= -0.5; } }
+    if (inp.keys.has('Space')) up += 0.5;
+    // turn 8% of the way to where the rider looks each tick
+    let d = (p.yaw + Math.PI) - this.yaw;
+    while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+    this.yaw += d * 0.08; this.bodyYaw = this.yaw; this.headYaw = 0;
+    let ix = side * 0.195, iy = up * 0.195, iz = ahead * 0.195;
+    const l2 = ix * ix + iy * iy + iz * iz, k = 0.05 * 5 / 3;
+    if (l2 > 1) { const l = Math.sqrt(l2); ix /= l; iy /= l; iz /= l; }
+    const sn = Math.sin(this.yaw), cs = Math.cos(this.yaw);
+    this.vx += (cs * ix + sn * iz) * k; this.vy += iy * k; this.vz += (-sn * ix + cs * iz) * k;
+    this.move = null; this.nav = null;
+  }
+}
+MOB_CLASSES.happy_ghast = HappyGhast;
+// standing still, tempted by snowballs and harnesses, or floating about near the ground
+GOALS.happyGhast = m => {
+  const g = m.game, w = g.world, p = g.player;
+  if (m.data.still > 0) { m.move = null; m.vx *= 0.5; m.vz *= 0.5; m.vy *= 0.5; return true; }
+  const held = p && !p.dead && p.held && ITEMS[p.held.id] ? ITEMS[p.held.id].name : '';
+  if (held && m.T.tempt.includes(held) && m.distTo(p) < 16 && m.distTo(p) > (m.baby ? 2 : 5)) {
+    const dx = p.x - m.x, dy = p.y + (m.baby ? 1 : 0) - m.y, dz = p.z - m.z, l = Math.hypot(dx, dy, dz) || 1;
+    m.move = [dx / l, dz / l, m.T.run, false, dy / l]; m.lookAt(p.x, p.y + 1.6, p.z); return true;
+  }
+  if (!m._floatTo || m.age % 120 === 0 && Math.random() < 0.3 || Math.hypot(m._floatTo[0] - m.x, m._floatTo[2] - m.z) < 1.5) {
+    const tx = m.x + (Math.random() * 2 - 1) * 16, tz = m.z + (Math.random() * 2 - 1) * 16;
+    let gy = Math.floor(m.y);
+    for (let k = 0; k < 24 && gy > 0 && !SOLID[w.getBlock(Math.floor(tx), gy - 1, Math.floor(tz))]; k++) gy--;
+    m._floatTo = [tx, gy + 1 + Math.random() * (m.baby ? 2 : 4), tz];
+  }
+  const [tx, ty, tz] = m._floatTo, dx = tx - m.x, dy = ty - m.y, dz = tz - m.z, l = Math.hypot(dx, dy, dz) || 1;
+  m.move = [dx / l, dz / l, m.T.walk, false, dy / l];
+  return true;
+};
+// using one: a snowball for a ghastling, a harness on (shears take it off), or a ride on a harnessed one
+MOB_INTERACT.happy_ghast = (m, p, held, name) => {
+  const g = m.game;
+  if (name === 'snowball' && m.baby) {
+    m.growth = babyFed(m.growth); p.consumeHeld(1); g.particles.poof(m.x, m.y + m.h, m.z, [0.4, 0.9, 0.4], 6); g.sound('ghastling_ambient', m.x, m.y, m.z); return true;
+  }
+  if (m.baby) return false;
+  const it = held && ITEMS[held.id];
+  if (it && it.harness && !m.data.harness) { m.data.harness = it.harness; if (p.mode !== 1) p.consumeHeld(1); g.sound('happy_ghast_equip', m.x, m.y + 2, m.z); return true; }
+  if (held && held.id === I.SHEARS && m.data.harness && !m.rider) {
+    g.dropItem(m.x, m.y + 1, m.z, { id: itemOf(m.data.harness + '_harness'), count: 1 }); m.data.harness = null; g.sound('happy_ghast_unequip', m.x, m.y + 2, m.z);
+    if (p.damageHeld) p.damageHeld(1);
+    return true;
+  }
+  if (m.data.harness && !p.sneaking && !(it && it.harness)) { g.mount(p, m); g.sound('happy_ghast_goggles_down', m.x, m.y + 2, m.z); return true; }
+  return false;
+};
+// riding on top of it
+const _rideTickHG = Player.prototype.rideTick;
+Player.prototype.rideTick = function (inp) {
+  const m = this.riding, r = _rideTickHG.apply(this, arguments);
+  if (r && m && m.type === 'happy_ghast' && this.riding === m) { this.y = m.y + m.h; this.x = m.x; this.z = m.z; }
+  return r;
+};
+// a harness is dropped with the ghast
+const _dropLootHG = Mob.prototype.dropLoot;
+Mob.prototype.dropLoot = function () {
+  _dropLootHG.apply(this, arguments);
+  if (this.type === 'happy_ghast' && this.data.harness && this.game.rule('doMobLoot')) this.game.dropItem(this.x, this.y + 1, this.z, { id: itemOf(this.data.harness + '_harness'), count: 1 });
+};
+
+/* ---------------- sounds ---------------- */
+for (const [n, t, c] of [['dried_ghast_place', 'Dried Ghast placed', 'block'], ['dried_ghast_place_in_water', 'Dried Ghast placed in water', 'block'], ['dried_ghast_transition', 'Dried Ghast changes', 'block'],
+  ['ghastling_spawn', 'Ghastling appears', 'neutral'], ['ghastling_ambient', 'Ghastling coos', 'neutral'], ['happy_ghast_ambient', 'Happy Ghast coos', 'neutral'],
+  ['happy_ghast_hurt', 'Happy Ghast hurts', 'neutral'], ['happy_ghast_death', 'Happy Ghast dies', 'neutral'], ['happy_ghast_equip', 'Harness equips', 'neutral'],
+  ['happy_ghast_unequip', 'Harness unequips', 'neutral'], ['happy_ghast_goggles_down', 'Goggles go down', 'neutral']]) { SND_CAT[n] = c; SUB_TEXT[n] = t; }
+const _audioPlayHG = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (!/^(dried_ghast_[a-z_]+|ghastling_[a-z]+|happy_ghast_[a-z_]+)$/.test(name)) return _audioPlayHG.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const t0 = this.ctx.currentTime;
+  switch (name) {
+    case 'dried_ghast_place': case 'dried_ghast_place_in_water': this.noiseHit(dst, 'lowpass', name.endsWith('water') ? 500 : 900, 1, 0.12, 0.35); break;
+    case 'dried_ghast_transition': this.noiseHit(dst, 'bandpass', 700, 2, 0.2, 0.25); break;
+    case 'ghastling_spawn': [700, 940, 1180].forEach((f, i) => this.tone(dst, 'sine', f, f * 1.15, 0.12, 0.07, t0 + i * 0.08)); break;
+    case 'ghastling_ambient': this.tone(dst, 'sine', 900, 1150, 0.18, 0.07); break;
+    case 'happy_ghast_ambient': this.tone(dst, 'sine', 420, 560, 0.45, 0.08); this.tone(dst, 'sine', 560, 470, 0.35, 0.05, t0 + 0.35); break;
+    case 'happy_ghast_hurt': this.tone(dst, 'triangle', 520, 330, 0.25, 0.09); break;
+    case 'happy_ghast_death': this.tone(dst, 'triangle', 480, 160, 0.9, 0.1); break;
+    case 'happy_ghast_equip': this.noiseHit(dst, 'lowpass', 1100, 1, 0.12, 0.3); break;
+    case 'happy_ghast_unequip': this.noiseHit(dst, 'highpass', 1500, 1, 0.12, 0.25); break;
+    case 'happy_ghast_goggles_down': this.noiseHit(dst, 'bandpass', 1800, 3, 0.06, 0.2); break;
+  }
+};
+
+/* @file 210_copper_chests.js */
+/* ===================================================================
+   Part 104: copper chests (Java 1.21.9)
+   - a chest ringed with eight copper ingots; 3 hard, 6 against
+     explosions, a stone pickaxe or better; four stages of weathering,
+     each with a waxed twin (honeycomb), scraped back a stage by an axe
+   - chests in all else: large chests of two of the same kind, the lid,
+     comparators, hoppers, piglins minding them; drawn with Java's chest
+     model and entity/chest/copper, copper_exposed, copper_weathered,
+     copper_oxidized (and their _left and _right halves)
+   - CopperChestBlock: a large one weathers as one (its left half takes
+     the random tick and turns its right half with it), and wax or an
+     axe on either half does both; not while someone looks inside
+   - opening and shutting sound of copper, duller once weathered or
+     oxidized
+   =================================================================== */
+
+const COPPER_CHESTS = [];
+for (const wx of ['', 'waxed_']) for (let s = 0; s < 4; s++) COPPER_CHESTS.push(B[copperName(wx + OXID[s], 'chest').toUpperCase()]);
+const IS_COPPER_CHEST = new Uint8Array(MAXB);
+for (const id of COPPER_CHESTS) {
+  IS_COPPER_CHEST[id] = 1; CHEST_DRAWN.add(id); NOMESH[id] = 1; CHEST_PAIRS.add(id); BLAST_RES[id] = 6; HAS_BE[id] = 1;
+  CHEST_SKIN_OF[id] = 'entity/chest/copper' + ['', '_exposed', '_weathered', '_oxidized'][BLK[id].copper];
+}
+for (let s = 0; s < 4; s++) {
+  const id = B[copperName(OXID[s], 'chest').toUpperCase()], wid = B[copperName('waxed_' + OXID[s], 'chest').toUpperCase()];
+  if (s < 3) COPPER_NEXT[id] = B[copperName(OXID[s + 1], 'chest').toUpperCase()];
+  if (s > 0) COPPER_PREV[id] = B[copperName(OXID[s - 1], 'chest').toUpperCase()];
+  COPPER_WAX[id] = wid; COPPER_UNWAX[wid] = id;
+}
+// the game's own pictures of them: the chest's planks as plates of copper
+const COPPER_CHEST_LOOKS = [[196, 110, 78], [166, 128, 104], [112, 158, 122], [86, 168, 140]].map(c => ({ body: c, rim: shd(c, 0.55), seam: shd(c, 0.55), band: shd(c, 0.75), inside: shd(c, 0.4),
+  lock: [236, 200, 160], lockDark: shd(c, 0.6), lockSide: shd(c, 0.85) }));
+COPPER_CHEST_LOOKS.forEach((look, s) => ['', '_left', '_right'].forEach((h, t) => defSkin('entity/chest/copper' + ['', '_exposed', '_weathered', '_oxidized'][s] + h, 64, 64, () => chestSkin(t, look, 7311 + s * 3 + t))));
+
+// a large one weathers as one: the left half turns the right; a right half doesn't weather alone; nor while it's open
+const _weatherCopperCC = Game.prototype.weatherCopper;
+Game.prototype.weatherCopper = function (x, y, z, id, R) {
+  if (!IS_COPPER_CHEST[id]) return _weatherCopperCC.apply(this, arguments);
+  const w = this.world, m = w.getMeta(x, y, z);
+  if (chestType(m) === 2 || (this._openChest && this._openChest.some(h => h[0] === x && h[1] === y && h[2] === z))) return;
+  const other = chestPartner(w, x, y, z), om = other && w.getMeta(other[0], other[1], other[2]);
+  _weatherCopperCC.apply(this, arguments);
+  const now = w.getBlock(x, y, z);
+  if (now !== id && other) ccTurnPair(w, x, y, z, m, other, om, id, now);
+};
+// both halves to the new kind, still a pair (the first half's change mustn't part them)
+function ccTurnPair(w, x, y, z, m, other, om, was, now) {
+  if (w.getBlock(other[0], other[1], other[2]) !== was) return;
+  w.setBlock(other[0], other[1], other[2], now, om);
+  if (w.getMeta(x, y, z) !== m) w.setMeta(x, y, z, m);
+  if (w.getMeta(other[0], other[1], other[2]) !== om) w.setMeta(other[0], other[1], other[2], om);
+}
+// wax or an axe on either half does both
+const _useItemSpecialCC = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  if (!hit || !IS_COPPER_CHEST[hit.id]) return _useItemSpecialCC.apply(this, arguments);
+  const w = this.world, m = w.getMeta(hit.x, hit.y, hit.z), other = chestPartner(w, hit.x, hit.y, hit.z), om = other && w.getMeta(other[0], other[1], other[2]);
+  const r = _useItemSpecialCC.apply(this, arguments), now = w.getBlock(hit.x, hit.y, hit.z);
+  if (now !== hit.id && other) ccTurnPair(w, hit.x, hit.y, hit.z, m, other, om, hit.id, now);
+  return r;
+};
+// the sounds: copper, duller weathered or oxidized
+const copperChestSound = (w, x, y, z) => { const id = w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)); return IS_COPPER_CHEST[id] ? ['', '', '_weathered', '_oxidized'][BLK[id].copper] : null; };
+const _soundCC = Game.prototype.sound;
+Game.prototype.sound = function (name, x, y, z, ...rest) {
+  if ((name === 'chest' || name === 'chest_close') && this.world) {
+    const k = copperChestSound(this.world, x, y, z);
+    if (k !== null) return _soundCC.call(this, 'copper_chest' + k + (name === 'chest' ? '_open' : '_close'), x, y, z, ...rest);
+  }
+  return _soundCC.call(this, name, x, y, z, ...rest);
+};
+for (const k of ['', '_weathered', '_oxidized']) for (const [a, t] of [['_open', 'opens'], ['_close', 'closes']]) {
+  SND_CAT['copper_chest' + k + a] = 'block'; SUB_TEXT['copper_chest' + k + a] = 'Copper Chest ' + t;
+}
+const _audioPlayCC = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  const m = /^copper_chest(_weathered|_oxidized)?_(open|close)$/.exec(name);
+  if (!m) return _audioPlayCC.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 0.5);
+  if (!dst) return;
+  const dull = m[1] === '_oxidized' ? 0.6 : m[1] === '_weathered' ? 0.8 : 1, v = (0.9 + Math.random() * 0.1) * dull;
+  if (m[2] === 'open') { this.noiseHit(dst, 'bandpass', 2600 * v, 2, 0.12, 0.3); this.tone(dst, 'triangle', 620 * v, 760 * v, 0.18, 0.08); }
+  else { this.noiseHit(dst, 'bandpass', 1800 * v, 2, 0.1, 0.35); this.tone(dst, 'triangle', 520 * v, 300 * v, 0.16, 0.1); }
+};
 
 </script>
 </body>

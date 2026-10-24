@@ -200,8 +200,9 @@ decoration of 26.3):
   biome with Java's fuzzy biome borders.
 - **The same structure positions**: villages (with the same village type), desert pyramids,
   jungle temples, swamp huts, igloos, pillager outposts, ocean monuments, shipwrecks, ruined
-  portals, ancient cities, trail ruins, trial chambers, buried treasure, mineshafts, desert wells
-  and all 128 strongholds start where Java Edition starts them, so `/locate` and seed maps agree.
+  portals, ancient cities, trail ruins, trial chambers, buried treasure, mineshafts and all 128
+  strongholds start where Java Edition starts them, so `/locate` and seed maps agree. Desert wells are features, as
+  in Java, and come with the decoration below.
   The buildings themselves are Blockcraft's own designs, not Mojang's, but they sit on the land the way Java's
   do: villages and pillager outposts shape the ground around their buildings with Java's own terrain adaptation,
   and abandoned villages turn up where Java's do.
@@ -229,9 +230,10 @@ starts and the strongholds against cubiomes.
   reference has it), and the sulfur caves' stone bands match the reference except that Blockcraft samples them
   in 3D as 26.3's data asks (the reference flattens them). Where the features of two
   chunks overlap at their border, Java's result depends on which chunk it decorated first; Blockcraft
-  gives one of those results, the same however the world is explored. Fossils and desert wells,
-  which Java builds from structure files, are placed where Java places them but built to the game's own designs; the
-  sulfur caves' springs and 26.3's abandoned camps (structure files too) aren't placed yet. Chunks of worlds made before this
+  gives one of those results, the same however the world is explored. Fossils, which Java builds from structure
+  files, are placed where Java places them but built to the game's own designs; desert wells (a structure file in 26.x
+  too) come out block for block like Java's. The sulfur caves' springs and 26.3's abandoned camps (structure files as
+  well) aren't placed yet. Chunks of worlds made before this
   version keep their old decoration, so a tree can be cut off where old and new chunks meet.
 
 ### Creating a world
@@ -704,6 +706,29 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   pottery sherds (and in warm ruins a sniffer egg) to brush out. The ruins themselves are the game's own designs.
   Fossils are back too: spines and skulls of bone blocks (with a little coal, or diamonds deep down) buried under
   deserts and swamps where Java's seed puts them (the bones' shapes are the game's own).
+- **Curse of Binding like Java's** (Part 100): armor with Curse of Binding can't come off once it's worn, by clicking,
+  shift-clicking, number keys, F or Q (except in Creative). Using armor or an elytra from your hand while you wear
+  something in its slot swaps the two, as in Java, unless the worn piece is cursed.
+- **Shelves** (Part 101, from Java 1.21.9): a shelf of every wood, made from stripped logs. Each holds three stacks,
+  shown on its front, that you swap with the one in your hand. Powered, up to three shelves side by side make a row,
+  and using one swaps the whole row with your hotbar. A comparator behind a shelf reads which of its slots hold
+  something, and a broken shelf drops what it held.
+- **More music discs** (Part 102): Tears (from a ghast killed by a fireball you sent back), Lava Chicken (from a baby
+  zombie riding a chicken) and 26.x's Bounce (from mineshaft chests in the sulfur caves). A comparator by a jukebox
+  now gives the signal Java gives for each song, and a disc's credit shows when it starts playing.
+- **Happy ghasts** (Part 103, from Java 1.21.6): craft a dried ghast from ghast tears and soul sand and keep it in
+  water: it soaks the water up stage by stage, and then a ghastling comes out (out of water it dries out again).
+  Snowballs make a ghastling grow up faster. Put a harness (in sixteen colours) on a grown happy ghast to ride it: it
+  flies the way you look, Space takes it up, and shears take the harness off. You can stand on top of one too, and it
+  keeps still while you do.
+- **Copper chests** (Part 104, from Java 1.21.9): chests ringed with copper. They weather like other copper (a large
+  one as a single piece), honeycomb waxes them and an axe scrapes them back a stage (sneak to use either on a chest),
+  and they sound like copper, duller when weathered.
+- **Desert wells like 26.x's** (Part 105): as in 26.x, desert wells are part of the decoration, placed where Java's
+  seed places them (only on sand with ground under it) and built block for block like Java's, with two suspicious sand
+  blocks under the water that hold pottery sherds, an emerald, a brick, suspicious stew or a stick to brush out.
+  Ghasts' tentacles now have Java's lengths, and feeding a baby animal takes a tenth of the time it still has to grow
+  off, as in Java.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
