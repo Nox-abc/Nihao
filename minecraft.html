@@ -22030,6 +22030,7 @@ function packTexMap() {
   for (let k = 0; k < 8; k++) set('particle_generic_' + k, 'particle/generic_' + (7 - k));
   set('particle_flame', 'particle/flame'); set('particle_lava', 'particle/lava'); set('particle_bubble', 'particle/bubble');
   set('particle_crit', 'particle/critical_hit'); set('particle_splash', 'particle/splash_0');
+  set('particle_firefly', 'particle/firefly'); set('particle_glow', 'particle/glow');
   for (const g in PACK_ANIM) for (let k = 1; k < PACK_ANIM[g]; k++) m[g + '_' + k] = m[g];
   for (const n of PACK_COMPOSITE) m[n] = [];
   return PACKS.texMap = m;
@@ -23136,6 +23137,9 @@ class Game {
       if (p.inv.length < 36) p.inv.length = 36;
       for (let i = 0; i < 36; i++) if (p.inv[i] === undefined) p.inv[i] = null;
       p.spawn = s.spawn || null; p.spawnDim = s.spawnDim || 'overworld';
+      // the bed or anchor the point belongs to (older saves: whatever stands under it, if it turns out to be one)
+      p.spawnBlock = s.spawnBlock || (p.spawn && !s.spawnForced ? [Math.floor(p.spawn[0]), Math.floor(p.spawn[1]) - 1, Math.floor(p.spawn[2])] : null);
+      p.spawnBlockGuess = !s.spawnBlock && !!p.spawnBlock; p.spawnYaw = s.spawnYaw || 0; p.spawnForced = !!s.spawnForced;
       p.savePrev();
       this.waitSpawn = false;
       if (s.dead) { p.health = 0; }
@@ -23532,7 +23536,7 @@ class Game {
   // ---------------- saving ----------------
   playerData() {
     const p = this.player;
-    return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, sat: p.sat, mode: p.mode, xpLevel: p.xpLevel, xp: p.xp, flying: p.flying, sel: p.sel, spawn: p.spawn, spawnDim: p.spawnDim, dead: p.dead,
+    return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, sat: p.sat, mode: p.mode, xpLevel: p.xpLevel, xp: p.xp, flying: p.flying, sel: p.sel, spawn: p.spawn, spawnDim: p.spawnDim, spawnBlock: p.spawnBlock || undefined, spawnYaw: p.spawnYaw, spawnForced: p.spawnForced || undefined, dead: p.dead,
       inv: p.inv.map(saveStack), armor: p.armor.map(saveStack), offhand: p.offhand.map(saveStack), ender: p.ender ? p.ender.map(saveStack) : undefined };
   }
   async saveAll() {
@@ -23730,7 +23734,7 @@ class Game {
     this.randomTicks();
     this.tickFurnaces();
     this.tickBrewers();
-    if (this.sleeping) { this.sleepTick(); this.input.reset(); }
+    if (this.sleeping) { this.sleepTick(); if (this.sleeping > 0 && this.sleeping < 100) this.input.reset(); }
     p.tick(this.input);
     for (const e of this.entities) if (!e.dead && this.inSimChunk(Math.floor(e.x) >> 4, Math.floor(e.z) >> 4)) e.tick();
     this.entities = this.entities.filter(e => !e.dead);
@@ -24010,14 +24014,30 @@ class Game {
     }
     this.breakBlock(x, y, z, null, true);
   }
+  // BedBlock.use and ServerPlayer.startSleepInBed (Part 76): a villager asleep in the bed is woken instead; then within reach of
+  // either half (3 across, 2 up or down), nothing solid over either half, the respawn point set, then the sky dark enough
+  // (Level.isDay: skyDarken under 4) and, out of creative, no monster within 8 across and 5 up or down of the bed
   tryToSleep(p, hit) {
-    const w = this.world, t = w.time % 24000;
-    p.spawn = [hit.x + 0.5, hit.y + 1, hit.z + 0.5]; p.spawnDim = 'overworld';
-    if (t > 1000 && t < 12542 && !w.raining) { this.ui.chat('You can sleep only at night. Respawn point set.', '#ccc'); return; }
-    if (this.entities.some(e => e instanceof Mob && !e.T.passive && e.target && Math.hypot(e.x - p.x, e.z - p.z) < 10)) { this.ui.chat('You may not rest now; there are monsters nearby', '#f88'); return; }
-    this.sleeping = 1;
-    p.x = hit.x + 0.5; p.z = hit.z + 0.5; p.y = hit.y + 0.6; p.vx = p.vy = p.vz = 0; p.savePrev();
-    this.ui.chat('Respawn point set', '#ccc');
+    const w = this.world, h = bedHead(w, hit.x, hit.y, hit.z);
+    if (!h || p.dead || this.sleeping) return;
+    const v = this.entities.find(e => e.type === 'villager' && e.data && e.data.sleeping && Math.floor(e.x) === h.x && Math.floor(e.z) === h.z && Math.abs(e.y - h.y) < 1);
+    if (v) { v.data.sleeping = false; v.y += 0.5; return; }
+    const reach = (x, z) => Math.abs(p.x - x - 0.5) <= 3 && Math.abs(p.y - h.y) <= 2 && Math.abs(p.z - z - 0.5) <= 3;
+    if (!reach(h.x, h.z) && !reach(h.x - h.d[0], h.z - h.d[1])) { this.ui.chat("You're too far from the bed", '#ccc'); return; }
+    if (bedSuffocates(w, h.x, h.y + 1, h.z) || bedSuffocates(w, h.x - h.d[0], h.y + 1, h.z - h.d[1])) { this.ui.chat('The bed is blocked', '#ccc'); return; }
+    const old = p.spawnBlock, moved = !old || old[0] !== h.x || old[1] !== h.y || old[2] !== h.z || (p.spawnDim || 'overworld') !== w.dim;
+    p.spawn = [h.x + 0.5, h.y + 1, h.z + 0.5]; p.spawnDim = w.dim; p.spawnBlock = [h.x, h.y, h.z]; p.spawnYaw = p.yaw; p.spawnBlockGuess = false; p.spawnForced = false;
+    if (moved) this.ui.chat('Respawn point set', '#ccc');
+    if (this.skyDarken() < 4) { this.ui.chat('You can only sleep at night or during a thunderstorm', '#ccc'); return; }
+    const cx = h.x + 0.5, cz = h.z + 0.5;
+    if (p.mode !== 1 && this.entities.some(e => keepsAwake(e, p) && e.x + e.w / 2 > cx - 8 && e.x - e.w / 2 < cx + 8 && e.y + e.h > h.y - 5 && e.y < h.y + 5 && e.z + e.w / 2 > cz - 8 && e.z - e.w / 2 < cz + 8)) {
+      this.ui.chat('Monsters are too close to rest', '#f88'); return;
+    }
+    // lying at the head, looking toward the foot
+    this.sleeping = 1; p.sleepBed = [h.x, h.y, h.z]; p._bedYaw = p.yaw;
+    p.x = cx; p.y = h.y + 0.6875; p.z = cz; p.vx = p.vy = p.vz = 0;
+    p.yaw = Math.atan2(h.d[0], h.d[1]); p.pitch = 0; p.savePrev();
+    this.bedScreen(true);
   }
   sleepTick() {
     const f = $('fx-sleep');
@@ -24031,8 +24051,9 @@ class Game {
       for (const e of this.entities) if (e instanceof Mob && e.T.cat === 'monster' && !e.persistent && !e.customName) e.dead = true;
       this.player.awake = 0;
     }
-    if (this.sleeping > 100) f.style.opacity = Math.max(0, 1 - (this.sleeping - 100) / 20);
-    if (this.sleeping > 120) { this.sleeping = 0; f.style.opacity = 0; }
+    // awake again at 100: the dark fades over 10 ticks (Gui.renderSleepOverlay)
+    if (this.sleeping > 100) f.style.opacity = Math.max(0, 1 - (this.sleeping - 100) / 10);
+    if (this.sleeping >= 110) { this.sleeping = 0; f.style.opacity = 0; }
   }
   explode(x, y, z, power, noBlocks, source) {
     const w = this.world;
@@ -24159,7 +24180,7 @@ class Game {
         }
         case 'kill': p.mode === 1 ? (p.health = 0, p.dead = true, this.onDeath('kill')) : p.hurt(1000, 'kill'); break;
         case 'seed': say('Seed: [' + (w.vanilla ? w.seed64 : w.seed) + ']'); break;
-        case 'spawnpoint': p.spawn = [p.x, p.y, p.z]; p.spawnDim = w.dim; say('Set spawn point to ' + Math.floor(p.x) + ', ' + showY(Math.floor(p.y)) + ', ' + Math.floor(p.z)); break;
+        case 'spawnpoint': p.spawn = [p.x, p.y, p.z]; p.spawnDim = w.dim; p.spawnBlock = null; p.spawnForced = true; say('Set spawn point to ' + Math.floor(p.x) + ', ' + showY(Math.floor(p.y)) + ', ' + Math.floor(p.z)); break;
         case 'clear': p.inv.fill(null); this.ui.refreshHotbar(); say('Cleared inventory'); break;
         case 'difficulty': { const v = { peaceful: 0, easy: 1, normal: 2, hard: 3 }[a[1]] ?? parseInt(a[1], 10); if (!(v >= 0 && v <= 3)) return say('Usage: /difficulty <peaceful|easy|normal|hard>', '#f66'); OPTIONS.difficulty = v; saveOptions(); say('Difficulty set'); break; }
         case 'keepinventory': this.keepInventory = !this.keepInventory; say('keepInventory is now ' + this.keepInventory); break;
@@ -25029,7 +25050,9 @@ Object.assign(Game.prototype, {
       if (it && held.id === B.GLOWSTONE && ch < 4) { w.setMeta(x, y, z, ch + 1); p.consumeHeld(1); this.sound('portal_ignite', x + 0.5, y + 0.5, z + 0.5); return done(); }
       if (ch > 0) {
         if (w.dim !== 'nether') { w.setBlock(x, y, z, 0, 0); this.explode(x + 0.5, y + 0.5, z + 0.5, 5, false, 'bed'); return true; }
-        p.spawn = [x + 0.5, y + 1, z + 0.5]; p.spawnDim = 'nether'; this.ui.chat('Respawn point set', '#ccc');
+        const moved = !p.spawnBlock || p.spawnBlock[0] !== x || p.spawnBlock[1] !== y || p.spawnBlock[2] !== z || p.spawnDim !== 'nether';
+        p.spawn = [x + 0.5, y + 1, z + 0.5]; p.spawnDim = 'nether'; p.spawnBlock = [x, y, z]; p.spawnYaw = p.yaw; p.spawnBlockGuess = false; p.spawnForced = false;
+        if (moved) this.ui.chat('Respawn point set', '#ccc');
         return true;
       }
       return false;
@@ -28333,34 +28356,7 @@ const RAIL_EXITS = [[[0, 0, -1], [0, 0, 1]], [[-1, 0, 0], [1, 0, 0]], [[-1, -1, 
   [[0, 0, 1], [1, 0, 0]], [[0, 0, 1], [-1, 0, 0]], [[0, 0, -1], [-1, 0, 0]], [[0, 0, -1], [1, 0, 0]]];
 const isRail = id => SHAPE[id] === SH.RAIL;
 const railShape = (id, m) => BLK[id].rail === 'rail' ? (m & 15) : (m & 7);
-// choose the shape of a freshly placed rail from the rails around it (curves only for plain rails)
-function shapeRail(w, x, y, z) {
-  const id = w.getBlock(x, y, z);
-  if (!isRail(id)) return;
-  const m = w.getMeta(x, y, z), cur = railShape(id, m), plain = BLK[id].rail === 'rail';
-  const link = (dx, dz) => isRail(w.getBlock(x + dx, y, z + dz)) ? 1 : isRail(w.getBlock(x + dx, y + 1, z + dz)) ? 2 : isRail(w.getBlock(x + dx, y - 1, z + dz)) ? 1 : 0;
-  const N = link(0, -1), S = link(0, 1), E = link(1, 0), W = link(-1, 0);
-  let s = cur;
-  if ((N || S) && !(E || W) || (N && S)) s = N === 2 ? 4 : S === 2 ? 5 : 0;
-  else if ((E || W) && !(N || S) || (E && W)) s = E === 2 ? 2 : W === 2 ? 3 : 1;
-  else if (plain && S && E) s = 6; else if (plain && S && W) s = 7; else if (plain && N && W) s = 8; else if (plain && N && E) s = 9;
-  else if (N || S) s = 0; else if (E || W) s = 1;
-  if (s !== cur) w.setBlock(x, y, z, id, plain ? s : (m & 8) | s, false);
-}
-const _placeBlockV = Game.prototype.placeBlock;
-Game.prototype.placeBlock = function (p, hit, id) {
-  const ok = _placeBlockV.call(this, p, hit, id);
-  if (ok && isRail(id)) {
-    const w = this.world, x = hit.x + (REPL[hit.id] ? 0 : DX[hit.face]), y = hit.y + (REPL[hit.id] ? 0 : DY[hit.face]), z = hit.z + (REPL[hit.id] ? 0 : DZ[hit.face]);
-    if (isRail(w.getBlock(x, y, z))) {
-      shapeRail(w, x, y, z);
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const dy of [-1, 0, 1]) if (isRail(w.getBlock(x + dx, y + dy, z + dz))) shapeRail(w, x + dx, y + dy, z + dz);
-      shapeRail(w, x, y, z);
-      this.remeshNear(x, z);
-    }
-  }
-  return ok;
-};
+// (rails take their shape as Java's RailState decides: Part 77)
 
 /* ---------------- minecarts ---------------- */
 const CART_KINDS = { minecart: null, chest_minecart: B.CHEST, hopper_minecart: B.HOPPER, furnace_minecart: B.FURNACE, tnt_minecart: B.TNT };
@@ -47890,6 +47886,8 @@ function mobDismount(rider) {
   if (!v) return;
   if (v.passenger === rider) v.passenger = null;
   rider.vehicle = null;
+  // Entity.removePassenger: no getting on anything again for 3 seconds (boardingCooldown)
+  rider.boardCd = rider.game.world.tick + 60;
   rider.vx = rider.vy = rider.vz = 0;
   if (!v.dead) { rider.x = v.x; rider.y = v.y; rider.z = v.z; }
 }
@@ -59326,8 +59324,6 @@ applyPackGUI = function (img, first) {
      unless they fly
    - lying cats lie on their side with their legs out, the head
      turned and the tail curled (CatModel, CatRenderer)
-   - you sleep at the head end of a bed whichever half you click, as
-     in Java
    - dying mobs tip over onto their left side, quickly at first, as
      LivingEntityRenderer turns them (they went the other way, evenly)
    =================================================================== */
@@ -59438,10 +59434,8 @@ function relaxCanUse(m, s) {
   return !!s.spot && !relaxTaken(m, s.spot);
 }
 const relaxGoesOn = (m, s) => m.data.tame && !m.data.sitting && !!relaxOwner(m) && catSleeping(m.game) && !!s.spot && !relaxTaken(m, s.spot);
-// DimensionType.timeOfDay, as Level.getTimeOfDay gives it
-const catTimeOfDay = t => { const d = t / 24000 - 0.25 - Math.floor(t / 24000 - 0.25), e = 0.5 - Math.cos(d * Math.PI) / 2; return (d * 2 + e) / 3; };
 function relaxStop(m, s) {
-  const g = m.game, t = catTimeOfDay(g.world.time);
+  const g = m.game, t = vanillaTimeOfDay(g.world.time);
   m._lying = false;
   // woken by the morning (the sleep timer had reached 100) just after daybreak
   if (g.sleeping >= 100 && t > 0.77 && t < 0.8 && Math.random() < 0.7) catMorningGift(m);
@@ -59567,18 +59561,6 @@ Mob.prototype.renderRoll = function (a) {
   return [-th, (-0.4 * f - n * Math.cos(th)) * k, (0.15 * f + n * Math.sin(th)) * k, -0.1 * f * k];
 };
 
-/* ---------------- sleeping at the head of the bed ---------------- */
-// BedBlock.use: the foot sends you to the head
-const _tryToSleepCT = Game.prototype.tryToSleep;
-Game.prototype.tryToSleep = function (p, hit) {
-  const w = this.world, m = w.getMeta(hit.x, hit.y, hit.z);
-  if (BLK[w.getBlock(hit.x, hit.y, hit.z)].bed && !(m & 4)) {
-    const hx = hit.x + BED_DIR[m & 3][0], hz = hit.z + BED_DIR[m & 3][1];
-    if (BLK[w.getBlock(hx, hit.y, hz)].bed) hit = Object.assign({}, hit, { x: hx, z: hz });
-  }
-  return _tryToSleepCT.call(this, p, hit);
-};
-
 /* ---------------- the purr ---------------- */
 SND_CAT.cat_purr = 'neutral'; SUB_TEXT.cat_purr = 'Cat purrs';
 const _audioPlayCT = AUDIO.play;
@@ -59589,6 +59571,893 @@ AUDIO.play = function (name, x, y, z, ...rest) {
   if (!dst) return;
   const t = this.ctx.currentTime;
   for (let k = 0; k < 6; k++) this.noiseHit(dst, 'lowpass', 160 + Math.random() * 40, 1, 0.035, 0.5, t + k * 0.045);
+};
+
+/* @file 182_beds.js */
+/* ===================================================================
+   Part 76: beds and respawn anchors like Java's
+   - getting into bed (BedBlock.use, ServerPlayer.startSleepInBed): a
+     villager asleep in it is woken instead; you have to be within 3
+     blocks across and 2 up or down of either half; a solid block over
+     either half blocks it; then the respawn point is set (said only
+     when it moves), and you only fall asleep once the sky is dark
+     enough (from about 12542 to 23459 on a clear day, longer under
+     rain, any time in a thunderstorm) and, unless in creative, with
+     no monster within 8 blocks across and 5 up or down of the bed
+     (zombified piglins only when angry with you; slimes, magma cubes,
+     phantoms, ghasts, shulkers and hoglins don't count, as Java's
+     Monster class doesn't take them in)
+   - asleep you lie at the head, looking toward the foot from just
+     above the pillow; the chat opens with a Leave Bed button (Escape
+     does the same, Enter sends a message and you stay in bed); being
+     hurt gets you up too. Just lying down resets the time since you
+     last rested, which phantoms go by
+   - in the morning, or on leaving the bed, you stand up beside it
+     (BedBlock.findStandUpPosition: the side away from the way you
+     faced first, then round the bed, then on it; somewhere safe if
+     there is anywhere), facing the bed, and can move at once while
+     the dark fades
+   - respawning (ServerPlayer.findRespawnAndUseSpawnBlock): beside
+     your bed in the same way, or beside your respawn anchor (the
+     eight blocks round it, then those a block lower, then higher, then
+     on top), which uses up one charge; with the bed or anchor gone,
+     out of charge or walled in, you come back at the world spawn and
+     the respawn point is forgotten. A point set with /spawnpoint is
+     kept as it is
+   =================================================================== */
+
+/* ---------------- where to stand ---------------- */
+// a bed's head and the way it points (BED_DIR: from the foot to the head); a foot whose head is gone is nothing
+function bedHead(w, x, y, z) {
+  if (!BLK[w.getBlock(x, y, z)].bed) return null;
+  const m = w.getMeta(x, y, z), d = BED_DIR[m & 3];
+  if (m & 4) return { x, y, z, d };
+  return BLK[w.getBlock(x + d[0], y, z + d[1])].bed ? { x: x + d[0], y, z: z + d[1], d } : null;
+}
+// EntityType.isBlockDangerous for a player: burning blocks (fire, lava, magma, a lit campfire, a lava cauldron), wither roses,
+// sweet berry bushes, cacti and powder snow
+const bedDanger = (w, x, y, z) => {
+  const id = w.getBlock(x, y, z), d = BLK[id];
+  if (d.fire || id === B.LAVA || id === B.MAGMA_BLOCK || id === B.LAVA_CAULDRON || id === B.WITHER_ROSE || id === B.SWEET_BERRY_BUSH || id === B.CACTUS || id === B.POWDER_SNOW) return true;
+  return (id === B.CAMPFIRE || id === B.SOUL_CAMPFIRE) && !(w.getMeta(x, y, z) & 4);
+};
+// DismountHelper.findSafeDismountLocation for a player: the floor is the collision top of the block (climbables count as nothing),
+// or of a full-height block under it; under a block, then, a player-sized box must fit there, out of end portals and gateways
+const bedFloor = (w, x, y, z) => BLK[w.getBlock(x, y, z)].climb ? -1 : colTop(w, x, y, z);
+function dismountAt(w, x, y, z, safe) {
+  if (safe && bedDanger(w, x, y, z)) return null;
+  let f = bedFloor(w, x, y, z);
+  if (f < 0) { const b = bedFloor(w, x, y - 1, z); f = b >= 1 ? b - 1 : -Infinity; }
+  if (!(f < 1) || f === -Infinity) return null;
+  if (safe && f <= 0 && bedDanger(w, x, y - 1, z)) return null;
+  const x0 = x + 0.2, y0 = y + f, z0 = z + 0.2, x1 = x + 0.8, y1 = y0 + 1.8, z1 = z + 0.8, E = 1e-7;
+  for (const b of collectBoxes(w, x0, y0, z0, x1, y1, z1)) if (x1 > b[0] + E && x0 < b[3] - E && y1 > b[1] + E && y0 < b[4] - E && z1 > b[2] + E && z0 < b[5] - E) return null;
+  for (const k of [0, 1]) { const id = w.getBlock(x, y + k, z); if (id === B.END_PORTAL || id === B.END_GATEWAY) return null; }
+  return [x + 0.5, y0, z + 0.5];
+}
+// BedBlock.findStandUpPosition: beside the bed on the side away from where you look (or clockwise of the bed), along it, past its
+// foot, round to the other side, by the head, then on the bed; safe ground first, then anywhere
+function bedStandUp(w, h, look) {
+  const B = h.d;
+  let s = [-B[1], B[0]];
+  if (look && s[0] * look[0] + s[1] * look[1] > 0) s = [-s[0], -s[1]];
+  const offs = [[s[0], s[1]], [s[0] - B[0], s[1] - B[1]], [s[0] - 2 * B[0], s[1] - 2 * B[1]], [-2 * B[0], -2 * B[1]], [-s[0] - 2 * B[0], -s[1] - 2 * B[1]],
+    [-s[0] - B[0], -s[1] - B[1]], [-s[0], -s[1]], [-s[0] + B[0], -s[1] + B[1]], [B[0], B[1]], [s[0] + B[0], s[1] + B[1]], [0, 0], [-B[0], -B[1]]];
+  for (const safe of [true, false]) for (const [ox, oz] of offs) { const v = dismountAt(w, h.x + ox, h.y, h.z + oz, safe); if (v) return v; }
+  return null;
+}
+// RespawnAnchorBlock.findStandUpPosition: the eight round it, the same a block lower, then higher, then on top
+const ANCHOR_RING = [[0, -1], [-1, 0], [0, 1], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+const ANCHOR_OFFS = [...ANCHOR_RING.map(([a, b]) => [a, 0, b]), ...ANCHOR_RING.map(([a, b]) => [a, -1, b]), ...ANCHOR_RING.map(([a, b]) => [a, 1, b]), [0, 1, 0]];
+function anchorStandUp(w, x, y, z) {
+  for (const safe of [true, false]) for (const [a, b, c] of ANCHOR_OFFS) { const v = dismountAt(w, x + a, y + b, z + c, safe); if (v) return v; }
+  return null;
+}
+const yawLook = yaw => [-Math.sin(yaw || 0), -Math.cos(yaw || 0)];
+
+/* ---------------- who keeps you awake ---------------- */
+// Monster (the class): every hostile mob but slimes, magma cubes, phantoms, ghasts, shulkers, hoglins and the dragon;
+// Monster.isPreventingPlayerRest: zombified piglins only when angry with you
+const NOT_MONSTER = new Set(['slime', 'magma_cube', 'phantom', 'ghast', 'shulker', 'hoglin', 'ender_dragon']);
+const keepsAwake = (e, p) => e instanceof Mob && !e.dead && !(e.deathTime > 0) && e.T.cat === 'monster' && !NOT_MONSTER.has(e.type) &&
+  (e.type !== 'zombified_piglin' || e.target === p || e.anger > 0);
+// BlockState.isSuffocating: a block that stops movement with a whole-block collision box, but not the see-through glass, leaves,
+// copper grates and mangrove roots; farmland, paths, soul sand and mud count although they are a little lower
+const SUFF_NEVER = new Uint8Array(MAXB), SUFF_ALWAYS = new Uint8Array(MAXB);
+for (const d of BLK) {
+  if (!d) continue;
+  const n = d.name;
+  if (n === 'glass' || n === 'tinted_glass' || n.endsWith('_stained_glass') || d.leaves || n.endsWith('copper_grate') || n === 'mangrove_roots') SUFF_NEVER[d.id] = 1;
+  if (n === 'farmland' || n === 'dirt_path' || n === 'soul_sand' || n === 'mud') SUFF_ALWAYS[d.id] = 1;
+}
+function suffocates(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (!id || SUFF_NEVER[id]) return false;
+  if (SUFF_ALWAYS[id]) return true;
+  if (SOLID[id] !== 1 || BLK[id].noCollide) return false;
+  if (SHAPE[id] === SH.CUBE) return true;
+  // a shape that fills the block (a double slab)
+  const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null;
+  const b = shapeBoxes(id, w.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx);
+  return b.length === 1 && b[0][0] <= 0 && b[0][1] <= 0 && b[0][2] <= 0 && b[0][3] >= 16 && b[0][4] >= 16 && b[0][5] >= 16;
+}
+const bedSuffocates = suffocates;
+
+/* ---------------- in bed ---------------- */
+// the in-bed screen (InBedChatScreen): the chat with a Leave Bed button under it
+Game.prototype.bedScreen = function (on) {
+  let b = $('b-leavebed');
+  if (!b) {
+    b = document.createElement('button'); b.id = 'b-leavebed'; b.className = 'btn'; b.textContent = 'Leave Bed';
+    b.style.cssText = 'position:fixed;left:50%;bottom:64px;width:200px;transform:translateX(-50%);z-index:40;display:none';
+    b.addEventListener('click', () => { AUDIO.init(); AUDIO.play('click'); this.leaveBed(); });
+    document.body.appendChild(b);
+  }
+  b.style.display = on ? '' : 'none';
+  if (on) { if (!this.ui.chatOpen) this.ui.openChat(''); }
+  else if (this.ui.chatOpen) { this._bedClosing = true; try { this.ui.closeChat(); } finally { this._bedClosing = false; } }
+};
+const inBed = g => g.sleeping > 0 && g.sleeping < 100;
+// LivingEntity.stopSleeping: up beside the bed, facing it (or on top of it if there is nowhere else)
+Game.prototype.bedStandUp = function () {
+  const p = this.player, w = this.world, b = p && p.sleepBed;
+  if (!b) return;
+  p.sleepBed = null;
+  const yaw = p._bedYaw !== undefined ? p._bedYaw : p.yaw;
+  p.yaw = yaw; p._bedYaw = undefined;
+  const h = bedHead(w, b[0], b[1], b[2]);
+  if (!h) return;
+  const v = bedStandUp(w, h, yawLook(yaw)) || [h.x + 0.5, h.y + 1.1, h.z + 0.5];
+  p.x = v[0]; p.y = v[1]; p.z = v[2]; p.vx = p.vy = p.vz = 0; p.fallDist = 0;
+  const dx = h.x + 0.5 - v[0], dz = h.z + 0.5 - v[2];
+  if (dx || dz) p.yaw = Math.atan2(-dx, -dz);
+  p.pitch = 0; p.savePrev();
+};
+// waking before morning: the Leave Bed button, Escape, or being hurt
+Game.prototype.leaveBed = function () {
+  if (!inBed(this)) return;
+  this.sleeping = 0; $('fx-sleep').style.opacity = 0;
+  this.bedStandUp();
+  this.bedScreen(false);
+};
+// in the morning (the sleep timer reaching 100) everyone gets up
+const _sleepTickBD = Game.prototype.sleepTick;
+Game.prototype.sleepTick = function () {
+  const was = this.sleeping;
+  const r = _sleepTickBD.apply(this, arguments);
+  if (was < 100 && this.sleeping >= 100) { this.bedStandUp(); this.bedScreen(false); }
+  return r;
+};
+// the chat closed some other way: out of bed too
+const _closeChatBD = UI.prototype.closeChat;
+UI.prototype.closeChat = function (lock) {
+  const g = this.game, r = _closeChatBD.call(this, lock);
+  if (g && !g._bedClosing && inBed(g)) g.leaveBed();
+  return r;
+};
+// Escape leaves the bed; Enter sends what was typed and keeps you in it
+document.addEventListener('keydown', e => {
+  const g = window.game;
+  if (!g || !inBed(g) || e.target !== $('chatin')) return;
+  if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); g.leaveBed(); }
+  else if (e.key === 'Enter') {
+    e.preventDefault(); e.stopImmediatePropagation();
+    const inp = $('chatin'), v = inp.value.trim();
+    if (v) { g.ui.chatHist.unshift(v); g.onChat(v); }
+    inp.value = '';
+  }
+}, true);
+const _hurtBD = Player.prototype.hurt;
+Player.prototype.hurt = function (amount, source, attacker) {
+  const r = _hurtBD.call(this, amount, source, attacker);
+  if (r && this.game && inBed(this.game)) this.game.leaveBed();
+  return r;
+};
+// lying down: a body 0.2 high whose view is half a block over the bed (the eyes at 0.2, the camera 0.3 above them)
+POSE_DIMS.sleeping = [0.2, 0.5];
+const _updatePoseBD = Player.prototype.updatePose;
+Player.prototype.updatePose = function (sneakKey) {
+  if (this.game && inBed(this.game) && this.sleepBed) { this.pose = 'sleeping'; this.h = POSE_DIMS.sleeping[0]; this.eyeH = POSE_DIMS.sleeping[1]; return; }
+  return _updatePoseBD.call(this, sneakKey);
+};
+
+// lying down at all counts as rest (the Time Since Last Rest that phantoms go by starts again)
+const _tryToSleepBD = Game.prototype.tryToSleep;
+Game.prototype.tryToSleep = function (p, hit) {
+  const r = _tryToSleepBD.call(this, p, hit);
+  if (this.sleeping > 0 && p) p.awake = 0;
+  return r;
+};
+
+/* ---------------- respawning ---------------- */
+// ServerPlayer.findRespawnAndUseSpawnBlock; true when there is somewhere to come back to (p.spawn then holds it), false when the bed
+// or anchor won't do (the point is forgotten), null while its chunk isn't loaded yet
+Game.prototype.resolveRespawn = function () {
+  const p = this.player, w = this.world, b = p.spawnBlock;
+  if (!b) return true;
+  if (!w.isLoadedAt(b[0], b[2])) return null;
+  const id = w.getBlock(b[0], b[1], b[2]);
+  let v = null;
+  if (BLK[id].bed && w.dim === 'overworld') { const h = bedHead(w, b[0], b[1], b[2]); v = h && bedStandUp(w, h, yawLook(p.spawnYaw)); }
+  else if (id === B.RESPAWN_ANCHOR && w.dim === 'nether' && (w.getMeta(b[0], b[1], b[2]) & 7) > 0) {
+    v = anchorStandUp(w, b[0], b[1], b[2]);
+    if (v) { const m = w.getMeta(b[0], b[1], b[2]); w.setBlock(b[0], b[1], b[2], B.RESPAWN_ANCHOR, (m & ~7) | ((m & 7) - 1)); this.sound('anchor_deplete', b[0] + 0.5, b[1] + 0.5, b[2] + 0.5); }
+  } else if (p.spawnBlockGuess) { p.spawnBlock = null; return true; }
+  if (v) { p.spawn = v; return true; }
+  p.spawn = null; p.spawnBlock = null;
+  this.ui.chat('Your bed or respawn anchor was missing or blocked', '#ccc');
+  return false;
+};
+const _respawnBD = Game.prototype.respawn;
+Game.prototype.respawn = function () {
+  const p = this.player, w = this.world;
+  if (p && p.spawnBlock) {
+    const same = w && w.dim === (p.spawnDim || 'overworld');
+    if (!same || this.resolveRespawn() === null) p._spawnCheck = 400;
+  }
+  if (p && inBed(this)) this.leaveBed();
+  return _respawnBD.apply(this, arguments);
+};
+// a bed or anchor whose chunk was still loading (or in another dimension) is looked at once it is there
+const _gameTickBD = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const p = this.player;
+  if (p && p._spawnCheck > 0 && this.state === 'playing' && !p.dead) {
+    p._spawnCheck--;
+    if (!p.spawnBlock) p._spawnCheck = 0;
+    else if (this.world.dim === (p.spawnDim || 'overworld')) {
+      const r = this.resolveRespawn();
+      if (r !== null) {
+        p._spawnCheck = 0;
+        if (r && p.spawn) { p.x = p.spawn[0]; p.y = p.spawn[1]; p.z = p.spawn[2]; }
+        else if (this.meta && this.meta.spawn) {
+          const x = this.meta.spawn[0], z = this.meta.spawn[1], s = this.world.isLoadedAt(x, z) ? this.safeSpot(x, z) : [x + 0.5, this.meta.spawnY || 100, z + 0.5];
+          p.x = s[0]; p.y = s[1]; p.z = s[2];
+        }
+        p.vx = p.vy = p.vz = 0; p.fallDist = 0; p.savePrev();
+      }
+    }
+  }
+  return _gameTickBD.apply(this, arguments);
+};
+// /spawnpoint sets a point that is kept as it is
+if (typeof CMDS !== 'undefined' && CMDS.spawnpoint) {
+  const base = CMDS.spawnpoint;
+  CMDS.spawnpoint = function (...a) { const r = base.apply(this, a); for (const e of [this.player]) if (e && e.spawnForced) e.spawnBlock = null; return r; };
+}
+
+/* ---------------- sounds ---------------- */
+SND_CAT.anchor_deplete = 'block'; SUB_TEXT.anchor_deplete = 'Respawn Anchor depletes';
+const _audioPlayBD = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'anchor_deplete') return _audioPlayBD.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 0.8);
+  if (dst) { this.tone(dst, 'sawtooth', 220, 70, 0.6, 0.15); this.noiseHit(dst, 'lowpass', 500, 1, 0.5, 0.3); }
+};
+
+/* @file 183_rails.js */
+/* ===================================================================
+   Part 77: rails and minecarts like Java's
+   - rails take their shape the way Java's RailState decides: a new
+     rail turns toward the rails beside it that have a free end (or
+     already lead to it), straight or, for plain rails, curving, and
+     slopes up to a rail one block higher; with rails on three sides
+     it curves south-east if it can (then south-west, north-east,
+     north-west), or the other way round when powered; the rails it
+     joins turn to meet it. The rail starts out along the way you face
+   - a plain rail with rails on three sides changes over when its
+     redstone power switches on or off
+   - powered and activator rails pass power along the track to up to 8
+     more rails of their kind (PoweredRailBlock), each lit in turn
+   - a sloping rail breaks when the block it climbs onto goes
+   - minecarts move as Java's do (OldMinecartBehavior): gravity, the
+     cart held to the track and turned with it, slopes speeding it up
+     or slowing it down by 1/128 a tick (a fifth of that in water) and
+     the drop itself adding to its speed, an empty cart losing 4% of
+     its speed every tick and one with a passenger 0.3%, a carried cart
+     moving only three quarters of its speed, at most 0.4 blocks a
+     tick (0.2 in water); powered rails add 0.06 a tick or start a
+     cart off a block that conducts power, unpowered ones halve its
+     speed and stop it below 0.03; a rider can nudge a cart that is
+     nearly still; off the rails it slides and halves its speed on
+     the ground
+   - furnace minecarts: coal gives 3600 ticks of fuel (32000 at most);
+     while burning the cart pushes on along the track, the way it was
+     pushed, at up to 0.2 blocks a tick
+   - activator rails: powered, they tip riders out (and mobs), set off
+     TNT minecarts and stop hopper minecarts; unpowered, they start
+     hopper minecarts again (which stay as they were set till then)
+   - a moving empty minecart scoops up a mob it runs into (not players,
+     iron golems or other carts), and a boat nobody steers takes in a
+     mob that bumps it (not fish, squid or dolphins); they stay in
+     until it breaks, or till a powered activator rail lets them out,
+     and a mob that gets out can't be taken in again for 3 seconds
+   =================================================================== */
+
+/* ---------------- rail shapes (RailState) ---------------- */
+// where each shape leads (RailState.updateConnections): NS, EW, ascending E, W, N, S, then SE, SW, NW, NE
+const RAIL_CONN = [[[0, 0, -1], [0, 0, 1]], [[-1, 0, 0], [1, 0, 0]], [[-1, 0, 0], [1, 1, 0]], [[-1, 1, 0], [1, 0, 0]], [[0, 1, -1], [0, 0, 1]],
+  [[0, 0, -1], [0, 1, 1]], [[1, 0, 0], [0, 0, 1]], [[-1, 0, 0], [0, 0, 1]], [[-1, 0, 0], [0, 0, -1]], [[1, 0, 0], [0, 0, -1]]];
+const RS_NS = 0, RS_EW = 1, RS_AE = 2, RS_AW = 3, RS_AN = 4, RS_AS = 5, RS_SE = 6, RS_SW = 7, RS_NW = 8, RS_NE = 9;
+class RailNode {
+  constructor(w, x, y, z) {
+    this.w = w; this.x = x; this.y = y; this.z = z;
+    this.id = w.getBlock(x, y, z); this.m = w.getMeta(x, y, z);
+    this.straight = BLK[this.id].rail !== 'rail';
+    this.setConns(railShape(this.id, this.m));
+  }
+  setConns(s) { this.conns = RAIL_CONN[s].map(([a, b, c]) => [this.x + a, this.y + b, this.z + c]); }
+  // getRail: a rail at that spot, or a block higher, or a block lower
+  railAt(x, y, z) { for (const dy of [0, 1, -1]) if (isRail(this.w.getBlock(x, y + dy, z))) return new RailNode(this.w, x, y + dy, z); return null; }
+  hasRail(x, y, z) { const w = this.w; return isRail(w.getBlock(x, y, z)) || isRail(w.getBlock(x, y + 1, z)) || isRail(w.getBlock(x, y - 1, z)); }
+  hasConn(x, z) { return this.conns.some(c => c[0] === x && c[2] === z); }
+  connectsTo(r) { return this.hasConn(r.x, r.z); }
+  // removeSoftConnections: only the ends that a rail there leads back from
+  removeSoft() { for (let i = 0; i < this.conns.length; i++) { const r = this.railAt(...this.conns[i]); if (r && r.connectsTo(this)) this.conns[i] = [r.x, r.y, r.z]; else this.conns.splice(i--, 1); } }
+  potential() { let n = 0; for (const [dx, dz] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) if (this.hasRail(this.x + dx, this.y, this.z + dz)) n++; return n; }
+  canConnectTo(r) { return this.connectsTo(r) || this.conns.length !== 2; }
+  setShape(s) { this.w.setBlock(this.x, this.y, this.z, this.id, this.straight ? (this.m & 8) | s : s); this.m = this.w.getMeta(this.x, this.y, this.z); }
+  slopes(s) {
+    const w = this.w, x = this.x, y = this.y, z = this.z;
+    if (s === RS_NS) { if (isRail(w.getBlock(x, y + 1, z - 1))) s = RS_AN; if (isRail(w.getBlock(x, y + 1, z + 1))) s = RS_AS; }
+    if (s === RS_EW) { if (isRail(w.getBlock(x + 1, y + 1, z))) s = RS_AE; if (isRail(w.getBlock(x - 1, y + 1, z))) s = RS_AW; }
+    return s;
+  }
+  connectTo(r) {
+    this.conns.push([r.x, r.y, r.z]);
+    const n = this.hasConn(this.x, this.z - 1), s = this.hasConn(this.x, this.z + 1), w = this.hasConn(this.x - 1, this.z), e = this.hasConn(this.x + 1, this.z);
+    let sh = null;
+    if (n || s) sh = RS_NS;
+    if (w || e) sh = RS_EW;
+    if (!this.straight) {
+      if (s && e && !n && !w) sh = RS_SE;
+      if (s && w && !n && !e) sh = RS_SW;
+      if (n && w && !s && !e) sh = RS_NW;
+      if (n && e && !s && !w) sh = RS_NE;
+    }
+    if (sh === RS_NS || sh === RS_EW) sh = this.slopes(sh);
+    this.setShape(sh === null ? RS_NS : sh);
+  }
+  hasNeighborRail(x, y, z) { const r = this.railAt(x, y, z); if (!r) return false; r.removeSoft(); return r.canConnectTo(this); }
+  place(powered, always, shape) {
+    const x = this.x, y = this.y, z = this.z;
+    const n = this.hasNeighborRail(x, y, z - 1), s = this.hasNeighborRail(x, y, z + 1), w = this.hasNeighborRail(x - 1, y, z), e = this.hasNeighborRail(x + 1, y, z);
+    const ns = n || s, ew = w || e, se = s && e, sw = s && w, ne = n && e, nw = n && w;
+    let sh = null;
+    if (ns && !ew) sh = RS_NS;
+    if (ew && !ns) sh = RS_EW;
+    if (!this.straight) {
+      if (se && !n && !w) sh = RS_SE;
+      if (sw && !n && !e) sh = RS_SW;
+      if (nw && !s && !e) sh = RS_NW;
+      if (ne && !s && !w) sh = RS_NE;
+    }
+    if (sh === null) {
+      if (ns && ew) sh = shape; else if (ns) sh = RS_NS; else if (ew) sh = RS_EW;
+      if (!this.straight) {
+        if (powered) { if (se) sh = RS_SE; if (sw) sh = RS_SW; if (ne) sh = RS_NE; if (nw) sh = RS_NW; }
+        else { if (nw) sh = RS_NW; if (ne) sh = RS_NE; if (sw) sh = RS_SW; if (se) sh = RS_SE; }
+      }
+    }
+    if (sh === RS_NS || sh === RS_EW) sh = this.slopes(sh);
+    if (sh === null) sh = shape;
+    this.setConns(sh);
+    const want = this.straight ? (this.m & 8) | sh : sh;
+    if (always || want !== this.m) {
+      this.setShape(sh);
+      for (const c of this.conns) { const r = this.railAt(...c); if (r) { r.removeSoft(); if (r.canConnectTo(this)) r.connectTo(this); } }
+    }
+    return this;
+  }
+}
+// fitting a rail that is already there to its neighbours (BaseRailBlock.updateDir)
+function shapeRail(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (isRail(id)) new RailNode(w, x, y, z).place(RS.powered(w, x, y, z), true, railShape(id, w.getMeta(x, y, z)));
+}
+// BaseRailBlock.getStateForPlacement and onPlace: along the way the player faces, then fitted to its neighbours
+const _placeBlockRL = Game.prototype.placeBlock;
+Game.prototype.placeBlock = function (p, hit, id) {
+  const ok = _placeBlockRL.call(this, p, hit, id);
+  if (ok && isRail(id)) {
+    const w = this.world, x = hit.x + (REPL[hit.id] ? 0 : DX[hit.face]), y = hit.y + (REPL[hit.id] ? 0 : DY[hit.face]), z = hit.z + (REPL[hit.id] ? 0 : DZ[hit.face]);
+    if (isRail(w.getBlock(x, y, z))) {
+      const lk = p.look(), start = Math.abs(lk[0]) > Math.abs(lk[2]) ? RS_EW : RS_NS, m = w.getMeta(x, y, z), plain = BLK[id].rail === 'rail';
+      w.setBlock(x, y, z, id, plain ? start : (m & 8) | start);
+      new RailNode(w, x, y, z).place(RS.powered(w, x, y, z), true, start);
+      this.remeshNear(x, z);
+    }
+  }
+  return ok;
+};
+// a sloping rail needs the block it climbs onto (BaseRailBlock.shouldBeRemoved)
+const _canStayRL = World.prototype.canStay;
+World.prototype.canStay = function (id, x, y, z, meta) {
+  const r = _canStayRL.call(this, id, x, y, z, meta);
+  if (!r || !isRail(id)) return r;
+  const s = railShape(id, meta), side = s === RS_AE ? [1, 0] : s === RS_AW ? [-1, 0] : s === RS_AN ? [0, -1] : s === RS_AS ? [0, 1] : null;
+  if (!side) return r;
+  const b = this.getBlock(x + side[0], y, z + side[1]);
+  return SOLID[b] === 1 && !BLK[b].noCollide;
+};
+
+/* ---------------- power along the track (PoweredRailBlock) ---------------- */
+// findPoweredRailSignal: the next rail along (searching "forward" goes south or west), level or a block lower (or up a slope)
+function railChain(w, x, y, z, id, s, fwd, n) {
+  if (n >= 8) return false;
+  let below = true;
+  switch (s) {
+    case RS_NS: z += fwd ? 1 : -1; break;
+    case RS_EW: x += fwd ? -1 : 1; break;
+    case RS_AE: if (fwd) x--; else { x++; y++; below = false; } s = RS_EW; break;
+    case RS_AW: if (fwd) { x--; y++; below = false; } else x++; s = RS_EW; break;
+    case RS_AN: if (fwd) z++; else { z--; y++; below = false; } s = RS_NS; break;
+    case RS_AS: if (fwd) { z++; y++; below = false; } else z--; s = RS_NS; break;
+    default: return false;
+  }
+  return railSamePowered(w, x, y, z, id, fwd, n, s) || (below && railSamePowered(w, x, y - 1, z, id, fwd, n, s));
+}
+// isSameRailWithPower: the same kind of rail, not crossways, already lit, and fed directly or from further on
+function railSamePowered(w, x, y, z, id, fwd, n, s) {
+  if (w.getBlock(x, y, z) !== id) return false;
+  const m = w.getMeta(x, y, z), o = m & 7;
+  if (s === RS_EW && (o === RS_NS || o === RS_AN || o === RS_AS)) return false;
+  if (s === RS_NS && (o === RS_EW || o === RS_AE || o === RS_AW)) return false;
+  if (!(m & 8)) return false;
+  return RS.powered(w, x, y, z) || railChain(w, x, y, z, id, o, fwd, n + 1);
+}
+RS_ANY[B.RAIL] = 1;
+const _reactRL = RS.react;
+RS.react = function (w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (id === B.POWERED_RAIL || id === B.ACTIVATOR_RAIL) {
+    const m = w.getMeta(x, y, z), s = m & 7;
+    const on = this.powered(w, x, y, z) || railChain(w, x, y, z, id, s, true, 0) || railChain(w, x, y, z, id, s, false, 0);
+    if (on !== !!(m & 8)) this.set(w, x, y, z, id, on ? m | 8 : m & ~8);
+    return;
+  }
+  // RailBlock.updateState: at a junction (rails on three sides) a change of power refits the rail
+  if (id === B.RAIL) {
+    const on = this.powered(w, x, y, z);
+    if (this.edge(x, y, z, on) && new RailNode(w, x, y, z).potential() === 3) new RailNode(w, x, y, z).place(on, false, railShape(id, w.getMeta(x, y, z)));
+    return;
+  }
+  return _reactRL.call(this, w, x, y, z);
+};
+
+/* ---------------- minecarts (OldMinecartBehavior) ---------------- */
+const clampC = (v, a) => v < -a ? -a : v > a ? a : v;
+const cartBusy = c => !!(c.rider || (c.passenger && !c.passenger.dead));
+const cartMax = c => c.data.kind === 'furnace_minecart' ? (c.inWater ? 0.15 : 0.2) : (c.inWater ? 0.2 : 0.4);
+// AbstractMinecart.getPos: the point of the track at this x/z (1/16 above the rail's block, up the slope)
+function cartRailPos(w, x, y, z) {
+  const bx = Math.floor(x), bz = Math.floor(z);
+  let by = Math.floor(y);
+  if (isRail(w.getBlock(bx, by - 1, bz))) by--;
+  const id = w.getBlock(bx, by, bz);
+  if (!isRail(id)) return null;
+  const [a, b] = RAIL_EXITS[railShape(id, w.getMeta(bx, by, bz))];
+  const x0 = bx + 0.5 + a[0] * 0.5, y0 = by + 0.0625 + a[1] * 0.5, z0 = bz + 0.5 + a[2] * 0.5, x1 = bx + 0.5 + b[0] * 0.5, y1 = by + 0.0625 + b[1] * 0.5, z1 = bz + 0.5 + b[2] * 0.5;
+  const dx = x1 - x0, dy = (y1 - y0) * 2, dz = z1 - z0, t = dx === 0 ? z - bz : dz === 0 ? x - bx : ((x - x0) * dx + (z - z0) * dz) * 2;
+  return [x0 + dx * t, y0 + dy * t + (dy < 0 ? 1 : dy > 0 ? 0.5 : 0), z0 + dz * t];
+}
+Minecart.prototype.tick = function () {
+  this.savePrev(); this.age++;
+  const g = this.game, w = g.world;
+  if (this.hurtTime > 0) this.hurtTime--;
+  if (this.wobble > 0) this.wobble--;
+  if (this.damage > 0) this.damage = Math.max(0, this.damage - 1);
+  if (this.rider && this.rider.dead) this.rider = null;
+  if (this.data.fuse > 0 && --this.data.fuse <= 0) { this.dead = true; g.explode(this.x, this.y + 0.5, this.z, 4 + Math.min(1.5, Math.hypot(this.vx, this.vz) * 3), false, 'tnt'); return; }
+  if (this.data.fuse > 0 && this.age % 4 === 0) g.particles.smoke(this.x, this.y + 1.1, this.z, 1);
+  // MinecartFurnace.tick: fuel burns down; smoke one tick in four
+  if (this.data.kind === 'furnace_minecart') {
+    if (this.data.fuel > 0) this.data.fuel--;
+    if (!(this.data.fuel > 0)) this.data.push = null;
+    else if (Math.random() < 0.25) g.particles.smoke(this.x, this.y + 0.8, this.z, 1);
+  }
+  this.vy -= this.inWater ? 0.005 : 0.04;
+  // getCurrentBlockPosOrRailBelow
+  const bx = Math.floor(this.x), bz = Math.floor(this.z);
+  let by = Math.floor(this.y);
+  if (isRail(w.getBlock(bx, by - 1, bz))) by--;
+  const id = w.getBlock(bx, by, bz);
+  if (isRail(id)) {
+    this.moveAlongTrack(bx, by, bz);
+    const d = BLK[id], m = w.getMeta(bx, by, bz);
+    if (d.rail === 'activator_rail') this.activate(!!(m & 8));
+    if (d.rail === 'detector_rail' && !(m & 8)) { w.setBlock(bx, by, bz, id, m | 8, false); RS.changed(w, bx, by, bz); RS.changed(w, bx, by - 1, bz); w.schedule(bx, by, bz, 20, 'rs_detector'); }
+  } else this.comeOffTrack();
+  // facing along the way it moves, never turned more than a right angle at once (Java flips the cart instead)
+  const mx = this.x - this.px, mz = this.z - this.pz;
+  if (mx * mx + mz * mz > 1e-6) {
+    const yaw = Math.atan2(mx, mz);
+    let dy = yaw - this.yaw; while (dy > PI) dy -= 2 * PI; while (dy < -PI) dy += 2 * PI;
+    this.yaw = Math.abs(dy) > HPI * 1.05 ? yaw + PI : yaw;
+  }
+  this.bodyYaw = this.yaw;
+  if (this.data.kind === 'hopper_minecart' && !this.data.locked && this.age % 4 === 0) this.suck();
+  this.updateFluids();
+  this.pickUpMobs();
+  if (this.y < -64) this.dead = true;
+};
+// comeOffTrack: no faster than the track allows, half as fast every tick on the ground, a little slower in the air
+Minecart.prototype.comeOffTrack = function () {
+  const max = cartMax(this);
+  this.vx = clampC(this.vx, max); this.vz = clampC(this.vz, max);
+  if (this.onGround) { this.vx *= 0.5; this.vy *= 0.5; this.vz *= 0.5; }
+  this.physicsStep();
+  if (!this.onGround) { this.vx *= 0.95; this.vy *= 0.95; this.vz *= 0.95; }
+  this.pitch *= 0.8;
+};
+// applyNaturalSlowdown (MinecartFurnace's: the push added after slowing to 0.8, or 0.98 without fuel)
+Minecart.prototype.slowDown = function () {
+  const busy = cartBusy(this), f = busy ? 0.997 : 0.96, pu = this.data.kind === 'furnace_minecart' && this.data.push;
+  let k = f;
+  if (this.data.kind === 'furnace_minecart') k *= pu ? 0.8 : 0.98;
+  this.vx *= k; this.vz *= k; this.vy = 0;
+  if (this.inWater) { this.vx *= 0.95; this.vz *= 0.95; }
+  if (pu) { this.vx += pu[0]; this.vz += pu[1]; if (this.inWater) { this.vx *= 0.1; this.vz *= 0.1; } }
+};
+Minecart.prototype.moveAlongTrack = function (bx, by, bz) {
+  const g = this.game, w = g.world, id = w.getBlock(bx, by, bz), m = w.getMeta(bx, by, bz), d = BLK[id], s = railShape(id, m);
+  this.fallDist = 0;
+  const before = cartRailPos(w, this.x, this.y, this.z);
+  let y = by, powered = false, braking = false;
+  if (d.rail === 'powered_rail') { powered = !!(m & 8); braking = !powered; }
+  const slope = this.inWater ? 0.0078125 * 0.2 : 0.0078125;
+  switch (s) {
+    case RS_AE: this.vx -= slope; y++; break;
+    case RS_AW: this.vx += slope; y++; break;
+    case RS_AN: this.vz += slope; y++; break;
+    case RS_AS: this.vz -= slope; y++; break;
+  }
+  const [e1, e2] = RAIL_EXITS[s];
+  let dx = e2[0] - e1[0], dz = e2[2] - e1[2];
+  const len = Math.sqrt(dx * dx + dz * dz);
+  if (this.vx * dx + this.vz * dz < 0) { dx = -dx; dz = -dz; }
+  const sp = Math.min(2, Math.hypot(this.vx, this.vz));
+  this.vx = sp * dx / len; this.vz = sp * dz / len;
+  // the rider's push on a cart that is nearly still
+  const p = this.rider;
+  if (p === g.player && g.input) {
+    const k = g.input.keys, f = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0), st = (k.has('KeyA') ? 1 : 0) - (k.has('KeyD') ? 1 : 0);
+    if (f || st) {
+      let ix = -Math.sin(p.yaw) * f - Math.cos(p.yaw) * st, iz = -Math.cos(p.yaw) * f + Math.sin(p.yaw) * st;
+      const il = Math.hypot(ix, iz); if (il > 1) { ix /= il; iz /= il; }
+      if (this.vx * this.vx + this.vz * this.vz < 0.01) { this.vx += ix * 0.001; this.vz += iz * 0.001; braking = false; }
+    }
+  }
+  if (braking) {
+    if (Math.hypot(this.vx, this.vz) < 0.03) { this.vx = this.vy = this.vz = 0; }
+    else { this.vx *= 0.5; this.vy = 0; this.vz *= 0.5; }
+  }
+  const x0 = bx + 0.5 + e1[0] * 0.5, z0 = bz + 0.5 + e1[2] * 0.5, x1 = bx + 0.5 + e2[0] * 0.5, z1 = bz + 0.5 + e2[2] * 0.5, ddx = x1 - x0, ddz = z1 - z0;
+  const t = ddx === 0 ? this.z - bz : ddz === 0 ? this.x - bx : ((this.x - x0) * ddx + (this.z - z0) * ddz) * 2;
+  this.x = x0 + ddx * t; this.y = y; this.z = z0 + ddz * t;
+  const ride = cartBusy(this) ? 0.75 : 1, max = cartMax(this);
+  moveEntity(w, this, clampC(ride * this.vx, max), 0, clampC(ride * this.vz, max));
+  // over the top of a slope
+  if (e1[1] !== 0 && Math.floor(this.x) - bx === e1[0] && Math.floor(this.z) - bz === e1[2]) this.y += e1[1];
+  else if (e2[1] !== 0 && Math.floor(this.x) - bx === e2[0] && Math.floor(this.z) - bz === e2[2]) this.y += e2[1];
+  this.slowDown();
+  const after = cartRailPos(w, this.x, this.y, this.z);
+  if (after && before) {
+    const drop = (before[1] - after[1]) * 0.05, h = Math.hypot(this.vx, this.vz);
+    if (h > 0) { this.vx *= (h + drop) / h; this.vz *= (h + drop) / h; }
+    this.y = after[1];
+  }
+  // onto the next block: the speed carried straight into it
+  const nbx = Math.floor(this.x), nbz = Math.floor(this.z);
+  if (nbx !== bx || nbz !== bz) { const h = Math.hypot(this.vx, this.vz); this.vx = h * (nbx - bx); this.vz = h * (nbz - bz); }
+  if (powered) {
+    const h = Math.hypot(this.vx, this.vz);
+    if (h > 0.01) { this.vx += this.vx / h * 0.06; this.vz += this.vz / h * 0.06; }
+    else if (s === RS_EW) { if (conductive(w.getBlock(bx - 1, by, bz))) this.vx = 0.02; else if (conductive(w.getBlock(bx + 1, by, bz))) this.vx = -0.02; }
+    else if (s === RS_NS) { if (conductive(w.getBlock(bx, by, bz - 1))) this.vz = 0.02; else if (conductive(w.getBlock(bx, by, bz + 1))) this.vz = -0.02; }
+  }
+  // the furnace cart's push turns with the track (MinecartFurnace.moveAlongTrack)
+  if (this.data.kind === 'furnace_minecart' && this.data.push) { const h2 = this.vx * this.vx + this.vz * this.vz; if (h2 > 0.001) { const h = Math.sqrt(h2); this.data.push = [this.vx / h, this.vz / h]; } }
+  this.onGround = true;
+  // tilted on slopes, nose up going uphill (drawn only)
+  const sl = s >= RS_AE && s <= RS_AS ? Math.PI / 4 : 0, up = s === RS_AE ? [1, 0] : s === RS_AW ? [-1, 0] : s === RS_AN ? [0, -1] : s === RS_AS ? [0, 1] : [0, 0];
+  const along = Math.sin(this.yaw) * up[0] + Math.cos(this.yaw) * up[1];
+  this.pitch += ((along >= 0 ? -sl : sl) - this.pitch) * 0.5;
+  if (Math.hypot(this.vx, this.vz) > 0.05 && this.age % 2 === 0 && Math.random() < 0.08) g.sound('step_metal', this.x, this.y, this.z);
+};
+// activateMinecart: powered, out go the passengers (a jolt), TNT is lit and hoppers stop; unpowered, hoppers start
+Minecart.prototype.activate = function (on) {
+  const k = this.data.kind;
+  if (k === 'tnt_minecart') { if (on) this.prime(); }
+  else if (k === 'hopper_minecart') this.data.locked = on;
+  else if (k === 'minecart' && on) {
+    if (this.rider) this.game.dismount(this.rider);
+    if (this.passenger) mobDismount(this.passenger);
+    if (!(this.hurtTime > 0)) { this.wobbleSide = -(this.wobbleSide || 1); this.hurtTime = 10; this.wobble = 10; this.damage = 50; }
+  }
+};
+// pushAndPickupEntities: a plain cart going at least 0.1 a tick takes in the first mob it touches
+Minecart.prototype.pickUpMobs = function () {
+  if (this.data.kind !== 'minecart' || cartBusy(this) || this.vx * this.vx + this.vz * this.vz < 0.01) return;
+  const hw = this.w / 2 + 0.2;
+  for (const e of this.game.entities) {
+    if (e === this || !(e instanceof Mob) || e.dead || e.deathTime > 0 || e.T.vehicle || e.T.cat === 'misc' || e.type === 'iron_golem' || e.vehicle || e.passenger || e.rider || e.boardCd > this.game.world.tick) continue;
+    if (e.x + e.w / 2 > this.x - hw && e.x - e.w / 2 < this.x + hw && e.z + e.w / 2 > this.z - hw && e.z - e.w / 2 < this.z + hw && e.y + e.h > this.y && e.y < this.y + this.h) { mobMount(e, this); break; }
+  }
+};
+// MinecartFurnace.interact: fuel (3600 a coal, up to 32000), and the push away from the player while it burns
+const _interactRL = Minecart.prototype.interact;
+Minecart.prototype.interact = function (p, held) {
+  if (this.data.kind === 'furnace_minecart') {
+    if (held && (held.id === I.COAL || held.id === I.CHARCOAL) && (this.data.fuel || 0) + 3600 <= 32000) { this.data.fuel = (this.data.fuel || 0) + 3600; p.consumeHeld(1); }
+    if (this.data.fuel > 0) { const dx = this.x - p.x, dz = this.z - p.z, l = Math.hypot(dx, dz) || 1; this.data.push = [dx / l, dz / l]; }
+    return true;
+  }
+  // one seat: taken by a mob, nobody else gets in
+  if (this.data.kind === 'minecart' && this.passenger && !this.passenger.dead) return false;
+  return _interactRL.call(this, p, held);
+};
+RIDE_SEAT.minecart = [0.1875, 0];
+
+/* ---------------- boats take in mobs ---------------- */
+// Boat.tick: unsteered by a player, with a seat free, it takes in a living thing narrower than itself that bumps it (not water
+// animals, players or the creaking)
+const NOT_BOAT = new Set(['cod', 'salmon', 'pufferfish', 'tropical_fish', 'squid', 'glow_squid', 'dolphin', 'creaking']);
+RIDE_SEAT.boat = RIDE_SEAT.chest_boat = [0.1875, 0];
+Boat.prototype.pickUpMobs = function () {
+  if (this.dead || this.rider || (this.passenger && !this.passenger.dead)) return;
+  const hw = this.w / 2 + 0.2;
+  for (const e of this.game.entities) {
+    if (e === this || !(e instanceof Mob) || e.dead || e.deathTime > 0 || e.T.vehicle || e.T.cat === 'misc' || NOT_BOAT.has(e.type) || e.vehicle || e.passenger || e.rider || e.w >= this.w || e.boardCd > this.game.world.tick) continue;
+    if (e.x + e.w / 2 > this.x - hw && e.x - e.w / 2 < this.x + hw && e.z + e.w / 2 > this.z - hw && e.z - e.w / 2 < this.z + hw && e.y + e.h > this.y - 0.01 && e.y < this.y + this.h - 0.01) { mobMount(e, this); break; }
+  }
+};
+const _tickBoatRL = Boat.prototype.tick;
+Boat.prototype.tick = function () { const r = _tickBoatRL.apply(this, arguments); this.pickUpMobs(); return r; };
+
+/* @file 184_boats.js */
+/* ===================================================================
+   Part 78: boats like Java's (AbstractBoat)
+   - what a boat is in or on decides how it slides: in water it keeps
+     90% of its speed each tick (and of its spin), under water 45% (and
+     after 3 seconds under, its rider floats off), in the air 90%, and
+     on land the friction of the blocks under it: 60% on most, 80% on
+     slime, 98% on ice and packed ice, 98.9% on blue ice. Rowed, a boat
+     reaches 0.4 blocks a tick on water, 0.1 on dirt, 2 on packed ice
+     and about 3.6 on blue ice
+   - rowing adds 0.04 a tick forward (0.005 back, and 0.005 forward
+     while only turning); turning adds a degree a tick to a spin that
+     dies away at the same rate, so a boat on ice keeps on turning
+   - afloat, a boat rises the deeper it sits and settles at the
+     surface; falling into water it lands on top
+   - its rider turns with it and can look at most 105 degrees to
+     either side; the paddles only move while rowing forward or turning
+   =================================================================== */
+
+// FluidState.getHeight: 8/9 of a block for a source or falling water (less as it flows out), a full block with water above
+function boatWaterHeight(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (id !== B.WATER && WATERY[id] !== 1) return -1;
+  const up = w.getBlock(x, y + 1, z);
+  if (up === B.WATER || WATERY[up] === 1) return 1;
+  if (id !== B.WATER) return 8 / 9;
+  const m = w.getMeta(x, y, z);
+  return ((m === 0 || (m & 8)) ? 8 : 8 - (m & 7)) / 9;
+}
+const boatWaterSource = (w, x, y, z) => w.getBlock(x, y, z) !== B.WATER || w.getMeta(x, y, z) === 0;
+// does the block's collision shape overlap the box?
+function boatBlockHits(w, x, y, z, b) {
+  const id = w.getBlock(x, y, z);
+  if (!SOLID[id] || BLK[id].noCollide) return false;
+  const boxes = SHAPE[id] === SH.CUBE ? [[0, 0, 0, 16, 16, 16]] : (() => { const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null; return shapeBoxes(id, w.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx); })();
+  for (const q of boxes) if (x + q[0] / 16 < b[3] && x + q[3] / 16 > b[0] && y + q[1] / 16 < b[4] && y + q[4] / 16 > b[1] && z + q[2] / 16 < b[5] && z + q[5] / 16 > b[2]) return true;
+  return false;
+}
+// getGroundFriction: the friction of the blocks the bottom of the boat rests on (not lily pads), averaged
+Boat.prototype.groundFriction = function () {
+  const w = this.game.world, hw = this.w / 2, b = [this.x - hw, this.y - 0.001, this.z - hw, this.x + hw, this.y, this.z + hw];
+  const x0 = Math.floor(b[0]) - 1, x1 = Math.ceil(b[3]) + 1, y0 = Math.floor(b[1]) - 1, y1 = Math.ceil(b[4]) + 1, z0 = Math.floor(b[2]) - 1, z1 = Math.ceil(b[5]) + 1;
+  let sum = 0, n = 0;
+  for (let x = x0; x < x1; x++) for (let z = z0; z < z1; z++) {
+    const edges = (x !== x0 && x !== x1 - 1 ? 0 : 1) + (z !== z0 && z !== z1 - 1 ? 0 : 1);
+    if (edges === 2) continue;
+    for (let y = y0; y < y1; y++) {
+      if (edges > 0 && (y === y0 || y === y1 - 1)) continue;
+      const id = w.getBlock(x, y, z);
+      if (id === B.LILY_PAD || !boatBlockHits(w, x, y, z, b)) continue;
+      sum += BLK[id].slip || 0.6; n++;
+    }
+  }
+  return sum / n;
+};
+// getStatus: under water (flowing or still), in water (the level its top reaches), on land, or in the air
+Boat.prototype.boatStatus = function () {
+  const w = this.game.world, hw = this.w / 2, x0 = Math.floor(this.x - hw), x1 = Math.ceil(this.x + hw), z0 = Math.floor(this.z - hw), z1 = Math.ceil(this.z + hw);
+  const top = this.y + this.h + 0.001;
+  let under = false;
+  for (let x = x0; x < x1; x++) for (let y = Math.floor(this.y + this.h); y < Math.ceil(top); y++) for (let z = z0; z < z1; z++) {
+    const h = boatWaterHeight(w, x, y, z);
+    if (h >= 0 && top < y + h) { if (!boatWaterSource(w, x, y, z)) return 'under_flowing'; under = true; }
+  }
+  if (under) { this.waterLevel = this.y + this.h; return 'under'; }
+  let inWater = false;
+  this.waterLevel = -Infinity;
+  for (let x = x0; x < x1; x++) for (let y = Math.floor(this.y); y < Math.ceil(this.y + 0.001); y++) for (let z = z0; z < z1; z++) {
+    const h = boatWaterHeight(w, x, y, z);
+    if (h >= 0) { const t = y + h; if (t > this.waterLevel) this.waterLevel = t; if (this.y < t) inWater = true; }
+  }
+  if (inWater) return 'water';
+  const f = this.groundFriction();
+  if (f > 0) { this.landFriction = f; return 'land'; }
+  return 'air';
+};
+// getWaterLevelAbove: the first layer from the top of the boat up that isn't full of water
+Boat.prototype.waterAbove = function () {
+  const w = this.game.world, hw = this.w / 2, x0 = Math.floor(this.x - hw), x1 = Math.ceil(this.x + hw), z0 = Math.floor(this.z - hw), z1 = Math.ceil(this.z + hw);
+  const y0 = Math.floor(this.y + this.h), y1 = Math.ceil(this.y + this.h - (this.lastYd || 0));
+  for (let y = y0; y < y1; y++) {
+    let h = 0;
+    for (let x = x0; x < x1 && h < 1; x++) for (let z = z0; z < z1 && h < 1; z++) h = Math.max(h, boatWaterHeight(w, x, y, z));
+    if (h < 1) return y + h;
+  }
+  return y1 + 1;
+};
+Boat.prototype.tick = function () {
+  this.savePrev(); this.age++;
+  const g = this.game, w = g.world;
+  this.oldStatus = this.status || 'air';
+  this.status = this.boatStatus();
+  this.outTicks = this.status === 'under' || this.status === 'under_flowing' ? (this.outTicks || 0) + 1 : 0;
+  if (this.outTicks >= 60) { if (this.rider) g.dismount(this.rider); if (this.passenger) mobDismount(this.passenger); }
+  if (this.hurtTime > 0) this.hurtTime--;
+  if (this.wobble > 0) this.wobble--;
+  if (this.damage > 0) this.damage = Math.max(0, this.damage - 1);
+  if (this.rider && this.rider.dead) this.rider = null;
+  if (this.deltaRot === undefined) this.deltaRot = 0;
+  // floatBoat
+  let grav = -0.04, buoy = 0, inv = 0.05;
+  if (this.oldStatus === 'air' && this.status !== 'air' && this.status !== 'land') {
+    this.waterLevel = this.y + this.h;
+    const y = this.waterAbove() - this.h + 0.101, hw = this.w / 2;
+    if (!collectBoxes(w, this.x - hw, y, this.z - hw, this.x + hw, y + this.h, this.z + hw).some(b => b[3] > this.x - hw && b[0] < this.x + hw && b[4] > y && b[1] < y + this.h && b[5] > this.z - hw && b[2] < this.z + hw)) { this.y = y; this.vy = 0; this.lastYd = 0; }
+    this.status = 'water';
+  } else {
+    if (this.status === 'water') { buoy = (this.waterLevel - this.y) / this.h; inv = 0.9; }
+    else if (this.status === 'under_flowing') { grav = -7e-4; inv = 0.9; }
+    else if (this.status === 'under') { buoy = 0.01; inv = 0.45; }
+    else if (this.status === 'air') inv = 0.9;
+    else inv = this.landFriction;
+    this.vx *= inv; this.vy += grav; this.vz *= inv;
+    this.deltaRot *= inv;
+    if (buoy > 0) this.vy = (this.vy + buoy * (0.04 / 0.65)) * 0.75;
+  }
+  // controlBoat (the rider's keys)
+  let left = false, right = false, up = false, down = false;
+  if (this.rider === g.player && g.input) { const k = g.input.keys; left = k.has('KeyA'); right = k.has('KeyD'); up = k.has('KeyW'); down = k.has('KeyS'); }
+  if (this.rider) {
+    let f = 0;
+    if (left) this.deltaRot--;
+    if (right) this.deltaRot++;
+    if (right !== left && !up && !down) f += 0.005;
+    this.yaw -= this.deltaRot * Math.PI / 180;
+    if (up) f += 0.04;
+    if (down) f -= 0.005;
+    this.vx += Math.sin(this.yaw) * f; this.vz += Math.cos(this.yaw) * f;
+  } else this.yaw -= this.deltaRot * Math.PI / 180;
+  this.bodyYaw = this.yaw;
+  // the paddles turn while rowing forward or turning (setPaddleState), and rest otherwise
+  const pad = [(right && !left) || up, (left && !right) || up];
+  for (let s = 0; s < 2; s++) this.row[s] = pad[s] ? this.row[s] + Math.PI / 8 : 0;
+  // Boat.positionRider: the rider turns with the boat, at most 105 degrees from its heading
+  const r = this.rider;
+  if (r) {
+    r.yaw -= this.deltaRot * Math.PI / 180;
+    let rel = r.yaw - Math.PI - this.yaw;
+    while (rel > Math.PI) rel -= 2 * Math.PI; while (rel < -Math.PI) rel += 2 * Math.PI;
+    const lim = 105 * Math.PI / 180, c = Math.max(-lim, Math.min(lim, rel));
+    r.yaw += c - rel;
+  }
+  const y0 = this.y;
+  this.physicsStep();
+  this.lastYd = this.y - y0;
+  this.updateFluids();
+  this.pickUpMobs();
+  if (this.y < -64) this.dead = true;
+  if (this.inLava) this.breakApart(false);
+};
+
+/* @file 185_items_on_ground.js */
+/* ===================================================================
+   Part 79: dropped items like Java's (ItemEntity)
+   - an item on the ground slides with the friction of the block under
+     it (far on ice, a little on slime), not as if every block were
+     stone
+   - items join up as Java's do: every 2 ticks while moving from block
+     to block, every 40 when still, with items alongside (half a block
+     past each side, level with them), the smaller stack going into the
+     bigger and only when both fit in one stack; the joined item keeps
+     the longer pickup wait and the younger age
+   - fire, lava and cactus burn or break items over a few ticks (an
+     item can take 5 points, the same 5 an explosion takes from: lava
+     does 4 a tick, with a hiss, fire and cactus 1, soul fire 2);
+     fire-proof items (netherite) bob up in lava instead and ride it
+     like water, only slower
+   - an item caught inside a block works its way out through the
+     nearest side that isn't a full block, as Java's does
+   =================================================================== */
+
+// is any block's collision box inside this box?
+function boxHitsShapes(w, x0, y0, z0, x1, y1, z1) {
+  return collectBoxes(w, x0, y0, z0, x1, y1, z1).some(b => b[3] > x0 && b[0] < x1 && b[4] > y0 && b[1] < y1 && b[5] > z0 && b[2] < z1);
+}
+// Entity.moveTowardsClosestSpace: out through the nearest side that isn't a full block (north, south, west, east, up; up when they
+// all are), at 0.1 to 0.3 a tick, with the rest of its speed cut to three quarters
+function pushOutOfBlock(e, x, y, z) {
+  const w = e.game.world, bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z), fx = x - bx, fy = y - by, fz = z - bz;
+  let dir = 4, best = Infinity;
+  [[0, 0, -1, fz], [0, 0, 1, 1 - fz], [-1, 0, 0, fx], [1, 0, 0, 1 - fx], [0, 1, 0, 1 - fy]].forEach(([dx, dy, dz, d], k) => {
+    const id = w.getBlock(bx + dx, by + dy, bz + dz);
+    if (SOLID[id] && SHAPE[id] === SH.CUBE) return;
+    if (d < best) { best = d; dir = k; }
+  });
+  const s = Math.random() * 0.2 + 0.1;
+  e.vx *= 0.75; e.vy *= 0.75; e.vz *= 0.75;
+  if (dir < 2) e.vz = dir ? s : -s; else if (dir < 4) e.vx = dir === 3 ? s : -s; else e.vy = s;
+}
+// what the blocks around it do to an item or an orb in a tick: lava 4 (the hiss with it), fire 1, soul fire 2, a cactus touching it 1
+function groundHurt(e, proof) {
+  const w = e.game.world, hw = e.w / 2;
+  let fire = 0, cactus = false;
+  if (!proof) aabbHitsBlock(w, e.x - hw, e.y, e.z - hw, e.x + hw, e.y + e.h, e.z + hw, id => { if (BLK[id].fire) fire = Math.max(fire, id === B.SOUL_FIRE ? 2 : 1); return false; });
+  aabbHitsBlock(w, e.x - hw - 0.001, e.y, e.z - hw - 0.001, e.x + hw + 0.001, e.y + e.h, e.z + hw + 0.001, id => { if (id === B.CACTUS) cactus = true; return false; });
+  const lava = e.inLava && !proof;
+  if (lava) e.game.sound('fizz', e.x, e.y, e.z);
+  return (lava ? 4 : 0) + fire + (cactus ? 1 : 0);
+}
+ItemEntity.prototype.tick = function () {
+  const g = this.game, w = g.world, it = ITEMS[this.stack.id], proof = !!(it && it.fireproof);
+  const ox = this.x, oy = this.y, oz = this.z;
+  this.savePrev(); this.age++;
+  if (this.pickupDelay > 0 && this.pickupDelay !== 32767) this.pickupDelay--;
+  this.updateFluids();
+  // setUnderwaterMovement / setUnderLavaMovement, else gravity
+  if (this.inWater) { this.vx *= 0.99; this.vz *= 0.99; if (this.vy < 0.06) this.vy += 0.0005; }
+  else if (this.inLava && proof) { this.vx *= 0.95; this.vz *= 0.95; if (this.vy < 0.06) this.vy += 0.0005; }
+  else this.vy -= 0.04;
+  // inside a block it moves straight through it toward the way out (noPhysics)
+  const hw = this.w / 2, E = 1e-7;
+  if (boxHitsShapes(w, this.x - hw + E, this.y + E, this.z - hw + E, this.x + hw - E, this.y + this.h - E, this.z + hw - E)) {
+    pushOutOfBlock(this, this.x, this.y + this.h / 2, this.z);
+    this.x += this.vx; this.y += this.vy; this.z += this.vz;
+  } else this.physicsStep();
+  // the friction of the block under it (getBlockPosBelowThatAffectsMyMovement)
+  let f = 0.98;
+  if (this.onGround) { const b = w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.5000001), Math.floor(this.z)); f = (BLK[b].slip || 0.6) * 0.98; }
+  this.vx *= f; this.vz *= f; this.vy *= 0.98;
+  if (this.onGround && this.vy < 0) this.vy *= -0.5;
+  // burning and breaking: the 5 health explosions take from too (fire-proof items aren't hurt by lava or fire)
+  const hurt = groundHurt(this, proof);
+  if (hurt && (this.ihp = (this.ihp === undefined ? 5 : this.ihp) - hurt) <= 0) { this.dead = true; return; }
+  if (this.age >= 6000) { this.dead = true; return; }
+  // mergeWithNeighbours
+  const moved = Math.floor(ox) !== Math.floor(this.x) || Math.floor(oy) !== Math.floor(this.y) || Math.floor(oz) !== Math.floor(this.z);
+  if (this.age % (moved ? 2 : 40) === 0) this.mergeNear();
+};
+ItemEntity.prototype.mergeable = function () { return !this.dead && this.pickupDelay !== 32767 && this.age < 6000 && this.stack.count < maxStack(this.stack.id); };
+ItemEntity.prototype.mergeNear = function () {
+  if (!this.mergeable()) return;
+  const hw = this.w / 2 + 0.5;
+  for (const e of this.game.entities) {
+    if (e === this || !(e instanceof ItemEntity) || !e.mergeable() || !stackable(e.stack, this.stack)) continue;
+    if (Math.abs(e.x - this.x) >= hw + e.w / 2 || e.y + e.h <= this.y || e.y >= this.y + this.h || Math.abs(e.z - this.z) >= hw + e.w / 2) continue;
+    if (e.stack.count + this.stack.count > maxStack(this.stack.id)) continue;
+    // the smaller goes into the bigger
+    const [dst, src] = e.stack.count < this.stack.count ? [this, e] : [e, this];
+    dst.stack.count += src.stack.count; src.stack.count = 0; src.dead = true;
+    dst.pickupDelay = Math.max(dst.pickupDelay, src.pickupDelay); dst.age = Math.min(dst.age, src.age);
+    if (this.dead) return;
+  }
 };
 
 </script>

@@ -583,6 +583,36 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   blocks they turn up next to you. You also sleep at the head of the bed now, whichever half you
   click.
 - **Dying mobs** tip over onto their left side, quickly at first, as in Java (Part 75).
+- **Beds and respawn anchors like Java's** (Part 76): you have to be within 3 blocks of a bed (2 up or down) to lie in
+  it, with nothing over it that you could suffocate in (glass, leaves and the like don't count). The respawn point is
+  set first; then you only fall asleep once the sky is dark enough (later on a clear evening than before, earlier in
+  rain, any time in a thunderstorm) and with no monster within 8 blocks (5 up or down; slimes, phantoms and the like
+  don't count, zombified piglins only when angry). A villager asleep in the bed is woken instead. In bed you look out
+  from the pillow with the chat open and a Leave Bed button (Escape works too, and a hit wakes you); in the morning, or
+  when you leave, you stand up beside the bed facing it and can move at once. Lying down at all resets the phantom
+  timer. You respawn beside your bed, or beside your respawn anchor, which uses up a charge; if the bed is gone, the
+  anchor empty or either one walled in, you come back at the world spawn instead.
+- **Rails and minecarts like Java's** (Part 77): rails take their shape the way Java decides it: a new rail turns toward
+  the rails beside it that have a free end, curves where it can (plain rails only), slopes up to a rail a block higher,
+  and at a T-junction curves south-east first, or the other way round when powered; a plain rail at a junction switches
+  when its redstone power changes. Powered and activator rails pass their power along to up to 8 more rails of their kind,
+  and a sloping rail breaks when the block it climbs onto goes. Minecarts move like Java's: an empty cart loses 4% of
+  its speed every tick and one with a passenger 0.3%, slopes and drops speed them up, powered rails push 0.06 a tick
+  (or start a cart away from a solid block), unpowered ones brake, a furnace cart with coal pushes on at 0.2 blocks a
+  tick, and activator rails tip riders out, light TNT carts and switch hopper carts off or on. A moving empty cart
+  scoops up a mob it runs into, and a boat nobody steers takes in a mob that bumps it; a mob that gets out can't be
+  taken in again for 3 seconds.
+- **Boats like Java's** (Part 78): a boat slides according to what it is in or on: it keeps 90% of its speed a tick on
+  water, 45% under water, and on land the friction of the blocks under it, from 60% on most blocks to 98% on ice and
+  98.9% on blue ice. Rowed, it reaches 0.4 blocks a tick on water, 0.1 on dirt, 2 on packed ice and about 3.6 on blue
+  ice, and its spin dies away at the same rate, so on ice it keeps turning. It floats with its bottom a little under the
+  surface, lands on top of water it falls into, sinks when held under water (its rider floats off after 3 seconds),
+  and keeps the rider's look within 105 degrees of its heading.
+- **Dropped items like Java's** (Part 79): items slide with the friction of the block under them (far on ice), join up
+  the way Java's do (every 2 ticks while moving, every 40 when still, with items right alongside, the smaller stack into
+  the bigger and only when they fit in one), burn up in lava within two ticks, in fire within five and in soul fire
+  within three, break on cacti, and fire-proof items such as netherite bob up and float in lava. An item caught inside
+  a block works its way out through the nearest open side.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
