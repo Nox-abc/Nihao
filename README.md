@@ -613,6 +613,26 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   the bigger and only when they fit in one), burn up in lava within two ticks, in fire within five and in soul fire
   within three, break on cacti, and fire-proof items such as netherite bob up and float in lava. An item caught inside
   a block works its way out through the nearest open side.
+- **Experience like Java's** (Part 80): orbs come in Java's eleven sizes (1 up to 2,477 points), each drawn with its own
+  icon (from your resource pack's orb sheet too: add a pack again if it was added before this update), see-through and
+  pulsing between green and yellow. They pop out, fall slowly, rise in water, burn up in lava and fire, bounce a little
+  when they land and fly to the nearest player within 8 blocks; orbs of a size sometimes join up. You collect one orb
+  every other tick, from as far away as items (a block to each side of you), and what you pick up flies into you.
+  Mending takes its share first, 2 points of repair a point, moving on to your next damaged mending item. Experience
+  comes as orbs where Java's does: a furnace's when you take the output (or break the furnace), the Ender Dragon's
+  raining down as it dies (12,000 the first time, 500 after), a villager's one orb per trade, with its new level coming
+  2 seconds after you stop trading, and a grindstone's at the grindstone. A bottle o' enchanting gives 3 to 11 (usually
+  about 7) and a spawner 15 to 43. Experience from advancements and commands doesn't mend anything.
+- **Suffocation** (Part 81): with your head inside a block you could suffocate in (not glass, leaves and the like), you
+  lose half a heart every half second, mobs too, so falling sand or gravel can bury you; inside a block the screen shows
+  it close up and dark, as in Java.
+- **Falling like Java's** (Part 82): a fall is measured the whole way down and its damage is rounded down, as in Java
+  now: 3.5 blocks costs nothing, 4 or 4.5 blocks half a heart, 5 blocks a heart. Mobs take half the fall on beds and a
+  fifth of the harm on hay bales and honey blocks too, and none on slime blocks. Falling sand and gravel no longer hurt
+  anyone; a falling anvil does, a heart for every block it fell after the first (up to 20 hearts), and may land chipped
+  or break; anvils keep their facing as they fall.
+- **Soul sand and mud** (Part 83) are 2 pixels lower to stand on than they look, as in Java, so you, mobs, items and
+  boats sink into them a little.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

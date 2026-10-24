@@ -9872,6 +9872,7 @@ const OPACITY = new Uint8Array(MAXB);    // light attenuation 0..15
 const EMIT = new Uint8Array(MAXB);       // light emission (largest value when it depends on the state)
 const EMITF = [];                        // id -> function(meta) for state dependent emission
 const SOLID = new Uint8Array(MAXB);      // collides
+const CUBE_TOP = new Float32Array(MAXB).fill(1);   // how high a whole block's collision box reaches (soul sand and mud: Part 83)
 const SHAPE = new Uint8Array(MAXB);
 const CULLSAME = new Uint8Array(MAXB);   // hide faces between identical blocks (glass, water, ice)
 const AOOCC = new Uint8Array(MAXB);      // casts ambient occlusion
@@ -13382,8 +13383,9 @@ class World {
       else if (kind === 'fall') {
         const id = this.getBlock(x, y, z), below = this.getBlock(x, y - 1, z);
         if (GRAVITY[id] && (below === 0 || BLK[below].liquid || (REPL[below] && !SOLID[below])) && y > 0) {
+          const m = this.getMeta(x, y, z);
           this.setBlock(x, y, z, 0, 0);
-          if (game) game.spawnFalling(x, y, z, id);
+          if (game) game.spawnFalling(x, y, z, id, m);
         }
       } else if (kind === 'pop') {
         const id = this.getBlock(x, y, z);
@@ -15459,7 +15461,7 @@ function collectBoxes(world, x0, y0, z0, x1, y1, z1) {
     if (y < 0) { _boxes.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
     const id = world.getBlock(x, y, z);
     if (!SOLID[id]) continue;
-    if (SHAPE[id] === SH.CUBE) { _boxes.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
+    if (SHAPE[id] === SH.CUBE) { _boxes.push([x, y, z, x + 1, y + CUBE_TOP[id], z + 1]); continue; }
     const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? world.shapeCtx(x, y, z, id) : null;
     for (const b of shapeBoxes(id, world.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx)) _boxes.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + b[4] / 16, z + b[5] / 16]);
   }
@@ -15687,14 +15689,16 @@ class Entity {
     if (res.hx) this.vx = 0;
     if (res.hz) this.vz = 0;
     if (res.hy) this.vy = 0;
+    // Entity.checkFallDamage: all of the way down counts, the last step onto the ground too (Part 82)
     if (this.inWater || this.inLava) this.fallDist = 0;
-    else if (!this.onGround && this.vy < 0) this.fallDist -= this.vy;
+    else if (this.y < oy) this.fallDist += oy - this.y;
     if (this.onGround && !wasGround) { this.landed(this.fallDist); this.fallDist = 0; }
     else if (this.onGround) this.fallDist = 0;
     return res;
   }
   landed(dist) {
-    if (dist > 3 && this.hurt) this.hurt(Math.ceil(dist - 3), 'fall');
+    const d = Math.floor(dist + 1e-6 - 3);
+    if (d > 0 && this.hurt) this.hurt(d, 'fall');
   }
   lightAt() {
     const l = this.game.world.getLightRaw(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z));
@@ -15752,20 +15756,20 @@ class ItemEntity extends Entity {
 }
 
 class FallingBlock extends Entity {
-  constructor(game, x, y, z, id) { super(game, x + 0.5, y, z + 0.5); this.block = id; this.w = 0.98; this.h = 0.98; }
+  // the block keeps its state (an anvil its facing) while it falls; what it does to what it lands on: Part 82
+  constructor(game, x, y, z, id, meta) { super(game, x + 0.5, y, z + 0.5); this.block = id; this.meta = meta || 0; this.w = 0.98; this.h = 0.98; }
   tick() {
     this.savePrev(); this.age++;
     this.vy -= 0.04; this.vy *= 0.98;
     this.physicsStep();
     if (this.onGround || this.age > 600) {
       this.dead = true;
-      const bx = Math.floor(this.x), by = Math.floor(this.y + 0.5), bz = Math.floor(this.z);
-      const cur = this.game.world.getBlock(bx, by, bz);
-      if (cur === 0 || REPL[cur]) this.game.world.setBlock(bx, by, bz, this.block, 0);
-      else this.game.dropItem(this.x, this.y + 0.5, this.z, { id: this.block, count: 1 });
+      const g = this.game, bx = Math.floor(this.x), by = Math.floor(this.y + 0.5), bz = Math.floor(this.z);
+      if (this.broken) { g.sound('anvil_break', this.x, this.y, this.z); return; }
+      const cur = g.world.getBlock(bx, by, bz);
+      if (cur === 0 || REPL[cur]) { g.world.setBlock(bx, by, bz, this.block, this.meta); if (FALL_ANVILS.includes(this.block)) g.sound('anvil_land', this.x, this.y, this.z); }
+      else g.dropItem(this.x, this.y + 0.5, this.z, { id: this.block, count: 1 });
     }
-    // crush entities
-    for (const e of this.game.mobsAndPlayer()) if (Math.abs(e.x - this.x) < 0.8 && Math.abs(e.z - this.z) < 0.8 && e.y < this.y && e.y + e.h > this.y && this.vy < -0.3) e.hurt && e.hurt(2, 'block');
   }
   render(r, a) {
     const p = this.ipos(a), L = this.lightAt();
@@ -15899,7 +15903,7 @@ class Projectile extends Entity {
       return;
     }
     if (this.kind === 'potion') { g.sound('break_glass', this.x, this.y, this.z); if (g.splashPotion) g.splashPotion(this.x, this.y, this.z, this.stack, this.owner); return; }
-    if (this.kind === 'xp') { g.sound('break_glass', this.x, this.y, this.z); g.particles.poof(this.x, this.y, this.z, [0.4, 0.6, 1], 10); const n = 3 + Math.floor(Math.random() * 9); if (g.spawnXP) g.spawnXP(this.x, this.y, this.z, n); else if (g.player) g.player.addXP(n); return; }
+    if (this.kind === 'xp') { g.sound('break_glass', this.x, this.y, this.z); g.particles.poof(this.x, this.y, this.z, [0.4, 0.6, 1], 10); const n = 3 + Math.floor(Math.random() * 5) + Math.floor(Math.random() * 5); g.spawnXP(this.x, this.y, this.z, n); return; }
     // wind charges burst like Java's (see windChargeHit)
     if (this.kind === 'wind') { g.windChargeHit(this, e); return; }
     if (this.kind === 'ghast' || this.kind === 'skull') {
@@ -17935,7 +17939,7 @@ const NAV = {
 function shapeHeight(w, x, y, z, id) {
   if (!SOLID[id]) return 0;
   const sh = SHAPE[id];
-  if (sh === SH.CUBE) return 1;
+  if (sh === SH.CUBE) return CUBE_TOP[id];
   if (sh === SH.CARPET || sh === SH.PLATE || sh === SH.RAIL || sh === SH.FLAT) return 0.06;
   if (sh === SH.SLAB) { const m = w.getMeta(x, y, z); return m === 2 ? 1 : (m === 1 ? 1 : 0.5); }
   return 1;
@@ -17944,7 +17948,7 @@ function shapeHeight(w, x, y, z, id) {
 function colTop(w, x, y, z) {
   const id = w.getBlock(x, y, z);
   if (!SOLID[id]) return -1;
-  if (SHAPE[id] === SH.CUBE) return 1;
+  if (SHAPE[id] === SH.CUBE) return CUBE_TOP[id];
   const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null;
   let top = -1;
   for (const b of shapeBoxes(id, w.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx)) top = Math.max(top, b[4] / 16);
@@ -18294,7 +18298,14 @@ class Mob extends Entity {
     const spd = Math.hypot(this.x - this.px, this.z - this.pz);
     this.walkAmt += (Math.min(1, spd * 4) - this.walkAmt) * 0.4; this.walk += spd * 4;
   }
-  landed(dist) { const safe = this.T.noFall === true ? 1e9 : typeof this.T.noFall === 'number' ? this.T.noFall : 3; if (dist > safe) this.hurt(Math.ceil(dist - safe), 'fall'); }
+  // LivingEntity.calculateFallDamage: the drop (and a hair) past what it can fall safely, rounded down (Part 82); beds count half the
+  // drop, hay bales and honey blocks do a fifth of the harm, slime blocks and powder snow none
+  landed(dist) {
+    const safe = this.T.noFall === true ? 1e9 : typeof this.T.noFall === 'number' ? this.T.noFall : 3, b = this.game.world.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z));
+    if (b === B.SLIME_BLOCK || b === B.POWDER_SNOW) return;
+    const d = Math.floor((dist * (1 - (BLK[b].fallCut || 0)) + 1e-6 - safe) * (b === B.HAY_BLOCK || b === B.HONEY_BLOCK ? 0.2 : 1));
+    if (d > 0) this.hurt(d, 'fall');
+  }
   // ---------- looking ----------
   lookAt(x, y, z) { this.lookTarget = [x, y, z]; }
   updateLook() {
@@ -18586,7 +18597,7 @@ const GOALS = {
       const baby = createMob(m.game, m.type, (m.x + mate.x) / 2, m.y, (m.z + mate.z) / 2, { baby: true, parents: [m, mate] });
       if (baby) { baby.growth = -24000; baby.persistent = true; if (m.data.tame && baby.T.tameItem) { baby.data.tame = true; baby.data.owner = m.data.owner; } m.game.entities.push(baby); }
       for (let k = 0; k < 7; k++) m.game.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5));
-      m.game.spawnXP(m.x, m.y + 0.5, m.z, 1 + Math.floor(Math.random() * 7));
+      m.game.xpOrb(m.x, m.y, m.z, 1 + Math.floor(Math.random() * 7));
     }
     return true;
   },
@@ -19509,15 +19520,16 @@ class Player extends Entity {
     return st;
   }
   damageHeld(amount) { const h = this.inv[this.sel]; if (h && ITEMS[h.id].dur) { this.inv[this.sel] = this.wear(h, amount); this.game.ui.refreshHotbar(); } }
+  // Player.giveExperiencePoints (Mending takes its share of an orb as it is picked up, Part 80); the level-up sound on every
+  // fifth level, at most once in 5 seconds
   addXP(n) {
-    // mending repairs worn gear first
-    const menders = [this.inv[this.sel], this.offhand[0], ...this.armor].filter(s => s && s.dmg && enchLevel(s, 'mending'));
-    if (menders.length && n > 0) { const s = menders[Math.floor(Math.random() * menders.length)], fix = Math.min(s.dmg, n * 2); s.dmg -= fix; n -= Math.ceil(fix / 2); }
-    if (n <= 0) { this.game.sound('xp', this.x, this.y, this.z); return; }
+    if (!(n > 0)) return;
     this.xp += n;
     let need;
-    while (this.xp >= (need = xpNeeded(this.xpLevel))) { this.xp -= need; this.xpLevel++; if (this.xpLevel % 5 === 0) this.game.sound('levelup', this.x, this.y, this.z); }
-    this.game.sound('xp', this.x, this.y, this.z);
+    while (this.xp >= (need = xpNeeded(this.xpLevel))) {
+      this.xp -= need; this.xpLevel++;
+      if (this.xpLevel % 5 === 0 && !(this.age - this.lastLevelUp <= 100)) { this.game.sound('levelup', this.x, this.y, this.z); this.lastLevelUp = this.age; }
+    }
   }
   // spend levels (enchanting, anvils)
   takeLevels(n) { this.xpLevel = Math.max(0, this.xpLevel - n); this.xp = Math.min(this.xp, xpNeeded(this.xpLevel) - 1); }
@@ -19607,10 +19619,10 @@ class Player extends Entity {
     if (b === B.SLIME_BLOCK && !this.sneaking) return;
     if (this.effectLevel('slow_falling') || this.gliding) return;
     if (b === B.POWDER_SNOW || b === B.SCAFFOLDING) return;
+    // LivingEntity.calculateFallDamage: the drop (and a hair) past the safe 3 blocks (more with Jump Boost), rounded down (Part 82);
     // on beds and shelf mushrooms only half the fall counts; hay bales and honey blocks do a fifth of the harm
-    let d = dist * (1 - (BLK[b].fallCut || 0)) - 3 - this.effectLevel('jump_boost');
-    if (b === B.HAY_BLOCK || b === B.HONEY_BLOCK) d *= 0.2;
-    if (d > 0) this.hurt(Math.ceil(d), 'fall');
+    const d = Math.floor((dist * (1 - (BLK[b].fallCut || 0)) + 1e-6 - 3 - this.effectLevel('jump_boost')) * (b === B.HAY_BLOCK || b === B.HONEY_BLOCK ? 0.2 : 1));
+    if (d > 0) this.hurt(d, 'fall');
   }
   // ---------- mining ----------
   // BlockBehaviour.getDestroyProgress with Player.getDestroySpeed: the share of a block broken in one tick (1 or more breaks it at
@@ -19877,16 +19889,8 @@ class Player extends Entity {
     if (this.sel !== this.lastSel) { this.equip = 1; this.lastSel = this.sel; this.lastAttack = this.age; if (this.using && this.using.hand === 'main') this.using = null; }
     if (this.equip > 0) this.equip = Math.max(0, this.equip - 0.25);
     if (this.swingT > 0) { this.swingT--; this.swing = 1 - this.swingT / 6; } else this.swing = 0;
-    // pick up items and experience
-    for (const e of g.entities) {
-      if (!(e instanceof ItemEntity) || e.dead || e.pickupDelay > 0) continue;
-      const dx = e.x - this.x, dy = e.y - (this.y + 0.9), dz = e.z - this.z;
-      if (Math.abs(dx) < 1.0 && Math.abs(dy) < 1.4 && Math.abs(dz) < 1.0) {
-        const left = this.addItem(e.stack);
-        if (left < e.stack.count) { g.sound('pop', e.x, e.y, e.z); g.ui.refreshHotbar(); }
-        if (left <= 0) e.dead = true; else e.stack.count = left;
-      }
-    }
+    // pick up items and experience (Part 80)
+    this.pickUpNearby();
   }
   glideStep() {
     const lk = this.look(), pr = -this.pitch;
@@ -21894,7 +21898,8 @@ for (const t of ['furnace', 'smoker', 'blast_furnace']) SCREEN_LOGIC[t] = {
   update: furnaceUpdate,
   changed(ui, c, i) {
     const be = ui.inv.data;
-    if (c === 'be' && i === 2 && be.xp >= 1) { const n = Math.floor(be.xp); be.xp -= n; ui.game.player.addXP(n); }
+    // taking the output: the experience of everything smelt since, as orbs at the player (Part 80)
+    if (c === 'be' && i === 2) { const p = ui.game.player; furnaceXP(ui.game, be, p.x, p.y, p.z); }
   },
 };
 // stonecutter: list of recipes for the input item
@@ -22012,6 +22017,8 @@ const PACK_ANIM = { water_still: 16, lava_still: 8, nether_portal: 8 };
 // textures that are put together from other images (handled by packComposites)
 const PACK_COMPOSITE = new Set(['grass_block_side_item', 'chest_top', 'chest_side', 'chest_front', 'bed_top', 'bed_side', 'end_portal', 'end_portal_1', 'end_portal_2', 'end_portal_3', 'rain', 'snowfall',
   'decorated_pot_top', 'decorated_pot_bottom']);
+// textures cut from a square of a sheet: name -> [path, x, y, width, height, the sheet's width in those units]
+const PACK_CROPS = {};
 function packTexMap() {
   if (PACKS.texMap) return PACKS.texMap;
   const m = {}, items = new Set();
@@ -22033,6 +22040,7 @@ function packTexMap() {
   set('particle_firefly', 'particle/firefly'); set('particle_glow', 'particle/glow');
   for (const g in PACK_ANIM) for (let k = 1; k < PACK_ANIM[g]; k++) m[g + '_' + k] = m[g];
   for (const n of PACK_COMPOSITE) m[n] = [];
+  for (const n in PACK_CROPS) m[n] = [];
   return PACKS.texMap = m;
 }
 const PACK_GUI = {
@@ -22193,6 +22201,7 @@ async function applyPackRecords(game, recs) {
   for (const k in PACK_GUI) for (const p of PACK_GUI[k]) paths.add(p);
   for (const k in SKINS) for (const p of [k, ...(SKIN_ALIAS[k] || [])]) paths.add(p);
   for (const p of PACK_EXTRA) paths.add(p);
+  for (const n in PACK_CROPS) paths.add(PACK_CROPS[n][0]);
   await Promise.all([...paths].filter(src).map(load));
   const img = p => images.get(p) || null;
   const first = list => { for (const p of list) if (img(p)) return p; return null; };
@@ -22224,6 +22233,8 @@ async function applyPackRecords(game, recs) {
   for (let i = 0; i < N; i++) {
     const name = TEX.names[i];
     const base = name.replace(/_\d+$/, ''), grp = PACK_ANIM[name] ? name : (PACK_ANIM[base] && /_\d+$/.test(name) ? base : null);
+    const cr = PACK_CROPS[name], ci = cr && img(cr[0]);
+    if (ci) { const k = ci.width / cr[5]; out[i] = grab(ci, cr[1] * k, cr[2] * k, cr[3] * k, cr[4] * k); continue; }
     const p = first(m[name] || []);
     if (!p) { out[i] = upscale(TEX.def[i]); continue; }
     const im = img(p), w = im.width, fl = frames(p, im);
@@ -23474,8 +23485,6 @@ class Game {
     const st = this.meta.end, first = !st.killed;
     st.killed = true; st.hp = null; this.dragon = null;
     for (const e of this.entities) if (e instanceof EndCrystal) e.dead = true;
-    const p = this.player;
-    if (!p.dead) p.addXP(first ? 1000 : 100);
     this.ui.chat('The Ender Dragon has been slain! The exit portal is open at the centre of the island.', '#d8a8ff');
     this.ensureExitPortal();
   }
@@ -23826,7 +23835,7 @@ class Game {
         if (++be.cook >= be.cookMax) {
           be.cook = 0;
           if (it[2]) it[2].count++; else it[2] = { id: res, count: 1 };
-          be.xp = (be.xp || 0) + (SMELT_XP[inp.id] || 0.1);
+          const un = ITEMS[inp.id].name; (be.used || (be.used = {}))[un] = (be.used[un] || 0) + 1;
           // a wet sponge dried in a furnace fills an empty bucket in the fuel slot
           if (inp.id === B.WET_SPONGE && it[1] && it[1].id === I.BUCKET) it[1] = { id: I.WATER_BUCKET, count: 1 };
           inp.count--; if (inp.count <= 0) it[0] = null;
@@ -23981,7 +23990,7 @@ class Game {
     this.entities.push(e);
     return e;
   }
-  spawnFalling(x, y, z, id) { this.entities.push(new FallingBlock(this, x, y, z, id)); }
+  spawnFalling(x, y, z, id, meta) { this.entities.push(new FallingBlock(this, x, y, z, id, meta)); }
   primeTNT(x, y, z, fuse) {
     if (this.world.getBlock(x, y, z) === B.TNT) this.world.setBlock(x, y, z, 0, 0);
     this.entities.push(new PrimedTNT(this, x, y, z, fuse || 80));
@@ -25458,7 +25467,7 @@ Object.assign(Game.prototype, {
       const it = ITEMS[p.heldId()];
       if (it && it.tool && d.hard > 0) p.damageHeld(it.tool.type === 'sword' ? 2 : 1);
       p.exh += 0.005;
-      if (d.xp && harvest && !(p.toolInfo && p.toolInfo().silk) && this.rule('doTileDrops')) { const [a, b] = d.xp; const n = a + Math.floor(Math.random() * (b - a + 1)); if (n > 0) this.spawnXP ? this.spawnXP(x + 0.5, y + 0.5, z + 0.5, n) : p.addXP(n); }
+      if (d.xp && harvest && !(p.toolInfo && p.toolInfo().silk) && this.rule('doTileDrops')) { const [a, b] = d.xp; const n = d.xpRoll ? d.xpRoll() : a + Math.floor(Math.random() * (b - a + 1)); if (n > 0) this.spawnXP ? this.spawnXP(x + 0.5, y + 0.5, z + 0.5, n) : p.addXP(n); }
       if (id === B.ICE && w.dim !== 'nether' && !(p.toolInfo && p.toolInfo().silk)) w.setBlock(x, y, z, B.WATER, 0);
     }
     this.remeshNear(x, z);
@@ -26102,45 +26111,23 @@ function grindResult(a, b) {
 SCREEN_LOGIC.grindstone = {
   accept(ui, c, i, st) { const it = ITEMS[st.id]; return c !== 'local' || !!(it.dur || st.id === I.ENCHANTED_BOOK || (st.tag && st.tag.ench)); },
   result(ui) { const r = grindResult(ui.inv.local[0], ui.inv.local[1]); return r ? r.out : null; },
-  take(ui) { const r = grindResult(ui.inv.local[0], ui.inv.local[1]); ui.inv.local[0] = ui.inv.local[1] = null; if (r && r.xp) ui.game.spawnXP(ui.game.player.x, ui.game.player.y + 1, ui.game.player.z, r.xp); ui.game.sound('grindstone', ui.game.player.x, ui.game.player.y, ui.game.player.z); },
+  take(ui) { const r = grindResult(ui.inv.local[0], ui.inv.local[1]), d = ui.inv.data, p = ui.game.player; ui.inv.local[0] = ui.inv.local[1] = null; if (r && r.xp) { if (d && d.x !== undefined) ui.game.spawnXP(d.x + 0.5, d.y + 0.5, d.z + 0.5, r.xp); else ui.game.spawnXP(p.x, p.y + 1, p.z, r.xp); } ui.game.sound('grindstone', ui.game.player.x, ui.game.player.y, ui.game.player.z); },
   single: true,
 };
 
 /* ---------------- experience orbs ---------------- */
+// ExperienceOrb(level, x, y, z, value): half a block across, 5 health, popping out at up to 0.2 sideways and 0.4 up; how it moves,
+// joins others, is drawn and is picked up: Part 80
 class XPOrb extends Entity {
   constructor(game, x, y, z, value) {
     super(game, x, y, z);
-    this.value = value; this.w = 0.3; this.h = 0.3;
-    this.vx = (Math.random() - 0.5) * 0.2; this.vy = Math.random() * 0.2 + 0.1; this.vz = (Math.random() - 0.5) * 0.2;
-    this.size = value >= 17 ? 0.35 : value >= 7 ? 0.28 : value >= 3 ? 0.22 : 0.16;
-  }
-  tick() {
-    this.savePrev(); this.age++;
-    const g = this.game, p = g.player;
-    this.updateFluids();
-    if (p && !p.dead && p.mode !== 3) {
-      const dx = p.x - this.x, dy = p.y + 0.9 - this.y, dz = p.z - this.z, d = Math.hypot(dx, dy, dz);
-      if (d < 8) { const k = (1 - d / 8) ** 2 * 0.1; this.vx += dx / d * k; this.vy += dy / d * k; this.vz += dz / d * k; }
-      if (d < 1.2 && this.age > 8 && (p.orbCd || 0) <= p.age) { p.orbCd = p.age + 2; this.dead = true; p.addXP(this.value); g.ui.refreshBars(); return; }
-    }
-    if (this.inWater) this.vy += 0.002; else this.vy -= 0.03;
-    this.physicsStep();
-    this.vx *= this.onGround ? 0.6 : 0.98; this.vz *= this.onGround ? 0.6 : 0.98; this.vy *= 0.98;
-    if (this.age > 6000 || this.inLava) this.dead = true;
-  }
-  render(r, a) {
-    const p = this.ipos(a), t = (this.age + a) * 0.3, k = (Math.sin(t) + 1) / 2;
-    drawSprite(r, texL('particle_generic_1'), p[0], p[1] + this.size, p[2], this.size * 1.6, this.game.camYaw || 0, [0.5 + k * 0.5, 1, 0.1 + k * 0.2, 1], [15, 15]);
+    this.value = value; this.w = 0.5; this.h = 0.5; this.count = 1; this.hp = 5; this.tc = 0;
+    this.vx = (Math.random() * 0.2 - 0.1) * 2; this.vy = Math.random() * 0.2 * 2; this.vz = (Math.random() * 0.2 - 0.1) * 2;
+    this.yaw = Math.random() * Math.PI * 2;
   }
 }
 Object.assign(Game.prototype, {
-  spawnXP(x, y, z, n) {
-    while (n > 0) {
-      const v = n >= 37 ? 37 : n >= 17 ? 17 : n >= 7 ? 7 : n >= 3 ? 3 : 1;
-      n -= v;
-      this.entities.push(new XPOrb(this, x + (Math.random() - 0.5) * 0.4, y, z + (Math.random() - 0.5) * 0.4, v));
-    }
-  },
+  spawnXP(x, y, z, n) { this.xpAward(x, y, z, n); },
 });
 
 /* @file 94_mobs_game.js */
@@ -26860,11 +26847,14 @@ SCREEN_LOGIC.merchant = {
     if (o.buy2) { ui.inv.local[1].count -= o.buy2[1]; if (ui.inv.local[1].count <= 0) ui.inv.local[1] = null; }
     o.uses++;
     const d = m.data;
+    // Villager.rewardTradeXp: one orb of 3 to 6, 5 more when the trade earns a level, which comes 2 seconds after trading ends
+    // (updateMerchantTimer, Part 80); a wandering trader's orb is the same
+    let v = 3 + Math.floor(Math.random() * 4);
     if (d.xp !== undefined && m.type === 'villager') {
       d.xp += o.xp;
-      g.spawnXP(m.x, m.y + 1.5, m.z, 3 + Math.floor(Math.random() * 4));
-      if (d.level < 5 && d.xp >= LEVEL_XP[d.level + 1]) { d.level++; addTrades(m, d.level); g.spawnXP(m.x, m.y + 1.5, m.z, 5); g.particles.icon(m.x, m.y + 2.2, m.z, 'happy', 8); m.addEffect('regeneration', 200, 0); }
+      if (d.level < 5 && d.xp >= LEVEL_XP[d.level + 1]) { m._levelUp = 40; v += 5; }
     }
+    if (m.type === 'villager' || m.type === 'wandering_trader') g.xpOrb(m.x, m.y + 0.5, m.z, v);
     g.sound('villager_trade', m.x, m.y, m.z);
     this.refresh(ui);
   },
@@ -29003,7 +28993,7 @@ class FishingHook extends Entity {
       const it = g.dropItem(this.x, this.y + 0.2, this.z, st);
       const dx = o.x - this.x, dy = o.y - this.y, dz = o.z - this.z;
       it.vx = dx * 0.1; it.vy = dy * 0.1 + Math.sqrt(Math.sqrt(dx * dx + dy * dy + dz * dz)) * 0.08; it.vz = dz * 0.1; it.pickupDelay = 0;
-      if (g.spawnXP) g.spawnXP(o.x, o.y + 0.5, o.z + 0.5, 1 + Math.floor(Math.random() * 6));
+      g.xpOrb(o.x, o.y + 0.5, o.z + 0.5, 1 + Math.floor(Math.random() * 6));
       dmg = 1;
     }
     if (this.onGround) dmg = 2;
@@ -32989,8 +32979,8 @@ Game.prototype.computeEnv = function (eye, look) {
 /* @file 116_vanilla_rules.js */
 /* ===================================================================
    VANILLA RULES — hunger on Peaceful (health and food come back by
-   themselves), the exhaustion cap, and the Ender Dragon's experience
-   (12,000 for the first kill, 500 after)
+   themselves) and the exhaustion cap (the Ender Dragon's experience:
+   Part 80)
    =================================================================== */
 const _playerTickVR = Player.prototype.tick;
 Player.prototype.tick = function (inp) {
@@ -33005,13 +32995,6 @@ Player.prototype.tick = function (inp) {
     if (this.food < 20 && this.age % 10 === 0) this.food++;
   }
   return r;
-};
-const _onDragonDefeatedVR = Game.prototype.onDragonDefeated;
-Game.prototype.onDragonDefeated = function (s) {
-  const st = this.meta && this.meta.end, real = !!(st && this.world.dim === 'end' && s === this.dragon), first = real && !st.everKilled && !st.killed;
-  _onDragonDefeatedVR.call(this, s);
-  // on top of the 1,000 / 100 the fight already gave
-  if (real && this.player && !this.player.dead) this.player.addXP(first ? 11000 : 400);
 };
 
 /* @file 117_pack_export.js */
@@ -35643,7 +35626,7 @@ Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
   }
   // the creatures and things around
   const f2 = power * 2, p = this.player, hurtAs = EXPLOSION_HURT[source] || source || 'explosion';
-  const things = this.entities.filter(e => !e.dead && (e instanceof Mob || e instanceof ItemEntity || e instanceof PrimedTNT || e instanceof FallingBlock));
+  const things = this.entities.filter(e => !e.dead && (e instanceof Mob || e instanceof ItemEntity || e instanceof XPOrb || e instanceof PrimedTNT || e instanceof FallingBlock));
   if (p && !p.dead && p.mode !== 3) things.push(p);
   for (const e of things) {
     const d11 = Math.hypot(e.x - x, e.y - y, e.z - z) / f2;
@@ -35657,6 +35640,8 @@ Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
     if (e instanceof ItemEntity) {
       // items have 5 health; nether stars are not hurt by explosions
       if (e.stack.id !== I.NETHER_STAR && (e.ihp = (e.ihp === undefined ? 5 : e.ihp) - dmg) <= 0) { e.dead = true; continue; }
+    } else if (e instanceof XPOrb) {
+      if ((e.hp = (e.hp === undefined ? 5 : e.hp) - dmg) <= 0) { e.dead = true; continue; }
     } else if (e.hurt && !(e instanceof PrimedTNT) && !(e instanceof FallingBlock)) {
       if (e === p) { const df = OPTIONS.difficulty; dmg = df === 0 ? 0 : df === 1 ? Math.min(dmg / 2 + 1, dmg) : df === 3 ? dmg * 1.5 : dmg; }
       if (dmg > 0) e.hurt(dmg, hurtAs, null);
@@ -45594,7 +45579,7 @@ GOALS.breed = function (m) {
     m.love = mate.love = 0; m.loveT = mate.loveT = 0; m.breedCd = mate.breedCd = 6000;
     if (m.type === 'turtle') m.data.hasEgg = true; else m.data.pregnant = true;
     for (let k = 0; k < 7; k++) m.game.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5));
-    if (m.game.rule('doMobLoot') !== false) m.game.spawnXP(m.x, m.y + 0.5, m.z, 1 + Math.floor(Math.random() * 7));
+    if (m.game.rule('doMobLoot') !== false) m.game.xpOrb(m.x, m.y, m.z, 1 + Math.floor(Math.random() * 7));
   }
   return true;
 };
@@ -47460,7 +47445,7 @@ if (MOB_TYPES.sniffer) {
   T.ai = ai;
 }
 // Sniffer.getHeadBlock: 2.25 blocks ahead of it
-const snifferHead = m => [Math.floor(m.x - Math.sin(m.bodyYaw) * 2.25), Math.floor(m.y + 0.01), Math.floor(m.z + Math.cos(m.bodyYaw) * 2.25)];
+const snifferHead = m => [Math.floor(m.x - Math.sin(m.bodyYaw) * 2.25), Math.floor(m.y + 0.2), Math.floor(m.z + Math.cos(m.bodyYaw) * 2.25)];
 // Sniffer.canSniff and canDig: not tempted, panicking, in water, in love, carried or leashed, on the ground; to dig, grown up, with a
 // diggable block under its head that it has not dug before and can walk to
 const snifferCanSniff = m => !(m.panic > 0) && m.goal !== 'tempt' && !m.inWater && !(m.love > 0) && m.onGround && !m.leashed;
@@ -47560,7 +47545,7 @@ GOALS.breed = function (m) {
     if (e) { e.vx = e.vy = e.vz = 0; }
     m.game.sound('sniffer_egg_plop', m.x, m.y, m.z);
     for (let k = 0; k < 7; k++) m.game.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5));
-    if (m.game.rule('doMobLoot') !== false) m.game.spawnXP(m.x, m.y + 0.5, m.z, 1 + Math.floor(Math.random() * 7));
+    if (m.game.rule('doMobLoot') !== false) m.game.xpOrb(m.x, m.y, m.z, 1 + Math.floor(Math.random() * 7));
   }
   return true;
 };
@@ -53428,7 +53413,7 @@ GOALS.breed = function (m) {
     const baby = createMob(m.game, 'mule', (m.x + mate.x) / 2, m.y, (m.z + mate.z) / 2, { baby: true, parents: [m, mate] });
     if (baby) { baby.growth = -24000; baby.persistent = true; m.game.entities.push(baby); }
     for (let k = 0; k < 7; k++) m.game.particles.heart(m.x + (Math.random() - 0.5), m.y + m.h, m.z + (Math.random() - 0.5));
-    if (m.game.rule('doMobLoot') !== false) m.game.spawnXP(m.x, m.y + 0.5, m.z, 1 + Math.floor(Math.random() * 7));
+    if (m.game.rule('doMobLoot') !== false) m.game.xpOrb(m.x, m.y, m.z, 1 + Math.floor(Math.random() * 7));
   }
   return true;
 };
@@ -53874,6 +53859,12 @@ EnderDragon.prototype.tick = function () {
     this.y += 0.1; this.yr += 20; this.yaw = Math.atan2(Math.sin(this.yr * DRG), -Math.cos(this.yr * DRG)); this.bodyYaw = this.yaw;
     if (this.deathT >= 180 && this.deathT <= 200) g.particles.explosion(this.x + (Math.random() - 0.5) * 8, this.y + 2 + (Math.random() - 0.5) * 4, this.z + (Math.random() - 0.5) * 8);
     else if (this.deathT % 3 === 0) g.particles.poof(this.x + (Math.random() - 0.5) * 8, this.y + 2 + (Math.random() - 0.5) * 4, this.z + (Math.random() - 0.5) * 8, [0.8, 0.5, 1.0]);
+    // experience over the last 2.5 seconds and a burst at the end: 12,000 in all for the fight's first dragon, else 500 (Part 80)
+    const st = g.meta && g.meta.end, xp = g.world.dim === 'end' && this === g.dragon && st && !st.everKilled && !st.killed ? 12000 : 500;
+    if (g.rule('doMobLoot') !== false) {
+      if (this.deathT > 150 && this.deathT % 5 === 0) g.xpAward(this.x, this.y, this.z, Math.floor(xp * 0.08));
+      if (this.deathT === 200) g.xpAward(this.x, this.y, this.z, Math.floor(xp * 0.2));
+    }
     if (this.deathT >= 200) { this.dead = true; g.onDragonDefeated(this); }
     return;
   }
@@ -55032,7 +55023,7 @@ MOB_SKINS.camel = m => {
 
 /* ---------------- packs added before this ---------------- */
 // a pack read before these names were known lacks its newer textures until it is added again
-const PACK_VERSION = 2;
+const PACK_VERSION = 3;
 const _importFileNP = PACKS.importFile;
 PACKS.importFile = async function (file, progress) {
   const rec = await _importFileNP.call(this, file, progress);
@@ -55040,7 +55031,7 @@ PACKS.importFile = async function (file, progress) {
   try { await DB.putPack(rec); } catch (e) { rec.unsaved = true; }
   return rec;
 };
-const packNeedsReadd = r => !r.embedded && !(r.v >= PACK_VERSION) && !!r.files['entity/zombie/zombie'] && !r.files['entity/cow/cow'];
+const packNeedsReadd = r => !r.embedded && !(r.v >= PACK_VERSION) && !!r.files['entity/zombie/zombie'] && (!r.files['entity/cow/cow'] || !r.files['entity/experience_orb']);
 const _renderPS = PackScreen.render;
 PackScreen.render = async function () {
   await _renderPS.call(this);
@@ -60250,7 +60241,7 @@ const boatWaterSource = (w, x, y, z) => w.getBlock(x, y, z) !== B.WATER || w.get
 function boatBlockHits(w, x, y, z, b) {
   const id = w.getBlock(x, y, z);
   if (!SOLID[id] || BLK[id].noCollide) return false;
-  const boxes = SHAPE[id] === SH.CUBE ? [[0, 0, 0, 16, 16, 16]] : (() => { const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null; return shapeBoxes(id, w.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx); })();
+  const boxes = SHAPE[id] === SH.CUBE ? [[0, 0, 0, 16, CUBE_TOP[id] * 16, 16]] : (() => { const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null; return shapeBoxes(id, w.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx); })();
   for (const q of boxes) if (x + q[0] / 16 < b[3] && x + q[3] / 16 > b[0] && y + q[1] / 16 < b[4] && y + q[4] / 16 > b[1] && z + q[2] / 16 < b[5] && z + q[5] / 16 > b[2]) return true;
   return false;
 }
@@ -60398,7 +60389,7 @@ function pushOutOfBlock(e, x, y, z) {
   let dir = 4, best = Infinity;
   [[0, 0, -1, fz], [0, 0, 1, 1 - fz], [-1, 0, 0, fx], [1, 0, 0, 1 - fx], [0, 1, 0, 1 - fy]].forEach(([dx, dy, dz, d], k) => {
     const id = w.getBlock(bx + dx, by + dy, bz + dz);
-    if (SOLID[id] && SHAPE[id] === SH.CUBE) return;
+    if (SOLID[id] && SHAPE[id] === SH.CUBE && CUBE_TOP[id] === 1) return;
     if (d < best) { best = d; dir = k; }
   });
   const s = Math.random() * 0.2 + 0.1;
@@ -60459,6 +60450,410 @@ ItemEntity.prototype.mergeNear = function () {
     if (this.dead) return;
   }
 };
+
+/* @file 186_experience.js */
+/* ===================================================================
+   Part 80: experience like Java's (ExperienceOrb)
+   - orbs come in Java's sizes (1, 3, 7, 17, 37, 73, 149, 307, 617,
+     1237 and 2477 points), each drawn with the icon for its size (from
+     a resource pack's orb sheet too), half see-through, glowing, its
+     colour pulsing between green and yellow
+   - an orb pops out at a random speed (up to 0.2 sideways, 0.4 up),
+     falls slowly (not while inside a block, which it works its way out
+     of), rises slowly in water, is tossed about by lava (which burns it
+     up in two ticks, as fire does in five, soul fire in three, a cactus
+     and explosions too), slides with the friction of the block under
+     it and bounces back up a little when it lands; it goes after the
+     nearest player within 8 blocks, faster the nearer it gets
+   - orbs of the same size join up now and then (once a second, one in
+     40 of them can), and a new orb may join one already where it
+     appears; a joined orb is picked up one at a time
+   - a player collects one orb every other tick, from a box a block
+     wider on each side and half a block taller (riding, the vehicle's
+     box too); items are picked up from the same box. What is picked
+     up flies into the player over 3 ticks
+   - Mending takes the experience first: 2 points of repair for each
+     point, an odd last point of repair free, going on to another
+     damaged mending item once one is whole
+   - experience comes as orbs wherever Java's does: a furnace's when
+     you take the output (at you; at the furnace when it's broken),
+     the Ender Dragon's in bursts as it rises dying (12,000 the first
+     time, 500 after), a villager's single orb per trade (5 more when
+     the trade earns a new level, which then comes 2 seconds after
+     trading ends, with Regeneration), a wandering trader's too, a
+     grindstone's at the grindstone, breeding's and fishing's as one
+     orb; a bottle o' enchanting gives 3 to 11 (most often 7) and a
+     spawner 15 to 43 (most often 29)
+   - experience straight from advancements and commands mends nothing,
+     only orbs make the pickup sound, and the level-up sound plays at
+     most once in 5 seconds
+   =================================================================== */
+
+// ExperienceOrb.getExperienceValue: the orb sizes, biggest first; getIcon: which of the sheet's icons a size has
+const XP_SIZES = [2477, 1237, 617, 307, 149, 73, 37, 17, 7, 3, 1];
+const xpSize = n => XP_SIZES.find(v => n >= v) || 1;
+const xpIcon = v => { const i = XP_SIZES.findIndex(s => v >= s); return i < 0 ? 0 : 10 - i; };
+
+/* ---------------- an orb ---------------- */
+XPOrb.prototype.tick = function () {
+  const g = this.game, w = g.world, hw = this.w / 2;
+  this.savePrev(); this.tc = (this.tc || 0) + 1;
+  this.updateFluids();
+  const stuck = boxHitsShapes(w, this.x - hw, this.y, this.z - hw, this.x + hw, this.y + this.h, this.z + hw);
+  // setUnderwaterMovement with its eyes in water, else gravity (none inside a block)
+  if (this.headInWater) { this.vx *= 0.99; this.vy = Math.min(this.vy + 5e-4, 0.06); this.vz *= 0.99; }
+  else if (!stuck) this.vy -= 0.03;
+  if (w.getBlock(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) === B.LAVA) {
+    this.vx = (Math.random() - Math.random()) * 0.2; this.vy = 0.2; this.vz = (Math.random() - Math.random()) * 0.2;
+  }
+  if (this.tc % 20 === 1) this.mergeNear();
+  this.followNearest();
+  // stuck and staying stuck: out by the nearest open side
+  if (!this.follow && stuck && boxHitsShapes(w, this.x - hw + this.vx, this.y + this.vy, this.z - hw + this.vz, this.x + hw + this.vx, this.y + this.h + this.vy, this.z + hw + this.vz)) {
+    pushOutOfBlock(this, this.x, this.y + this.h / 2, this.z);
+  }
+  const vy0 = this.vy, res = this.physicsStep();
+  const hurt = groundHurt(this, false);
+  if (hurt && (this.hp = (this.hp === undefined ? 5 : this.hp) - hurt) <= 0) { this.dead = true; return; }
+  let f = 0.98;
+  if (this.onGround) f = (BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.999999), Math.floor(this.z))].slip || 0.6) * 0.98;
+  this.vx *= f; this.vy *= f; this.vz *= f;
+  // landing faster than it falls in a tick: a little bounce
+  if (res && res.down && vy0 < -0.03) this.vy = -vy0 * 0.4;
+  if (++this.age >= 6000) this.dead = true;
+};
+// orbs take no fall damage
+XPOrb.prototype.landed = function () {};
+// followNearbyPlayer: the nearest living player within 8 blocks (kept while within 8), pulled toward their middle
+XPOrb.prototype.followNearest = function () {
+  const p = this.game.player, ok = p && !p.dead && p.mode !== 3;
+  const d2 = ok ? (p.x - this.x) ** 2 + (p.y - this.y) ** 2 + (p.z - this.z) ** 2 : Infinity;
+  this.follow = d2 <= 64 ? p : null;
+  if (!this.follow) return;
+  const dx = p.x - this.x, dy = p.y + (p.eyeCur || 1.62) / 2 - this.y, dz = p.z - this.z, d = Math.hypot(dx, dy, dz);
+  if (!d) return;
+  const k = (1 - d / 8) ** 2 * 0.1;
+  this.vx += dx / d * k; this.vy += dy / d * k; this.vz += dz / d * k;
+};
+// scanForMerges: orbs of its size in the box half a block around it whose numbers differ by a multiple of 40
+XPOrb.prototype.mergeNear = function () {
+  const hw = this.w / 2 + 0.5;
+  for (const e of this.game.entities) {
+    if (e === this || !(e instanceof XPOrb) || e.dead || e.value !== this.value || (e.id - this.id) % 40) continue;
+    if (Math.abs(e.x - this.x) >= hw + e.w / 2 || e.y + e.h <= this.y - 0.5 || e.y >= this.y + this.h + 0.5 || Math.abs(e.z - this.z) >= hw + e.w / 2) continue;
+    this.count = (this.count || 1) + (e.count || 1); this.age = Math.min(this.age, e.age); e.dead = true;
+  }
+};
+// playerTouch: one of its count at a time, every other tick; Mending first, the rest to the player
+XPOrb.prototype.playerTouch = function (p) {
+  if (p.xpDelay > 0) return;
+  p.xpDelay = 2;
+  const g = this.game;
+  g.pickupFly(this, p);
+  g.sound('xp', this.x, this.y, this.z);
+  const left = p.mendWithXP(this.value);
+  if (left > 0) p.addXP(left);
+  g.ui.refreshBars();
+  if (--this.count <= 0) this.dead = true;
+};
+XPOrb.prototype.render = function () {};
+// ExperienceOrbRenderer: the icon for its value on a quad 0.3 across, facing the camera, red pulsing, green full, a touch of blue,
+// half see-through, lit as if by 7 more block light
+XPOrb.prototype.drawOrb = function (r, p, t, rt, up) {
+  const red = (Math.sin(t) + 1) * 0.5, blue = (Math.sin(t + 4.1887903) + 1) * 0.1, layer = texL('xp_orb_' + xpIcon(this.value));
+  const l = this.game.world.getLightRaw(Math.floor(p[0]), Math.floor(p[1] + 0.25), Math.floor(p[2])), sky = l >> 4, blk = Math.min(15, (l & 15) + 7);
+  const c = (u, v) => [p[0] + rt[0] * u + up[0] * v, p[1] + 0.1 + rt[1] * u + up[1] * v, p[2] + rt[2] * u + up[2] * v];
+  const pts = [c(-0.15, -0.075), c(0.15, -0.075), c(0.15, 0.225), c(-0.15, 0.225)], uv = [[0, 1], [1, 1], [1, 0], [0, 0]];
+  for (let k = 0; k < 4; k++) r.dv(pts[k][0], pts[k][1], pts[k][2], uv[k][0], uv[k][1], layer, red, 1, blue, 0.5, sky, blk);
+};
+// drawn with the particles, which blend
+const _renderBeamsXP = Game.prototype.renderBeams;
+Game.prototype.renderBeams = function (r, alpha) {
+  _renderBeamsXP.call(this, r, alpha);
+  const p = this.player;
+  if (!p) return;
+  const yaw = this.camYaw || 0, pitch = this.thirdPerson === 2 ? -p.pitch : p.pitch, far = (OPTIONS.renderDist * 16) ** 2;
+  const rt = [Math.cos(yaw), 0, -Math.sin(yaw)], up = [Math.sin(yaw) * Math.sin(pitch), Math.cos(pitch), Math.cos(yaw) * Math.sin(pitch)];
+  for (const e of this.entities) {
+    if (!(e instanceof XPOrb) || e.dead || (e.x - p.x) ** 2 + (e.z - p.z) ** 2 > far) continue;
+    e.drawOrb(r, e.ipos(alpha), ((e.tc || 0) + alpha) / 2, rt, up);
+  }
+  for (const f of this.pickups || []) if (f.e instanceof XPOrb) f.e.drawOrb(r, pickupAt(f, alpha), ((f.e.tc || 0) + f.t + alpha) / 2, rt, up);
+};
+
+/* ---------------- handing out experience ---------------- */
+// ExperienceOrb.award: split into orb sizes; each may join an orb of its size already there (tryMergeToExisting) instead
+Game.prototype.xpAward = function (x, y, z, n) {
+  n = Math.floor(n);
+  while (n > 0) {
+    const v = xpSize(n);
+    n -= v;
+    if (!this.xpJoin(x, y, z, v)) this.entities.push(new XPOrb(this, x, y, z, v));
+  }
+};
+Game.prototype.xpJoin = function (x, y, z, v) {
+  const i = Math.floor(Math.random() * 40);
+  for (const e of this.entities) {
+    if (!(e instanceof XPOrb) || e.dead || e.value !== v || ((e.id - i) % 40 + 40) % 40) continue;
+    const hw = e.w / 2;
+    if (e.x + hw <= x - 0.5 || e.x - hw >= x + 0.5 || e.y + e.h <= y - 0.5 || e.y >= y + 0.5 || e.z + hw <= z - 0.5 || e.z - hw >= z + 0.5) continue;
+    e.count = (e.count || 1) + 1; e.age = 0;
+    return true;
+  }
+  return false;
+};
+// a single orb of exactly this value (breeding, fishing, trading)
+Game.prototype.xpOrb = function (x, y, z, v) { if (v > 0) this.entities.push(new XPOrb(this, x, y, z, v)); };
+
+/* ---------------- the player ---------------- */
+// Player.aiStep: what a player touches: a box a block wider each side and half a block taller (riding, around the vehicle's box
+// too, a block wider each side); every item there, and one orb picked at random
+Player.prototype.pickUpNearby = function () {
+  const g = this.game;
+  if (this.xpDelay > 0) this.xpDelay--;
+  if (this.dead || this.health <= 0 || this.mode === 3) return;
+  const hw = this.w / 2, v = this.riding;
+  let b = [this.x - hw - 1, this.y - 0.5, this.z - hw - 1, this.x + hw + 1, this.y + this.h + 0.5, this.z + hw + 1];
+  if (v && !v.dead) {
+    const vw = v.w / 2;
+    b = [Math.min(this.x - hw, v.x - vw) - 1, Math.min(this.y, v.y), Math.min(this.z - hw, v.z - vw) - 1, Math.max(this.x + hw, v.x + vw) + 1, Math.max(this.y + this.h, v.y + v.h), Math.max(this.z + hw, v.z + vw) + 1];
+  }
+  const orbs = [];
+  for (const e of g.entities) {
+    if (e.dead) continue;
+    const orb = e instanceof XPOrb;
+    if (!orb && !(e instanceof ItemEntity)) continue;
+    const ew = e.w / 2;
+    if (e.x + ew <= b[0] || e.x - ew >= b[3] || e.y + e.h <= b[1] || e.y >= b[4] || e.z + ew <= b[2] || e.z - ew >= b[5]) continue;
+    if (orb) orbs.push(e); else this.touchItem(e);
+  }
+  if (orbs.length) orbs[Math.floor(Math.random() * orbs.length)].playerTouch(this);
+};
+// ItemEntity.playerTouch: as much as fits, once its pickup delay is over
+Player.prototype.touchItem = function (e) {
+  if (e.pickupDelay > 0) return;
+  const g = this.game, n = e.stack.count, left = this.addItem(e.stack);
+  if (left >= n) return;
+  g.sound('pop', e.x, e.y, e.z); g.ui.refreshHotbar();
+  const c = Object.assign(Object.create(Object.getPrototypeOf(e)), e);
+  c.stack = Object.assign({}, e.stack, { count: n - left });
+  g.pickupFly(c, this);
+  if (left <= 0) e.dead = true; else e.stack.count = left;
+};
+// ExperienceOrb.repairPlayerItems: a damaged mending item in hand or worn, picked at random, gets 2 points a point; what that
+// didn't need (rounded in the player's favour) goes on to the next one
+Player.prototype.mendWithXP = function (n) {
+  while (n > 0) {
+    const items = [this.inv[this.sel], this.offhand[0], ...this.armor].filter(s => s && s.dmg > 0 && enchLevel(s, 'mending'));
+    if (!items.length) return n;
+    const s = items[Math.floor(Math.random() * items.length)], j = n * 2, k = Math.min(j, s.dmg);
+    s.dmg -= k;
+    n -= Math.floor(k * n / j);
+    this.game.ui.refreshHotbar();
+  }
+  return 0;
+};
+
+/* ---------------- picked up: flying in ---------------- */
+// ItemPickupParticle: from where it was to halfway up the player, over 3 ticks, speeding up
+Game.prototype.pickupFly = function (e, p) { (this.pickups || (this.pickups = [])).push({ e, p, t: 0, x: e.x, y: e.y, z: e.z }); };
+function pickupAt(f, a) {
+  const k = ((f.t + a) / 3) ** 2, q = f.p.ipos(a), ty = q[1] + (f.p.eyeCur || 1.62) / 2;
+  return [f.x + (q[0] - f.x) * k, f.y + (ty - f.y) * k, f.z + (q[2] - f.z) * k];
+}
+const _gameTickXP = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const r = _gameTickXP.apply(this, arguments);
+  if (this.pickups && this.pickups.length) { for (const f of this.pickups) f.t++; this.pickups = this.pickups.filter(f => f.t < 3); }
+  return r;
+};
+const _renderSpawnerMobsXP = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, alpha) {
+  if (_renderSpawnerMobsXP) _renderSpawnerMobsXP.call(this, r, alpha);
+  for (const f of this.pickups || []) {
+    if (!(f.e instanceof ItemEntity)) continue;
+    const q = pickupAt(f, alpha);
+    f.e.px = f.e.x = q[0]; f.e.py = f.e.y = q[1]; f.e.pz = f.e.z = q[2];
+    f.e.render(r, alpha);
+  }
+};
+
+/* ---------------- where experience comes from ---------------- */
+// AbstractFurnaceBlockEntity.createExperience: each recipe's share (by what went in), the fraction a chance of one more, as orbs at
+// the player (taking the output) or at the furnace (broken); be.xp is what furnaces of older saves had stored
+function furnaceXP(g, be, x, y, z) {
+  let n = 0;
+  for (const k in be.used || {}) { const it = ITEM_BY_NAME[k], v = be.used[k] * ((it && SMELT_XP[it.id]) || 0.1), i = Math.floor(v), f = v - i; n += i + (f > 1e-6 && Math.random() < f ? 1 : 0); }
+  if (be.xp >= 1e-6) { const i = Math.floor(be.xp), f = be.xp - i; n += i + (f > 1e-6 && Math.random() < f ? 1 : 0); }
+  be.used = {}; be.xp = 0;
+  if (n > 0) g.xpAward(x, y, z, n);
+}
+const _breakBlockXP = Game.prototype.breakBlock;
+Game.prototype.breakBlock = function (x, y, z, byPlayer, natural) {
+  const be = this.world.getBE(x, y, z);
+  const r = _breakBlockXP.apply(this, arguments);
+  if (be && be.type === 'furnace' && this.world.getBE(x, y, z) !== be) furnaceXP(this, be, x + 0.5, y + 0.5, z + 0.5);
+  return r;
+};
+// SpawnerBlock.spawnAfterBreak: 15 + rand(15) + rand(15)
+BLK[B.SPAWNER].xpRoll = () => 15 + Math.floor(Math.random() * 15) + Math.floor(Math.random() * 15);
+// a villager's level comes 2 seconds after trading ends (updateMerchantTimer), with Regeneration for 10 seconds
+const _mobTickXP = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const r = _mobTickXP.apply(this, arguments);
+  if (this._levelUp > 0 && !this.dead && !(this.data && this.data.trading) && --this._levelUp <= 0) {
+    const d = this.data;
+    if (d.level < 5) { d.level++; addTrades(this, d.level); }
+    this.addEffect('regeneration', 200, 0);
+  }
+  return r;
+};
+
+/* ---------------- the orb icons ---------------- */
+// eleven round drops, bigger for bigger orbs, pale so that the tint colours them (a pack's orb sheet replaces them)
+TEXGEN.push(function texXPOrbs() {
+  for (let i = 0; i < 11; i++) {
+    const rad = 1.6 + i * 0.5;
+    T('xp_orb_' + i, (d) => {
+      fillEl(d, 8, 8, rad, rad, (x, y) => {
+        const q = Math.hypot(x + 0.5 - 8, y + 0.5 - 8) / rad;
+        return q < 0.45 ? [255, 255, 236] : q < 0.8 ? [226, 240, 176] : [158, 186, 96];
+      });
+      outline(d, 0.42);
+    });
+  }
+});
+for (let i = 0; i < 11; i++) PACK_CROPS['xp_orb_' + i] = ['entity/experience_orb', (i % 4) * 16, (i >> 2) * 16, 16, 16, 64];
+PACK_EXTRA.push('entity/experience_orb');
+
+/* @file 187_suffocation.js */
+/* ===================================================================
+   Part 81: suffocation like Java's
+   - a player or mob whose head is inside a block they could suffocate
+     in (a square 0.8 of their width at eye level: LivingEntity.isInWall)
+     takes a point of damage a tick, which the damage cooldown turns
+     into one every half second; armor doesn't help ("suffocated in a
+     wall"). Which blocks count is BlockState.isSuffocating (Part 76):
+     whole blocks you can't walk through, but not glass, leaves, copper
+     grates or mangrove roots; farmland, paths, soul sand and mud do
+   - not in creative or spectator mode, nor for things that fly through
+     walls (vexes, the Ender Dragon) or vehicles
+   - with the camera inside a block that blocks the view, the screen
+     shows that block close up and nearly black (ScreenEffectRenderer)
+   =================================================================== */
+
+// LivingEntity.isInWall
+function inWall(e, eyeY) {
+  const w = e.game.world, f = e.w * 0.4, x0 = e.x - f, x1 = e.x + f, z0 = e.z - f, z1 = e.z + f, by = Math.floor(eyeY);
+  for (let bx = Math.floor(x0); bx <= Math.floor(x1); bx++) for (let bz = Math.floor(z0); bz <= Math.floor(z1); bz++) {
+    if (!suffocates(w, bx, by, bz)) continue;
+    const id = w.getBlock(bx, by, bz);
+    if (SHAPE[id] === SH.CUBE) { if (eyeY <= by + CUBE_TOP[id]) return true; continue; }
+    // a lower block (a path, farmland) only when its box reaches the eyes
+    const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(bx, by, bz, id) : null;
+    for (const b of shapeBoxes(id, w.getMeta(bx, by, bz), ctx ? ctx.conn : 0, true, ctx)) {
+      if (bx + b[0] / 16 < x1 && bx + b[3] / 16 > x0 && by + b[1] / 16 <= eyeY && by + b[4] / 16 >= eyeY && bz + b[2] / 16 < z1 && bz + b[5] / 16 > z0) return true;
+    }
+  }
+  return false;
+}
+const playerEye = p => typeof POSE_DIMS !== 'undefined' && p.pose && POSE_DIMS[p.pose] ? POSE_DIMS[p.pose][1] : p.sneaking ? 1.27 : 1.62;
+DEATH_MSG.in_wall = 'suffocated in a wall';
+BYPASS_ARMOR.add('in_wall');
+
+const _tickPlayerSF = Player.prototype.tick;
+Player.prototype.tick = function (inp) {
+  const r = _tickPlayerSF.call(this, inp);
+  if (!this.dead && this.mode !== 1 && this.mode !== 3 && !(this.game && this.game.sleeping > 0 && this.game.sleeping < 100) && inWall(this, this.y + playerEye(this))) this.hurt(1, 'in_wall', null);
+  return r;
+};
+const _tickMobSF = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const r = _tickMobSF.apply(this, arguments);
+  const T = this.T;
+  if (!this.dead && !(this.deathTime > 0) && !T.noClip && !T.vehicle && T.cat !== 'misc' && this.type !== 'ender_dragon' && inWall(this, this.y + (this.eyeH || this.h * 0.85))) this.hurt(1, 'in_wall', null);
+  return r;
+};
+
+/* ---------------- the view from inside a block ---------------- */
+// ScreenEffectRenderer.getViewBlockingState: any of eight points around the eyes (a square 0.8 of the width across, 0.1 high) in a
+// block that blocks the view (the same blocks as for suffocating; barriers aren't drawn); its particle texture, a tenth as bright, on
+// a square 2 across half a block in front of the eyes, so that only its middle fills the screen
+const WALL_VIEW = { id: -1, res: 0 };
+const _renderWorldSF = Game.prototype.renderWorld;
+Game.prototype.renderWorld = function (alpha, dt, panorama) {
+  const r = _renderWorldSF.apply(this, arguments);
+  let fx = $('fx-wall');
+  if (!fx) { fx = document.createElement('div'); fx.id = 'fx-wall'; fx.style.cssText = 'position:fixed;inset:0;pointer-events:none;display:none;image-rendering:pixelated;background-position:50% 50%;background-repeat:no-repeat;transform:scaleX(-1)'; const s = $('fx-water'); s.parentNode.insertBefore(fx, s); }
+  const p = this.player, w = this.world;
+  let id = 0;
+  if (p && !panorama && !this.thirdPerson && p.mode !== 3 && w) {
+    const q = p.ipos(alpha), ey = q[1] + (p.eyeCur || 1.62), f = p.w * 0.8;
+    for (let k = 0; k < 8 && !id; k++) {
+      const x = Math.floor(q[0] + ((k & 1) - 0.5) * f), y = Math.floor(ey + ((k >> 1 & 1) - 0.5) * 0.1), z = Math.floor(q[2] + ((k >> 2 & 1) - 0.5) * f);
+      if (suffocates(w, x, y, z) && w.getBlock(x, y, z) !== B.BARRIER) id = w.getBlock(x, y, z);
+    }
+  }
+  if (!id) { if (fx.style.display !== 'none') fx.style.display = 'none'; return r; }
+  if (WALL_VIEW.id !== id || WALL_VIEW.res !== TEX.res) {
+    WALL_VIEW.id = id; WALL_VIEW.res = TEX.res;
+    fx.style.backgroundImage = 'url(' + tileCanvas(id === B.GRASS_BLOCK ? FACETEX[B.DIRT * 6] : FACETEX[id * 6], null, 0.1).toDataURL() + ')';
+  }
+  const hh = 0.5 * Math.tan((this.fovCur || 70) * Math.PI / 360), cv = this.canvas, aspect = cv && cv.height ? cv.width / cv.height : 16 / 9;
+  fx.style.backgroundSize = (200 / (hh * 2 * aspect)).toFixed(1) + '% ' + (200 / (hh * 2)).toFixed(1) + '%';
+  if (fx.style.display !== 'block') fx.style.display = 'block';
+  return r;
+};
+
+/* @file 188_falling.js */
+/* ===================================================================
+   Part 82: falling like Java's
+   - the fall is measured the whole way down, the last step onto the
+     ground included (Entity.checkFallDamage), and the damage is the
+     drop past the safe distance rounded down (with a hair added, so a
+     4-block fall still costs a point): 3.5 blocks costs nothing, 4.5
+     blocks one point, as in Java now (the game used to round up)
+   - the same for mobs, which now also take half the fall on beds, a
+     fifth of the harm on hay bales and honey blocks and none on slime
+     blocks or powder snow
+   - falling blocks hurt only when they are anvils (FallingBlockEntity
+     with hurtEntities: sand, gravel and the like never do): landing,
+     2 for every block fallen after the first, at most 40, to living
+     things in the block where it lands; the harder the fall the likelier
+     the anvil comes down more damaged (5% and 5% more a block), and a
+     damaged one breaks; a falling block keeps its state (an anvil its
+     facing)
+   (the fall itself is measured in Entity.physicsStep; the damage in
+   Entity.landed, Player.landed and Mob.landed)
+   =================================================================== */
+const FALL_ANVILS = [B.ANVIL, B.CHIPPED_ANVIL, B.DAMAGED_ANVIL];
+// FallingBlockEntity.causeFallDamage
+FallingBlock.prototype.landed = function (dist) {
+  const i = Math.ceil(dist - 1), k = FALL_ANVILS.indexOf(this.block);
+  if (k < 0 || i < 0) return;
+  const f = Math.min(i * 2, 40), hw = this.w / 2;
+  if (f <= 0) return;
+  for (const e of this.game.mobsAndPlayer()) {
+    if (e.dead || e.deathTime > 0) continue;
+    const ew = e.w / 2;
+    if (e.x + ew <= this.x - hw || e.x - ew >= this.x + hw || e.y + e.h <= this.y || e.y >= this.y + this.h || e.z + ew <= this.z - hw || e.z - ew >= this.z + hw) continue;
+    e.hurt(f, 'anvil', null);
+  }
+  // AnvilBlock.damage: anvil -> chipped -> damaged -> gone
+  if (Math.random() < 0.05 + i * 0.05) { if (k === 2) this.broken = true; else this.block = FALL_ANVILS[k + 1]; }
+};
+
+/* @file 189_low_blocks.js */
+/* ===================================================================
+   Part 83: soul sand and mud like Java's
+   - their collision box stops 2 pixels short of the top (SoulSandBlock
+     and MudBlock: a column 14/16 high), so players, mobs, items and
+     boats sink in a little, though the blocks still look whole, hold
+     things up and count as whole blocks for suffocating
+   - a sniffer finds the block under its head the way Java does (a
+     fifth of a block above its feet), so it still digs on mud
+   =================================================================== */
+CUBE_TOP[B.SOUL_SAND] = CUBE_TOP[B.MUD] = 14 / 16;
 
 </script>
 </body>
