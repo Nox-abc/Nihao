@@ -645,6 +645,25 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Shading like Java's** (Part 87): grass, flowers, saplings, crops, vines, ladders, fire, torches, lantern handles,
   chains, redstone dust and the like are drawn at full brightness, as Java draws them (they were a little darker), other
   upright faces are as bright as the direction they face, and in the Nether tops and bottoms are lit alike.
+- **Chests like Java's** (Part 88): chests, trapped chests and ender chests are drawn with Java's chest model, with the
+  latch standing out a pixel in front, and each half of a large chest has its own texture, so the front runs on across
+  both halves with one latch in the middle. The lid swings open when you open a chest and shuts when you close it (you
+  hear it shut), both halves of a large chest together. From 24 to 26 December chests wear their Christmas textures, as
+  in Java. Your resource pack's chest textures are used, in the inventory and the hand too.
+- **Mob heads like Java's** (Part 89): skulls and heads show the whole head from the mob's own texture (the zombie's and
+  the player's with their hat layer, the piglin's with its ears, the dragon's with its jaw), standing or on a wall. A
+  dragon head powered by redstone opens and shuts its jaw, and a piglin head flaps its ears. Heads worn on the head now
+  show on you in third person, on armor stands and on mobs, a little bigger than the head (a dragon head moves its jaw
+  as you walk), and so does a worn carved pumpkin.
+- **Shulker boxes like Java's** (Part 90): a shulker box faces the side you place it against and is drawn as a shulker's
+  shell; opening it, the lid rises and twists, and it sinks back when you close it. It won't open with a block in the way
+  of its lid, and like Java's it lets light through. Your resource pack's shulker textures are used.
+- **Block models like Java's** (Part 91): azaleas are leafy bushes on crossed stems rather than solid cubes, the sculk
+  shrieker has its bony top, the cauldron stands on four legs with its water at Java's heights, the brewing stand's three
+  arms each show a bottle while that slot holds one, flower pots are hollow with the soil inside, the dragon egg is built
+  of its layers, the chorus flower has its side plates and scaffolding its four posts. Potted azaleas, cacti, bamboo and
+  mangrove propagules look as they do in Java, and open eyeblossoms and firefly bushes glow in the dark. Your resource
+  pack's textures for all of these are used.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

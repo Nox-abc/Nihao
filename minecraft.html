@@ -11435,9 +11435,8 @@ function genTextures() {
   });
   T('firefly_bush', (d, r) => {
     clear(d);
-    // dark bushy stems with a few glowing specks
+    // dark bushy stems (the glowing specks are a layer of their own, firefly_bush_emissive)
     for (let k = 0; k < 7; k++) { let x = 2 + r() * 12; const top = 2 + r() * 6, lean = (r() - 0.5) * 0.4; for (let y = 15; y > top; y--) { sp(d, Math.round(x), y, mul([46, 82, 34], 0.8 + r() * 0.4)); if (r() < 0.25) sp(d, Math.round(x) + 1, y, [62, 104, 40]); x += lean; } }
-    for (let k = 0; k < 5; k++) sp(d, 2 + Math.floor(r() * 12), 1 + Math.floor(r() * 9), [255, 236, 120]);
   });
   const dryBlades = (n, hMin, hMax) => (d, r) => {
     clear(d);
@@ -12033,7 +12032,13 @@ TEXGEN.push(function texBlocks() {
   T('bamboo_block_top', stalkTop([96, 132, 34], [214, 196, 120])); T('stripped_bamboo_block_top', stalkTop([196, 180, 80], [226, 210, 130]));
   T('bamboo_planks', (d, r) => fillF(d, (x, y) => { let f = 0.92 + r() * 0.08; if (y % 4 === 3) f *= 0.72; else if (x % 8 === (y >> 2) * 3 % 8) f *= 0.82; return mul([194, 174, 82], f); }));
   T('bamboo_mosaic', (d, r) => fillF(d, (x, y) => { const cell = ((x >> 2) + (y >> 3)) % 2; const ly = cell ? y % 4 : x % 4; let f = 0.9 + r() * 0.08; if (ly === 3) f *= 0.72; return mul(cell ? [196, 176, 84] : [184, 164, 74], f); }));
-  T('bamboo_stalk', (d, r) => { clear(d); for (let y = 0; y < 16; y++) for (let x = 0; x < 3; x++) sp(d, x, y, mul(y % 8 === 0 ? [80, 112, 28] : x === 1 ? [128, 164, 54] : [100, 138, 40], 0.92 + r() * 0.1)); });
+  // four stalks side by side (u 0-3, 3-6, 6-9, 9-12: the ones Java's bamboo models choose between), their joints at different
+  // heights, and the cut ends at u 13-16 (top v 0-3, bottom v 4-7)
+  T('bamboo_stalk', (d, r) => {
+    clear(d);
+    for (const [x0, j] of [[0, 0], [3, 5], [6, 11], [9, 3]]) for (let y = 0; y < 16; y++) for (let x = x0; x < x0 + 3; x++) sp(d, x, y, mul((y - j + 16) % 8 === 0 ? [80, 112, 28] : x === x0 + 1 ? [128, 164, 54] : [100, 138, 40], 0.92 + r() * 0.1));
+    for (const v0 of [0, 4]) for (let y = v0; y < v0 + 3; y++) for (let x = 13; x < 16; x++) sp(d, x, y, x === 14 && y === v0 + 1 ? [176, 196, 110] : [110, 148, 46]);
+  });
   T('bamboo_large_leaves', (d, r) => { clear(d); for (let k = 0; k < 5; k++) { const a = -0.6 + k * 0.3; for (let s = 0; s < 8; s++) sp(d, Math.round(8 + Math.cos(a - 1.57) * s * 0.4 + (k - 2) * 2), Math.round(2 + s), mul([88, 136, 40], 0.85 + r() * 0.3)); } });
   // leaves and saplings
   for (const w of ['jungle', 'acacia', 'dark_oak', 'mangrove']) T(w + '_leaves', leavesFn([205, 205, 205], w === 'dark_oak' ? 0.18 : 0.24));
@@ -12444,7 +12449,15 @@ TEXGEN.push(function texBlocks2() {
   T('enchanting_table_top', (d, r) => fillF(d, (x, y) => { const e = Math.min(x, y, 15 - x, 15 - y); if (e < 2) return mul([150, 30, 40], 0.9 + r() * 0.1); if (e === 2) return [230, 200, 80]; return mul([40, 30, 46], 0.9 + r() * 0.1); }));
   T('enchanting_table_side', (d, r) => fillF(d, (x, y) => { if (y < 4) return mul([150, 30, 40], 0.9 + r() * 0.1); if (y === 4) return [230, 200, 80]; return mul([30, 22, 40], 0.85 + r() * 0.15) ; }));
   T('enchanting_table_bottom', (d, r) => fillF(d, () => mul([30, 22, 40], 0.85 + r() * 0.15)));
-  T('brewing_stand', (d) => { clear(d); for (let y = 2; y < 16; y++) { sp(d, 7, y, [230, 200, 90]); sp(d, 8, y, [200, 160, 60]); } for (const [x, y] of [[2, 10], [12, 10], [3, 6]]) { rect(d, x, y, x + 2, y + 4, [180, 200, 220]); } });
+  // the blaze rod up the middle; the left half an arm out to a glass bottle hanging near its end, the right half the same arm
+  // empty with its hook (the halves the stand's arms show with and without a bottle)
+  T('brewing_stand', (d) => {
+    clear(d); for (let y = 2; y < 16; y++) { sp(d, 7, y, [230, 200, 90]); sp(d, 8, y, [200, 160, 60]); }
+    const arm = [74, 74, 78];
+    for (let x = 2; x < 7; x++) sp(d, x, 2, arm); for (let x = 9; x < 14; x++) sp(d, x, 2, arm);
+    sp(d, 3, 3, arm); sp(d, 12, 3, arm); sp(d, 12, 4, arm); sp(d, 12, 5, arm); sp(d, 13, 6, arm);
+    rect(d, 2, 4, 4, 5, [196, 214, 226]); rect(d, 1, 6, 5, 12, [176, 198, 216]); rect(d, 2, 7, 2, 10, [236, 242, 248]); rect(d, 1, 13, 5, 13, [150, 170, 190]);
+  });
   T('brewing_stand_base', (d, r) => fillF(d, () => mul([110, 110, 112], 0.9 + r() * 0.1)));
   const ironish = (d, r) => fillF(d, (x, y) => mul([62, 62, 66], 0.88 + r() * 0.14));
   T('cauldron_side', over('anvil', (d) => { frame(d, [40, 40, 44]); rect(d, 4, 12, 11, 15, [0, 0, 0, 0]); }));
@@ -13576,6 +13589,8 @@ const FND = [PD(1, 0, 0), PD(-1, 0, 0), PD(0, 1, 0), PD(0, -1, 0), PD(0, 0, 1), 
 const FSHADE = [0.6, 0.6, 1.0, 0.5, 0.8, 0.8];
 // blocks whose faces Java lights as from above whatever way they face (Part 87): 1 its free-standing faces, 2 all of it
 const SHADE_FLAT = new Uint8Array(MAXB);
+// blocks a renderer draws each frame instead of the chunk mesh (chests, Part 88)
+const NOMESH = new Uint8Array(MAXB);
 const AOC = [0.48, 0.66, 0.83, 1.0];
 const AOO = [];
 for (let f = 0; f < 6; f++) {
@@ -14126,6 +14141,7 @@ function meshSection(world, c, sy) {
     const X = lx * 16, Y = (sy * 16 + ly) * 16, Z = lz * 16;
     switch (shape) {
       case SH.CUBE: {
+        if (NOMESH[id]) break;
         const d = BLK[id];
         const isLeaf = d.leaves === true;
         const mb = TRANSL[id] ? trn : opq;
@@ -14242,7 +14258,7 @@ function meshSection(world, c, sy) {
         break;
       }
       default: {
-        if (!MDL[shape]) break;
+        if (!MDL[shape] || NOMESH[id]) break;
         const ps = blockParts(id, meta, DYNAMIC_SHAPES.has(shape) ? padCtx(pi, id) : null);
         emitParts(TRANSL[id] ? trn : opq, ps, X, Y, Z, pi, id, meta, tint, to, 0);
       }
@@ -61183,6 +61199,889 @@ meshSection = function (world, c, sy) {
   FSHADE[2] = nether ? 0.9 : 1; FSHADE[3] = nether ? 0.9 : 0.5;
   return _meshSectionSH.apply(this, arguments);
 };
+
+/* @file 194_chests.js */
+/* ===================================================================
+   Part 88: chests drawn like Java
+   - chests, trapped chests and ender chests are drawn the way Java's
+     ChestRenderer draws them, with its chest model: the bottom, the lid
+     and the latch standing out a pixel in front; each half of a large
+     chest is 15 pixels wide with a texture of its own, so its front
+     runs on across both halves with one latch in the middle
+   - the textures are a resource pack's entity/chest/normal,
+     normal_left and normal_right, trapped (and its halves) and ender,
+     and on 24 to 26 December (by the computer's clock) the christmas
+     ones for chests and trapped chests, as in Java; or the game's own
+     drawings of them
+   - the lid opens when you open the chest and shuts when you close it,
+     a tenth of the way each tick, eased (ChestLidController; both
+     halves of a large chest together), and you hear it shut
+   - a large chest is as bright as the brighter of its halves
+   - in the inventory, in your hand, dropped, in item frames and in
+     chest minecarts they are the same model
+   =================================================================== */
+
+// ChestModel (single, left half, right half): [u, v, x, y, z, w, h, d] in a 64x64 texture; the lid and latch turn about (0, 9, 1)
+const CHEST_CUBES = [
+  { bottom: [0, 19, 1, 0, 1, 14, 10, 14], lid: [0, 0, 1, 0, 0, 14, 5, 14], lock: [0, 0, 7, -2, 14, 2, 4, 1] },
+  { bottom: [0, 19, 0, 0, 1, 15, 10, 14], lid: [0, 0, 0, 0, 0, 15, 5, 14], lock: [0, 0, 0, -2, 14, 1, 4, 1] },
+  { bottom: [0, 19, 1, 0, 1, 15, 10, 14], lid: [0, 0, 1, 0, 0, 15, 5, 14], lock: [0, 0, 15, -2, 14, 1, 4, 1] },
+];
+const CHEST_DRAWN = new Set([B.CHEST, B.TRAPPED_CHEST, B.ENDER_CHEST]);
+for (const id of CHEST_DRAWN) NOMESH[id] = 1;
+BKM.rx = a => { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, 0, c, -s, 0, 0, s, c, 0]; };
+// Sheets.chooseMaterial; ChestRenderer's Christmas check
+const chestXmas = () => { const d = new Date(); return d.getMonth() === 11 && d.getDate() >= 24 && d.getDate() <= 26; };
+const chestSkinKey = (id, type, xmas) => id === B.ENDER_CHEST ? 'entity/chest/ender'
+  : 'entity/chest/' + (xmas ? 'christmas' : id === B.TRAPPED_CHEST ? 'trapped' : 'normal') + ['', '_left', '_right'][type];
+
+/* ---------------- the game's own textures ---------------- */
+// in the texture a face is upside down and mirrored (the model isn't turned over); the regions of skinParts: 'top' is the
+// underside, 'bottom' the top, 'back' the front, 'front' the back. Planks with a dark rim, the rim left off where the halves meet
+function chestSkin(type, look, seed) {
+  const C = CHEST_CUBES[type];
+  const parts = [{ n: 'bottom', c: [C.bottom] }, { n: 'lid', c: [C.lid] }, { n: 'lock', c: [C.lock] }];
+  // the column of a face at the edge where a half meets the other half
+  const inner = (f, x, W) => type === 1 ? (f === 'back' ? x === W - 1 : f !== 'left' && f !== 'right' && x === 0) : type === 2 ? (f === 'back' ? x === 0 : f !== 'left' && f !== 'right' && x === W - 1) : false;
+  const wood = (lid) => (f, x, y, W, H, R) => {
+    if ((lid ? f === 'top' : f === 'bottom')) return nz(look.inside, R, 0.08);
+    const rim = (x === 0 || x === W - 1 || y === 0 || y === H - 1) && !inner(f, x, W);
+    if (f !== 'top' && f !== 'bottom') {
+      if (lid && y === 0) return nz(look.seam, R, 0.04);
+      if (!lid && y === H - 1) return nz(look.band, R, 0.05);
+    }
+    return nz(rim ? look.rim : look.body, R, rim ? 0.04 : 0.09);
+  };
+  return skinParts(64, 64, parts, { bottom: wood(false), lid: wood(true), lock: (f, x, y, W, H, R) => nz(f === 'back' ? (y === 0 ? look.lockDark : look.lock) : look.lockSide, R, 0.04) }, seed);
+}
+const CHEST_LOOKS = {
+  normal: { body: [162, 112, 48], rim: [62, 40, 18], seam: [62, 40, 18], band: [110, 74, 30], inside: [70, 46, 22], lock: [226, 226, 230], lockDark: [150, 150, 158], lockSide: [170, 170, 178] },
+  trapped: { body: [162, 112, 48], rim: [62, 40, 18], seam: [62, 40, 18], band: [110, 74, 30], inside: [70, 46, 22], lock: [196, 70, 60], lockDark: [120, 40, 36], lockSide: [150, 54, 48] },
+  ender: { body: [26, 40, 40], rim: [10, 16, 16], seam: [40, 70, 66], band: [40, 70, 66], inside: [8, 12, 12], lock: [70, 210, 170], lockDark: [30, 120, 96], lockSide: [40, 150, 120] },
+  christmas: { body: [176, 40, 40], rim: [232, 190, 64], seam: [232, 190, 64], band: [40, 120, 50], inside: [70, 20, 20], lock: [240, 214, 90], lockDark: [180, 150, 40], lockSide: [210, 180, 60] },
+};
+for (const k of ['normal', 'trapped', 'christmas']) ['', '_left', '_right'].forEach((s, t) => defSkin('entity/chest/' + k + s, 64, 64, () => chestSkin(t, CHEST_LOOKS[k], 7301 + t)));
+defSkin('entity/chest/ender', 64, 64, () => chestSkin(0, CHEST_LOOKS.ender, 7304));
+
+/* ---------------- the model ---------------- */
+// type 0 single, 1 left half, 2 right half; open 0..1; xf: a point of the block (blocks) to where it is drawn
+function drawChestModel(r, xf, type, key, open, light) {
+  const vt = VTEX[key] || VTEX['entity/chest/normal'];
+  if (!vt) return;
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th, uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+  const C = CHEST_CUBES[type], k = 1 - open, xr = -(1 - k * k * k) * Math.PI / 2, c = Math.cos(xr), s = Math.sin(xr);
+  emitVCube(r, C.bottom, q => xf(q[0] / 16, q[1] / 16, q[2] / 16), uvx, [1, 1, 1, 1], light, 0);
+  // ChestRenderer.render: the lid and latch turned by -(1 - (1 - open)^3) x 90 degrees about their pivot
+  const lid = q => xf(q[0] / 16, (9 + q[1] * c - q[2] * s) / 16, (1 + q[1] * s + q[2] * c) / 16);
+  emitVCube(r, C.lid, lid, uvx, [1, 1, 1, 1], light, 0);
+  emitVCube(r, C.lock, lid, uvx, [1, 1, 1, 1], light, 0);
+}
+
+/* ---------------- the chests around ---------------- */
+function chunkChests(c) {
+  if (!c._chests || c._chestsB !== c.blocks) {
+    const l = [];
+    for (const id of CHEST_DRAWN) for (let i = c.blocks.indexOf(id); i >= 0; i = c.blocks.indexOf(id, i + 1)) l.push(i);
+    c._chests = l; c._chestsB = c.blocks;
+  }
+  return c._chests;
+}
+const _setBlockCX = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id) {
+  const old = this.getBlock(x, y, z), r = _setBlockCX.apply(this, arguments);
+  if (CHEST_DRAWN.has(old) || CHEST_DRAWN.has(id)) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._chests = null; this._chestsDirty = true; }
+  return r;
+};
+Game.prototype.listChests = function () {
+  const w = this.world, p = this.player, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, list = [], old = w._lids || new Map(), lids = new Map();
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.blocks) continue;
+    for (const i of chunkChests(c)) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), k = x + ',' + y + ',' + z;
+      list.push([x, y, z, k]); lids.set(k, old.get(k) || { o: 0, oo: 0 });
+    }
+  }
+  w._chests = list; w._lids = lids; w._chestsDirty = false;
+};
+// the chest (or both halves) whose screen is open, and the ender chest opened
+const chestIsOpen = (g, x, y, z, id) => id === B.ENDER_CHEST ? !!(g._openEnder && g._openEnder[0] === x && g._openEnder[1] === y && g._openEnder[2] === z)
+  : !!(g._openChest && g._openChest.some(h => h[0] === x && h[1] === y && h[2] === z));
+// ChestLidController.tickLid
+const _gameTickCX = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickCX.apply(this, arguments);
+  const w = this.world, p = this.player;
+  if (!w || !p) return;
+  if (!w._chests || w._chestsDirty || w.tick % 20 === 0) this.listChests();
+  for (const [x, y, z, k] of w._chests) {
+    const s = w._lids.get(k), open = this.ui && this.ui.inv && chestIsOpen(this, x, y, z, w.getBlock(x, y, z));
+    s.oo = s.o;
+    if (!open && s.o > 0) s.o = Math.round(Math.max(s.o - 0.1, 0) * 1e6) / 1e6; else if (open && s.o < 1) s.o = Math.round(Math.min(s.o + 0.1, 1) * 1e6) / 1e6;
+  }
+};
+// an ender chest's screen remembers where it was opened
+const _useBlockCX = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const r = _useBlockCX.apply(this, arguments);
+  if (hit && hit.id === B.ENDER_CHEST && this.ui.inv && this.ui.inv.type === 'ender_chest') this._openEnder = [hit.x, hit.y, hit.z];
+  return r;
+};
+// closing it: the lid shuts, with the sound (at the middle of a large chest)
+const _closeInvCX = UI.prototype.closeInv;
+UI.prototype.closeInv = function () {
+  const g = this.game, halves = g && g._openChest ? g._openChest.slice() : null, ender = g && g._openEnder;
+  const r = _closeInvCX.apply(this, arguments);
+  if (g && !this.inv) {
+    const at = ender ? [ender] : halves && halves.length ? halves : null;
+    if (at) g.sound('chest_close', at.reduce((s, h) => s + h[0] + 0.5, 0) / at.length, at[0][1] + 0.5, at.reduce((s, h) => s + h[2] + 0.5, 0) / at.length);
+    g._openEnder = null;
+  }
+  return r;
+};
+SND_CAT.chest_close = 'block'; SUB_TEXT.chest_close = 'Chest closes';
+SOUND_EVENTS.unshift([/^block\.(ender_)?chest\.close/, 'chest_close']);
+const _audioPlayCX = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'chest_close') return _audioPlayCX.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 0.5);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.1;
+  this.noiseHit(dst, 'lowpass', 520 * v, 1.5, 0.12, 0.4); this.tone(dst, 'triangle', 140 * v, 95 * v, 0.14, 0.16);
+};
+
+/* ---------------- drawing them ---------------- */
+const _renderSpawnerMobsCX = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, a) {
+  if (_renderSpawnerMobsCX) _renderSpawnerMobsCX.call(this, r, a);
+  const w = this.world, p = this.player;
+  if (!w || !p || !w._chests || !VTEX['entity/chest/normal']) return;
+  const xmas = chestXmas(), lidAt = k => { const s = w._lids.get(k); return s ? s.oo + (s.o - s.oo) * a : 0; };
+  for (const [x, y, z, k] of w._chests) {
+    if ((p.x - x - 0.5) ** 2 + (p.z - z - 0.5) ** 2 > 64 * 64) continue;
+    const id = w.getBlock(x, y, z);
+    if (!CHEST_DRAWN.has(id)) continue;
+    const m = w.getMeta(x, y, z), type = id === B.ENDER_CHEST ? 0 : chestType(m) % 3;
+    let open = lidAt(k), lr = w.getLightRaw(x, y, z), sky = lr >> 4, blk = lr & 15;
+    // a large chest: the more open of its halves' lids and the brighter of their light (opennessCombiner, BrightnessCombiner)
+    const q = type ? chestPartner(w, x, y, z) : null;
+    if (q) { open = Math.max(open, lidAt(q[0] + ',' + q[1] + ',' + q[2])); const l2 = w.getLightRaw(q[0], q[1], q[2]); sky = Math.max(sky, l2 >> 4); blk = Math.max(blk, l2 & 15); }
+    // turned about the block's middle by its facing (south 0, west 90, north 180, east 270 degrees)
+    const t = BKM.mul(BKM.t(x + 0.5, y + 0.5, z + 0.5), BKM.mul(BKM.ry(-(m & 3) * Math.PI / 2), BKM.t(-0.5, -0.5, -0.5)));
+    drawChestModel(r, (u, v, w2) => BKM.ap(t, u, v, w2), q || !type ? type : 0, chestSkinKey(id, q || !type ? type : 0, xmas), open, [sky, blk]);
+  }
+};
+// held, dropped, framed and in minecarts: the closed chest facing south, in the block item's space
+const _pushBlockItemCX = Game.prototype.pushBlockItem;
+Game.prototype.pushBlockItem = function (r, m, id, l) {
+  if (!CHEST_DRAWN.has(id) || !VTEX['entity/chest/normal']) return _pushBlockItemCX.call(this, r, m, id, l);
+  drawChestModel(r, (x, y, z) => M4.xform(m, x - 0.5, y - 0.5, z - 0.5), 0, chestSkinKey(id, 0, chestXmas()), 0, [l[0], l[1]]);
+};
+// the inventory icon: the model with the chest item's GUI transform (template_chest: 30, 45, 0 at 0.625)
+const CHEST_ICON = { parts: [{ n: 'bottom', p: [0, 0, 0], c: [CHEST_CUBES[0].bottom] }, { n: 'lid', p: [0, 9, 1], c: [CHEST_CUBES[0].lid] }, { n: 'lock', p: [0, 9, 1], c: [CHEST_CUBES[0].lock] }] };
+const _iconForCX = iconFor;
+iconFor = function (id, tag, st) {
+  if (!CHEST_DRAWN.has(id) || !ATLAS.canvas) return _iconForCX(id, tag, st);
+  const key = chestSkinKey(id, 0, chestXmas()), ck = 'chestmodel#' + key;
+  if (ICONS[ck]) return ICONS[ck];
+  const pass = skinPass(key, CHEST_ICON.parts);
+  if (!pass) return _iconForCX(id, tag, st);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  const P = handPose(); applyDisplay(P, [[30, 45, 0], [0, 0, 0], 0.625], false); P.t(-0.5, -0.5, -0.5);
+  const m = P.m;
+  paintModel(g, CHEST_ICON, {}, [pass], q => { const v = M4.xform(m, q[0] / 16, q[1] / 16, q[2] / 16); return [(v[0] + 0.5) * 64, (0.5 - v[1]) * 64, -v[2] * 64]; });
+  return ICONS[ck] = c.toDataURL();
+};
+
+/* @file 195_heads.js */
+/* ===================================================================
+   Part 89: mob heads like Java
+   - skulls and heads are drawn with Java's skull models and each
+     mob's own texture (SkullBlockRenderer): the whole head, not only
+     its face; the zombie's and the player's with their hat layer, the
+     piglin's with its snout, tusks and ears, the dragon's with its
+     snout, scales, nostrils and jaw (at three quarters of its size);
+     from a resource pack's mob textures too
+   - powered by redstone, a dragon head opens and shuts its jaw and a
+     piglin head flaps its ears (SkullBlockEntity.animationTick)
+   - worn on the head (CustomHeadLayer) they show on you in third
+     person, on armor stands and on the mobs that wear them, a size
+     bigger than the head; a dragon head worn moves its jaw as you
+     walk; a carved pumpkin worn shows too
+   - in the inventory, the hand, dropped and in item frames they are
+     the same models
+   =================================================================== */
+
+// SkullModel (mob heads 64x32, humanoid heads 64x64 with the hat a quarter pixel out), PiglinHeadModel, DragonHeadModel
+const HEAD_SKULL = P_('head', [0, 0, 0], [[0, 0, -4, -8, -4, 8, 8, 8]]), HEAD_HAT = P_('hat', [0, 0, 0], [[32, 0, -4, -8, -4, 8, 8, 8, 0.25]], null, 'head');
+const HEAD_KINDS = {
+  skeleton_skull: { key: 'entity/skeleton/skeleton', parts: [HEAD_SKULL] },
+  wither_skeleton_skull: { key: 'entity/skeleton/wither_skeleton', parts: [HEAD_SKULL] },
+  zombie_head: { key: 'entity/zombie/zombie', parts: [HEAD_SKULL, HEAD_HAT] },
+  creeper_head: { key: 'entity/creeper/creeper', parts: [HEAD_SKULL] },
+  player_head: { key: 'entity/player/wide/steve', parts: [HEAD_SKULL, HEAD_HAT] },
+  piglin_head: { key: 'entity/piglin/piglin', parts: MOB_MODELS.piglin.parts.filter(p => p.n === 'head' || p.n === 'left_ear' || p.n === 'right_ear'),
+    anim: (P, t) => { P.left_ear = [0, 0, -(Math.cos(t * Math.PI * 0.2 * 1.2) + 2.5) * 0.2]; P.right_ear = [0, 0, (Math.cos(t * Math.PI * 0.2) + 2.5) * 0.2]; } },
+  dragon_head: { key: 'entity/enderdragon/dragon', parts: [Object.assign({}, MOB_MODELS.ender_dragon.parts.find(p => p.n === 'head'), { p: [0, -7.986666, 0], s: 0.75 }), MOB_MODELS.ender_dragon.parts.find(p => p.n === 'jaw')],
+    anim: (P, t) => { P.jaw = [(Math.sin(t * Math.PI * 0.2) + 1) * 0.2, 0, 0]; } },
+};
+const HEAD_IDS = new Set(Object.keys(HEAD_KINDS).map(n => B[n.toUpperCase()]).filter(id => id !== undefined));
+for (const id of HEAD_IDS) NOMESH[id] = 1;
+// a piglin head's box is 10 pixels across (PiglinWallSkullBlock, its SkullBlock shape)
+const _headModelHD = MDL[SH.HEAD];
+MDL[SH.HEAD] = (d, m) => {
+  const ps = _headModelHD(d, m);
+  if (d.name !== 'piglin_head') return ps;
+  return ps.map(p => { const b = p.b.slice(); if (m & 16) { const k = (m & 3) % 2 ? 2 : 0; b[k] = 3; b[k + 3] = 13; } else { b[0] = b[2] = 3; b[3] = b[5] = 13; } return Object.assign({}, p, { b }); });
+};
+// the collision box whichever way a standing head turns (a turned box was left out, so most heads had none)
+const _modelCollisionHD = modelCollision;
+modelCollision = function (id, meta, ctx) { return HEAD_IDS.has(id) ? MDL[SH.HEAD](BLK[id], meta).map(p => p.b.slice()) : _modelCollisionHD(id, meta, ctx); };
+const BKM_FLIP = [-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0];
+// a model's parts (mob model format) as transforms (blocks) from the transform m; P: rotations by part name
+function modelMats(parts, P, m) {
+  const mats = {};
+  for (const part of parts) {
+    const rot = P[part.n] || part.r, pv = part.p, s = part.s;
+    let t = BKM.mul(part.par ? mats[part.par] : m, BKM.t(pv[0] / 16, pv[1] / 16, pv[2] / 16));
+    if (rot) t = BKM.mul(t, BKM.mul(BKM.rz(rot[2]), BKM.mul(BKM.ry(rot[1]), BKM.rx(rot[0]))));
+    if (s) t = BKM.mul(t, [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0]);
+    mats[part.n] = t;
+  }
+  return mats;
+}
+// drawn from both sides (entityCutoutNoCullZOffset), so the inside of a hat layer shows through its clear parts
+function drawHeadModel(r, name, m, yRotDeg, mouth, light) {
+  const K = HEAD_KINDS[name], vt = K && VTEX[K.key];
+  if (!vt) return;
+  const P = { head: [0, yRotDeg * Math.PI / 180, 0] };
+  if (K.anim) K.anim(P, mouth);
+  const mats = modelMats(K.parts, P, m), A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th, uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+  for (const part of K.parts) { const M = mats[part.n]; for (const c of part.c) emitVCube(r, c, q => BKM.ap(M, q[0] / 16, q[1] / 16, q[2] / 16), uvx, [1, 1, 1, 1], light, 63); }
+}
+// SkullBlockRenderer.renderSkull: standing at the block's middle, on a wall a quarter block out from it; turned over
+const HEAD_WALL = [[0, 1, 180], [-1, 0, 270], [0, -1, 0], [1, 0, 90]];    // by facing (south, west, north, east): step and turn
+function headTransform(x, y, z, meta) {
+  if (meta & 16) { const [sx, sz, yr] = HEAD_WALL[meta & 3]; return [BKM.mul(BKM.t(x + 0.5 - sx * 0.25, y + 0.25, z + 0.5 - sz * 0.25), BKM_FLIP), yr]; }
+  // the game's standing rotation 0 faces south: Java's 8
+  return [BKM.mul(BKM.t(x + 0.5, y, z + 0.5), BKM_FLIP), (((meta & 15) + 8) & 15) * 22.5];
+}
+
+/* ---------------- the heads around, and their mouths ---------------- */
+function chunkHeads(c) {
+  if (!c._heads || c._headsB !== c.blocks) {
+    const l = [];
+    for (const id of HEAD_IDS) for (let i = c.blocks.indexOf(id); i >= 0; i = c.blocks.indexOf(id, i + 1)) l.push(i);
+    c._heads = l; c._headsB = c.blocks;
+  }
+  return c._heads;
+}
+const _setBlockHD = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id) {
+  const old = this.getBlock(x, y, z), r = _setBlockHD.apply(this, arguments);
+  if (HEAD_IDS.has(old) || HEAD_IDS.has(id)) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._heads = null; this._headsDirty = true; }
+  return r;
+};
+Game.prototype.listHeads = function () {
+  const w = this.world, p = this.player, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, list = [], old = w._mouths || new Map(), mouths = new Map();
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.blocks) continue;
+    for (const i of chunkHeads(c)) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), k = x + ',' + y + ',' + z;
+      list.push([x, y, z, k]); mouths.set(k, old.get(k) || { n: 0, on: false });
+    }
+  }
+  w._headList = list; w._mouths = mouths; w._headsDirty = false;
+};
+const _gameTickHD = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickHD.apply(this, arguments);
+  const w = this.world, p = this.player;
+  if (!w || !p) return;
+  if (!w._headList || w._headsDirty || w.tick % 20 === 0) this.listHeads();
+  // SkullBlockEntity.animationTick: counting up while powered
+  for (const [x, y, z, k] of w._headList) {
+    const id = w.getBlock(x, y, z);
+    if (id !== B.DRAGON_HEAD && id !== B.PIGLIN_HEAD) continue;
+    const s = w._mouths.get(k);
+    s.on = RS.powered(w, x, y, z);
+    if (s.on) s.n++;
+  }
+};
+const _renderSpawnerMobsHD = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, a) {
+  if (_renderSpawnerMobsHD) _renderSpawnerMobsHD.call(this, r, a);
+  const w = this.world, p = this.player;
+  if (!w || !p || !w._headList) return;
+  for (const [x, y, z, k] of w._headList) {
+    if ((p.x - x - 0.5) ** 2 + (p.z - z - 0.5) ** 2 > 64 * 64) continue;
+    const id = w.getBlock(x, y, z);
+    if (!HEAD_IDS.has(id)) continue;
+    const s = w._mouths.get(k), [m, yr] = headTransform(x, y, z, w.getMeta(x, y, z)), lr = w.getLightRaw(x, y, z);
+    drawHeadModel(r, BLK[id].name, m, yr, s ? s.n + (s.on ? a : 0) : 0, [lr >> 4, lr & 15]);
+  }
+};
+
+/* ---------------- worn ---------------- */
+// CustomHeadLayer: in the head's space, scaled 1.1875 (turned back over), a standing skull turned 180 degrees; a villager's a
+// pixel higher. Another block (a carved pumpkin) as an item: down a quarter, turned, 0.625 the size.
+function drawWornHead(r, at, st, light, mouth, villager) {
+  if (!st || !at || !at('head', [0, 0, 0])) return;
+  const it = ITEMS[st.id], blk = it && it.block;
+  if (blk === undefined) return;
+  const o = at('head', [0, 0, 0]), ex = at('head', [16, 0, 0]), ey = at('head', [0, 16, 0]), ez = at('head', [0, 0, 16]);
+  // the head's space (blocks) to the world
+  const H = [ex[0] - o[0], ey[0] - o[0], ez[0] - o[0], o[0], ex[1] - o[1], ey[1] - o[1], ez[1] - o[1], o[1], ex[2] - o[2], ey[2] - o[2], ez[2] - o[2], o[2]];
+  if (HEAD_IDS.has(blk)) {
+    let m = BKM.mul(H, [1.1875, 0, 0, 0, 0, -1.1875, 0, villager ? -0.0625 * 1.1875 : 0, 0, 0, -1.1875, 0]);
+    m = BKM.mul(m, BKM_FLIP);
+    drawHeadModel(r, BLK[blk].name, m, 180, mouth, light);
+  } else if (blk === B.CARVED_PUMPKIN || blk === B.JACK_O_LANTERN) {
+    // (the game's pumpkin item faces south, Java's north: one half turn less)
+    let m = BKM.mul(H, BKM.mul(BKM.t(0, -0.25 + (villager ? 0.1875 * 0.625 : 0), 0), [0.625, 0, 0, 0, 0, -0.625, 0, 0, 0, 0, -0.625, 0]));
+    const m4 = new Float32Array([m[0], m[4], m[8], 0, m[1], m[5], m[9], 0, m[2], m[6], m[10], 0, m[3], m[7], m[11], 1]);
+    window.game.pushBlockItem(r, m4, blk, light);
+  }
+}
+let WORN_HEAD = null;
+const _drawMobHD = drawMob;
+drawMob = function (r, def, skins, pos, yaw, st) {
+  const at = _drawMobHD.apply(this, arguments), w = WORN_HEAD;
+  if (w && def.parts.some(p => p.n === 'head')) { WORN_HEAD = null; drawWornHead(r, at, w.st, arguments[7], w.mouth, w.villager); }
+  return at;
+};
+const _renderMobHD = Mob.prototype.render;
+Mob.prototype.render = function (r, a) {
+  const st = this.data && this.data.armor && this.data.armor[0];
+  WORN_HEAD = st ? { st, mouth: (this.walk || 0) + (this.walkAmt || 0) * a, villager: /villager|wandering_trader/.test(this.type) } : null;
+  try { return _renderMobHD.apply(this, arguments); } finally { WORN_HEAD = null; }
+};
+if (typeof ArmorStand !== 'undefined') {
+  const _renderStandHD = ArmorStand.prototype.render;
+  ArmorStand.prototype.render = function (r, a) {
+    const st = this.data && this.data.armor && this.data.armor[0];
+    WORN_HEAD = st ? { st, mouth: 0, villager: false } : null;
+    try { return _renderStandHD.apply(this, arguments); } finally { WORN_HEAD = null; }
+  };
+}
+const _renderPlayerModelHD = Game.prototype.renderPlayerModel;
+Game.prototype.renderPlayerModel = function (r, p, alpha) {
+  const st = p.armor && p.armor[0];
+  WORN_HEAD = st ? { st, mouth: (p.pwalkDist + (p.walkDist - p.pwalkDist) * alpha) * 3.3, villager: false } : null;
+  try { return _renderPlayerModelHD.apply(this, arguments); } finally { WORN_HEAD = null; }
+};
+
+/* ---------------- as items ---------------- */
+// held, dropped and framed: a standing head facing south, its middle where the old block item's middle was
+const _pushBlockItemHD = Game.prototype.pushBlockItem;
+Game.prototype.pushBlockItem = function (r, m, id, l) {
+  if (!HEAD_IDS.has(id)) return _pushBlockItemHD.call(this, r, m, id, l);
+  const K = HEAD_KINDS[BLK[id].name];
+  if (!K || !VTEX[K.key]) return _pushBlockItemHD.call(this, r, m, id, l);
+  const t = [m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14]];
+  drawHeadModel(r, BLK[id].name, BKM.mul(t, BKM.mul(BKM.t(0, -0.25, 0), BKM_FLIP)), 180, 0, [l[0], l[1]]);
+};
+// the inventory icon: seen like the block icons, larger (template_skull's GUI scale 1 against a block's 0.625)
+const _iconForHD = iconFor;
+iconFor = function (id, tag, st) {
+  if (!HEAD_IDS.has(id) || !ATLAS.canvas) return _iconForHD(id, tag, st);
+  const name = BLK[id].name, K = HEAD_KINDS[name], ck = 'headmodel#' + name;
+  if (ICONS[ck]) return ICONS[ck];
+  const pass = K && skinPass(K.key, K.parts);
+  if (!pass) return _iconForHD(id, tag, st);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  const P = { head: [0, Math.PI, 0] };
+  if (K.anim) K.anim(P, 0);
+  if (name === 'dragon_head') P['head#s'] = 0.75;
+  // the model's space: turned over (y up), its middle 4 pixels up at the icon's middle, 1.6 times a block icon's size
+  const k = name === 'dragon_head' ? 0.96 : 1.6;
+  paintModel(g, { parts: K.parts }, P, [pass], q => {
+    const x = 8 - q[0] * k, y = 8 + (-q[1] - (name === 'dragon_head' ? 8 : 4)) * k, z = 8 + q[2] * k, s = isoP(x, y, z);
+    return [s[0], s[1], -(0.6124 * (x + z) + 0.5 * y)];
+  });
+  return ICONS[ck] = c.toDataURL();
+};
+
+/* @file 196_shulker_boxes.js */
+/* ===================================================================
+   Part 90: shulker boxes like Java
+   - a shulker box faces the side it was placed against (its FACING),
+     and is drawn the way Java's ShulkerBoxRenderer draws it: a
+     shulker's shell, lid and base, with a resource pack's
+     entity/shulker/shulker_<colour> texture or the game's own drawing
+   - opening it, the lid rises half a block and twists three quarters
+     of a turn, a tenth of the way each tick, and sinks back when you
+     close it, with a sound; it won't open while a block is in the way
+     of its lid (ShulkerBoxBlock.canOpen)
+   - like Java's it lets light through and doesn't hide the faces of
+     the blocks around it
+   - the same model in the inventory, the hand, dropped and in frames
+   =================================================================== */
+
+const SHULKER_IDS = new Set();
+for (let id = 0; id < MAXB; id++) if (BLK[id] && BLK[id].shulker) SHULKER_IDS.add(id);
+for (const id of SHULKER_IDS) { NOMESH[id] = 1; OPAQUE[id] = 0; AOOCC[id] = 0; OPACITY[id] = 1; }
+const shulkerKey = id => BLK[id].color ? 'entity/shulker/shulker_' + BLK[id].color : 'entity/shulker/shulker';
+// the game's own textures: the shell in the box's dye colour, darker at the lid's rim and the base's top
+for (const c of COLORS) {
+  const k = COLOR_RGB[c];
+  defSkin('entity/shulker/shulker_' + c, 64, 64, () => skinParts(64, 64, MM.shulker.parts, {
+    lid: (f, x, y, W, H, R) => nz(f === 'top' ? ((x + y) % 4 === 0 ? shd(k, 0.82) : k) : y > H - 3 ? shd(k, 0.74) : k, R),
+    base: (f, x, y, W, H, R) => nz(y < 2 ? shd(k, 0.74) : shd(k, 0.93), R),
+    head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 1 || x === 4) ? [30, 30, 30] : nz([236, 236, 170], R),
+  }, 7400 + COLORS.indexOf(c)));
+}
+// the facing: the face placed against, in the meta with bit 8 (boxes from before face up)
+const shulkerFacing = m => (m & 8) ? m & 7 : 2;
+const _afterPlaceSX = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  if (SHULKER_IDS.has(id) && this.world.getBlock(x, y, z) === id) {
+    const hit = this._chestHit, clicked = hit && hit.x + DX[hit.face] === x && hit.y + DY[hit.face] === y && hit.z + DZ[hit.face] === z;
+    this.world.setMeta(x, y, z, 8 | (clicked ? hit.face : 2));
+  }
+  return _afterPlaceSX.call(this, p, x, y, z, id);
+};
+
+/* ---------------- the lid ---------------- */
+// ShulkerBoxBlock.canOpen: the half block its lid moves into must be free of blocks
+function shulkerCanOpen(w, x, y, z) {
+  const f = shulkerFacing(w.getMeta(x, y, z)), e = 1e-6;
+  const lo = [x, y, z], hi = [x + 1, y + 1, z + 1], ax = f < 2 ? 0 : f < 4 ? 1 : 2, pos = f % 2 === 0;
+  if (pos) { lo[ax] = hi[ax]; hi[ax] += 0.5; } else { hi[ax] = lo[ax]; lo[ax] -= 0.5; }
+  return !boxHitsShapes(w, lo[0] + e, lo[1] + e, lo[2] + e, hi[0] - e, hi[1] - e, hi[2] - e);
+}
+const shulkerOpenAt = (g, x, y, z) => { const inv = g.ui && g.ui.inv, d = inv && inv.type === 'shulker' && inv.data; return !!(d && d.x === x && d.y === y && d.z === z); };
+const _useBlockSX = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  if (hit && SHULKER_IDS.has(hit.id) && !(p.sneaking && held)) {
+    const s = this.world._sbLids && this.world._sbLids.get(hit.x + ',' + hit.y + ',' + hit.z);
+    if (!(s && s.p > 0) && !shulkerCanOpen(this.world, hit.x, hit.y, hit.z)) return true;
+  }
+  return _useBlockSX.apply(this, arguments);
+};
+function chunkShulkers(c) {
+  if (!c._sbs || c._sbsB !== c.blocks) {
+    const l = [];
+    for (const id of SHULKER_IDS) for (let i = c.blocks.indexOf(id); i >= 0; i = c.blocks.indexOf(id, i + 1)) l.push(i);
+    c._sbs = l; c._sbsB = c.blocks;
+  }
+  return c._sbs;
+}
+const _setBlockSX = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id) {
+  const old = this.getBlock(x, y, z), r = _setBlockSX.apply(this, arguments);
+  if (SHULKER_IDS.has(old) || SHULKER_IDS.has(id)) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._sbs = null; this._sbDirty = true; }
+  return r;
+};
+Game.prototype.listShulkers = function () {
+  const w = this.world, p = this.player, pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, list = [], old = w._sbLids || new Map(), lids = new Map();
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.blocks) continue;
+    for (const i of chunkShulkers(c)) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), k = x + ',' + y + ',' + z;
+      list.push([x, y, z, k]); lids.set(k, old.get(k) || { p: 0, op: 0 });
+    }
+  }
+  w._sbList = list; w._sbLids = lids; w._sbDirty = false;
+};
+// ShulkerBoxBlockEntity.updateAnimation: a tenth of the way a tick
+const _gameTickSX = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  _gameTickSX.apply(this, arguments);
+  const w = this.world, p = this.player;
+  if (!w || !p) return;
+  if (!w._sbList || w._sbDirty || w.tick % 20 === 0) this.listShulkers();
+  for (const [x, y, z, k] of w._sbList) {
+    const s = w._sbLids.get(k), open = shulkerOpenAt(this, x, y, z);
+    s.op = s.p;
+    // (rounded: ten tenths taken from 1 leave a trace that would count as still open)
+    s.p = Math.round((open ? Math.min(1, s.p + 0.1) : Math.max(0, s.p - 0.1)) * 1e6) / 1e6;
+  }
+};
+const _closeInvSX = UI.prototype.closeInv;
+UI.prototype.closeInv = function () {
+  const g = this.game, d = this.inv && this.inv.type === 'shulker' && this.inv.data;
+  const r = _closeInvSX.apply(this, arguments);
+  if (g && d && d.x !== undefined && !this.inv) g.sound('shulker_close', d.x + 0.5, d.y + 0.5, d.z + 0.5);
+  return r;
+};
+SND_CAT.shulker_close = 'block'; SUB_TEXT.shulker_close = 'Shulker box closes';
+SOUND_EVENTS.unshift([/^block\.shulker_box\.close/, 'shulker_close']);
+const _audioPlaySX = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'shulker_close') return _audioPlaySX.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, 0.5);
+  if (!dst) return;
+  const v = 0.9 + Math.random() * 0.1;
+  this.tone(dst, 'sine', 300 * v, 180 * v, 0.18, 0.12); this.noiseHit(dst, 'lowpass', 700 * v, 1, 0.1, 0.25);
+};
+
+/* ---------------- drawing ---------------- */
+// Direction.getRotation by the game's face order (east, west, up, down, south, north)
+const SB_TURN = [
+  BKM.mul(BKM.rx(Math.PI / 2), BKM.rz(-Math.PI / 2)), BKM.mul(BKM.rx(Math.PI / 2), BKM.rz(Math.PI / 2)), BKM.t(0, 0, 0),
+  BKM.rx(Math.PI), BKM.rx(Math.PI / 2), BKM.mul(BKM.rx(Math.PI / 2), BKM.rz(Math.PI))];
+const SB_PARTS = MM.shulker.parts.filter(q => q.n === 'lid' || q.n === 'base');
+// ShulkerBoxRenderer: about the block's middle, 0.9995 the size, turned to its facing, turned over and down a block; the lid
+// up 0.5 x progress and turned 270 degrees x progress
+function drawShulkerModel(r, m, key, prog, light) {
+  const vt = VTEX[key] || VTEX['entity/shulker/shulker'];
+  if (!vt) return;
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th, uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+  const base = BKM.mul(m, BKM.mul([1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0], BKM.t(0, -1, 0)));
+  for (const part of SB_PARTS) {
+    const lid = part.n === 'lid', M = BKM.mul(base, lid ? BKM.mul(BKM.t(0, (24 - prog * 8) / 16, 0), BKM.ry(prog * 1.5 * Math.PI)) : BKM.t(0, 24 / 16, 0));
+    for (const c of part.c) emitVCube(r, c, q => BKM.ap(M, q[0] / 16, q[1] / 16, q[2] / 16), uvx, [1, 1, 1, 1], light, 63);
+  }
+}
+const _renderSpawnerMobsSX = Game.prototype.renderSpawnerMobs;
+Game.prototype.renderSpawnerMobs = function (r, a) {
+  if (_renderSpawnerMobsSX) _renderSpawnerMobsSX.call(this, r, a);
+  const w = this.world, p = this.player;
+  if (!w || !p || !w._sbList) return;
+  for (const [x, y, z, k] of w._sbList) {
+    if ((p.x - x - 0.5) ** 2 + (p.z - z - 0.5) ** 2 > 64 * 64) continue;
+    const id = w.getBlock(x, y, z);
+    if (!SHULKER_IDS.has(id)) continue;
+    const s = w._sbLids.get(k), lr = w.getLightRaw(x, y, z), f = shulkerFacing(w.getMeta(x, y, z));
+    const m = BKM.mul(BKM.t(x + 0.5, y + 0.5, z + 0.5), BKM.mul([0.9995, 0, 0, 0, 0, 0.9995, 0, 0, 0, 0, 0.9995, 0], SB_TURN[f]));
+    drawShulkerModel(r, m, shulkerKey(id), s ? s.op + (s.p - s.op) * a : 0, [lr >> 4, lr & 15]);
+  }
+};
+// held, dropped and framed: closed and facing up, in the block item's space
+const _pushBlockItemSX = Game.prototype.pushBlockItem;
+Game.prototype.pushBlockItem = function (r, m, id, l) {
+  if (!SHULKER_IDS.has(id) || !VTEX['entity/shulker/shulker']) return _pushBlockItemSX.call(this, r, m, id, l);
+  drawShulkerModel(r, [m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14]], shulkerKey(id), 0, [l[0], l[1]]);
+};
+// the icon: closed, seen like the block icons
+const _iconForSX = iconFor;
+iconFor = function (id, tag, st) {
+  if (!SHULKER_IDS.has(id) || !ATLAS.canvas) return _iconForSX(id, tag, st);
+  const key = shulkerKey(id), ck = 'shulkermodel#' + key;
+  if (ICONS[ck]) return ICONS[ck];
+  const pass = skinPass(key, SB_PARTS);
+  if (!pass) return _iconForSX(id, tag, st);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  // the model's space turned over (the renderer's scale(1, -1, -1)) and down a block: block pixels around its middle
+  paintModel(g, { parts: SB_PARTS }, {}, [pass], q => { const x = 8 + q[0], y = 24 - q[1], z = 8 - q[2], s = isoP(x, y, z); return [s[0], s[1], -(0.6124 * (x + z) + 0.5 * y)]; });
+  return ICONS[ck] = c.toDataURL();
+};
+
+/* @file 197_block_models.js */
+/* ===================================================================
+   Part 91: block models like Java
+   - blocks whose shape was a stand-in now have Java's model (its
+     elements, face UVs and rotations, baked by jElementQuads):
+     . azaleas and flowering azaleas: a leafy top with leaves hanging
+       half way down each side and the stems crossed inside, not a
+       solid cube
+     . the sculk shrieker: its bony upper part over the base
+     . the cauldron: its walls start above the four corner legs, so it
+       stands on them with gaps between; water and powder snow at 9,
+       12 and 15 pixels, lava at 15
+     . the brewing stand: the two plates by the rod a pixel further
+       out, an arm to the east and two turned 45 degrees on the other
+       side, each showing a bottle while its slot holds something
+     . the flower pot: hollow, a pixel thick, the soil four pixels up,
+       the plant crossed in it as wide as Java draws it; the potted
+       azaleas' small bushes, the potted cactus, bamboo and mangrove
+       propagule as Java models them, the roots' shorter pot texture,
+       the pot shaded by direction and only the plant lit as from above
+     . the dragon egg: its six layers
+     . the chorus flower: a plate on each side round the core
+     . scaffolding: four whole posts and the frame round the top
+   - the glowing layer of an open eyeblossom (in a pot too) and of a
+     firefly bush drawn at full light, so they glow in the dark
+   - their textures from a resource pack: block/azalea_plant,
+     block/sculk_shrieker_inner_top, the potted azalea bushes' top, side
+     and plant, block/crimson_roots_pot and warped_roots_pot and the two
+     glowing layers too, with the game's own drawings
+   =================================================================== */
+
+// a compact element: [from, to, { face: [uv or 0, texture, uv rotation] }, element rotation]
+const jE = (f, t, faces, rot) => {
+  const fc = {};
+  for (const k in faces) { const [uv, tex, r] = faces[k]; fc[k] = { uv: uv || undefined, texture: tex, rotation: r || 0 }; }
+  return { from: f, to: t, faces: fc, rotation: rot };
+};
+const jQuads = els => els.flatMap(jElementQuads);
+const ALL4 = (o, tex) => ({ north: [o, tex], east: [o, tex], south: [o, tex], west: [o, tex] });
+
+/* ---------------- azaleas ---------------- */
+for (const [name, top, side] of [['azalea', 'azalea_top', 'azalea_side'], ['flowering_azalea', 'flowering_azalea_top', 'flowering_azalea_side']]) {
+  const Q = jQuads([
+    jE([0, 16, 0], [16, 16, 16], { down: [[0, 16, 16, 0], top], up: [[0, 0, 16, 16], top] }),
+    jE([0, 5, 0], [16, 16, 0.01], { north: [[0, 0, 16, 11], side], south: [[16, 0, 0, 11], side] }),
+    jE([0, 5, 15.99], [16, 16, 16], { north: [[16, 0, 0, 11], side], south: [[0, 0, 16, 11], side] }),
+    jE([0, 5, 0], [0.01, 16, 16], { west: [[0, 0, 16, 11], side], east: [[16, 0, 0, 11], side] }),
+    jE([15.99, 5, 0], [16, 16, 16], { west: [[16, 0, 0, 11], side], east: [[0, 0, 16, 11], side] }),
+    jE([0.1, 0, 8], [15.9, 15.9, 8], { north: [[0, 0, 16, 16], 'azalea_plant'], south: [[0, 0, 16, 16], 'azalea_plant'] }, { origin: [8, 8, 8], axis: 'y', angle: 45, rescale: true }),
+    jE([8, 0, 0.1], [8, 15.9, 15.9], { west: [[0, 0, 16, 16], 'azalea_plant'], east: [[0, 0, 16, 16], 'azalea_plant'] }, { origin: [8, 8, 8], axis: 'y', angle: 45, rescale: true }),
+  ]);
+  BOX_MODELS[name + '_java'] = () => Q;
+  if (B[name.toUpperCase()] !== undefined) BLK[B[name.toUpperCase()]].model = name + '_java';
+}
+const _modelCollisionBM = modelCollision;
+modelCollision = function (id, meta, ctx) {
+  // AzaleaBlock: a full block's collision for the leafy top: the shape of its top half and stem (0..16 x 8..16, 6..10 x 0..8)
+  if (id === B.AZALEA || id === B.FLOWERING_AZALEA) return [[0, 8, 0, 16, 16, 16], [6, 0, 6, 10, 8, 10]];
+  return _modelCollisionBM(id, meta, ctx);
+};
+
+/* ---------------- the sculk shrieker ---------------- */
+{
+  const S = 'sculk_shrieker_side', T = 'sculk_shrieker_top';
+  const Q = jQuads([
+    jE([0, 0, 0], [16, 8, 16], Object.assign(ALL4([0, 8, 16, 16], S), { up: [[0, 0, 16, 16], 'sculk_shrieker_inner_top'], down: [[0, 0, 16, 16], 'sculk_shrieker_bottom'] })),
+    jE([1, 8, 1], [15, 15, 15], Object.assign(ALL4([1, 1, 15, 8], S), { up: [[1, 1, 15, 15], T] })),
+    jE([1, 14.98, 1], [15, 14.98, 15], { down: [[1, 1, 15, 15], T] }),
+    jE([1, 8, 14.98], [15, 15, 14.98], { north: [[1, 1, 15, 8], S] }),
+    jE([1, 8, 1.02], [15, 15, 1.02], { south: [[1, 1, 15, 8], S] }),
+    jE([14.98, 8, 1], [14.98, 15, 15], { west: [[1, 1, 15, 8], S] }),
+    jE([1.02, 8, 1], [1.02, 15, 15], { east: [[1, 1, 15, 8], S] }),
+  ]);
+  BOX_MODELS.shrieker = () => Q;
+  // SculkShriekerBlock's collision: the bottom half
+  const _mc = modelCollision;
+  modelCollision = function (id, meta, ctx) { return id === B.SCULK_SHRIEKER ? [[0, 0, 0, 16, 8, 16]] : _mc(id, meta, ctx); };
+}
+
+/* ---------------- the cauldron ---------------- */
+{
+  const s = 'cauldron_side', t = 'cauldron_top', b = 'cauldron_bottom', i = 'cauldron_inner';
+  const leg = (f, to, faces) => jE(f, to, faces);
+  const FRAME = jQuads([
+    jE([0, 3, 0], [2, 16, 16], { north: [0, s], east: [0, s], south: [0, s], west: [0, s], up: [0, t], down: [0, i] }),
+    jE([2, 3, 2], [14, 4, 14], { up: [0, i], down: [0, i] }),
+    jE([14, 3, 0], [16, 16, 16], { north: [0, s], east: [0, s], south: [0, s], west: [0, s], up: [0, t], down: [0, i] }),
+    jE([2, 3, 0], [14, 16, 2], { north: [0, s], south: [0, s], up: [0, t], down: [0, i] }),
+    jE([2, 3, 14], [14, 16, 16], { north: [0, s], south: [0, s], up: [0, t], down: [0, i] }),
+    leg([0, 0, 0], [4, 3, 2], { north: [0, s], east: [0, s], south: [0, s], west: [0, s], down: [0, b] }),
+    leg([0, 0, 2], [2, 3, 4], { east: [0, s], south: [0, s], west: [0, s], down: [0, b] }),
+    leg([12, 0, 0], [16, 3, 2], { north: [0, s], east: [0, s], south: [0, s], west: [0, s], down: [0, b] }),
+    leg([14, 0, 2], [16, 3, 4], { east: [0, s], south: [0, s], west: [0, s], down: [0, b] }),
+    leg([0, 0, 14], [4, 3, 16], { north: [0, s], east: [0, s], south: [0, s], west: [0, s], down: [0, b] }),
+    leg([0, 0, 12], [2, 3, 14], { north: [0, s], east: [0, s], west: [0, s], down: [0, b] }),
+    leg([12, 0, 14], [16, 3, 16], { north: [0, s], east: [0, s], south: [0, s], west: [0, s], down: [0, b] }),
+    leg([14, 0, 12], [16, 3, 14], { north: [0, s], east: [0, s], west: [0, s], down: [0, b] }),
+  ]);
+  // what's in it is drawn as before (the parts after the frame and legs the old model built), at Java's heights: water and powder
+  // snow at 6 + 3 pixels a level (LayeredCauldronBlock.getContentHeight: 9, 12, 15), lava at 15 (LavaCauldronBlock)
+  const _cauldron = BOX_MODELS.cauldron;
+  BOX_MODELS.cauldron = (d, m) => FRAME.concat(_cauldron(d, m).slice(9).map(p => {
+    const y = (m & 12) === 4 ? 15 : 6 + (m & 3) * 3;
+    return Object.assign({}, p, { q: p.q.map(v => [v[0], y, v[2], v[3], v[4]]) });
+  }));
+  // AbstractCauldronBlock.SHAPE: the block less the gaps between its legs and the inside above 4
+  const _mc = modelCollision;
+  const COLL = [[0, 0, 0, 2, 16, 4], [0, 0, 12, 2, 16, 16], [2, 0, 0, 4, 16, 2], [2, 0, 14, 4, 16, 16], [12, 0, 0, 16, 16, 2], [12, 0, 14, 16, 16, 16], [14, 0, 2, 16, 16, 4],
+    [14, 0, 12, 16, 16, 14], [0, 3, 4, 16, 4, 12], [2, 3, 2, 14, 4, 4], [2, 3, 12, 14, 4, 14], [4, 3, 0, 12, 16, 2], [4, 3, 14, 12, 16, 16], [0, 4, 4, 2, 16, 12], [14, 4, 4, 16, 16, 12]];
+  modelCollision = function (id, meta, ctx) { return BLK[id] && BLK[id].model === 'cauldron' ? COLL : _mc(id, meta, ctx); };
+}
+
+/* ---------------- the brewing stand ---------------- */
+{
+  // brewing_stand_bottle0..2 and _empty0..2: an arm to the east and two on the other side turned 45 degrees either way, showing
+  // the bottle half of the texture on an arm whose slot holds something (has_bottle_0..2: meta bits 1, 2 and 4), else the empty half
+  const t = 'brewing_stand';
+  const arm = (k, full) => {
+    const uv = k === 0 ? (full ? [[0, 0, 8, 16], [8, 0, 0, 16]] : [[16, 0, 8, 16], [8, 0, 16, 16]]) : full ? [[8, 0, 0, 16], [0, 0, 8, 16]] : [[8, 0, 16, 16], [16, 0, 8, 16]];
+    const faces = { north: [uv[0], t], south: [uv[1], t] };
+    return jQuads([k === 0 ? jE([8, 0, 8], [16, 16, 8], faces) : jE([-0.41, 0, 8], [7.59, 16, 8], faces, { origin: [8, 8, 8], axis: 'y', angle: k === 1 ? -45 : 45 })]);
+  };
+  const ARMS = [0, 1, 2].map(k => [arm(k, false), arm(k, true)]);
+  // the base plates and the rod as they were (the two plates by the rod a pixel further out), then the arms
+  const _brew = BOX_MODELS.brewing_stand;
+  BOX_MODELS.brewing_stand = (d, m) => _brew(d, m).slice(0, 4).map(p => p.b && p.b[0] === 2 && p.b[3] === 8 ? Object.assign({}, p, { b: [1, p.b[1], p.b[2], 7, p.b[4], p.b[5]] }) : p)
+    .concat(ARMS[0][m & 1], ARMS[1][m >> 1 & 1], ARMS[2][m >> 2 & 1]);
+  // BrewingStandBlockEntity.serverTick: the block shows which of the three bottle slots hold something
+  const _tickBrewersBM = Game.prototype.tickBrewers;
+  Game.prototype.tickBrewers = function () {
+    _tickBrewersBM.apply(this, arguments);
+    const w = this.world;
+    if (!this.brewers || !w) return;
+    for (const b of this.brewers.values()) {
+      if (w.getBlock(b.x, b.y, b.z) !== B.BREWING_STAND) continue;
+      const it = b.be.items || [], bits = (it[0] ? 1 : 0) | (it[1] ? 2 : 0) | (it[2] ? 4 : 0), m = w.getMeta(b.x, b.y, b.z);
+      if ((m & 7) !== bits) w.setMeta(b.x, b.y, b.z, (m & ~7) | bits);
+    }
+  };
+}
+
+/* ---------------- the flower pot ---------------- */
+{
+  const f = 'flower_pot';
+  const POT = jQuads([
+    jE([5, 0, 5], [6, 6, 11], { down: [[5, 5, 6, 11], f], up: [[5, 5, 6, 11], f], north: [[10, 10, 11, 16], f], south: [[5, 10, 6, 16], f], west: [[5, 10, 11, 16], f], east: [[5, 10, 11, 16], f] }),
+    jE([10, 0, 5], [11, 6, 11], { down: [[10, 5, 11, 11], f], up: [[10, 5, 11, 11], f], north: [[5, 10, 6, 16], f], south: [[10, 10, 11, 16], f], west: [[5, 10, 11, 16], f], east: [[5, 10, 11, 16], f] }),
+    jE([6, 0, 5], [10, 6, 6], { down: [[6, 10, 10, 11], f], up: [[6, 5, 10, 6], f], north: [[6, 10, 10, 16], f], south: [[6, 10, 10, 16], f] }),
+    jE([6, 0, 10], [10, 6, 11], { down: [[6, 5, 10, 6], f], up: [[6, 10, 10, 11], f], north: [[6, 10, 10, 16], f], south: [[6, 10, 10, 16], f] }),
+    jE([6, 0, 6], [10, 4, 10], { down: [[6, 12, 10, 16], f], up: [[6, 6, 10, 10], 'dirt'] }),
+  ]);
+  const R45 = { origin: [8, 8, 8], axis: 'y', angle: 45, rescale: true };
+  // flower_pot_cross: the plant crossed from the soil up, turned 45 degrees and stretched to reach 2.6 to 13.4 pixels, lit as from
+  // above (shade_direction_override "up") while the pot is shaded by direction; v0 4 for the azalea bushes' stems
+  const potCross = (t, v0) => jQuads([
+    jE([2.6, 4, 8], [13.4, 16, 8], { north: [[0, v0 || 0, 16, 16], t], south: [[0, v0 || 0, 16, 16], t] }, R45),
+    jE([8, 4, 2.6], [8, 16, 13.4], { west: [[0, v0 || 0, 16, 16], t], east: [[0, v0 || 0, 16, 16], t] }, R45),
+  ]);
+  const plantCross = (t, tint) => potCross(t).map(q => Object.assign(q, { tint, two: false, su: 1 }));
+  // flower_pot_cross_emissive: the glowing layer at full light, ahead of the plant so it shows where the two lie on each other
+  const glowCross = t => potCross(t).map(q => Object.assign(q, { tint: 0, two: false, su: 1, light: 15 }));
+  // template_potted_azalea_bush: a small leafy top and sides over its stems, with textures of its own
+  const AZ = {};
+  for (const n of ['azalea', 'flowering_azalea']) {
+    const k = 'potted_' + n + '_bush_', t = k + 'top', sd = k + 'side';
+    AZ[n] = POT.concat(jQuads([
+      jE([4, 15.9, 4], [12, 16, 12], { down: [[4, 12, 12, 4], t], up: [[4, 4, 12, 12], t] }),
+      jE([4, 8, 4], [12, 16, 4], { north: [[4, 5, 12, 13], sd], south: [[12, 5, 4, 13], sd] }),
+      jE([4, 8, 12], [12, 16, 12], { north: [[12, 5, 4, 13], sd], south: [[4, 5, 12, 13], sd] }),
+      jE([4, 8, 4], [4, 16, 12], { west: [[4, 5, 12, 13], sd], east: [[12, 5, 4, 13], sd] }),
+      jE([12, 8, 4], [12, 16, 12], { west: [[12, 5, 4, 13], sd], east: [[4, 5, 12, 13], sd] }),
+    ]), potCross(k + 'plant', 4));
+  }
+  // potted_cactus: a solid pot (its bottom face taking a sliver of the texture, as Java's does) and a short cactus
+  const cs = 'cactus_side';
+  const CACTUS = jQuads([
+    jE([5, 0, 5], [11, 6, 11], Object.assign(ALL4(0, f), { down: [[5, 5, 6, 11], f], up: [0, f] })),
+    jE([6, 5, 6], [10, 16, 10], Object.assign(ALL4([6, 0, 10, 11], cs), { up: [0, 'cactus_top'] })),
+  ]);
+  // potted_bamboo: a stalk standing in the soil and one leaf across it (the leaf lit as from above)
+  const BAMBOO = POT.concat(jQuads([jE([7, 0, 7], [9, 16, 9], Object.assign(ALL4([6, 0, 8, 16], 'bamboo_stalk'), { up: [[13, 0, 15, 2], 'bamboo_stalk'] }))]),
+    jQuads([jE([0, 2, 8], [16, 18, 8], { north: [[0, 0, 16, 16], 'bamboo_singleleaf'], south: [[16, 0, 0, 16], 'bamboo_singleleaf'] })]).map(q => Object.assign(q, { su: 1 })));
+  // potted_mangrove_propagule: the propagule's leaves and stem crossed, turned about the pot's bottom centre
+  const RM = { origin: [8, 0, 8], axis: 'y', angle: 45, rescale: true }, mp = 'mangrove_propagule';
+  const MANGROVE = jQuads([
+    jE([4.5, 9, 8], [11.5, 15, 8], { north: [[4, 1, 11, 7], mp], south: [[4, 1, 11, 7], mp] }, RM),
+    jE([8, 9, 4.5], [8, 15, 11.5], { east: [[4, 1, 11, 7], mp], west: [[4, 1, 11, 7], mp] }, RM),
+    jE([8, 0, 7], [8, 9, 9], { east: [[7, 7, 9, 16], mp], west: [[7, 7, 9, 16], mp] }, RM),
+    jE([7, 0, 8], [9, 9, 8], { north: [[7, 7, 9, 16], mp], south: [[7, 7, 9, 16], mp] }, RM),
+  ]).concat(POT);
+  // crimson and warped roots have a shorter texture for the pot
+  const POT_TEX = { crimson_roots: 'crimson_roots_pot', warped_roots: 'warped_roots_pot' };
+  const GLOW_TEX = { open_eyeblossom: 'open_eyeblossom_emissive' };
+  const _pot = MDL[SH.POT];
+  MDL[SH.POT] = (d, m) => {
+    const plant = m ? POTTABLE[m - 1] : null;
+    if (!plant) return POT;
+    if (plant === 'cactus') return CACTUS;
+    if (plant === 'bamboo') return BAMBOO;
+    if (plant === 'mangrove_propagule') return MANGROVE;
+    if (AZ[plant]) return AZ[plant];
+    const pid = B[plant.toUpperCase()];
+    if (pid === undefined) return _pot(d, m);
+    const ps = POT.concat(plantCross(POT_TEX[plant] || TEX.names[FACETEX[pid * 6]], TINT[pid]));
+    return GLOW_TEX[plant] ? glowCross(GLOW_TEX[plant]).concat(ps) : ps;
+  };
+  // the pot is shaded by direction now that it is built of quads (only the plants are lit as from above)
+  for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.POT) SHADE_FLAT[id] = 0;
+}
+/* ---------------- glowing layers ---------------- */
+// cross_emissive: an open eyeblossom's and a firefly bush's glowing layer over the plant, at full block light (light_emission 15),
+// drawn ahead of the plant so it shows where the two lie on each other
+{
+  const GLOW = new Map();
+  if (B.OPEN_EYEBLOSSOM !== undefined) GLOW.set(B.OPEN_EYEBLOSSOM, 'open_eyeblossom_emissive');
+  if (B.FIREFLY_BUSH !== undefined) GLOW.set(B.FIREFLY_BUSH, 'firefly_bush_emissive');
+  const _meshCrossBM = meshCross;
+  meshCross = function (mb, id, meta, pi, X, Y, Z, tint, to, world, wx, wy, wz) {
+    const t = GLOW.get(id);
+    if (t) {
+      const d = BLK[id], sky = (pLight[pi] >> 4) * 16, L = texLayer(t, FACETEX[id * 6]), k = 255 * FSHADE[2];
+      let ox = 0, oz = 0;
+      if (OFFSET[id]) { ox = (hash2(wx, wz, 11) - 0.5) * 6; oz = (hash2(wx, wz, 12) - 0.5) * 6; }
+      const x = X + ox, z = Z + oz, a = 0.8, c = 15.2, fl = WAVE[id] && !d.noWave ? FL_WAVE : 0, top = d.tall && (meta & 1);
+      for (const P of [[[x + a, Y, z + a], [x + c, Y, z + c], [x + c, Y + 16, z + c], [x + a, Y + 16, z + a]], [[x + c, Y, z + a], [x + a, Y, z + c], [x + a, Y + 16, z + c], [x + c, Y + 16, z + a]]]) {
+        quad(mb, P, L, UV_FULL, sky, 240, k, k, k, fl, !top);
+        quad(mb, [P[1], P[0], P[3], P[2]], L, UV_FULL, sky, 240, k, k, k, fl, !top);
+      }
+    }
+    return _meshCrossBM.apply(this, arguments);
+  };
+}
+// the collision boxes these models had from their boxes, now given (Java's shapes)
+{
+  const COLL = new Map();
+  const set = (n, boxes) => { if (B[n.toUpperCase()] !== undefined) COLL.set(B[n.toUpperCase()], boxes); };
+  set('dragon_egg', [[1, 0, 1, 15, 16, 15]]); set('chorus_flower', [[0, 0, 0, 16, 16, 16]]); set('brewing_stand', [[1, 0, 1, 15, 2, 15], [7, 2, 7, 9, 14, 9]]);
+  for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.POT) COLL.set(id, [[5, 0, 5, 11, 6, 11]]);
+  const _mc = modelCollision;
+  modelCollision = function (id, meta, ctx) { return COLL.get(id) || _mc(id, meta, ctx); };
+}
+
+/* ---------------- the dragon egg, the chorus flower, scaffolding ---------------- */
+{
+  const a = 'dragon_egg';
+  const layer = (y0, y1, k, top, bottom) => jE([k, y0, k], [16 - k, y1, 16 - k], Object.assign(ALL4([k, 16 - y1, 16 - k, 16 - y0], a), top ? { up: [[k, k, 16 - k, 16 - k], a] } : {}, bottom ? { down: [[k, k, 16 - k, 16 - k], a] } : {}));
+  const EGG = jQuads([layer(15, 16, 6, true), layer(14, 15, 5, true), layer(13, 14, 4, true), layer(0, 13, 3, true, true), layer(1, 11, 2, true, true), layer(3, 8, 1, true, true)]);
+  BOX_MODELS.dragon_egg = () => EGG;
+}
+{
+  const flower = tex => {
+    const b = 'chorus_plant', t = tex;
+    return jQuads([
+      jE([2, 14, 2], [14, 16, 14], { up: [[2, 2, 14, 14], t], north: [[2, 0, 14, 2], b], south: [[2, 0, 14, 2], b], west: [[2, 0, 14, 2], b], east: [[2, 0, 14, 2], b] }),
+      jE([0, 2, 2], [2, 14, 14], { down: [[16, 14, 14, 2], b], up: [[0, 2, 2, 14], b], north: [[14, 2, 16, 14], b], south: [[0, 2, 2, 14], b], west: [[2, 2, 14, 14], t] }),
+      jE([2, 2, 0], [14, 14, 2], { down: [[14, 2, 2, 0], b], up: [[2, 0, 14, 2], b], north: [[2, 2, 14, 14], t], west: [[0, 2, 2, 14], b], east: [[14, 2, 16, 14], b] }),
+      jE([2, 2, 14], [14, 14, 16], { down: [[14, 16, 2, 14], b], up: [[2, 14, 14, 16], b], south: [[2, 2, 14, 14], t], west: [[14, 2, 16, 14], b], east: [[0, 2, 2, 14], b] }),
+      jE([14, 2, 2], [16, 14, 14], { down: [[2, 14, 0, 2], b], up: [[14, 2, 16, 14], b], north: [[0, 2, 2, 14], b], south: [[14, 2, 16, 14], b], east: [[2, 2, 14, 14], t] }),
+      jE([2, 0, 2], [14, 14, 14], { up: [[2, 2, 14, 14], b], down: [[14, 14, 2, 2], b], north: [[2, 2, 14, 16], b], south: [[2, 2, 14, 16], b], west: [[2, 2, 14, 16], b], east: [[2, 2, 14, 16], b] }),
+    ]);
+  };
+  const ALIVE = flower('chorus_flower'), DEAD = flower('chorus_flower_dead');
+  const _chorus = MDL[SH.CHORUS];
+  MDL[SH.CHORUS] = (d, m, c) => d.flowerHead ? ((m & 7) >= 5 ? DEAD : ALIVE) : _chorus(d, m, c);
+}
+{
+  const t = 'scaffolding_top', s = 'scaffolding_side', b = 'scaffolding_bottom', post = (x, z) => jE([x, 0, z], [x + 2, 16, z + 2], Object.assign(ALL4(0, s), { down: [0, b] }));
+  const STABLE = jQuads([
+    jE([0, 15.99, 0], [16, 16, 16], { up: [0, t], down: [[0, 16, 16, 0], t] }),
+    post(0, 0), post(0, 14), post(14, 14), post(14, 0),
+    jE([2, 14, 0], [14, 16, 2], { north: [0, s], south: [[2, 2, 14, 4], s], down: [0, b] }),
+    jE([2, 14, 14], [14, 16, 16], { north: [[14, 0, 2, 2], s], south: [0, s], down: [0, b] }),
+    jE([14, 14, 2], [16, 16, 14], { east: [[14, 0, 2, 2], s], west: [[14, 2, 2, 4], s], down: [0, b] }),
+    jE([0, 14, 2], [2, 16, 14], { east: [0, s], west: [[14, 0, 2, 2], s], down: [0, b] }),
+  ]);
+  BOX_MODELS.scaffolding = () => STABLE;
+}
+
+/* ---------------- textures ---------------- */
+TEXGEN.push(function texJavaModels() {
+  // azalea stems: a few crooked brown stems with leaf tufts; the shrieker's inner top: dark with pale bone rings
+  T('azalea_plant', (d, r) => {
+    for (const [x0, lean] of [[5, 1], [8, 0], [10, -1]]) for (let y = 15; y >= 4; y--) { const x = Math.round(x0 + lean * (15 - y) / 6); sp(d, x, y, mul([96, 70, 40], 0.85 + r() * 0.2)); }
+    for (const [x, y] of [[4, 4], [6, 3], [9, 4], [11, 5], [7, 5]]) { sp(d, x, y, [86, 120, 44]); sp(d, x + 1, y, [104, 140, 52]); }
+  });
+  // the potted azalea bushes' own textures (a small top, sides and stems), drawn from the azaleas'; the pot's shorter roots
+  const fromTex = (d, src, map) => { const s = copyOf(src); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const m = map(x, y); if (!m) continue; const i = (m[1] * 16 + m[0]) * 4, o = (y * 16 + x) * 4; d[o] = s[i]; d[o + 1] = s[i + 1]; d[o + 2] = s[i + 2]; d[o + 3] = s[i + 3]; } };
+  const inner = (x, y, x0, y0, w, h) => x >= x0 && x < x0 + w && y >= y0 && y < y0 + h;
+  for (const n of ['azalea', 'flowering_azalea']) {
+    T('potted_' + n + '_bush_top', d => fromTex(d, n + '_top', (x, y) => inner(x, y, 4, 4, 8, 8) && [x, y]));
+    T('potted_' + n + '_bush_side', d => fromTex(d, n + '_side', (x, y) => inner(x, y, 4, 5, 8, 8) && [x, y - 2]));
+    T('potted_' + n + '_bush_plant', d => fromTex(d, 'azalea_plant', (x, y) => inner(x, y, 3, 4, 10, 12) && [x, y]));
+  }
+  for (const n of ['crimson_roots', 'warped_roots']) T(n + '_pot', d => fromTex(d, n, (x, y) => inner(x, y, 4, 0, 8, 16) && [x, y]));
+  // a firefly bush's glowing specks (the bush itself is drawn without them)
+  T('firefly_bush_emissive', (d, r) => { for (let k = 0; k < 5; k++) sp(d, 2 + Math.floor(r() * 12), 1 + Math.floor(r() * 9), [255, 236, 120]); });
+  // a potted bamboo's leaf: two leaves off a short stalk top
+  T('bamboo_singleleaf', (d, r) => {
+    for (let k = 0; k < 7; k++) { sp(d, 8 - k, 9 - Math.round(k * 0.5), mul([92, 140, 44], 0.9 + r() * 0.2)); sp(d, 8 + k, 7 - Math.round(k * 0.4), mul([92, 140, 44], 0.9 + r() * 0.2)); if (k < 5) { sp(d, 8 - k, 10 - Math.round(k * 0.5), [74, 116, 34]); sp(d, 8 + k, 8 - Math.round(k * 0.4), [74, 116, 34]); } }
+  });
+  T('sculk_shrieker_inner_top', (d, r) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const e = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+      sp(d, x, y, e > 6.5 ? mul([12, 30, 38], 0.9 + r() * 0.2) : e > 4.5 && e < 5.5 ? [200, 196, 160] : mul([8, 20, 26], 0.8 + r() * 0.3));
+    }
+  });
+});
 
 </script>
 </body>
