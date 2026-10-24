@@ -1430,6 +1430,9 @@ Generator.prototype.genChunk = function (cx, cz) {
       }
     }
   }
+  // where the water is before the trees, plants and structures (what they put there that can hold water keeps it: Part 96)
+  const water0 = new Uint8Array(65536);
+  for (let i = 0; i < 65536; i++) if (blocks[i] === B.WATER) water0[i] = 1;
   // ---- trees, huge mushrooms, ice spikes and boulders ----
   let wet = false;
   const setT = (x, y, z, id, isLog, m) => {
@@ -1651,7 +1654,7 @@ Generator.prototype.genChunk = function (cx, cz) {
       break;
     }
   }
-  return { blocks, biomes, meta, be, mobs };
+  return { blocks, biomes, meta, be, mobs, wl: genWl(blocks, meta, water0, 65536, null) };
 };
 // opaque lookup usable inside workers (no block registry there)
 const OPAQUE_GEN = new Uint8Array(MAXB);
@@ -2578,6 +2581,7 @@ function framesMeta(seed, wx, wz) { return hash2(wx, wz, seed + 8105) < 0.1 ? 4 
 function tallChunk(r, off) {
   const b = new Uint16Array(CH_VOL), m = new Uint8Array(CH_VOL);
   b.set(r.blocks, off << 8); if (r.meta) m.set(r.meta, off << 8);
+  if (r.wl) { const wl = new Uint8Array(CH_VOL >> 3); wl.set(r.wl, off << 5); r.wl = wl; }
   if (off) {
     for (let i = 0; i < 5 * 256; i++) if (b[(off << 8) + i] === B.BEDROCK) b[(off << 8) + i] = B.DEEPSLATE;
     for (let i = 0; i < off << 8; i++) { const y = i >> 8; b[i] = (y === 0 || (y < 5 && hash3(i & 15, y, (i >> 4) & 15, 991) < (5 - y) / 5)) ? B.BEDROCK : B.DEEPSLATE; }
@@ -9856,6 +9860,88 @@ VanillaWorldGen.prototype.vDecorate = function (cx, cz, blocks, meta, be, mobs, 
 };
 })();
 
+/* @file 19_waterlog_gen.js */
+/* ===================================================================
+   Part 96 (generation): waterlogged blocks
+   - the blocks that can hold water (Java's SimpleWaterloggedBlock):
+     stairs, slabs, fences, walls, panes and bars, trapdoors, signs,
+     ladders, lanterns, chains, rails, chests, campfires, conduits, sea pickles,
+     coral, candles, amethyst, pointed dripstone, dripleaves, lichen and
+     veins, sculk sensors and shriekers, lightning rods, hanging and
+     mangrove roots, mangrove propagules, scaffolding, leaves, grates,
+     decorated pots and more
+   - a chunk keeps which of its blocks hold water in a set of flags, a
+     bit a block in the blocks' own order; a vanilla chunk's flags come
+     from its states (waterlogged=true) and from the blocks its
+     structures put where there was water (they keep the water there);
+     a classic chunk's from what its trees, plants and structures put
+     where there was water
+   =================================================================== */
+
+const WL_RE = /(_stairs|_slab|_fence|_wall|_pane|_bars|_trapdoor|_sign|_lantern|_chain|_coral|_coral_fan|_coral_wall_fan|_candle|_amethyst_bud|_leaves|_copper_grate|_shelf|_rail|lightning_rod)$|^(ladder|lantern|rail|chain|chest|trapped_chest|ender_chest|campfire|soul_campfire|conduit|sea_pickle|candle|amethyst_cluster|pointed_dripstone|big_dripleaf|big_dripleaf_stem|small_dripleaf|glow_lichen|sculk_vein|resin_clump|sculk_sensor|calibrated_sculk_sensor|sculk_shrieker|hanging_roots|mangrove_roots|mangrove_propagule|scaffolding|light|copper_grate|heavy_core|decorated_pot|barrier|dried_ghast)$/;
+const WLABLE = new Uint8Array(MAXB);
+BLOCK_NAMES.forEach((n, id) => { if (id < MAXB && n && WL_RE.test(n) && n !== 'jack_o_lantern' && n !== 'sea_lantern') WLABLE[id] = 1; });
+// a chunk's flags: bit i of the set is block i, (y << 8) | (z << 4) | x
+const wlGet = (wl, i) => (wl[i >> 3] >> (i & 7)) & 1;
+const wlSet = (wl, i, on) => { if (on) wl[i >> 3] |= 1 << (i & 7); else wl[i >> 3] &= ~(1 << (i & 7)); };
+// a generated chunk's flags (n blocks): those already set and the blocks put where there was water (wet) that can hold it;
+// a sea pickle holding water lives (meta bit 4), a campfire in it is out (bit 4); null if none
+function genWl(blocks, meta, wet, n, wl) {
+  if (wet) for (let i = 0; i < n; i++) if (wet[i] && WLABLE[blocks[i]]) { if (!wl) wl = new Uint8Array(n >> 3); wlSet(wl, i, 1); }
+  if (!wl) return null;
+  let any = false;
+  for (let i = 0; i < n; i++) if (wlGet(wl, i)) {
+    const b = blocks[i];
+    if (!WLABLE[b]) { wlSet(wl, i, 0); continue; }
+    any = true;
+    if (b === B.SEA_PICKLE || b === B.CAMPFIRE || b === B.SOUL_CAMPFIRE) meta[i] |= 4;
+  }
+  return any ? wl : null;
+}
+
+if (typeof VanillaWorldGen !== 'undefined') {
+  // every vanilla state that holds water as a game block that can
+  let WLT = null;
+  VF.wlTable = () => {
+    if (WLT) return WLT;
+    const G = VF.gameTable();
+    WLT = new Uint8Array(ST.N);
+    for (let st = 0; st < ST.N; st++) if (G[st] >= 0 && WLABLE[G[st] >> 8] && ST.has(st, 'waterlogged') && ST.get(st, 'waterlogged') === 'true') WLT[st] = 1;
+    return WLT;
+  };
+  // the decorations: the flags of the states they put, and where water still is before the structures come
+  const _vDecorateWL = VanillaWorldGen.prototype.vDecorate;
+  VanillaWorldGen.prototype.vDecorate = function (cx, cz, blocks, meta, be, mobs, parts) {
+    const res = _vDecorateWL.apply(this, arguments);
+    const cur = this._vcur, T = VF.wlTable(), wet = new Uint8Array(CH_VOL);
+    let wl = null;
+    for (let i = 0; i < CH_VOL; i++) {
+      if (blocks[i] === B.WATER) wet[i] = 1;
+      const st = cur ? cur[i] : -1;
+      if (st >= 0 && T[st]) { if (!wl) wl = new Uint8Array(CH_VOL >> 3); wlSet(wl, i, 1); }
+    }
+    this._wl = wl; this._wet = wet;
+    return res;
+  };
+  // the chunk: blocks the structures put in water keep it; flags only where a block can hold water
+  const _genChunkWL = VanillaWorldGen.prototype.genChunk;
+  VanillaWorldGen.prototype.genChunk = function (cx, cz, parts) {
+    this._wl = null; this._wet = null;
+    const r = _genChunkWL.apply(this, arguments);
+    r.wl = genWl(r.blocks, r.meta, this._wet, CH_VOL, this._wl);
+    this._lastWl = r.wl; this._wl = this._wet = null;
+    return r;
+  };
+  // a finished chunk sent back from a worker carries its flags
+  const _vJobWL = VanillaWorldGen.prototype.vJob;
+  VanillaWorldGen.prototype.vJob = function (d) {
+    this._lastWl = null;
+    const res = _vJobWL.apply(this, arguments);
+    if (res && res.msg && res.msg.blocks && this._lastWl) { res.msg.wl = this._lastWl; res.transfer.push(this._lastWl.buffer); }
+    return res;
+  };
+}
+
 </script>
 <script>
 /* @file 20_blocks.js */
@@ -10199,9 +10285,9 @@ defB('dried_kelp_block', { hard: 0.5, tool: HOE, sound: 'grass', tex: { top: 'dr
 for (const c of CORALS) {
   defB(c + '_coral_block', ROCK(1.5, 0, { drop: 'dead_' + c + '_coral_block', silk: true, coral: c }));
   defB('dead_' + c + '_coral_block', ROCK(1.5));
-  defB(c + '_coral', Object.assign({}, PLANT, { water: true, needs: 'solid_below', wave: false, drop: null, silk: true, coral: c }));
+  defB(c + '_coral', Object.assign({}, PLANT, { needs: 'solid_below', wave: false, drop: null, silk: true, coral: c }));
   defB('dead_' + c + '_coral', Object.assign({}, PLANT, { needs: 'solid_below', wave: false, drop: null, silk: true }));
-  defB(c + '_coral_fan', { shape: SH.FAN, hard: 0, sound: 'grass', cutout: true, noCollide: true, water: true, needs: 'attached6', drop: null, silk: true, coral: c });
+  defB(c + '_coral_fan', { shape: SH.FAN, hard: 0, sound: 'grass', cutout: true, noCollide: true, needs: 'attached6', drop: null, silk: true, coral: c });
   defB('dead_' + c + '_coral_fan', { shape: SH.FAN, hard: 0, sound: 'grass', cutout: true, noCollide: true, needs: 'attached6', drop: null, silk: true });
 }
 defB('sponge', { hard: 0.6, tool: HOE, sound: 'grass', sponge: true });
@@ -12319,7 +12405,13 @@ TEXGEN.push(function texBlocks() {
   T('seagrass', (d, r) => { clear(d); for (let k = 0; k < 6; k++) { let x = 1 + k * 2.6; for (let y = 15; y > 2 + r() * 6; y--) { sp(d, Math.round(x) & 15, y, mul([60, 140, 50], 0.8 + r() * 0.3)); x += Math.sin(y * 0.6 + k) * 0.35; } } });
   T('tall_seagrass_bottom', (d, r) => { clear(d); for (let k = 0; k < 5; k++) { let x = 2 + k * 3; for (let y = 15; y >= 0; y--) { sp(d, Math.round(x) & 15, y, mul([60, 140, 50], 0.8 + r() * 0.3)); x += Math.sin(y * 0.5 + k) * 0.3; } } });
   T('tall_seagrass_top', (d, r) => { clear(d); for (let k = 0; k < 5; k++) { let x = 2 + k * 3; for (let y = 15; y > 3 + r() * 6; y--) { sp(d, Math.round(x) & 15, y, mul([70, 150, 56], 0.8 + r() * 0.3)); x += Math.sin(y * 0.5 + k) * 0.3; } } });
-  T('sea_pickle', (d, r) => fillF(d, (x, y) => r() < 0.12 ? [140, 180, 70] : mul([90, 120, 50], 0.85 + r() * 0.2)));
+  // laid out as the pickle models use it: the leaves (x 1-2 and 13-14, rows 0-4), the tops (x 4-11, rows 1-4), the sides round (rows 5-11)
+  T('sea_pickle', (d, r) => {
+    clear(d);
+    for (let y = 5; y < 12; y++) for (let x = 0; x < 16; x++) sp(d, x, y, mul((y === 5 || y === 11) ? [74, 96, 34] : [104, 128, 46], 0.9 + r() * 0.15 + ((x & 3) === 1 ? 0.08 : 0)));
+    for (let y = 1; y < 5; y++) for (let x = 4; x < 12; x++) sp(d, x, y, mul(x < 8 ? [128, 152, 60] : [96, 120, 44], 0.92 + r() * 0.12));
+    for (let y = 0; y < 5; y++) for (const x of [1, 2, 13, 14]) if (r() < 0.8 || y > 2) sp(d, x, y, mul([150, 200, 90], 0.85 + r() * 0.2));
+  });
   const kelpTex = top => (d, r) => { clear(d); let x = 7; for (let y = 15; y >= (top ? 4 : 0); y--) { sp(d, Math.round(x), y, mul([60, 120, 40], 0.85 + r() * 0.2)); if (y % 3 === 0) { sp(d, Math.round(x) - 1, y, [80, 140, 50]); sp(d, Math.round(x) - 2, y - 1, [80, 140, 50]); } if (y % 3 === 1) { sp(d, Math.round(x) + 1, y, [70, 130, 46]); sp(d, Math.round(x) + 2, y - 1, [70, 130, 46]); } x += Math.sin(y * 0.4) * 0.3; } };
   T('kelp', kelpTex(true)); T('kelp_plant', kelpTex(false));
   T('dried_kelp_side', (d, r) => fillF(d, (x, y) => mul(y % 4 === 0 ? [40, 50, 30] : [60, 72, 40], 0.85 + r() * 0.2)));
@@ -13313,7 +13405,7 @@ class World {
       case 'cane': {
         if (below === B.SUGAR_CANE) return true;
         if (!SOIL[below] && below !== B.SAND && below !== B.RED_SAND) return false;
-        for (let f of [0, 1, 4, 5]) { const n = this.getBlock(x + DX[f], y - 1, z + DZ[f]); if (WATERY[n] || n === B.ICE) return true; }
+        for (let f of [0, 1, 4, 5]) { const n = this.getBlock(x + DX[f], y - 1, z + DZ[f]); if (WATERY[n] || (B.FROSTED_ICE !== undefined && n === B.FROSTED_ICE) || this.isWet(x + DX[f], y - 1, z + DZ[f])) return true; }
         return false;
       }
       case 'cactus': {
@@ -13459,7 +13551,7 @@ class World {
       if (below === other) {
         if (lava) { this.setBlock(x, y - 1, z, B.STONE, 0); if (this.onFizz) this.onFizz(x, y - 1, z); }
         else canDown = false;
-      } else if (below === 0 || (REPL[below] && !BLK[below].liquid && !WATERY[below])) {
+      } else if (below === 0 || (REPL[below] && !BLK[below].liquid && !WATERY[below] && !WLABLE[below])) {
         this.setBlock(x, y - 1, z, id, 8); canDown = true;
       } else if (below === id) {
         const bm = this.getMeta(x, y - 1, z);
@@ -13474,7 +13566,7 @@ class World {
     for (const f of [0, 1, 4, 5]) {
       const nx = x + DX[f], nz = z + DZ[f];
       const n = this.getBlock(nx, y, nz);
-      if (n === 0 || (REPL[n] && !BLK[n].liquid && !WATERY[n])) this.setBlock(nx, y, nz, id, nm);
+      if (n === 0 || (REPL[n] && !BLK[n].liquid && !WATERY[n] && !WLABLE[n])) this.setBlock(nx, y, nz, id, nm);
       else if (n === id) { const m = this.getMeta(nx, y, nz); if (m !== 0 && !(m & 8) && amt(m) < a) this.setBlock(nx, y, nz, id, nm); }
       else if (n === other && lava) { /* handled by water tick */ this.schedule(nx, y, nz, 2, 'fluid'); }
       else if (n === other && !lava) this.schedule(nx, y, nz, 2, 'fluid');
@@ -13493,6 +13585,9 @@ class World {
     }
     const rec = { v: 2, h: CH_H, pal, blocks: rle16Encode(idx), meta: rleEncode(c.meta), biomes: c.biomes, be };
     if (c.bio3) rec.bio3 = c.bio3;
+    // the blocks holding water (Part 96), when any do
+    if (c.wl && c.wl.some(v => v)) rec.wl = rleEncode(c.wl);
+    rec.wlv = 1;
     if (ents && ents.length) rec.ents = ents;
     return rec;
   }
@@ -13539,7 +13634,8 @@ function decodeChunk(rec, dim) {
     }
     blocks = b2; meta = m2;
   }
-  return { blocks, meta, biomes: rec.biomes, bio3: rec.bio3 || null, be, ents };
+  const wl = rec.wl && n === CH_VOL ? rleDecode(rec.wl, CH_VOL >> 3) : rec.wlv ? null : wlFromOldSave(blocks, meta);
+  return { blocks, meta, biomes: rec.biomes, bio3: rec.bio3 || null, be, ents, wl };
 }
 function rle16Encode(a) {
   const out = [];
@@ -13575,6 +13671,8 @@ function rleDecode(r, len) {
 /* ---------------- mesher ---------------- */
 const PADW = 18, PAD2 = 324, PADN = PADW * PADW * PADW;
 const pBlk = new Uint16Array(PADN), pMeta = new Uint8Array(PADN), pLight = new Uint8Array(PADN);
+// blocks holding water (waterlogged, Part 96) in the padded section
+const pWl = new Uint8Array(PADN);
 // face vertex tables: [x,y,z,u,v] for BL, BR, TR, TL (CCW seen from outside)
 const FV = [
   [[1, 0, 1, 0, 16], [1, 0, 0, 16, 16], [1, 1, 0, 16, 0], [1, 1, 1, 0, 0]],   // +X
@@ -13668,7 +13766,7 @@ function fillPadded(world, c, sy) {
       const lz = pz - 1, rowz = lz < 0 ? 0 : lz > 15 ? 2 : 1, z = lz & 15;
       const base = py * PAD2 + pz * PADW;
       if (y < 0 || y > CH_TOP) {
-        pBlk.fill(y < 0 ? B.BEDROCK : 0, base, base + 18); pMeta.fill(0, base, base + 18); pLight.fill(y < 0 ? 0 : 0xF0, base, base + 18);
+        pBlk.fill(y < 0 ? B.BEDROCK : 0, base, base + 18); pMeta.fill(0, base, base + 18); pLight.fill(y < 0 ? 0 : 0xF0, base, base + 18); pWl.fill(0, base, base + 18);
         continue;
       }
       const ci = (y << 8) | (z << 4);
@@ -13679,6 +13777,8 @@ function fillPadded(world, c, sy) {
       const l = N[rowz * 3], r = N[rowz * 3 + 2];
       pBlk[base] = l.blocks[ci | 15]; pMeta[base] = l.meta[ci | 15]; pLight[base] = l.light[ci | 15];
       pBlk[base + 17] = r.blocks[ci]; pMeta[base + 17] = r.meta[ci]; pLight[base + 17] = r.light[ci];
+      if (mid.wl) for (let k = 0; k < 16; k++) pWl[base + 1 + k] = (mid.wl[(ci + k) >> 3] >> ((ci + k) & 7)) & 1; else pWl.fill(0, base + 1, base + 17);
+      pWl[base] = l.wl ? (l.wl[(ci | 15) >> 3] >> ((ci | 15) & 7)) & 1 : 0; pWl[base + 17] = r.wl ? (r.wl[ci >> 3] >> (ci & 7)) & 1 : 0;
     }
   }
 }
@@ -13984,11 +14084,12 @@ function emitQuadPart(mb, p, X, Y, Z, l, id, r, g, b, fl) {
   // shade from the quad's normal
   const ax = _px[1] - _px[0], ay = _py[1] - _py[0], az = _pz[1] - _pz[0], bx = _px[3] - _px[0], by = _py[3] - _py[0], bz = _pz[3] - _pz[0];
   const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx, nl = Math.hypot(nx, ny, nz) || 1;
+  // lit as from above (su, or the block's flat shading), as a north face whatever way it faces (sn: shade_direction_override north)
   const up = p.su || SHADE_FLAT[id];
-  let s = up ? FSHADE[2] : jShade(nx, ny, nz);
+  let s = p.sn ? FSHADE[4] : up ? FSHADE[2] : jShade(nx, ny, nz);
   for (let k = 0; k < 4; k++) mb.v(X + _px[k], Y + _py[k], Z + _pz[k], L, _uu[k], _vv[k], sky, blk, r * s, g * s, b * s, flq);
   if (p.two) {
-    s = up ? FSHADE[2] : jShade(-nx, -ny, -nz);
+    s = p.sn ? FSHADE[4] : up ? FSHADE[2] : jShade(-nx, -ny, -nz);
     for (const k of [1, 0, 3, 2]) mb.v(X + _px[k], Y + _py[k], Z + _pz[k], L, _uu[k], _vv[k], sky, blk, r * s, g * s, b * s, flq);
   }
 }
@@ -14263,8 +14364,8 @@ function meshSection(world, c, sy) {
         emitParts(TRANSL[id] ? trn : opq, ps, X, Y, Z, pi, id, meta, tint, to, 0);
       }
     }
-    // plants and other blocks standing in water
-    if (WATERY[id] && id !== B.WATER) meshLiquid(trn, B.WATER, 0, pi, lx, ly, lz, sy, tint, to);
+    // plants and other blocks standing in water, and blocks holding it
+    if ((WATERY[id] && id !== B.WATER) || pWl[pi]) meshLiquid(trn, B.WATER, 0, pi, lx, ly, lz, sy, tint, to);
   }
   opq.nm = 0;
   return { opq: opq.n ? opq.u8.slice(0, opq.n * 16) : null, nOpq: opq.n, trn: trn.n ? trn.u8.slice(0, trn.n * 16) : null, nTrn: trn.n };
@@ -14318,11 +14419,12 @@ function meshTorch(mb, x, y, z, meta, l, layer) {
 
 /* ---------------- liquids ---------------- */
 // waterlogged blocks count as still water
-const isLiq = (b, id) => id === B.WATER ? WATERY[b] === 1 : b === id;
+// a padded cell holds this liquid: the liquid itself, or for water a block always in it or holding it (waterlogged)
+const liqAt = (pi, id) => id === B.WATER ? WATERY[pBlk[pi]] === 1 || pWl[pi] === 1 : pBlk[pi] === id;
 function liquidHeightAt(pi, id) {
   // height of the liquid surface at a padded index, NaN if not this liquid
   const b = pBlk[pi];
-  if (!isLiq(b, id)) return NaN;
+  if (!liqAt(pi, id)) return NaN;
   const m = b === id ? pMeta[pi] : 0;
   if (m === 0 || (m & 8)) return 14 / 16;
   return (8 - (m & 7)) / 9 * (14 / 16) / (8 / 9);
@@ -14333,8 +14435,8 @@ function cornerHeight(pi, dx, dz, id) {
   for (let k = 0; k < 4; k++) {
     const ox = dx - 1 + (k & 1), oz = dz - 1 + (k >> 1);
     const c = pi + oz * PADW + ox;
-    if (isLiq(pBlk[c], id)) {
-      if (isLiq(pBlk[c + PAD2], id)) return 1;
+    if (liqAt(c, id)) {
+      if (liqAt(c + PAD2, id)) return 1;
       const h = liquidHeightAt(c, id);
       const wt = (pBlk[c] !== id || pMeta[c] === 0) ? 4 : 1;
       sum += h * wt; w += wt;
@@ -14346,7 +14448,7 @@ function meshLiquid(mb, id, meta, pi, lx, ly, lz, sy, tint, to) {
   const water = id === B.WATER;
   const layer = FACETEX[id * 6];
   const above = pBlk[pi + PAD2];
-  const covered = isLiq(above, id);
+  const covered = liqAt(pi + PAD2, id);
   let h00 = 1, h10 = 1, h11 = 1, h01 = 1;
   if (!covered) { h00 = cornerHeight(pi, 0, 0, id); h10 = cornerHeight(pi, 1, 0, id); h11 = cornerHeight(pi, 1, 1, id); h01 = cornerHeight(pi, 0, 1, id); }
   let r = 255, g = 255, b = 255;
@@ -14360,7 +14462,7 @@ function meshLiquid(mb, id, meta, pi, lx, ly, lz, sy, tint, to) {
     quad(mb, [[X, Y + h01 * 16, Z + 16], [X + 16, Y + h11 * 16, Z + 16], [X + 16, Y + h10 * 16, Z], [X, Y + h00 * 16, Z]], layer, UV_FULL, Math.max(s, (pLight[pi] >> 4) * 16), bl, r, g, b, fl);
   }
   const below = pBlk[pi - PAD2];
-  if (!isLiq(below, id) && !OPAQUE[below]) {
+  if (!liqAt(pi - PAD2, id) && !OPAQUE[below]) {
     const [s, bl] = lightOf(pi - PAD2);
     quad(mb, [[X, Y, Z], [X + 16, Y, Z], [X + 16, Y, Z + 16], [X, Y, Z + 16]], layer, UV_FULL, s, bl, r * 0.5, g * 0.5, b * 0.5, fl);
   }
@@ -14372,7 +14474,7 @@ function meshLiquid(mb, id, meta, pi, lx, ly, lz, sy, tint, to) {
   for (const [f, A, Bc] of sides) {
     const npi = pi + FND[f];
     const nid = pBlk[npi];
-    if (isLiq(nid, id) || OPAQUE[nid]) continue;
+    if (liqAt(npi, id) || OPAQUE[nid]) continue;
     const [s, bl] = lightOf(npi);
     const sh = FSHADE[f];
     quad(mb, [[X + A[0], Y, Z + A[1]], [X + Bc[0], Y, Z + Bc[1]], [X + Bc[0], Y + Bc[2] * 16, Z + Bc[1]], [X + A[0], Y + A[2] * 16, Z + A[1]]], layer,
@@ -19636,7 +19738,8 @@ class Player extends Entity {
     // SlimeBlock.fallOn: no harm unless you sneak onto it
     if (b === B.SLIME_BLOCK && !this.sneaking) return;
     if (this.effectLevel('slow_falling') || this.gliding) return;
-    if (b === B.POWDER_SNOW || b === B.SCAFFOLDING) return;
+    // PowderSnowBlock.fallOn: no harm (scaffolding hurts like any block when landed on from above; inside it the climb holds the fall)
+    if (b === B.POWDER_SNOW) return;
     // LivingEntity.calculateFallDamage: the drop (and a hair) past the safe 3 blocks (more with Jump Boost), rounded down (Part 82);
     // on beds and shelf mushrooms only half the fall counts; hay bales and honey blocks do a fifth of the harm
     const d = Math.floor((dist * (1 - (BLK[b].fallCut || 0)) + 1e-6 - 3 - this.effectLevel('jump_boost')) * (b === B.HAY_BLOCK || b === B.HONEY_BLOCK ? 0.2 : 1));
@@ -19820,7 +19923,8 @@ class Player extends Entity {
       this.fallDist = 0;
       this.vx = Math.max(-0.15, Math.min(0.15, this.vx)); this.vz = Math.max(-0.15, Math.min(0.15, this.vz));
       if (this.vy < -0.15) this.vy = -0.15;
-      if (this.sneaking && this.vy < 0) this.vy = 0;
+      // LivingEntity.handleOnClimbable: sneaking holds you on a ladder, not in scaffolding (you sink through it)
+      if (this.sneaking && this.vy < 0 && w.getBlock(fx0, Math.floor(this.y), fz0) !== B.SCAFFOLDING) this.vy = 0;
     }
     if (this.jumpT > 0) this.jumpT--;
     if (!jump) this.jumpT = 0;
@@ -22946,7 +23050,7 @@ class Game {
   }
   // ---------------- workers ----------------
   setupWorkers() {
-    const src = $('shared-src').textContent + '\nconst G={};onmessage=function(e){const d=e.data,k=d.dim+":"+(d.seed|0)+":"+(d.kind||"")+":"+(d.seed64||"")+":"+(d.wo?JSON.stringify(d.wo):"");if(!G[k])G[k]=makeGenerator(d.seed,d.dim,d.kind,d.seed64,d.wo);if(d.op){const t0=performance.now();let j;try{j=G[k].vJob(d);}catch(err){j=G[k].vJobFailed(d,err);}j.msg.ms=performance.now()-t0;postMessage(j.msg,j.transfer);return;}const r=G[k].genChunk(d.cx,d.cz);const t=[r.blocks.buffer,r.biomes.buffer];if(r.meta)t.push(r.meta.buffer);if(r.bio3)t.push(r.bio3.buffer);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,dim:d.dim,blocks:r.blocks,biomes:r.biomes,meta:r.meta||null,be:r.be||null,mobs:r.mobs||null,bio3:r.bio3||null},t);};';
+    const src = $('shared-src').textContent + '\nconst G={};onmessage=function(e){const d=e.data,k=d.dim+":"+(d.seed|0)+":"+(d.kind||"")+":"+(d.seed64||"")+":"+(d.wo?JSON.stringify(d.wo):"");if(!G[k])G[k]=makeGenerator(d.seed,d.dim,d.kind,d.seed64,d.wo);if(d.op){const t0=performance.now();let j;try{j=G[k].vJob(d);}catch(err){j=G[k].vJobFailed(d,err);}j.msg.ms=performance.now()-t0;postMessage(j.msg,j.transfer);return;}const r=G[k].genChunk(d.cx,d.cz);const t=[r.blocks.buffer,r.biomes.buffer];if(r.meta)t.push(r.meta.buffer);if(r.bio3)t.push(r.bio3.buffer);if(r.wl)t.push(r.wl.buffer);postMessage({cx:d.cx,cz:d.cz,seed:d.seed,tok:d.tok,dim:d.dim,blocks:r.blocks,biomes:r.biomes,meta:r.meta||null,be:r.be||null,mobs:r.mobs||null,bio3:r.bio3||null,wl:r.wl||null},t);};';
     this.workers = [];
     try {
       const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
@@ -22974,7 +23078,7 @@ class Game {
     let mem = null;
     for (let i = this.pendingSaves.length - 1; i >= 0; i--) if (this.pendingSaves[i][0] === key) { mem = this.pendingSaves[i][1]; break; }
     if (!mem) mem = this.memChunks.get(key);
-    if (mem) { const d = decodeChunk(mem, w.dim); this.onChunkData(c.cx, c.cz, w.seed, d.blocks, d.biomes, d.meta, d.be, undefined, d.ents, null, d.bio3); return; }
+    if (mem) { const d = decodeChunk(mem, w.dim); this.onChunkData(c.cx, c.cz, w.seed, d.blocks, d.biomes, d.meta, d.be, undefined, d.ents, d.wl ? { wl: d.wl } : null, d.bio3); return; }
     this.inflight++;
     if (this.savedKeys.has(key)) {
       DB.getChunk(key).then(rec => {
@@ -22982,7 +23086,7 @@ class Game {
         this.inflight--;
         if (!rec) { this.savedKeys.delete(key); this.inflight++; this.genChunk(c); return; }
         const d = decodeChunk(rec, w.dim);
-        this.onChunkData(c.cx, c.cz, w.seed, d.blocks, d.biomes, d.meta, d.be, undefined, d.ents, null, d.bio3);
+        this.onChunkData(c.cx, c.cz, w.seed, d.blocks, d.biomes, d.meta, d.be, undefined, d.ents, d.wl ? { wl: d.wl } : null, d.bio3);
       }).catch(() => { this.inflight--; this.savedKeys.delete(key); this.inflight++; this.genChunk(c); });
     } else this.genChunk(c);
   }
@@ -23000,6 +23104,7 @@ class Game {
     const c = w.chunks.get(w.key(cx, cz));
     if (!c || c.state !== 0) return;
     c.blocks = blocks; c.biomes = biomes; c.meta = meta || (gen && gen.meta) || new Uint8Array(CH_VOL); c.light = new Uint8Array(CH_VOL);
+    c.wl = (gen && gen.wl) || null;
     c.bio3 = bio3 || (gen && gen.bio3) || null;
     if (!meta && gen) { if (gen.be && gen.be.length) be = gen.be; if (gen.mobs && gen.mobs.length) c.genMobs = gen.mobs; }
     if (!meta && w.dim === 'overworld') this.initStructureMeta(c);
@@ -24884,7 +24989,7 @@ Object.assign(Game.prototype, {
     // plants that live under water need water, the others can't go into it
     const inWater = WATERY[cur] === 1;
     if (d.water && !inWater && sh !== SH.CUBE) return false;
-    if (inWater && !d.water && (d.noCollide || sh === SH.CROSS || sh === SH.TALL || sh === SH.CROP) && !d.candle) return false;
+    if (inWater && !d.water && !WLABLE[id] && (d.noCollide || sh === SH.CROSS || sh === SH.TALL || sh === SH.CROP) && !d.candle) return false;
     const look = lookDir4(p), lk = p.look();
     const hy = p.eye()[1] + lk[1] * hit.t - hit.y, topHalf = face === 3 || (face !== 2 && hy > 0.5);
     let meta = 0;
@@ -25570,7 +25675,7 @@ Object.assign(Game.prototype, {
       case B.COCOA: { const m = w.getMeta(x, y, z); if ((m >> 2) < 2 && R() < 0.2) w.setBlock(x, y, z, id, (m & 3) | (((m >> 2) + 1) << 2), false); return; }
       case B.FARMLAND: {
         let wet = false;
-        for (let dz = -4; dz <= 4 && !wet; dz++) for (let dx = -4; dx <= 4 && !wet; dx++) for (let dy = 0; dy <= 1; dy++) if (WATERY[w.getBlock(x + dx, y + dy, z + dz)]) { wet = true; break; }
+        for (let dz = -4; dz <= 4 && !wet; dz++) for (let dx = -4; dx <= 4 && !wet; dx++) for (let dy = 0; dy <= 1; dy++) if (w.waterAt(x + dx, y + dy, z + dz)) { wet = true; break; }
         const m = w.getMeta(x, y, z), above = w.getBlock(x, y + 1, z);
         if (wet || w.raining) { if (m !== 7) w.setBlock(x, y, z, B.FARMLAND, 7, false); }
         else if (m > 0) w.setBlock(x, y, z, B.FARMLAND, m - 1, false);
@@ -28878,7 +28983,7 @@ function rollFishing(luck, openWater, jungle) {
   return st;
 }
 const rodHand = p => (p.inv[p.sel] && p.inv[p.sel].id === I.FISHING_ROD) || (p.offhand[0] && p.offhand[0].id === I.FISHING_ROD);
-const waterAt = (w, x, y, z) => { const id = w.getBlock(x, y, z); return id === B.WATER || WATERY[id] === 1; };
+const waterAt = (w, x, y, z) => w.waterAt(x, y, z);
 class FishingHook extends Entity {
   constructor(game, owner, rod) {
     const e = owner.eye(), d = owner.look(), hl = Math.hypot(d[0], d[2]) || 1, hx = d[0] / hl, hz = d[2] / hl;
@@ -31817,8 +31922,10 @@ Game.prototype.soak = function (x, y, z) {
       if (seen.has(k)) continue;
       seen.add(k);
       const id = w.getBlock(nx, ny, nz);
-      if (id !== B.WATER && !(WATERY[id] === 1 && !SOLID[id])) continue;
-      w.setBlock(nx, ny, nz, 0, 0); n++;
+      if (w.isWet(nx, ny, nz)) w.setWet(nx, ny, nz, false);
+      else if (id !== B.WATER && !(WATERY[id] === 1 && !SOLID[id])) continue;
+      else { if (id !== B.WATER && this.dropsFor) for (const st of this.dropsFor(id, w.getMeta(nx, ny, nz), null) || []) this.dropItem(nx + 0.5, ny + 0.5, nz + 0.5, st); w.setBlock(nx, ny, nz, 0, 0); }
+      n++;
       if (d < 6) q.push([nx, ny, nz, d + 1]);
       if (n >= 65) break;
     }
@@ -32780,7 +32887,7 @@ Game.prototype.useBlock = function (p, hit, held) {
 // the shape: water all round, and prismarine on the three rings of a 5x5x5 frame
 Game.prototype.conduitFrame = function (x, y, z) {
   const w = this.world;
-  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) if ((i || j || k) && !WATERY[w.getBlock(x + i, y + j, z + k)]) return 0;
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) if ((i || j || k) && !w.waterAt(x + i, y + j, z + k)) return 0;
   let n = 0;
   for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (let k = -2; k <= 2; k++) {
     const ai = Math.abs(i), aj = Math.abs(j), ak = Math.abs(k);
@@ -33655,14 +33762,14 @@ Object.assign(Game.prototype, {
   // nothing in the way at a spawn cell (NaturalSpawner.isValidEmptySpawnBlock)
   vEmptyCell(type, x, y, z) {
     const w = this.world, id = w.getBlock(x, y, z);
-    if (SOLID[id] && (SHAPE[id] === SH.CUBE || BLK[id].fullCollide) || BLK[id].liquid || WATERY[id] || V_NOSPAWN_IN[id]) return false;
+    if (SOLID[id] && (SHAPE[id] === SH.CUBE || BLK[id].fullCollide) || BLK[id].liquid || WATERY[id] || V_NOSPAWN_IN[id] || w.isWet(x, y, z)) return false;
     const h = V_HURTS[id];
     return !h || (h === 2 ? !!MOB_TYPES[type].fireproof : V_HURT_IMMUNE[BLK[id].name] === type);
   },
   // the spot fits the mob's placement (SpawnPlacements.isSpawnPositionOk)
   vPlacementOk(type, x, y, z) {
     const w = this.world;
-    if (V_IN_WATER.has(type)) { const up = w.getBlock(x, y + 1, z); return (w.getBlock(x, y, z) === B.WATER || WATERY[w.getBlock(x, y, z)] === 1) && !(SOLID[up] && SHAPE[up] === SH.CUBE && OPAQUE[up]); }
+    if (V_IN_WATER.has(type)) { const up = w.getBlock(x, y + 1, z); return w.waterAt(x, y, z) && !(SOLID[up] && SHAPE[up] === SH.CUBE && OPAQUE[up]); }
     if (type === 'strider') return w.getBlock(x, y, z) === B.LAVA;
     return this.vFloorOk(type, x, y - 1, z) && this.vEmptyCell(type, x, y, z) && this.vEmptyCell(type, x, y + 1, z);
   },
@@ -35646,7 +35753,7 @@ Game.prototype.explode = function (x, y, z, power, noBlocks, source) {
         const id = w.getBlock(bx, by, bz);
         if (id) {
           let res = BLAST_RES[id];
-          if (WATERY[id] && !BLK[id].liquid) res = Math.max(res, 100);
+          if ((WATERY[id] && !BLK[id].liquid) || (WLABLE[id] && w.isWet(bx, by, bz))) res = Math.max(res, 100);
           if (source === 'wither_blue' && !WITHER_IMMUNE.has(id)) res = Math.min(0.8, res);
           f -= (res + 0.3) * 0.3;
         }
@@ -43697,7 +43804,7 @@ Game.prototype.windBurstAt = function (x, y, z, r, kbMul, src) {
       const id = w.getBlock(bx, by, bz);
       if (id) {
         let res = WIND_STOP.has(id) ? 3600000 : BLAST_RES[id];
-        if (WATERY[id] && !BLK[id].liquid) res = Math.max(res, 100);
+        if ((WATERY[id] && !BLK[id].liquid) || (WLABLE[id] && w.isWet(bx, by, bz))) res = Math.max(res, 100);
         f -= (res + 0.3) * 0.3;
         if (f > 0) { const key = bx + ',' + by + ',' + bz; if (!reach.has(key)) reach.set(key, [bx, by, bz]); }
       }
@@ -45356,7 +45463,7 @@ function dispenseExtra(g, c) {
   const mobsHere = pred => g.entities.filter(e => e instanceof Mob && !e.dead && !(e.deathTime > 0) && inCell(e, fx, fy, fz) && pred(e));
   const fail = () => { g.sound('dispense_fail', c.px, c.py, c.pz); return true; };
   const done = () => { g.sound('click', c.px, c.py, c.pz); return true; };
-  const isWater = b => b === B.WATER || WATERY[b] === 1;
+  const isWater = b => b === B.WATER || WATERY[b] === 1 || w.isWet(fx, fy, fz);
   if (id === I.SHEARS) {
     let ok = false;
     if (HIVE_IDS.has(front) && hiveHoney(fm) >= 5) {
@@ -49893,7 +50000,7 @@ function emTeleportTo(m, x, y, z) {
   let by = Math.floor(y);
   if (by > CH_TOP) by = CH_TOP;
   while (by > 0 && !emBlocksMotion(w, bx, by, bz)) by--;
-  if (!emBlocksMotion(w, bx, by, bz) || WATERY[w.getBlock(bx, by, bz)]) return false;
+  if (!emBlocksMotion(w, bx, by, bz) || WATERY[w.getBlock(bx, by, bz)] || w.isWet(bx, by, bz)) return false;
   let py = Math.min(Math.floor(y), CH_TOP + 1), ty = y, found = false;
   while (!found && py > 0) { if (emBlocksMotion(w, bx, py - 1, bz)) found = true; else { ty--; py--; } }
   if (!found) return false;
@@ -50554,7 +50661,7 @@ function zombieTick(m) {
     return;
   }
   const eye = w.getBlock(Math.floor(m.x), Math.floor(m.eyeY()), Math.floor(m.z));
-  if (eye === B.WATER || WATERY[eye]) { d.inWaterT = (d.inWaterT || 0) + 1; if (d.inWaterT >= 600) { d.convertT = 300; d.inWaterT = 0; } }
+  if (eye === B.WATER || WATERY[eye] || w.isWet(Math.floor(m.x), Math.floor(m.eyeY()), Math.floor(m.z))) { d.inWaterT = (d.inWaterT || 0) + 1; if (d.inWaterT >= 600) { d.convertT = 300; d.inWaterT = 0; } }
   else d.inWaterT = -1;
 }
 function zombieConvert(m, into) {
@@ -56695,7 +56802,7 @@ function squidTick(m) {
   if (a && m.inWater && (m.x - a.x) ** 2 + (m.y - a.y) ** 2 + (m.z - a.z) ** 2 < 100) {
     let v = [m.x - a.x, m.y - a.y, m.z - a.z];
     const tx = Math.floor(m.x + v[0]), ty = Math.floor(m.y + v[1]), tz = Math.floor(m.z + v[2]), b = w.getBlock(tx, ty, tz);
-    if (b === B.WATER || WATERY[b] === 1 || b === 0) {
+    if (b === B.WATER || WATERY[b] === 1 || b === 0 || w.isWet(tx, ty, tz)) {
       const l = Math.hypot(...v);
       if (l > 0) { const s = 3 - (l > 5 ? (l - 5) / 5 : 0); if (s > 0) v = v.map(c => c * s); }
       if (b === 0) v[1] = 0;
@@ -56863,6 +56970,7 @@ function grassCanLive(w, x, y, z) {
   const a = w.getBlock(x, y + 1, z);
   if (a === B.SNOW) return (w.getMeta(x, y + 1, z) & 7) < 7;
   if (BLK[a].liquid && (w.getMeta(x, y + 1, z) & 7) === 0) return false;
+  if (WATERY[a] === 1 || w.isWet(x, y + 1, z)) return false;
   return !OPAQUE[a];
 }
 // SaplingBlock.advanceTree: a first step, then the tree
@@ -56913,7 +57021,7 @@ Game.prototype.randomTick = function (x, y, z, id) {
     }
     case B.FARMLAND: {
       let wet = false;
-      for (let dz = -4; dz <= 4 && !wet; dz++) for (let dx = -4; dx <= 4 && !wet; dx++) for (let dy = 0; dy <= 1; dy++) if (WATERY[w.getBlock(x + dx, y + dy, z + dz)]) { wet = true; break; }
+      for (let dz = -4; dz <= 4 && !wet; dz++) for (let dx = -4; dx <= 4 && !wet; dx++) for (let dy = 0; dy <= 1; dy++) if (w.waterAt(x + dx, y + dy, z + dz)) { wet = true; break; }
       const m = w.getMeta(x, y, z);
       if (wet || this.rainingAt(x, y + 1, z)) { if (m < 7) w.setBlock(x, y, z, B.FARMLAND, 7, false); }
       else if (m > 0) w.setBlock(x, y, z, B.FARMLAND, m - 1, false);
@@ -56925,7 +57033,7 @@ Game.prototype.randomTick = function (x, y, z, id) {
       if (dim(y + 1) < 9) return;
       for (let i = 0; i < 4; i++) {
         const tx = x + fmRand(3) - 1, ty = y + fmRand(5) - 3, tz = z + fmRand(3) - 1;
-        if (w.getBlock(tx, ty, tz) === B.DIRT && grassCanLive(w, tx, ty, tz) && !WATERY[w.getBlock(tx, ty + 1, tz)]) w.setBlock(tx, ty, tz, id, 0);
+        if (w.getBlock(tx, ty, tz) === B.DIRT && grassCanLive(w, tx, ty, tz) && !w.waterAt(tx, ty + 1, tz)) w.setBlock(tx, ty, tz, id, 0);
       }
       return;
     }
@@ -58595,7 +58703,7 @@ const ANIM = new Array(MAXB);
     for (let k = 1; k < 11 && w.getBlock(x, ry, z) === B.POINTED_DRIPSTONE && !(w.getMeta(x, ry, z) & 1); k++) ry++;
     if (w.getBlock(x, ry, z) === B.POINTED_DRIPSTONE) return;
     const above = w.getBlock(x, ry + 1, z);
-    let fl = above === B.MUD && w.dim !== 'nether' ? B.WATER : above === B.LAVA ? B.LAVA : above === B.WATER || WATERY[above] === 1 ? B.WATER : 0;
+    let fl = above === B.MUD && w.dim !== 'nether' ? B.WATER : above === B.LAVA ? B.LAVA : above === B.WATER || WATERY[above] === 1 || w.isWet(x, ry + 1, z) ? B.WATER : 0;
     if (!fl && f >= 0.02) return;
     if (!fl) fl = w.dim === 'nether' ? B.LAVA : B.WATER;
     P.jDrip(x + 0.5, y + 0.25, z + 0.5, fl === B.LAVA ? 'dripstone_lava' : 'dripstone_water');
@@ -60260,9 +60368,8 @@ Boat.prototype.tick = function () { const r = _tickBoatRL.apply(this, arguments)
 // FluidState.getHeight: 8/9 of a block for a source or falling water (less as it flows out), a full block with water above
 function boatWaterHeight(w, x, y, z) {
   const id = w.getBlock(x, y, z);
-  if (id !== B.WATER && WATERY[id] !== 1) return -1;
-  const up = w.getBlock(x, y + 1, z);
-  if (up === B.WATER || WATERY[up] === 1) return 1;
+  if (id !== B.WATER && WATERY[id] !== 1 && !w.isWet(x, y, z)) return -1;
+  if (w.waterAt(x, y + 1, z)) return 1;
   if (id !== B.WATER) return 8 / 9;
   const m = w.getMeta(x, y, z);
   return ((m === 0 || (m & 8)) ? 8 : 8 - (m & 7)) / 9;
@@ -62082,6 +62189,771 @@ TEXGEN.push(function texJavaModels() {
     }
   });
 });
+
+/* @file 198_scaffolding.js */
+/* ===================================================================
+   Part 92: scaffolding like Java
+   - each piece knows how far it is from what holds it up (its distance,
+     meta bits 0-2; ScaffoldingBlock.getDistance): 0 on a sturdy top,
+     on scaffolding the same as the piece under it, otherwise one more
+     than the nearest piece beside it, 7 at most; a piece not standing
+     on scaffolding that isn't held from below is a bottom piece (bit 8)
+     and is drawn with the frame round its foot (scaffolding_unstable)
+   - a tick after anything next to it changes, a piece works out its
+     distance again (ScaffoldingBlock.tick): at 7 it breaks and drops,
+     or falls as a falling block if it was at 7 already; so taking away
+     what holds up a tower or a bridge brings it down a piece a tick
+   - scaffolding used on scaffolding (ScaffoldingBlockItem) goes to the
+     top of that column, or, on its top face, out the way you face, up
+     to 7 blocks; sneaking, it goes against the face clicked as other
+     blocks do; anywhere else it only goes where it would be held (its
+     distance under 7), and a piece hanging 7 out falls
+   - from above it is a floor (the top and the four posts) unless you
+     sneak, and then you sink down through it; inside it you climb by
+     jumping or pushing against a wall and slide down slowly, sneaking or
+     not; a bottom piece's foot is a floor 2 pixels up (getCollisionShape)
+   - pistons break it, mobs don't spawn on it, and landing on it from
+     above hurts like landing on any other block
+   =================================================================== */
+
+const SCAF = B.SCAFFOLDING;
+// Block.isFaceSturdy(UP): a whole top face; full blocks always (soul sand and mud too: their outline is the whole block)
+function scafSturdyTop(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (!id || !SOLID[id] || id === SCAF) return false;
+  if (SHAPE[id] === SH.CUBE) return true;
+  const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null;
+  return (shapeBoxes(id, w.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx) || []).some(b => b[0] <= 0 && b[2] <= 0 && b[3] >= 16 && b[5] >= 16 && b[4] >= 16);
+}
+// ScaffoldingBlock.getDistance
+function scafDistance(w, x, y, z) {
+  let d = 7;
+  if (w.getBlock(x, y - 1, z) === SCAF) d = w.getMeta(x, y - 1, z) & 7;
+  else if (scafSturdyTop(w, x, y - 1, z)) return 0;
+  for (const f of [5, 0, 4, 1]) {
+    if (w.getBlock(x + DX[f], y, z + DZ[f]) !== SCAF) continue;
+    d = Math.min(d, (w.getMeta(x + DX[f], y, z + DZ[f]) & 7) + 1);
+    if (d === 1) break;
+  }
+  return d;
+}
+// the distance and the bottom bit (ScaffoldingBlock.isBottom: held from the side and not on scaffolding)
+const scafMeta = (w, x, y, z, d) => d | (d > 0 && w.getBlock(x, y - 1, z) !== SCAF ? 8 : 0);
+
+/* ---------------- ticks ---------------- */
+const _neighborChangedSF = World.prototype.neighborChanged;
+World.prototype.neighborChanged = function (x, y, z) {
+  if (y >= 0 && y <= CH_TOP && this.getBlock(x, y, z) === SCAF) { this.schedule(x, y, z, 1, 'scaffolding'); return; }
+  return _neighborChangedSF.apply(this, arguments);
+};
+const _onScheduledSF = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind !== 'scaffolding') return _onScheduledSF.apply(this, arguments);
+  const w = this.world;
+  if (w.getBlock(x, y, z) !== SCAF) return;
+  const m = w.getMeta(x, y, z), d = scafDistance(w, x, y, z), nm = (m & ~15) | scafMeta(w, x, y, z, d);
+  if (d === 7) {
+    if ((m & 7) === 7) { w.setBlock(x, y, z, 0, 0); this.spawnFalling(x, y, z, SCAF, nm); this.remeshNear(x, z); }
+    else { this.breakBlock(x, y, z, null, true); this.remeshNear(x, z); }
+  } else if (nm !== m) { w.setBlock(x, y, z, SCAF, nm); this.remeshNear(x, z); }
+};
+// a falling piece stays only where it would be held (FallingBlockEntity: canSurvive), else it drops as an item
+const _fallingTickSF = FallingBlock.prototype.tick;
+FallingBlock.prototype.tick = function () {
+  const was = this.dead;
+  _fallingTickSF.apply(this, arguments);
+  if (was || !this.dead || this.block !== SCAF) return;
+  const g = this.game, w = g.world, bx = Math.floor(this.x), by = Math.floor(this.y + 0.5), bz = Math.floor(this.z);
+  if (w.getBlock(bx, by, bz) === SCAF && scafDistance(w, bx, by, bz) >= 7) {
+    w.setBlock(bx, by, bz, 0, 0); g.remeshNear(bx, bz);
+    g.dropItem(this.x, this.y + 0.5, this.z, { id: SCAF, count: 1 });
+  }
+};
+
+/* ---------------- placing ---------------- */
+// ScaffoldingBlockItem.updatePlacementContext
+const _placeBlockSF = Game.prototype.placeBlock;
+Game.prototype.placeBlock = function (p, hit, id) {
+  if (id !== SCAF) return _placeBlockSF.apply(this, arguments);
+  const w = this.world;
+  // the clicked piece itself (scaffolding gives way to scaffolding), a replaceable block, or the cell by the face
+  let x = hit.x, y = hit.y, z = hit.z;
+  if (hit.id !== SCAF && !(REPL[hit.id] && !BLK[hit.id].liquid)) { x += DX[hit.face]; y += DY[hit.face]; z += DZ[hit.face]; }
+  if (y < 0 || y > CH_TOP) return false;
+  if (w.getBlock(x, y, z) === SCAF) {
+    // up the column, or out the way the player faces from a top face; sneaking, toward the clicked face
+    const dir = p.sneaking ? hit.face : hit.face === 2 ? FRONT4[lookDir4(p)] ^ 1 : 2;
+    let i = 0, found = false;
+    x += DX[dir]; y += DY[dir]; z += DZ[dir];
+    while (i < 7) {
+      if (y < 0 || y > CH_TOP) { if (y > CH_TOP && p === this.player && this.ui.actionBar) this.ui.actionBar('Height limit for building is ' + (CH_TOP - (w.yOff || 0)), '#ff5555'); break; }
+      const b = w.getBlock(x, y, z);
+      if (b !== SCAF) { found = b === 0 || !!REPL[b]; break; }
+      x += DX[dir]; y += DY[dir]; z += DZ[dir];
+      if (dir !== 2 && dir !== 3) i++;
+    }
+    if (!found) return false;
+  } else {
+    const cur = w.getBlock(x, y, z);
+    if (cur !== 0 && !REPL[cur]) return false;
+    if (scafDistance(w, x, y, z) === 7) return false;
+  }
+  // BlockItem: placed whatever its distance (mustSurvive false); in the way of nobody (its collision is empty for whoever is in it)
+  w.setBlock(x, y, z, SCAF, scafMeta(w, x, y, z, scafDistance(w, x, y, z)));
+  return this.afterPlace(p, x, y, z, SCAF);
+};
+
+/* ---------------- collision ---------------- */
+// ScaffoldingBlock.getCollisionShape for the entity being moved: from above (its bottom over the top) and not sneaking, the top
+// and the posts; a bottom piece's foot for one above the block below; else nothing (and nothing without an entity)
+const SCAF_STABLE = [[0, 14, 0, 16, 16, 16], [0, 0, 0, 2, 16, 2], [14, 0, 0, 16, 16, 2], [0, 0, 14, 2, 16, 16], [14, 0, 14, 16, 16, 16]];
+const SCAF_FOOT = [[0, 0, 0, 16, 2, 16]];
+const _modelCollisionSF = modelCollision;
+modelCollision = function (id, meta, ctx) { return id === SCAF ? [] : _modelCollisionSF(id, meta, ctx); };
+function scafCollision(w, x, y, z, e) {
+  const descending = e === e.game.player && !!e.sneaking;
+  if (e.y > y + 1 - 1e-5 && !descending) return SCAF_STABLE;
+  const m = w.getMeta(x, y, z);
+  return (m & 7) && (m & 8) && e.y > y - 1e-5 ? SCAF_FOOT : null;
+}
+const _collectBoxesSF = collectBoxes;
+collectBoxes = function (world, x0, y0, z0, x1, y1, z1) {
+  const out = _collectBoxesSF.apply(this, arguments), e = typeof SM_MOVING !== 'undefined' ? SM_MOVING : null;
+  if (!e || !e.game) return out;
+  for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let x = Math.floor(x0); x <= Math.floor(x1); x++) {
+    if (world.getBlock(x, y, z) !== SCAF) continue;
+    const bx = scafCollision(world, x, y, z, e);
+    if (bx) for (const b of bx) out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + b[4] / 16, z + b[5] / 16]);
+  }
+  return out;
+};
+
+/* ---------------- looks, pistons ---------------- */
+// scaffolding_unstable: the stable model with the frame round its foot
+{
+  const t = 'scaffolding_top', s = 'scaffolding_side', b = 'scaffolding_bottom';
+  const FOOT = jQuads([
+    jE([0, 1.99, 0], [16, 2, 16], { up: [0, t], down: [[0, 16, 16, 0], t] }),
+    jE([2, 0, 0], [14, 2, 2], { north: [[2, 0, 14, 2], s], south: [[2, 2, 14, 4], s], down: [0, b] }),
+    jE([2, 0, 14], [14, 2, 16], { north: [[14, 0, 2, 2], s], south: [[2, 0, 14, 2], s], down: [0, b] }),
+    jE([14, 0, 2], [16, 2, 14], { east: [[14, 0, 2, 2], s], west: [[14, 2, 2, 4], s], down: [0, b] }),
+    jE([0, 0, 2], [2, 2, 14], { east: [[2, 0, 14, 2], s], west: [[14, 0, 2, 2], s], down: [0, b] }),
+  ]);
+  const _scaffold = BOX_MODELS.scaffolding;
+  let unstable = null;
+  BOX_MODELS.scaffolding = (d, m) => (m & 8) ? unstable || (unstable = _scaffold(d, 0).concat(FOOT)) : _scaffold(d, m);
+}
+PUSH[SCAF] = PUSH_DESTROY;
+
+/* @file 199_animated_textures.js */
+/* ===================================================================
+   Part 93: animated textures like Java
+   - every block texture a resource pack animates (an .mcmeta
+     "animation" section) now moves, not only water, lava and nether
+     portals: fire and soul fire, campfire flames and lit logs, sea
+     lanterns, magma, prismarine, lanterns, kelp and seagrass, the
+     crimson and warped stems, sculk and its catalysts, sensors and
+     shriekers, command blocks, the stonecutter's saw, lit smokers and
+     blast furnaces, a respawn anchor's top, a firefly bush's specks ...
+   - SpriteContents.Ticker each game tick: a frame lasts its "time" or
+     the "frametime" (1 tick by default), in the order of "frames" or
+     down the strip; with "interpolate" each tick in between is mixed
+     from this frame and the next by how far through it is; frames as
+     big as the image is wide (or "width" and "height"), left to right
+     then down
+   - the frame is copied into the texture's layer (and its smaller
+     copies for mipmapping) as it changes
+   =================================================================== */
+
+// the animations of the active packs: { layer, frames: [{ i, t }], pix: [RGBA per strip frame], interp, f, sub }
+let TEX_ANIMS = [];
+async function buildTexAnims(recs) {
+  const anims = [], R = TEX.res || 16, m = packTexMap();
+  const srcOf = path => { for (const r of recs) { if (r.files[path]) return [r, path]; for (const a of PACK_ALIASES[path] || []) if (r.files[a]) return [r, a]; } return null; };
+  const cv = document.createElement('canvas'); cv.width = cv.height = R;
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  for (let i = 0; i < TEX.names.length; i++) {
+    const name = TEX.names[i], base = name.replace(/_\d+$/, '');
+    // water, lava and portals keep their own frames (one layer each), and cut-out pieces of bigger images stay still
+    if (PACK_ANIM[name] || (PACK_ANIM[base] && base !== name) || PACK_CROPS[name] || PACK_ADAPT['block/' + name]) continue;
+    const path = (m[name] || []).find(p => srcOf(p));
+    if (!path || !path.startsWith('block/')) continue;
+    const s = srcOf(path), txt = s[0].metas && s[0].metas[s[1]];
+    let a = null;
+    try { a = txt ? JSON.parse(txt).animation : null; } catch (e) { a = null; }
+    if (!a || typeof a !== 'object') continue;
+    let im = null;
+    try { im = await createImageBitmap(new Blob([s[0].files[s[1]]], { type: 'image/png' })); } catch (e) { im = null; }
+    if (!im) continue;
+    // AnimationMetadataSection.calculateFrameSize: as given, else squares as big as the shorter side
+    const fw = a.width || (a.height ? im.width : Math.min(im.width, im.height)), fh = a.height || (a.width ? im.height : Math.min(im.width, im.height));
+    const cols = Math.max(1, Math.floor(im.width / fw)), count = cols * Math.max(1, Math.floor(im.height / fh));
+    if (count < 2) continue;
+    const ft = Math.max(1, a.frametime | 0 || 1);
+    let frames = Array.isArray(a.frames) ? a.frames.map(f => typeof f === 'number' ? { i: f, t: ft } : { i: f.index, t: Math.max(1, f.time | 0 || ft) }) : Array.from({ length: count }, (_, k) => ({ i: k, t: ft }));
+    frames = frames.filter(f => f.i >= 0 && f.i < count);
+    if (frames.length < 2) continue;
+    const pix = [];
+    for (let k = 0; k < count; k++) {
+      g.clearRect(0, 0, R, R); g.imageSmoothingEnabled = fw > R; g.imageSmoothingQuality = 'high';
+      g.drawImage(im, (k % cols) * fw, Math.floor(k / cols) * fh, fw, fh, 0, 0, R, R);
+      pix.push(new Uint8Array(g.getImageData(0, 0, R, R).data));
+    }
+    anims.push({ layer: i, frames, pix, interp: !!a.interpolate, f: 0, sub: 0, buf: new Uint8Array(R * R * 4) });
+  }
+  return anims;
+}
+// copies a frame into the layer and the smaller copies in use (Mipmap Levels), on a texture unit nothing draws from
+function uploadTexFrame(r, layer, data) {
+  const gl = r && r.gl;
+  if (!gl || !r.arrs || !r.per) return;
+  const t = r.arrs[Math.floor(layer / r.per)];
+  if (!t) return;
+  const R = TEX.res || 16, lv = Math.max(0, Math.min(OPTIONS.mipmaps === undefined ? 4 : OPTIONS.mipmaps, Math.round(Math.log2(R))));
+  const levels = lv ? mipLevels(data, 1, R) : [data];
+  gl.activeTexture(gl.TEXTURE15);
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
+  for (let l = 0; l <= lv && l < levels.length; l++) { const s = R >> l; gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, 0, 0, layer % r.per, s, s, 1, gl.RGBA, gl.UNSIGNED_BYTE, levels[l]); }
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+  gl.activeTexture(gl.TEXTURE0);
+}
+// SpriteContents.Ticker.tickAndUpload (and InterpolationData: each channel mixed by 1 - sub / time)
+function tickTexAnims(r) {
+  for (const A of TEX_ANIMS) {
+    A.sub++;
+    const cur = A.frames[A.f];
+    if (A.sub >= cur.t) {
+      const was = cur.i;
+      A.f = (A.f + 1) % A.frames.length; A.sub = 0;
+      if (A.frames[A.f].i !== was) uploadTexFrame(r, A.layer, A.pix[A.frames[A.f].i]);
+    } else if (A.interp) {
+      const i = cur.i, j = A.frames[(A.f + 1) % A.frames.length].i;
+      if (i === j) continue;
+      const d = 1 - A.sub / cur.t, p = A.pix[i], q = A.pix[j], o = A.buf;
+      for (let k = 0; k < o.length; k++) o[k] = d * p[k] + (1 - d) * q[k];
+      uploadTexFrame(r, A.layer, o);
+    }
+  }
+}
+const _applyPackRecordsAT = applyPackRecords;
+applyPackRecords = async function (game, recs) {
+  TEX_ANIMS = [];
+  const res = await _applyPackRecordsAT.apply(this, arguments);
+  try { TEX_ANIMS = recs && recs.length ? await buildTexAnims(recs) : []; } catch (e) { console.warn('pack animations', e); TEX_ANIMS = []; }
+  return res;
+};
+// back to the game's own art (no pack active): nothing animates but water, lava and portals
+const _applyDefaultAT = PACKS.applyDefault;
+PACKS.applyDefault = function () { TEX_ANIMS = []; return _applyDefaultAT.apply(this, arguments); };
+const _gameTickAT = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const res = _gameTickAT.apply(this, arguments);
+  if (TEX_ANIMS.length && this.r) tickTexAnims(this.r);
+  return res;
+};
+
+/* @file 200_ground_plants.js */
+/* ===================================================================
+   Part 94: flowers and leaves on the ground like Java
+   - pink petals and wildflowers have Java's flowerbed models: each
+     flower adds a quarter of the block's petals at its own height
+     (3, 1 and 2 pixels up) standing on thin stems, the stems coloured
+     like the grass there and lit as a north face from every side
+     (shade_direction_override "north"), turned the way they face
+   - leaf litter covers a quarter, a half, three quarters or the whole
+     block a quarter pixel up, as Java's four leaf litter models do
+   - the stems' texture from a resource pack (block/pink_petals_stem,
+     block/wildflowers_stem), with the game's own drawing
+   =================================================================== */
+
+{
+  const S45 = o => ({ origin: o, axis: 'y', angle: -45 });
+  // a stem: one plane across x (faces north and south) or across z (east and west), uv a pixel wide
+  const stem = (f, t, o, uv, ns) => jE(f, t, ns ? { north: [uv, '#stem'], south: [uv, '#stem'] } : { east: [uv, '#stem'], west: [uv, '#stem'] }, S45(o));
+  const bed = (f, t, up, down) => jE(f, t, { up: [up, '#bed'], down: [down, '#bed'] });
+  const A = [0, 4, 1, 7], C = [0, 6, 1, 7], D = [0, 5, 1, 7];
+  // flowerbed_1..4, facing north
+  const FLOWERBED = [
+    [bed([0, 2.99, 0], [8, 2.99, 8], [0, 0, 8, 8], [0, 8, 8, 0]),
+      stem([4.25, 0, -2.6], [4.25, 2.99, -1.6], [0, 0, 0], A), stem([3.75, 0, -2.1], [4.75, 2.99, -2.1], [0, 0, 0], A, true),
+      stem([4.9, 0, 2.3], [4.9, 2.99, 3.3], [0, 0, 0], A), stem([4.4, 0, 2.8], [5.4, 2.99, 2.8], [0, 0, 0], A, true),
+      stem([9.15, 0, -0.45], [9.15, 2.99, 0.55], [0, 0, 0], A), stem([8.65, 0, 0.05], [9.65, 2.99, 0.05], [0, 0, 0], A, true)],
+    [bed([0, 1, 8], [8, 1, 16], [0, 8, 8, 16], [0, 16, 8, 8]),
+      stem([10.15, 0, 5.25], [11.15, 1, 5.25], [0, 0, 1], C, true), stem([10.65, 0, 4.75], [10.65, 1, 5.75], [0, 0, 1], C)],
+    [bed([8, 2, 8], [16, 2, 16], [8, 8, 16, 16], [8, 16, 16, 8]),
+      stem([17.65, 0, 1.9], [18.65, 2, 1.9], [0.5, 0, 0.5], D, true), stem([18.15, 0, 1.4], [18.15, 2, 2.4], [0.5, 0, 0.5], D),
+      stem([17.65, 0, -3.35], [17.65, 2, -2.35], [0, 0, 0], D), stem([17.15, 0, -2.85], [18.15, 2, -2.85], [0, 0, 0], D, true),
+      stem([13.4, 0, -0.5], [13.4, 2, 0.5], [0, 0, 0], D), stem([12.9, 0, 0], [13.9, 2, 0], [0, 0, 0], D, true)],
+    [bed([8, 2, 0], [16, 2, 8], [8, 0, 16, 8], [8, 8, 16, 0]),
+      stem([12.4, 0, -7.7], [12.4, 2, -6.7], [-1, 0, -3], D), stem([11.9, 0, -7.2], [12.9, 2, -7.2], [-1, 0, -3], D, true)],
+  ];
+  // template_leaf_litter_1..4, facing north
+  const litter = (f, t, up, down) => jE(f, t, { up: [up, '#bed'], down: [down, '#bed'] });
+  const LITTER = [
+    [litter([0, 0.25, 0], [8, 0.25, 8], [0, 0, 8, 8], [0, 8, 8, 0])],
+    [litter([0, 0.25, 0], [8, 0.25, 16], [0, 0, 8, 16], [0, 16, 8, 0])],
+    [litter([8, 0.25, 8], [16, 0.25, 16], [8, 8, 16, 16], [8, 16, 16, 8])],
+    [litter([0, 0.25, 0], [16, 0.25, 16], [0, 0, 16, 16], [0, 16, 16, 0])],
+  ];
+  // the blockstate's y rotation, a quarter turn clockwise from above at a time (north to east)
+  const turn = (ps, n) => n ? ps.map(p => Object.assign({}, p, { q: p.q.map(v => { let x = v[0], z = v[2]; for (let k = 0; k < n; k++) { const t = x; x = 16 - z; z = t; } return [x, v[1], z, v[3], v[4]]; }) })) : ps;
+  const cache = new Map();
+  const baked = (key, els, tex, stemTex, tints) => {
+    let ps = cache.get(key);
+    if (!ps) {
+      ps = jQuads(els).map(q => {
+        const isStem = q.t === '#stem';
+        return Object.assign(q, { t: isStem ? stemTex : tex, tint: isStem ? tints[1] : tints[0], two: false }, isStem ? { sn: 1 } : null);
+      });
+      cache.set(key, ps);
+    }
+    return ps;
+  };
+  const _flat = MDL[SH.FLAT];
+  MDL[SH.FLAT] = (d, m) => {
+    // our facing (0 south, 1 west, 2 north, 3 east, toward the player) as Java's y rotation from north
+    const steps = ((m & 3) + 2) & 3, n = (m >> 2) & 3;
+    if (d.flat === 'petals') {
+      const tex = TEX.names[FACETEX[d.id * 6]], stemTex = d.name + '_stem';
+      const parts = [];
+      for (let k = 0; k <= n; k++) parts.push(...baked(d.name + k, FLOWERBED[k], tex, stemTex, [0, 1]));
+      return turn(parts, steps);
+    }
+    if (d.flat === 'litter') {
+      const tex = TEX.names[FACETEX[d.id * 6]], which = n === 0 ? [0] : n === 1 ? [1] : n === 2 ? [1, 2] : [3];
+      const parts = [];
+      for (const k of which) parts.push(...baked('litter' + k, LITTER[k], tex, tex, [9, 9]));
+      return turn(parts, steps);
+    }
+    return _flat(d, m);
+  };
+}
+
+TEXGEN.push(function texGroundPlants() {
+  // a petal stem: a pale column (the grass colour tints it) with a darker joint
+  for (const n of ['pink_petals', 'wildflowers']) T(n + '_stem', (d, r) => { for (let y = 0; y < 16; y++) { sp(d, 0, y, mul([196, 204, 188], 0.9 + r() * 0.15)); sp(d, 1, y, mul([170, 178, 160], 0.9 + r() * 0.1)); } });
+});
+
+/* @file 201_cauldrons.js */
+/* ===================================================================
+   Part 95: cauldrons like Java
+   - a mob or player in what a cauldron holds (inside its walls, below
+     the surface and reaching above 4 pixels:
+     AbstractCauldronBlock.isEntityInsideContent):
+     . water or powder snow puts out its fire; a burning one uses up a
+       level as it is put out (LayeredCauldronBlock.lowerFillLevel), and
+       powder snow melts to water doing it
+     . lava sets it alight for 15 seconds and burns it as lava does
+       (Entity.lavaHurt), unless fire can't harm it
+   - mobs don't spawn in a cauldron of lava (EntityType.isBlockDangerous)
+   =================================================================== */
+
+// the cauldron whose contents the entity is in: [x, y, z, meta] or null
+function cauldronContentAt(e) {
+  const w = e.game.world, hw = e.w / 2;
+  for (let y = Math.floor(e.y); y <= Math.floor(e.y + e.h); y++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) {
+    if (w.getBlock(x, y, z) !== B.CAULDRON) continue;
+    const m = w.getMeta(x, y, z), lv = m & 3;
+    if (!lv) continue;
+    // getContentHeight: water and powder snow (6 + 3 x level) / 16, lava 15 / 16
+    const top = y + ((m & 12) === 4 ? 15 : 6 + 3 * lv) / 16;
+    if (e.x + hw <= x + 0.125 || e.x - hw >= x + 0.875 || e.z + hw <= z + 0.125 || e.z - hw >= z + 0.875) continue;
+    if (e.y < top && e.y + e.h > y + 0.25) return [x, y, z, m];
+  }
+  return null;
+}
+const _updateFluidsCD = Entity.prototype.updateFluids;
+Entity.prototype.updateFluids = function () {
+  const res = _updateFluidsCD.apply(this, arguments);
+  if (this.dead || typeof this.hurt !== 'function' || !this.game || !this.game.world || this.health === undefined) return res;
+  const hit = cauldronContentAt(this);
+  if (!hit) return res;
+  const [x, y, z, m] = hit, g = this.game, w = g.world;
+  if ((m & 12) === 4) {
+    // LavaCauldronBlock.entityInside: Entity.lavaHurt
+    const immune = (this.T && this.T.fireproof) || (this.effectLevel && this.effectLevel('fire_resistance')) || (this.mode === 1 || this.mode === 3);
+    if (!immune) { this.fireTicks = Math.max(this.fireTicks || 0, 300); this.hurt(4, 'lava'); }
+  } else if (this.fireTicks > 0) {
+    // LayeredCauldronBlock.entityInside: put out, and the level goes down (powder snow becomes water)
+    this.fireTicks = 0;
+    const lv = (m & 3) - 1;
+    w.setBlock(x, y, z, B.CAULDRON, lv <= 0 ? 0 : lv);
+    g.remeshNear(x, z);
+  }
+  return res;
+};
+// NaturalSpawner.isValidEmptySpawnBlock: a cauldron of lava is dangerous to mobs fire can harm
+const _vEmptyCellCD = Game.prototype.vEmptyCell;
+Game.prototype.vEmptyCell = function (type, x, y, z) {
+  const w = this.world;
+  if (w.getBlock(x, y, z) === B.CAULDRON && (w.getMeta(x, y, z) & 12) === 4 && (w.getMeta(x, y, z) & 3) && !(MOB_TYPES[type] && MOB_TYPES[type].fireproof)) return false;
+  return _vEmptyCellCD.apply(this, arguments);
+};
+
+/* @file 202_waterlogging.js */
+/* ===================================================================
+   Part 96: waterlogged blocks like Java
+   - a block that can hold water (see 19_waterlog_gen.js) keeps it:
+     placed into still water, filled with a water bucket (a fish bucket
+     lets its fish out there), or left that way by the world generation
+     (shipwrecks and ruins under water, coral, sea pickles, dripleaves,
+     mangrove roots ...); the water shows in it, flows out of it as from
+     a source, counts as water for mobs and players (swimming, drowning,
+     putting out fires) and for water next to it; an empty bucket takes
+     it back, and breaking the block (or blowing it up) leaves the water
+   - kelp and seagrass, always in water, count as water for swimming
+     and drowning too
+   - sea pickles live and glow only in water (SeaPickleBlock.isDead),
+     with Java's models: one to four pickles, with their tops while alive
+   - a campfire in water goes out and can't be lit
+   - in the Nether a water bucket only hisses, there too
+   - the water held counts as water for farmland, sugar cane, conduits,
+     concrete powder, lava (obsidian and cobblestone), sponges (they
+     take it out), boats, fish spawning, zombies turning drowned and
+     dripstone; neither flowing water nor lava washes away a block that
+     can hold water, and a block that can between two sources fills up
+     like water would (FlowingFluid.getNewLiquid)
+   - living coral holds water only in water: placed out of it, or left
+     dry with no water beside it, it dies after 3 to 5 seconds
+   - blocks pushed by pistons lose their water (PistonMovingBlockEntity),
+     the water held makes a block as hard to blow up as water, a falling
+     block that can hold water landing in still water keeps it, and
+     /setblock and /fill set it from [waterlogged=true] (coral, sea
+     pickles and conduits holding it unless told otherwise)
+   - concrete powder hardens into concrete in water: placed in it or
+     beside it, water coming next to it, or falling into it
+   =================================================================== */
+
+World.prototype.isWet = function (x, y, z) {
+  if (y < 0 || y > CH_TOP) return false;
+  const c = this.getChunk(x >> 4, z >> 4);
+  return !!(c && c.wl && wlGet(c.wl, (y << 8) | ((z & 15) << 4) | (x & 15)));
+};
+// Level.isWaterAt: water, a block always in it, or one holding it
+World.prototype.waterAt = function (x, y, z) { const id = this.getBlock(x, y, z); return id === B.WATER || WATERY[id] === 1 || this.isWet(x, y, z); };
+// the bit, the block's own state where it shows (a living sea pickle, a doused campfire), the mesh and the water around
+World.prototype.setWet = function (x, y, z, on) {
+  if (y < 0 || y > CH_TOP) return false;
+  const c = this.getChunk(x >> 4, z >> 4), id = this.getBlock(x, y, z);
+  if (!c || !c.blocks || (on && !WLABLE[id])) return false;
+  const i = (y << 8) | ((z & 15) << 4) | (x & 15);
+  if (!c.wl) { if (!on) return false; c.wl = new Uint8Array(CH_VOL >> 3); }
+  if (!!wlGet(c.wl, i) === !!on) return false;
+  wlSet(c.wl, i, on);
+  c.modified = c.unsaved = true;
+  const m = this.getMeta(x, y, z);
+  if (id === B.SEA_PICKLE) this.setBlock(x, y, z, id, on ? m | 4 : m & ~4);
+  else if (on && BLK[id].campfire && !(m & 4)) this.setBlock(x, y, z, id, m | 4);
+  else { this.touch(x, y, z); this.notify(x, y, z); }
+  if (!on && CORAL_DEAD.has(id)) coralCheck(this, x, y, z);
+  return true;
+};
+// a block that changes keeps the water if it can hold it; taken away (broken, blown up) it leaves the water; a block that
+// can hold water put into still water while placing keeps it
+const _setBlockWL = World.prototype.setBlock;
+function wlSetBlock(x, y, z, id, meta, notify) {
+  if (y < 0 || y > CH_TOP) return _setBlockWL.apply(this, arguments);
+  const c = this.getChunk(x >> 4, z >> 4);
+  if (!c || !c.blocks) return _setBlockWL.apply(this, arguments);
+  const i = (y << 8) | ((z & 15) << 4) | (x & 15), old = c.blocks[i], wet = c.wl && wlGet(c.wl, i);
+  // a command sets the block's state outright: the water as its waterlogged state says
+  if (this._cmdWL !== undefined) {
+    if (wet) wlSet(c.wl, i, 0);
+    const res = _setBlockWL.apply(this, arguments);
+    if (this._cmdWL && WLABLE[id] && c.blocks[i] === id) { if (!c.wl) c.wl = new Uint8Array(CH_VOL >> 3); wlSet(c.wl, i, 1); if (id === B.SEA_PICKLE) c.meta[i] |= 4; }
+    else if (id === B.SEA_PICKLE) c.meta[i] &= ~4;
+    return res;
+  }
+  // concrete powder put or falling into water is concrete (ConcretePowderBlock.getStateForPlacement, onLand)
+  if ((this._placingWL || this._fallingWL) && id && BLK[id].powder && (old === B.WATER || wet)) return this.setBlock(x, y, z, B[BLK[id].powder.toUpperCase()], 0, notify);
+  if (wet && old !== id) {
+    wlSet(c.wl, i, 0);
+    // moved by a piston: the block goes dry and leaves no water behind
+    if (this._pistonWL) return _setBlockWL.apply(this, arguments);
+    if (!id) return _setBlockWL.call(this, x, y, z, B.WATER, 0, notify);
+    if (WLABLE[id]) { const res = _setBlockWL.apply(this, arguments); wlSet(c.wl, i, 1); return res; }
+  }
+  if ((this._placingWL || this._fallingWL) && old === B.WATER && c.meta[i] === 0 && WLABLE[id]) {
+    if (!c.wl) c.wl = new Uint8Array(CH_VOL >> 3);
+    wlSet(c.wl, i, 1);
+    if (id === B.SEA_PICKLE) meta = (meta | 4);
+    else if (BLK[id].campfire) meta = (meta | 4);
+    return _setBlockWL.call(this, x, y, z, id, meta, notify);
+  }
+  return _setBlockWL.apply(this, arguments);
+}
+World.prototype.setBlock = function (x, y, z, id) {
+  const r = wlSetBlock.apply(this, arguments);
+  // living coral put anywhere (CoralPlantBlock.onPlace) looks for water
+  if (id && CORAL_DEAD.has(id)) coralCheck(this, x, y, z);
+  return r;
+};
+const _placeBlockWL = Game.prototype.placeBlock;
+Game.prototype.placeBlock = function () {
+  const w = this.world, was = w._placingWL;
+  w._placingWL = true;
+  try { return _placeBlockWL.apply(this, arguments); } finally { w._placingWL = was; }
+};
+
+/* ---------------- buckets, lighting ---------------- */
+const _useItemSpecialWL = Game.prototype.useItemSpecial;
+Game.prototype.useItemSpecial = function (p, hit, held, it) {
+  const w = this.world;
+  if (hit && it && WLABLE[hit.id]) {
+    const wet = w.isWet(hit.x, hit.y, hit.z), done = () => { this.remeshNear(hit.x, hit.z); this.ui.refreshHotbar(); return true; };
+    // BucketItem.emptyContents into a LiquidBlockContainer (only hissing in the Nether)
+    if (it.bucket === 'water' && !wet) {
+      if (w.dim === 'nether') { this.sound('fizz', hit.x + 0.5, hit.y + 0.5, hit.z + 0.5); this.particles.smoke(hit.x + 0.5, hit.y + 0.3, hit.z + 0.5, 10); }
+      else w.setWet(hit.x, hit.y, hit.z, true);
+      if (it.fishBucket && this.spawnMob) this.spawnMob(it.fishBucket, hit.x + 0.5, hit.y + 0.2, hit.z + 0.5);
+      // a dry sponge beside it drinks the water (SpongeBlock.neighborChanged)
+      for (let f = 0; f < 6 && this.soak; f++) if (w.getBlock(hit.x + DX[f], hit.y + DY[f], hit.z + DZ[f]) === B.SPONGE) { this.soak(hit.x + DX[f], hit.y + DY[f], hit.z + DZ[f]); break; }
+      if (p.survival) p.inv[p.sel] = { id: I.BUCKET, count: 1 };
+      this.sound('bucket', hit.x, hit.y, hit.z);
+      return done();
+    }
+    // BucketPickup.pickupBlock: the water taken back out
+    if (held && held.id === I.BUCKET && wet) {
+      w.setWet(hit.x, hit.y, hit.z, false);
+      this.giveOrReplace(p, { id: I.WATER_BUCKET, count: 1 });
+      this.sound('bucket', hit.x, hit.y, hit.z);
+      return done();
+    }
+    // CampfireBlock.canLight: not in water
+    if (held && (held.id === I.FLINT_AND_STEEL || held.id === I.FIRE_CHARGE) && wet && BLK[hit.id].campfire) return false;
+  }
+  return _useItemSpecialWL.apply(this, arguments);
+};
+
+/* ---------------- water flowing ---------------- */
+// a block holding water spreads it as a source does (FlowingFluid.spread: down where it can, else to the sides)
+const _neighborChangedWL = World.prototype.neighborChanged;
+World.prototype.neighborChanged = function (x, y, z) {
+  const res = _neighborChangedWL.apply(this, arguments);
+  const id = this.getBlock(x, y, z);
+  if (this.isWet(x, y, z)) this.schedule(x, y, z, 5, 'wlfluid');
+  else if (WLABLE[id] && this.dim !== 'nether' && this.waterSources !== false) {
+    // FlowingFluid.getNewLiquid: two sources beside it (through its open sides) over something solid or a source make a source here
+    const m = this.getMeta(x, y, z), src = (a, b, c) => (this.getBlock(a, b, c) === B.WATER && this.getMeta(a, b, c) === 0) || this.isWet(a, b, c);
+    let n = 0;
+    for (const f of [0, 1, 4, 5]) if (src(x + DX[f], y, z + DZ[f]) && !faceFull(id, m, f)) n++;
+    if (n >= 2 && (SOLID[this.getBlock(x, y - 1, z)] || src(x, y - 1, z))) this.setWet(x, y, z, true);
+  }
+  if (CORAL_DEAD.has(id)) coralCheck(this, x, y, z);
+  if (BLK[id] && BLK[id].powder && powderTouchesWater(this, x, y, z, false)) this.setBlock(x, y, z, B[BLK[id].powder.toUpperCase()], 0);
+  return res;
+};
+const _onScheduledWL = Game.prototype.onScheduled;
+Game.prototype.onScheduled = function (kind, x, y, z) {
+  if (kind === 'coral') {
+    // CoralPlantBlock / CoralBlock.tick: still no water, it dies (dry)
+    const w = this.world, id = w.getBlock(x, y, z), dead = CORAL_DEAD.get(id);
+    if (dead !== undefined && !coralHasWater(w, x, y, z, id)) { w.setBlock(x, y, z, dead, w.getMeta(x, y, z)); this.remeshNear(x, z); }
+    return;
+  }
+  if (kind !== 'wlfluid') return _onScheduledWL.apply(this, arguments);
+  const w = this.world;
+  if (!w.isWet(x, y, z) || w.dim === 'nether') return;
+  const open = id => id === 0 || (REPL[id] && !BLK[id].liquid && !WATERY[id]);
+  if (y > 0 && open(w.getBlock(x, y - 1, z)) && !w.isWet(x, y - 1, z)) { w.setBlock(x, y - 1, z, B.WATER, 8); return; }
+  for (const f of [0, 1, 4, 5]) {
+    const nx = x + DX[f], nz = z + DZ[f], n = w.getBlock(nx, y, nz);
+    if (open(n)) w.setBlock(nx, y, nz, B.WATER, 1);
+  }
+};
+// water next to a block holding water (or kelp, seagrass) sees still water there: it neither dries up nor flows into it
+const _fluidTickWL = World.prototype.fluidTick;
+World.prototype.fluidTick = function (x, y, z) {
+  const id0 = this.getBlock(x, y, z);
+  if (id0 === B.LAVA) {
+    // LiquidBlock.shouldSpreadLiquid: water held in a block beside or above lava makes obsidian of a source, cobblestone else
+    for (let f = 0; f < 6; f++) if (f !== 3 && this.isWet(x + DX[f], y + DY[f], z + DZ[f])) {
+      this.setBlock(x, y, z, this.getMeta(x, y, z) === 0 ? B.OBSIDIAN : B.COBBLESTONE, 0);
+      if (this.onFizz) this.onFizz(x, y, z);
+      return;
+    }
+  }
+  if (id0 !== B.WATER) return _fluidTickWL.apply(this, arguments);
+  const self = this, gb = World.prototype.getBlock, gm = World.prototype.getMeta;
+  const held = (a, b, c, id) => id !== B.WATER && (WATERY[id] === 1 || self.isWet(a, b, c));
+  this.getBlock = function (a, b, c) { const id = gb.call(self, a, b, c); return held(a, b, c, id) ? B.WATER : id; };
+  this.getMeta = function (a, b, c) { const id = gb.call(self, a, b, c); return held(a, b, c, id) ? 0 : gm.call(self, a, b, c); };
+  try { return _fluidTickWL.apply(this, arguments); } finally { delete this.getBlock; delete this.getMeta; }
+};
+
+/* ---------------- in the water ---------------- */
+// Entity.updateFluidHeightAndDoFluidPushing: a block holding water (or always in it) is still water up to 8/9 of the block,
+// all of it under more water
+const _updateFluidsWL = Entity.prototype.updateFluids;
+Entity.prototype.updateFluids = function () {
+  const res = _updateFluidsWL.apply(this, arguments);
+  const w = this.game && this.game.world;
+  if (!w) return res;
+  const held = (id, x, y, z) => id !== B.WATER && (WATERY[id] === 1 || w.isWet(x, y, z));
+  const top = (x, y, z) => y + (w.waterAt(x, y + 1, z) ? 1 : 8 / 9);
+  if (!this.inWater) {
+    const hw = this.w / 2 - 0.001, y0 = this.y + 0.01;
+    this.inWater = aabbHitsBlock(w, this.x - hw, y0, this.z - hw, this.x + hw, this.y + this.h * 0.6, this.z + hw, (id, x, y, z) => held(id, x, y, z) && top(x, y, z) > y0);
+  }
+  if (!this.headInWater) {
+    const ey = this.y + (this.eyeH || this.h * 0.85), ex = Math.floor(this.x), eyy = Math.floor(ey), ez = Math.floor(this.z);
+    if (held(w.getBlock(ex, eyy, ez), ex, eyy, ez) && ey < top(ex, eyy, ez)) this.headInWater = true;
+  }
+  return res;
+};
+
+/* ---------------- sea pickles ---------------- */
+// SeaPickleBlock: light 3 + 3 x pickles while alive (in water, meta bit 4), none dead
+EMITF[B.SEA_PICKLE] = m => (m & 4) ? 6 + 3 * (m & 3) : 0;
+{
+  const t = 'sea_pickle', R45 = o => ({ origin: o, axis: 'y', angle: 45, rescale: true });
+  // one pickle: its body, the inner top a hair below its top, and (alive) two crossed leaves lit as from above
+  const pickle = (x, z, h) => [
+    jE([x, 0, z], [x + 4, h, z + 4], { down: [[8, 1, 12, 5], t], up: [[4, 1, 8, 5], t], north: [[4, 5, 8, 5 + h], t], south: [[0, 5, 4, 5 + h], t], west: [[8, 5, 12, 5 + h], t], east: [[12, 5, 16, 5 + h], t] }),
+    jE([x, h - 0.05, z], [x + 4, h - 0.05, z + 4], { up: [[8, 1, 12, 5], t] }),
+  ];
+  const tops = (cx, cz, y0, oy) => [
+    jE([cx - 0.5, y0, cz], [cx + 0.5, y0 + 3.5, cz], { north: [[1, 0, 3, 5], t], south: [[3, 0, 1, 5], t] }, R45([cx, oy, cz])),
+    jE([cx, y0, cz - 0.5], [cx, y0 + 3.5, cz + 0.5], { west: [[13, 0, 15, 5], t], east: [[15, 0, 13, 5], t] }, R45([cx, oy, cz])),
+  ];
+  // sea_pickle, two_, three_, four_sea_pickles: [x, z, height] per pickle, leaves at [x, z, y, origin y]
+  const SETS = [
+    [[[6, 6, 6]], [[8, 8, 5.2, 8]]],
+    [[[3, 3, 6], [8, 8, 4]], [[5, 5, 5.2, 5.6], [10, 10, 3.2, 8]]],
+    [[[6, 9, 6], [2, 2, 4], [8, 4, 6]], [[8, 11, 5.2, 8], [4, 4, 3.2, 8], [10, 6, 5.2, 8]]],
+    [[[2, 2, 6], [9, 10, 4], [9, 2, 6], [2, 8, 7]], [[4, 4, 5.2, 8], [11, 12, 3.2, 8], [11, 4, 5.2, 8], [4, 10, 6.2, 8]]],
+  ];
+  const MODELS = SETS.map(([ps, ls]) => [jQuads(ps.flatMap(([x, z, h]) => pickle(x, z, h))), jQuads(ls.flatMap(([x, z, y, oy]) => tops(x, z, y, oy))).map(q => Object.assign(q, { su: 1 }))]);
+  BOX_MODELS.sea_pickle = (d, m) => { const [body, leaves] = MODELS[m & 3]; return (m & 4) ? body.concat(leaves) : body; };
+  // the pickles' boxes for collision (SeaPickleBlock's shapes: 1 to 4 pickles)
+  const COLL = [[[6, 0, 6, 10, 6, 10]], [[3, 0, 3, 13, 6, 13]], [[2, 0, 2, 14, 6, 14]], [[2, 0, 2, 14, 7, 14]]];
+  const _mc = modelCollision;
+  modelCollision = function (id, meta, ctx) { return id === B.SEA_PICKLE ? COLL[meta & 3] : _mc(id, meta, ctx); };
+}
+
+/* ---------------- faces, corals, concrete powder ---------------- */
+// Block.isFaceSturdy, near enough: a box of the block's collision shape covers the whole face f
+function faceFull(id, meta, f) {
+  if (!id) return false;
+  if (SOLID[id] && SHAPE[id] === SH.CUBE) return true;
+  if (!SOLID[id]) return false;
+  const bs = shapeBoxes(id, meta, 0, true) || [];
+  const ax = f >> 1, hi = !(f & 1), [u, v] = ax === 0 ? [1, 2] : ax === 1 ? [0, 2] : [0, 1], k = ax === 0 ? 0 : ax === 1 ? 1 : 2;
+  return bs.some(b => (hi ? b[k + 3] >= 16 : b[k] <= 0) && b[u] <= 0 && b[u + 3] >= 16 && b[v] <= 0 && b[v + 3] >= 16);
+}
+// living coral and what it turns into
+const CORAL_DEAD = new Map();
+for (const c of CORALS) for (const k of ['_coral', '_coral_fan', '_coral_block']) {
+  const a = B[(c + k).toUpperCase()], d = B[('dead_' + c + k).toUpperCase()];
+  if (a !== undefined && d !== undefined) CORAL_DEAD.set(a, d);
+}
+// BaseCoralPlantTypeBlock.scanForWater (holding water, or water beside it) / CoralBlock.scanForWater (water beside it)
+function coralHasWater(w, x, y, z, id) {
+  if (!BLK[id].name.endsWith('_block') && w.isWet(x, y, z)) return true;
+  for (let f = 0; f < 6; f++) if (w.waterAt(x + DX[f], y + DY[f], z + DZ[f])) return true;
+  return false;
+}
+// tryScheduleDieTick: 60 to 99 ticks
+function coralCheck(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (CORAL_DEAD.has(id) && !coralHasWater(w, x, y, z, id)) w.schedule(x, y, z, 60 + Math.floor(Math.random() * 40), 'coral');
+}
+// ConcretePowderBlock.touchesLiquid: water beside or above it (below only when the powder is in water itself) whose face toward it
+// isn't sturdy
+function powderTouchesWater(w, x, y, z, selfWet) {
+  for (let f = 0; f < 6; f++) {
+    if (f === 3 && !selfWet) continue;
+    const nx = x + DX[f], ny = y + DY[f], nz = z + DZ[f];
+    if (!w.waterAt(nx, ny, nz)) continue;
+    const id = w.getBlock(nx, ny, nz);
+    if (id === B.WATER || !faceFull(id, w.getMeta(nx, ny, nz), f ^ 1)) return true;
+  }
+  return false;
+}
+const _afterPlaceWL = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const r = _afterPlaceWL.apply(this, arguments), w = this.world, now = w.getBlock(x, y, z);
+  if (CORAL_DEAD.has(now)) coralCheck(w, x, y, z);
+  if (BLK[now] && BLK[now].powder && powderTouchesWater(w, x, y, z, false)) { w.setBlock(x, y, z, B[BLK[now].powder.toUpperCase()], 0); this.remeshNear(x, z); }
+  return r;
+};
+
+/* ---------------- falling blocks ---------------- */
+// FallingBlockEntity.tick: a block that can hold water landing in still water keeps it; concrete powder lands in the first water it
+// reaches (looked for along the way down), as concrete, or hardens where it lands with water beside it
+const _fbTickWL = FallingBlock.prototype.tick;
+FallingBlock.prototype.tick = function () {
+  const g = this.game, w = g && g.world, d = BLK[this.block];
+  if (!w) return _fbTickWL.apply(this, arguments);
+  if (d && d.powder && !this.dead) {
+    const bx = Math.floor(this.x), bz = Math.floor(this.z), y0 = Math.floor(this.y), y1 = Math.floor(this.y + (this.vy - 0.04) * 0.98);
+    for (let y = y0; y >= y1 && y >= 0; y--) {
+      if (!w.waterAt(bx, y, bz)) { if (y < y0 && SOLID[w.getBlock(bx, y, bz)]) break; continue; }
+      this.savePrev(); this.dead = true;
+      const cur = w.getBlock(bx, y, bz);
+      if (cur === 0 || REPL[cur] || cur === B.WATER) { w.setBlock(bx, y, bz, B[d.powder.toUpperCase()], 0); g.remeshNear(bx, bz); }
+      else g.dropItem(this.x, this.y + 0.5, this.z, { id: this.block, count: 1 });
+      return;
+    }
+  }
+  const was = w._fallingWL;
+  w._fallingWL = true;
+  try { _fbTickWL.apply(this, arguments); } finally { w._fallingWL = was; }
+  if (d && d.powder && this.dead) {
+    const bx = Math.floor(this.x), by = Math.floor(this.y + 0.5), bz = Math.floor(this.z);
+    if (w.getBlock(bx, by, bz) === this.block && powderTouchesWater(w, bx, by, bz, false)) { w.setBlock(bx, by, bz, B[d.powder.toUpperCase()], 0); g.remeshNear(bx, bz); }
+  }
+};
+
+/* ---------------- pistons ---------------- */
+// PistonBaseBlock.moveBlocks and PistonMovingBlockEntity.tick: what the piston moves or breaks leaves air, and lands dry
+const _pistonMoveWL = Game.prototype.pistonMove;
+Game.prototype.pistonMove = function () {
+  const w = this.world, was = w._pistonWL;
+  w._pistonWL = true;
+  try { return _pistonMoveWL.apply(this, arguments); } finally { w._pistonWL = was; }
+};
+
+/* ---------------- commands ---------------- */
+// /setblock and /fill set the waterlogged state the block was given, or its default one (true for coral, sea pickles, conduits)
+const WL_DEFAULT_WET = new Set([B.SEA_PICKLE, B.CONDUIT]);
+for (let id = 1; id < MAXB; id++) if (BLK[id] && /_coral(_fan|_wall_fan)?$/.test(BLK[id].name || '')) WL_DEFAULT_WET.add(id);
+for (const k of ['setblock', 'fill']) {
+  const f = CMDS[k];
+  if (!f) continue;
+  CMDS[k] = function (r, ctx) {
+    const w = this.world, rb = Game.prototype.readBlock;
+    this.readBlock = function (t) {
+      const b = rb.call(this, t);
+      if (w._cmdWL === undefined) w._cmdWL = b.states && b.states.waterlogged !== undefined ? b.states.waterlogged === 'true' : WL_DEFAULT_WET.has(b.id);
+      return b;
+    };
+    try { return f.apply(this, arguments); } finally { delete this.readBlock; w._cmdWL = undefined; }
+  };
+}
+
+/* ---------------- older saves ---------------- */
+// a chunk saved before blocks held water: its living coral and sea pickles with water beside them hold it
+function wlFromOldSave(blocks, meta) {
+  let wl = null;
+  for (let i = 0; i < CH_VOL; i++) {
+    const b = blocks[i];
+    if (b !== B.SEA_PICKLE && !(CORAL_DEAD.has(b) && !BLK[b].name.endsWith('_block'))) continue;
+    const x = i & 15, z = (i >> 4) & 15, y = i >> 8;
+    let water = false;
+    for (let f = 0; f < 6 && !water; f++) {
+      const nx = x + DX[f], ny = y + DY[f], nz = z + DZ[f];
+      if (nx < 0 || nx > 15 || nz < 0 || nz > 15 || ny < 0 || ny > CH_TOP) continue;
+      const n = blocks[(ny << 8) | (nz << 4) | nx];
+      water = n === B.WATER || WATERY[n] === 1;
+    }
+    if (!water) continue;
+    if (!wl) wl = new Uint8Array(CH_VOL >> 3);
+    wlSet(wl, i, 1);
+    if (b === B.SEA_PICKLE) meta[i] |= 4;
+  }
+  return wl;
+}
 
 </script>
 </body>

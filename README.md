@@ -664,6 +664,30 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   of its layers, the chorus flower has its side plates and scaffolding its four posts. Potted azaleas, cacti, bamboo and
   mangrove propagules look as they do in Java, and open eyeblossoms and firefly bushes glow in the dark. Your resource
   pack's textures for all of these are used.
+- **Scaffolding like Java's** (Part 92): each piece of scaffolding knows how far it is from what holds it up. Using
+  scaffolding on scaffolding builds the column up to its top, or, on its top face, out the way you face, up to 7 blocks; a
+  piece 7 out falls, and taking away what holds up a tower or a bridge brings it down a piece at a time. Scaffolding
+  hanging from the side is drawn with a frame round its foot. You can stand on scaffolding, sink down through it by
+  sneaking, and climb up inside it by jumping; landing on it from high up hurts as on any block, and pistons break it.
+- **Animated textures like Java's** (Part 93): with a resource pack, every block texture the pack animates now moves, not
+  only water, lava and portals: fire, campfires, lanterns, magma, prismarine, sea lanterns, kelp and seagrass, crimson
+  and warped stems, sculk blocks, command blocks, the stonecutter's saw, lit smokers and blast furnaces, a charged
+  respawn anchor and more, with the pack's frame order, timing and smooth blending between frames.
+- **Flowers and leaves on the ground like Java's** (Part 94): pink petals and wildflowers grow a cluster of petals per
+  flower, each at its own height on little stems coloured like the grass, turned the way you placed them, and leaf
+  litter covers a quarter, half, three quarters or all of its block, as in Java.
+- **Cauldrons like Java's** (Part 95): stepping into a cauldron of water or powder snow while burning puts the fire out and
+  uses up a level of it (powder snow melts into water doing so), and a cauldron of lava sets you alight and burns you as
+  lava does. Mobs don't spawn in cauldrons of lava.
+- **Waterlogged blocks like Java's** (Part 96): stairs, slabs, fences, walls, panes, trapdoors, signs, ladders, lanterns,
+  chains, rails, chests, campfires, coral, sea pickles, leaves, candles, dripleaves and the other blocks that can hold
+  water in Java now keep it. Put one into still water, or pour a water bucket on it, and the water stays in the block (an
+  empty bucket takes it back out): it shows inside the block, flows out of it, and you can swim and drown in it, and
+  breaking the block leaves the water behind. Shipwrecks, reefs and lush caves now come with their water in place
+  instead of air pockets. Sea pickles glow and grow their tops only in water, coral dies a few seconds after it is left
+  dry, and a campfire in water goes out. Water held in a block counts for farmland, sugar cane and conduits, turns lava
+  beside it into obsidian or cobblestone and shields the block from explosions; a sponge soaks it up, and pistons push
+  such blocks out dry. Concrete powder now hardens into concrete when it touches water, as in Java.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
