@@ -869,7 +869,7 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **The biomes of Java Edition 26.3** (Part 64): Java seeds now give 26.3's biome layout, with its three new biomes
   where Java has them. **Pale gardens**: grey-green pale oaks with moss hanging from their leaves and trunks, pale
   moss on the ground, and **creaking hearts** inside some trunks (uprooted unless pale oak logs hold them at both
-  ends, dormant by day, glowing awake at night; they don't call up creakings yet); **eyeblossoms** open as night
+  ends, dormant by day, glowing awake at night, when they call up a creaking: see Part 66); **eyeblossoms** open as night
   falls and close at dawn, and each one that turns sets off the ones around it. **Dappled forests**: orange grass
   under red, orange and yellow **poplars**, leaf litter, fallen poplar logs with **shelf mushrooms** (bouncy to
   land on, bigger with bone meal), red shrubs. **Sulfur caves**: bands of **sulfur** and **cinnabar**, **sulfur
@@ -877,8 +877,8 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   whoever breathes it at the surface sick, and over magma erupts every half minute or so (over lava all the time),
   pushing up whatever stands in the water above it. The new blocks are all in the creative inventory with their
   26.3 recipes and drops: the **pale oak** and **poplar** wood families (logs, wood, planks, stairs, slabs, fences,
-  gates, doors, trapdoors, plates, buttons, signs, hanging signs, saplings, boats and chest boats; pale oak and
-  poplar saplings grow trees of Blockcraft's own shape for now), **pale moss** and its carpet (which climbs the
+  gates, doors, trapdoors, plates, buttons, signs, hanging signs, saplings, boats and chest boats; the saplings
+  grow Java's trees, see Part 67), **pale moss** and its carpet (which climbs the
   walls beside it), **pale hanging moss**, the **resin** family (clumps, block, bricks with stairs, slabs, walls and
   chiseled bricks, the resin brick smelted from a clump), **golden dandelions**, the **sulfur** and **cinnabar**
   families (polished, bricks, chiseled, with stairs, slabs and walls) and **potent sulfur**. Pointed dripstone now
@@ -910,6 +910,50 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   (they never despawn), no iron golem or cats, no doors or torches, cobwebs, mossy cobblestone and brown, grimy
   windows, at the odds of Java's abandoned villages. New chunks of worlds made before this version follow the new
   rules, so the ground can step where old and new chunks meet near a village.
+- **The creaking** (Part 66): at night an awake creaking heart calls up a creaking when you come within 32 blocks, a
+  tall, bark-skinned figure that stands somewhere up to 16 blocks from its heart. It can't move while you look at it
+  (within about 60 degrees of where you look, with nothing solid in the way; glass doesn't hide it), and looking at it
+  from within 12 blocks wakes it up: its eyes light up and, the moment you look away, it comes for you, fast, and hits
+  for 3 hearts' worth every 2 seconds. Once it's awake, a carved pumpkin on your head stops your looks from freezing it.
+  You can't hurt a heart's creaking: a hit only makes it twitch, sends a trail of sparks back to its heart and, while the
+  heart is awake, grows two or three resin clumps on the pale oak logs around the heart. Break the heart to get rid of it:
+  the creaking shakes for two seconds and crumbles into bits of wood. It also crumbles at dawn and when it strays more
+  than 34 blocks from its heart. A creaking from the new spawn egg is an ordinary monster that one hit kills. Its model
+  and textures follow Java's, so a resource pack's creaking (with its glowing eyes) shows on it.
+- **Saplings grow Java's trees** (Part 67): a sapling now grows exactly the trees Java Edition grows from it, built by
+  the same code that places the world's trees: an oak becomes a fancy oak one time in ten, and with a flower within two
+  blocks the tree carries a bee nest with bees one time in twenty (birches and cherries too); four spruce or jungle
+  saplings in a square grow a giant spruce, a giant pine or a giant jungle tree; dark and pale oaks need a square of four;
+  mangrove propagules grow mangroves (tall ones most of the time) with their roots, moss and hanging propagules; azaleas
+  grow azalea trees over rooted dirt; poplar saplings grow one of the three poplars. As in Java, a sapling that has no
+  room for its tree simply stays a sapling.
+- **Skies like Java's biomes** (Part 68): the sky takes the colour of the biomes around you, as in Java Edition 26.3:
+  paler over deserts, savannas and badlands, bluer over snow and peaks, and grey over the pale garden; the fog is the usual
+  light blue, or a biome's own: grey-brown in the pale garden, misty in the dappled forest, yellow-green in the sulfur caves.
+  Colours blend smoothly across biome borders, and dim through the day as Java's do (a black sky at night). Under water the
+  fog is the biome's water colour (a deep navy most places, greener in swamps, lighter blue in cherry groves) and your eyes
+  get used to it: at first you see about 24 blocks, after half a minute 96. Water in deserts, badlands, savannas and most
+  snowy biomes is now the ordinary blue it is in Java. With a resource pack, the decorated pot's top and bottom, the
+  lever's base and the barrier now use the pack's own textures too.
+- **Copper tools and armor** (Part 69, as in Java Edition 1.21.9): copper swords, pickaxes, axes, shovels and hoes
+  sit between stone and iron (190 uses, they mine what stone tools mine but faster, and a copper sword does 5 damage), and
+  copper armor between leather and chainmail (10 armor points for the set). They're crafted from copper ingots, repaired
+  with them, and melt back down into copper nuggets in a furnace or blast furnace; nine nuggets make an ingot. A trim of
+  copper on copper armor shows in a darker copper, and there's copper horse armor (4 points). With a 1.21.9 or newer
+  resource pack, the pack's copper textures show on the items and on whoever wears them. Every mob in the game that has
+  a spawn egg in Java now has one here too (24 more, from the camel to the zombie horse).
+- **Moving like Java** (Part 69): walking, sprinting and sneaking now go exactly Java's speeds (4.317, 5.612 and 1.295
+  metres a second), and sneaking diagonally is faster than sneaking straight, as in Java. Sprint-jumping was much too
+  fast (8.9 m/s): the ground's grip now counts for the tick you jump from and not for the tick you land on, as in Java, so
+  it's Java's 7.1 m/s. Slime blocks are slippery and slow to walk on, and bounce you back up as high as Java's do
+  (sneaking onto one hurts like any other fall); beds bounce you too and only half the fall counts on them (the harm was
+  halved instead before); honey blocks halve only the jump itself, not what Jump Boost adds.
+- **Items and blocks checked against 26.3**: every item's durability, damage, attack speed, armor, stack size,
+  enchantability and food were compared with Java Edition 26.3's, and the rarity colours of item names now match it
+  (the elytra, dragon head and dragon egg are epic, heads, sherds and the conduit uncommon, the beacon and enchanted books
+  rare, horse armor and the end crystal common, and an enchanted book's name no longer turns purple); honey bottles are
+  drunk rather than eaten and can be drunk when full; dropped netherite blocks and ancient debris don't burn; the 26.3
+  blocks (sulfur, cinnabar, resin bricks, pale oak and poplar wood) resist explosions as they do in Java.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
