@@ -2734,23 +2734,62 @@ const BED_COLORS = [B.WHITE_BED, B.RED_BED, B.YELLOW_BED, B.LIGHT_BLUE_BED, B.LI
 const VSTYLE = {
   plains: { log: B.OAK_LOG, wall: B.OAK_PLANKS, low: B.COBBLESTONE, floor: B.OAK_PLANKS, base: B.COBBLESTONE, stairs: B.OAK_STAIRS, slab: B.OAK_SLAB, roofTop: B.OAK_PLANKS,
     fence: B.OAK_FENCE, post: B.OAK_FENCE, gate: B.OAK_FENCE_GATE, door: B.OAK_DOOR, glass: B.GLASS_PANE, light: B.TORCH, path: B.DIRT_PATH, bridge: B.OAK_PLANKS,
-    roof: 'gable', vtype: 'plains', loot: 'village_plains_house', animals: ['cow', 'sheep', 'pig'], well: B.COBBLESTONE, wellRoof: B.COBBLESTONE_SLAB },
+    roof: 'gable', vtype: 'plains', loot: 'village_plains_house', pathGrass: 0.1, crops: [['carrots', 0.3], ['potatoes', 0.2], ['beetroots', 0.1]], animals: ['cow', 'sheep', 'pig'], well: B.COBBLESTONE, wellRoof: B.COBBLESTONE_SLAB },
   desert: { log: B.CUT_SANDSTONE, wall: B.SANDSTONE, low: B.SANDSTONE, floor: B.SMOOTH_SANDSTONE, base: B.SANDSTONE, stairs: B.SANDSTONE_STAIRS, slab: B.SMOOTH_SANDSTONE_SLAB, roofTop: B.SMOOTH_SANDSTONE,
     fence: B.JUNGLE_FENCE, post: B.SANDSTONE_WALL, gate: B.JUNGLE_FENCE_GATE, door: B.JUNGLE_DOOR, glass: B.GLASS_PANE, light: B.TORCH, path: B.SMOOTH_SANDSTONE, bridge: B.SMOOTH_SANDSTONE,
-    roof: 'flat', accent: B.YELLOW_TERRACOTTA, vtype: 'desert', loot: 'village_desert_house', animals: ['camel', 'sheep', 'rabbit'], well: B.CUT_SANDSTONE, wellRoof: B.SMOOTH_SANDSTONE_SLAB },
+    roof: 'flat', accent: B.YELLOW_TERRACOTTA, vtype: 'desert', loot: 'village_desert_house', crops: [['beetroots', 0.2], ['melon_stem', 0.1]], animals: ['camel', 'sheep', 'rabbit'], well: B.CUT_SANDSTONE, wellRoof: B.SMOOTH_SANDSTONE_SLAB },
   savanna: { log: B.ACACIA_LOG, wall: B.ACACIA_PLANKS, low: B.ORANGE_TERRACOTTA, floor: B.ACACIA_PLANKS, base: B.COBBLESTONE, stairs: B.ACACIA_STAIRS, slab: B.ACACIA_SLAB, roofTop: B.ACACIA_PLANKS,
     fence: B.ACACIA_FENCE, post: B.ACACIA_FENCE, gate: B.ACACIA_FENCE_GATE, door: B.ACACIA_DOOR, glass: B.GLASS_PANE, light: B.TORCH, path: B.DIRT_PATH, bridge: B.ACACIA_PLANKS,
-    roof: 'gable', vtype: 'savanna', loot: 'village_savanna_house', animals: ['cow', 'sheep', 'horse'], well: B.ACACIA_PLANKS, wellRoof: B.ACACIA_SLAB },
+    roof: 'gable', vtype: 'savanna', loot: 'village_savanna_house', pathGrass: 0.2, crops: [['melon_stem', 0.1]], animals: ['cow', 'sheep', 'horse'], well: B.ACACIA_PLANKS, wellRoof: B.ACACIA_SLAB },
   taiga: { log: B.SPRUCE_LOG, wall: B.SPRUCE_PLANKS, low: B.COBBLESTONE, floor: B.SPRUCE_PLANKS, base: B.MOSSY_COBBLESTONE, stairs: B.SPRUCE_STAIRS, slab: B.SPRUCE_SLAB, roofTop: B.SPRUCE_PLANKS,
     fence: B.SPRUCE_FENCE, post: B.SPRUCE_FENCE, gate: B.SPRUCE_FENCE_GATE, door: B.SPRUCE_DOOR, glass: B.GLASS_PANE, light: B.LANTERN, path: B.DIRT_PATH, bridge: B.SPRUCE_PLANKS,
-    roof: 'gable', vtype: 'taiga', loot: 'village_taiga_house', animals: ['sheep', 'pig', 'cow'], well: B.COBBLESTONE, wellRoof: B.SPRUCE_SLAB },
+    roof: 'gable', vtype: 'taiga', loot: 'village_taiga_house', pathGrass: 0.2, crops: [['pumpkin_stem', 0.3], ['potatoes', 0.2]], animals: ['sheep', 'pig', 'cow'], well: B.COBBLESTONE, wellRoof: B.SPRUCE_SLAB },
   snowy: { log: B.STRIPPED_SPRUCE_LOG, wall: B.SNOW_BLOCK, low: B.SPRUCE_PLANKS, floor: B.SPRUCE_PLANKS, base: B.STONE_BRICKS, stairs: B.SPRUCE_STAIRS, slab: B.SPRUCE_SLAB, roofTop: B.SPRUCE_PLANKS,
     fence: B.SPRUCE_FENCE, post: B.SPRUCE_FENCE, gate: B.SPRUCE_FENCE_GATE, door: B.SPRUCE_DOOR, glass: B.GLASS_PANE, light: B.LANTERN, path: B.DIRT_PATH, bridge: B.SPRUCE_PLANKS,
-    roof: 'gable', vtype: 'snow', loot: 'village_snowy_house', animals: ['sheep', 'rabbit', 'pig'], well: B.PACKED_ICE, wellRoof: B.SPRUCE_SLAB },
+    roof: 'gable', vtype: 'snow', loot: 'village_snowy_house', pathGrass: 0.2, crops: [['carrots', 0.1], ['potatoes', 0.8]], animals: ['sheep', 'rabbit', 'pig'], well: B.PACKED_ICE, wellRoof: B.SPRUCE_SLAB },
 };
+// Java's abandoned villages put their buildings through these rules (the zombie_* processor lists): the first rule whose
+// block matches and whose chance comes up turns it into its result; doors and torches go, cobwebs creep in, windows go brown
+const ZOMBIE_RULES = {
+  plains: [['cobblestone', 0.8, 'mossy_cobblestone'], ['#doors', 0, 'air'], ['torch', 0, 'air'], ['cobblestone', 0.07, 'cobweb'], ['mossy_cobblestone', 0.07, 'cobweb'],
+    ['white_terracotta', 0.07, 'cobweb'], ['oak_log', 0.05, 'cobweb'], ['oak_planks', 0.1, 'cobweb'], ['oak_stairs', 0.1, 'cobweb'], ['stripped_oak_log', 0.02, 'cobweb'],
+    ['glass_pane', 0.5, 'cobweb'], ['glass_pane', 0, 'brown_stained_glass_pane']],
+  desert: [['#doors', 0, 'air'], ['torch', 0, 'air'], ['smooth_sandstone', 0.08, 'cobweb'], ['cut_sandstone', 0.1, 'cobweb'], ['terracotta', 0.08, 'cobweb'],
+    ['smooth_sandstone_stairs', 0.08, 'cobweb'], ['smooth_sandstone_slab', 0.08, 'cobweb']],
+  savanna: [['#doors', 0, 'air'], ['torch', 0, 'air'], ['acacia_planks', 0.2, 'cobweb'], ['acacia_stairs', 0.2, 'cobweb'], ['acacia_log', 0.05, 'cobweb'], ['acacia_wood', 0.05, 'cobweb'],
+    ['orange_terracotta', 0.05, 'cobweb'], ['yellow_terracotta', 0.05, 'cobweb'], ['red_terracotta', 0.05, 'cobweb'], ['glass_pane', 0.5, 'cobweb'], ['glass_pane', 0, 'brown_stained_glass_pane']],
+  snowy: [['#doors', 0, 'air'], ['torch', 0, 'air'], ['lantern', 0, 'air'], ['spruce_planks', 0.2, 'cobweb'], ['spruce_slab', 0.4, 'cobweb'], ['stripped_spruce_log', 0.05, 'cobweb'],
+    ['stripped_spruce_wood', 0.05, 'cobweb'], ['glass_pane', 0.5, 'cobweb'], ['glass_pane', 0, 'brown_stained_glass_pane']],
+  taiga: [['cobblestone', 0.8, 'mossy_cobblestone'], ['#doors', 0, 'air'], ['torch', 0, 'air'], ['cobblestone', 0.08, 'cobweb'], ['spruce_log', 0.08, 'cobweb'],
+    ['glass_pane', 0.5, 'cobweb'], ['glass_pane', 0, 'brown_stained_glass_pane']],
+};
+{
+  const DOORS = new Set(BLOCK_NAMES.filter(n => n.endsWith('_door')).map(n => B[n.toUpperCase()]));
+  const id = n => n === 'air' ? 0 : B[n.toUpperCase()];
+  for (const k in ZOMBIE_RULES) ZOMBIE_RULES[k] = ZOMBIE_RULES[k].map(([i, c, o]) => [i === '#doors' ? DOORS : new Set([id(i)]), c, id(o)]);
+  for (const k in VSTYLE) VSTYLE[k].crops = VSTYLE[k].crops.map(([n, c]) => [new Set([B.WHEAT]), c, id(n)]);
+}
+// RandomSource.create(Mth.getSeed(x, y, z)): the random a structure's rule processor rolls with at a block
+class PosRand {
+  constructor(x, y, z) {
+    let l = BigInt(Math.imul(x, 3129871)) ^ (BigInt(z) * 116129781n) ^ BigInt(y);
+    l = BigInt.asIntN(64, BigInt.asIntN(64, l * l * 42317861n) + l * 11n) >> 16n;
+    this.s = (l ^ 0x5DEECE66Dn) & 0xFFFFFFFFFFFFn;
+  }
+  nextFloat() { this.s = (this.s * 0x5DEECE66Dn + 0xBn) & 0xFFFFFFFFFFFFn; return Number(this.s >> 24n) / 16777216; }
+}
+// RuleProcessor: the first rule [blocks, chance, result] that takes block id at (x, y, z) gives its result (-1: none)
+function ruleProcess(rules, id, x, y, z) {
+  let r = null;
+  for (const [ids, chance, out] of rules) {
+    if (!ids.has(id)) continue;
+    if (chance && !((r || (r = new PosRand(x, y, z))).nextFloat() < chance)) continue;
+    return out;
+  }
+  return -1;
+}
 const JOB_SITE_BLOCKS = [B.SMOKER, B.CARTOGRAPHY_TABLE, B.BARREL, B.FLETCHING_TABLE, B.CAULDRON, B.STONECUTTER, B.LOOM, B.SMITHING_TABLE, B.GRINDSTONE,
   B.BLAST_FURNACE, B.LECTERN, B.BREWING_STAND];
-const CROPS = [[B.WHEAT, 7], [B.CARROTS, 7], [B.POTATOES, 7], [B.BEETROOTS, 3]];
 function villageStyle(b) {
   if (b === BI.PLAINS || b === BI.SUNFLOWER_PLAINS || b === BI.MEADOW) return 'plains';
   if (b === BI.DESERT) return 'desert';
@@ -2778,9 +2817,12 @@ function villagePlan(gen, rx, rz) {
 const VBUILD = {
   house_s: [5, 5], house_m: [7, 6], house_l: [9, 7], smith: [8, 7], farm: [9, 7], farm_l: [13, 9], pen: [7, 7], lamp: [1, 1],
 };
-function planVillageLayout(gen, X, Z, style) {
+// zombie: an abandoned village (Java's zombie start pieces)
+function planVillageLayout(gen, X, Z, style, zombie) {
   const R = mulberry32((hash2(X, Z, gen.seed + 9103) * 4294967296) | 0);
-  const ground = (x, z) => gen.columnAt(x, z).h;
+  const solid = (x, z) => gen.columnAt(x, z).h;
+  // like Java's WORLD_SURFACE_WG heightmap, the ground a village is laid on counts the water's surface
+  const ground = (x, z) => Math.max(solid(x, z), gen.sea);
   const pieces = [], roads = [], built = [];
   const overlaps = (r, list, m) => list.some(o => r[0] - m <= o[2] && r[2] + m >= o[0] && r[1] - m <= o[3] && r[3] + m >= o[1]);
   const cy = ground(X, Z);
@@ -2790,11 +2832,12 @@ function planVillageLayout(gen, X, Z, style) {
   const streets = [];
   const addStreet = (sx, sz, d, len, depth) => {
     const [dx, dz] = DIR4[d];
-    // the road ends where the land drops into water or a cliff
-    let n = 0, last = ground(sx, sz);
+    // the road ends at a cliff, or at the shore of water too wide for planks to bridge
+    let n = 0, last = ground(sx, sz), wet = 0;
     for (; n < len; n++) {
       const h = ground(sx + dx * n, sz + dz * n);
-      if (h < gen.sea - 1 && n > 6) break;
+      wet = solid(sx + dx * n, sz + dz * n) < gen.sea - 1 ? wet + 1 : 0;
+      if (wet > 12) { n -= wet; break; }
       if (Math.abs(h - last) > 3) break;
       last = h;
     }
@@ -2832,9 +2875,8 @@ function planVillageLayout(gen, X, Z, style) {
     // floor level: the street in front of the door
     const mid = Math.floor((w - 1) / 2), fx = st.sx + dx * (t + mid) + ox, fz = st.sz + dz * (t + mid) + oz;
     const y = ground(fx, fz);
-    if (y < gen.sea) return false;
-    for (const [cx2, cz2] of [[rect[0], rect[1]], [rect[2], rect[1]], [rect[0], rect[3]], [rect[2], rect[3]]]) { const h = ground(cx2, cz2); if (h < gen.sea - 1 || h - y > 5 || y - h > 4) return false; }
-    const pc = { type, rect, f, y };
+    for (const [cx2, cz2] of [[rect[0], rect[1]], [rect[2], rect[1]], [rect[0], rect[3]], [rect[2], rect[3]]]) { const h = solid(cx2, cz2); if (h < gen.sea - 2 || h - y > 5 || y - h > 4) return false; }
+    const pc = { type, rect, f, y, jx: fx, jz: fz };
     if (type.startsWith('house') || type === 'smith') pc.job = type === 'smith' ? [B.SMITHING_TABLE, B.GRINDSTONE, B.BLAST_FURNACE][Math.floor(R() * 3)] : (R() < 0.75 ? JOB_SITE_BLOCKS[Math.floor(R() * JOB_SITE_BLOCKS.length)] : 0);
     pieces.push(pc); built.push(rect);
     return true;
@@ -2855,10 +2897,16 @@ function planVillageLayout(gen, X, Z, style) {
   let bb = [Infinity, Infinity, -Infinity, -Infinity];
   for (const r of [...built, ...roads]) bb = [Math.min(bb[0], r[0]), Math.min(bb[1], r[1]), Math.max(bb[2], r[2]), Math.max(bb[3], r[3])];
   const rects = [...built, ...roads];
-  return { X, Y: cy, Z, style, pieces, roads, rects, bbox: [bb[0] - 2, bb[1] - 2, bb[2] + 2, bb[3] + 2] };
+  // Java's villages adapt the ground to their buildings (terrain_adaptation beard_thin): every building is rigid, with its
+  // ground on top of its floor, and a junction where it meets its street (the streets themselves follow the ground)
+  const beard = { rig: pieces.map(pc => [pc.rect[0], pc.rect[1], pc.rect[2], pc.rect[3], pc.y + 1]), jun: [] };
+  for (const pc of pieces) if (pc.jx !== undefined) beard.jun.push([pc.jx, pc.y + 1, pc.jz]);
+  for (const st of streets) if (st.depth === 0) beard.jun.push([st.sx, cy + 1, st.sz]);
+  return { X, Y: cy, Z, style, zombie: !!zombie, pieces, roads, rects, beard, bbox: [bb[0] - 2, bb[1] - 2, bb[2] + 2, bb[3] + 2] };
 }
 function buildVillage(p, ctx) {
   const S = VSTYLE[p.style], bx = ctx.cx * 16, bz = ctx.cz * 16, { blocks, meta, I, hs, M, W: PW } = ctx, SEA = ctx.gen.sea;
+  const yOff = typeof VY === 'number' && ctx.gen.v ? VY : 0, snowy = p.style === 'snowy';
   // roads follow the ground; planks bridge the water
   for (const r of p.roads) {
     if (r[0] > bx + 15 || r[2] < bx || r[1] > bz + 15 || r[3] < bz) continue;
@@ -2866,16 +2914,39 @@ function buildVillage(p, ctx) {
       const lx = x - bx, lz = z - bz, h = hs[(lz + M) * PW + (lx + M)];
       if (h < SEA) { const i = I(lx, SEA, lz); if (blocks[i] === B.WATER || blocks[i] === B.ICE) { blocks[i] = S.bridge; meta[i] = 0; } for (let k = 1; k <= 2; k++) { const j = I(lx, SEA + k, lz); if (FILLABLE[blocks[j]] && blocks[j] !== B.WATER) blocks[j] = 0; } continue; }
       const i = I(lx, h, lz);
-      if (PATHABLE[blocks[i]]) { blocks[i] = S.path; meta[i] = 0; }
+      // Java's street processors leave some of the path grass (a tenth in the plains, a fifth in savannas, taigas and snow)
+      const grass = S.pathGrass && new PosRand(x, h - yOff, z).nextFloat() < S.pathGrass;
+      if (PATHABLE[blocks[i]]) { blocks[i] = grass ? B.GRASS_BLOCK : S.path; meta[i] = 0; }
       for (let k = 1; k <= 3; k++) { const j = I(lx, h + k, lz); if (FILLABLE[blocks[j]] && blocks[j] !== B.WATER) { blocks[j] = 0; meta[j] = 0; } }
+      if (grass && snowy && blocks[i] === B.GRASS_BLOCK) blocks[I(lx, h + 1, lz)] = B.SNOW;
     }
   }
   for (const pc of p.pieces) {
     const [x0, z0, x1, z1] = pc.rect;
     if (x0 - 1 > bx + 15 || x1 + 1 < bx || z0 - 1 > bz + 15 || z1 + 1 < bz) continue;
     const W = pieceWriter(ctx, pc), R = mulberry32((hash2(x0 * 3 + pc.f, z0, ctx.gen.seed + 9200) * 4294967296) | 0);
+    if (p.zombie) zombify(W, p.style, yOff);
     VPIECES[pc.type](W, S, R, pc, p);
   }
+}
+// a piece of an abandoned village: what it writes goes through Java's zombie rules, its villagers are zombie villagers
+// (who never despawn), and no iron golem or cats live there
+function zombify(W, style, yOff) {
+  const rules = ZOMBIE_RULES[style], set = W.set, spawn = W.spawn, y0 = W.p.y - yOff;
+  W.set = (lx, ly, lz, id, m) => {
+    const r = ruleProcess(rules, id, W.wx(lx, lz), y0 + ly, W.wz(lx, lz));
+    return r < 0 ? set(lx, ly, lz, id, m) : set(lx, ly, lz, r, r === B.BROWN_STAINED_GLASS_PANE ? m : 0);
+  };
+  W.spawn = (type, lx, ly, lz, opts) => {
+    if (type === 'iron_golem' || type === 'cat') return;
+    if (type === 'villager') { type = 'zombie_villager'; opts = { vtype: opts.vtype, prof: opts.prof || 'none' }; }
+    spawn(type, lx, ly, lz, opts);
+  };
+}
+// a villager of a village's pool (Java's: unemployed 10, nitwit 1, baby 1)
+function vVillager(W, S, R, lx, ly, lz) {
+  const r = R() * 12;
+  W.spawn('villager', lx, ly, lz, { vtype: S.vtype, prof: r < 1 ? 'nitwit' : 'none', baby: r >= 1 && r < 2 });
 }
 // a house: walls with log corners, windows, a door to the street, beds at the back, a job site
 function vHouse(W, S, R, pc, w, d, h, beds) {
@@ -2928,7 +2999,7 @@ function vHouse(W, S, R, pc, w, d, h, beds) {
   W.set(door, 3, -1, B.TORCH, M_TORCH(W.d(2)));
   // a villager or two per house; the spare beds let them grow the village
   const n = beds >= 3 && R() < 0.5 ? 2 : 1;
-  for (let k = 0; k < n; k++) W.spawn('villager', door, 1, 1 + k, { vtype: S.vtype, baby: R() < 0.15 });
+  for (let k = 0; k < n; k++) vVillager(W, S, R, door, 1, 1 + k);
 }
 const VPIECES = {
   center(W, S, R, pc) {
@@ -2969,7 +3040,7 @@ const VPIECES = {
     W.chest(w - 2, 1, 2, 3, 'village_weaponsmith');
     W.set(w - 2, 1, 3, B.ANVIL, W.d(0) & 3);
     W.set(1, h, 1, B.TORCH, M_TORCH(W.d(3)));
-    W.spawn('villager', 3, 1, 2, { vtype: S.vtype });
+    vVillager(W, S, R, 3, 1, 2);
   },
   farm(W, S, R, pc) { vFarm(W, S, R, 9, 7, [3]); },
   farm_l(W, S, R, pc) { vFarm(W, S, R, 13, 9, [3, 5]); },
@@ -2997,16 +3068,17 @@ const VPIECES = {
   },
 };
 // fields of crops with a water channel, bordered by logs; the composter is the farmer's job site
+// (Java plants its village farms with wheat, freshly sown, and its farm processors turn some into the style's other crops)
 function vFarm(W, S, R, w, d, water) {
   W.foundation(0, 0, w - 1, d - 1, B.DIRT);
   W.fill(0, 1, 0, w - 1, 2, d - 1, B.AIR);
-  const [crop, ripe] = CROPS[Math.floor(R() * CROPS.length)];
+  const yOff = typeof VY === 'number' && W.ctx.gen.v ? VY : 0;
   for (let lz = 0; lz < d; lz++) for (let lx = 0; lx < w; lx++) {
     if (lx === 0 || lx === w - 1 || lz === 0 || lz === d - 1) { W.set(lx, 0, lz, S.log, lx === 0 || lx === w - 1 ? W.axisZ : W.axisX); continue; }
     if (water.includes(lz)) { W.set(lx, 0, lz, B.WATER); continue; }
     W.set(lx, 0, lz, B.FARMLAND, 7);
-    const age = R() < 0.6 ? Math.floor(R() * (ripe + 1)) : ripe;
-    W.set(lx, 1, lz, crop, age);
+    const c = ruleProcess(S.crops, B.WHEAT, W.wx(lx, lz), W.p.y + 1 - yOff, W.wz(lx, lz));
+    W.set(lx, 1, lz, c < 0 ? B.WHEAT : c, 0);
   }
   W.set(0, 1, 0, B.COMPOSTER);
 }
@@ -3145,7 +3217,7 @@ function buildAncientCity(p, ctx) {
   }
 }
 
-STRUCTURES.push({ name: 'village', region: VILLAGE_REGION, reach: 100, plan: villagePlan, build: buildVillage });
+STRUCTURES.push({ name: 'village', region: VILLAGE_REGION, reach: 100, plan: villagePlan, build: buildVillage, beard: true });
 const CITY_STRUCT = { name: 'ancient_city', region: CITY_REGION, reach: 70, plan: ancientCityPlan, build: buildAncientCity };
 STRUCTURES.push(CITY_STRUCT);
 
@@ -3185,7 +3257,7 @@ function villageNear(gen, x, z, r) {
   return false;
 }
 function addStructure(name, region, o, build) {
-  STRUCTURES.push({ name, region, reach: Math.max(o.size[0], o.size[1]) + (o.pad || 2) + 8, opts: o, plan: placedPlan(Object.assign({ region }, o)), build: (p, ctx) => build(pieceWriter(ctx, p), mulberry32(p.seed), p, ctx) });
+  STRUCTURES.push({ name, region, reach: Math.max(o.size[0], o.size[1]) + (o.pad || 2) + 8, opts: o, beard: !!o.beard, plan: placedPlan(Object.assign({ region }, o)), build: (p, ctx) => build(pieceWriter(ctx, p), mulberry32(p.seed), p, ctx) });
 }
 const LAND = b => !OCEAN_BIOMES.has(b) && b !== BI.RIVER && b !== BI.FROZEN_RIVER;
 const ALL_LAND = new Set(BIOME_NAMES.map((n, i) => i).filter(i => i < BI.NETHER_WASTES || (i > BI.THE_END && i < BI.LUSH_CAVES)).filter(LAND));
@@ -3293,7 +3365,7 @@ addStructure('igloo', 320, { salt: 9631, avoid: 80, chance: 0.55, biomes: new Se
 });
 
 // pillager outpost: a tall dark oak watchtower, a caged iron golem and pillagers on guard
-addStructure('pillager_outpost', 448, { salt: 9641, avoid: 200, chance: 0.45, biomes: new Set([BI.PLAINS, BI.SUNFLOWER_PLAINS, BI.DESERT, BI.SAVANNA, BI.TAIGA, BI.SNOWY_PLAINS, BI.MEADOW, BI.GROVE, BI.CHERRY_GROVE, BI.SNOWY_SLOPES]), size: [13, 9], flat: 5 }, (W, R, p) => {
+addStructure('pillager_outpost', 448, { salt: 9641, avoid: 200, chance: 0.45, biomes: new Set([BI.PLAINS, BI.SUNFLOWER_PLAINS, BI.DESERT, BI.SAVANNA, BI.TAIGA, BI.SNOWY_PLAINS, BI.MEADOW, BI.GROVE, BI.CHERRY_GROVE, BI.SNOWY_SLOPES]), size: [13, 9], flat: 5, beard: true }, (W, R, p) => {
   const L = B.DARK_OAK_LOG, P = B.BIRCH_PLANKS, D = B.DARK_OAK_PLANKS;
   W.foundation(0, 0, 8, 8, B.COBBLESTONE);
   W.fill(0, 1, 0, 12, 24, 8, B.AIR);
@@ -4173,6 +4245,48 @@ const gkey = (gx, gy, gz) => ((gx + 2097152) * 4194304 + (gz + 2097152)) * 64 + 
 const LAVA_S = { l: -54, t: B.LAVA }, WATER_S = { l: 63, t: B.WATER };
 const AQ_SAMPLE = [0, 0, -2, -1, -1, -1, 0, -1, 1, -1, -3, 0, -2, 0, -1, 0, 1, 0, -2, 1, -1, 1, 0, 1, 1, 1];
 
+/* ---- the beardifier: the density structures add to the terrain around their buildings ---- */
+// Java's Beardifier for terrain_adaptation beard_thin: below a rigid piece's ground the terrain gains density and above it
+// loses some, fading over 12 blocks, so the ground rises under a building and opens above it; the same at a lighter
+// weight around the junctions where buildings meet their streets. A kernel of e^(-d²/16), y measured from half a block up.
+const BEARD_K = new Float32Array(13824);
+for (let k = 0; k < 24; k++) for (let i = 0; i < 24; i++) for (let j = 0; j < 24; j++) BEARD_K[k * 576 + i * 24 + j] = Math.exp(-((i - 12) ** 2 + (j - 12 + 0.5) ** 2 + (k - 12) ** 2) / 16);
+function beardK(x, y, z, toGround) {
+  const d = toGround + 0.5, e = x * x + d * d + z * z;
+  return -d / Math.sqrt(e / 2) / 2 * BEARD_K[(z + 12) * 576 + (x + 12) * 24 + (y + 12)];
+}
+// bd: { rig: [[minX, minZ, maxX, maxZ, groundY]...], jun: [[x, groundY, z]...] }; for each of a chunk's 4x4 cell columns
+// the pieces and junctions that reach it and the heights they reach (null where none do)
+function beardCells(cx, cz, bd) {
+  const out = new Array(16).fill(null), x0 = cx * 16, z0 = cz * 16;
+  for (let ci = 0; ci < 4; ci++) for (let ck = 0; ck < 4; ck++) {
+    const ax = x0 + ci * 4, az = z0 + ck * 4, bx = ax + 3, bz = az + 3, rig = [], jun = [];
+    let lo = INT_MAX, hi = INT_MIN;
+    for (const r of bd.rig) {
+      if (Math.max(0, r[0] - bx, ax - r[2]) > 11 || Math.max(0, r[1] - bz, az - r[3]) > 11) continue;
+      rig.push(r); lo = Math.min(lo, r[4] - 12); hi = Math.max(hi, r[4] + 11);
+    }
+    for (const j of bd.jun) {
+      if (j[0] - 12 > bx || j[0] + 11 < ax || j[2] - 12 > bz || j[2] + 11 < az) continue;
+      jun.push(j); lo = Math.min(lo, j[1] - 12); hi = Math.max(hi, j[1] + 11);
+    }
+    if (rig.length || jun.length) out[ci * 4 + ck] = { lo, hi, rig, jun };
+  }
+  return out;
+}
+function beardAt(c, x, y, z) {
+  let v = 0;
+  for (const r of c.rig) {
+    const dx = Math.max(0, r[0] - x, x - r[2]), dz = Math.max(0, r[1] - z, z - r[3]), p = y - r[4];
+    if (dx <= 11 && dz <= 11 && p >= -12 && p <= 11) v += beardK(dx, p, dz, p) * 0.8;
+  }
+  for (const j of c.jun) {
+    const a = x - j[0], b = y - j[1], e = z - j[2];
+    if (a >= -12 && a <= 11 && b >= -12 && b <= 11 && e >= -12 && e <= 11) v += beardK(a, b, e, b) * 0.4;
+  }
+  return v;
+}
+
 // the 2D values of a block column: shifts, continents, erosion, ridges, the terrain splines and the climate
 class Column {
   constructor(g, x, z) {
@@ -4475,8 +4589,9 @@ class Overworld {
   ensureField(C00, C01, C10, C11, gi, j) {
     for (const cc of [C00, C01, C10, C11]) { const a = cc.g[gi]; if (Number.isNaN(a[j])) this.cornerField(cc, gi, j); if (Number.isNaN(a[j + 1])) this.cornerField(cc, gi, j + 1); }
   }
-  noiseStage(cx, cz) {
-    const x0 = cx * 16, z0 = cz * 16;
+  // bd: the pieces of the structures around that adapt the terrain (beardCells), or null
+  noiseStage(cx, cz, bd) {
+    const x0 = cx * 16, z0 = cz * 16, bcs = bd ? beardCells(cx, cz, bd) : null;
     const cols = [];
     for (let i = 0; i < 5; i++) for (let k = 0; k < 5; k++) cols.push(this.cornerColumn(x0 + i * 4, z0 + k * 4));
     const blocks = new Uint16Array(98304);
@@ -4485,15 +4600,17 @@ class Overworld {
     for (let ci = 0; ci < 4; ci++) for (let ck = 0; ck < 4; ck++) {
       const C00 = cols[ci * 5 + ck], C01 = cols[ci * 5 + ck + 1], C10 = cols[(ci + 1) * 5 + ck], C11 = cols[(ci + 1) * 5 + ck + 1];
       const A = C00.g[0], Bq = C10.g[0], Cq = C01.g[0], Dq = C11.g[0], TA = C00.g[1], TB = C10.g[1], TC = C01.g[1], TD = C11.g[1];
+      const bc = bcs && bcs[ci * 4 + ck];
       for (let cj = 47; cj >= 0; cj--) {
-        const yc = -64 + cj * 8;
+        const yc = -64 + cj * 8, bAt = bc && yc + 7 >= bc.lo && yc <= bc.hi ? bc : null;
         // the interpolated values stay within the corners' range, so a cell whose corners all agree is decided at once
+        // (not where a structure's beard reaches)
         const dMax = Math.max(A[cj], A[cj + 1], Bq[cj], Bq[cj + 1], Cq[cj], Cq[cj + 1], Dq[cj], Dq[cj + 1]);
-        if (dMax < -1e-7 && yc >= airAbove) continue;
+        if (dMax < -1e-7 && yc >= airAbove && !bAt) continue;
         const dMin = Math.min(A[cj], A[cj + 1], Bq[cj], Bq[cj + 1], Cq[cj], Cq[cj + 1], Dq[cj], Dq[cj + 1]);
         const nMax = Math.max(TA[cj], TA[cj + 1], TB[cj], TB[cj + 1], TC[cj], TC[cj + 1], TD[cj], TD[cj + 1]);
         let ens = 0;
-        if (dMin > 1e-7 && nMax < -1e-7) {
+        if (dMin > 1e-7 && nMax < -1e-7 && !bAt) {
           // solid all through, without noodle caves: stone, unless an ore vein can pass (|vein toggle| reaching 0.4)
           let plain = yc > 50 || yc + 7 < -60;
           if (!plain) {
@@ -4524,7 +4641,7 @@ class Overworld {
                 if (!(ens & 4)) { this.ensureField(C00, C01, C10, C11, 2, cj); this.ensureField(C00, C01, C10, C11, 3, cj); this.ensureField(C00, C01, C10, C11, 4, cj); ens |= 4; }
                 noodle = ip8(C00.g[2], C10.g[2], C01.g[2], C11.g[2], cj, d, e, f) + Math.max(Math.abs(ip8(C00.g[3], C10.g[3], C01.g[3], C11.g[3], cj, d, e, f)), Math.abs(ip8(C00.g[4], C10.g[4], C01.g[4], C11.g[4], cj, d, e, f))) * 1.5;
               }
-              const dens = Math.min(sq, noodle) + 0;
+              const dens = Math.min(sq, noodle) + (bAt ? beardAt(bAt, x, y, z) : 0);
               let st;
               if (dens <= 0 && y >= airAbove) st = B.AIR;
               else {
@@ -4968,8 +5085,8 @@ class Overworld {
   }
 
   // the noise, surface and carver stages of a chunk
-  terrain(cx, cz) {
-    const blocks = this.noiseStage(cx, cz), hm = this.surfaceStage(cx, cz, blocks);
+  terrain(cx, cz, bd) {
+    const blocks = this.noiseStage(cx, cz, bd), hm = this.surfaceStage(cx, cz, blocks);
     this.carveStage(cx, cz, blocks, hm);
     return { blocks, hm };
   }
@@ -5871,7 +5988,23 @@ Object.assign(VanillaWorldGen.prototype, {
   seaLevel: VSEA,                                    // the sea level the features and starts read (superflat: -63)
   deco: true,                                        // the decoration steps run (superflat presets may leave them out)
   // the terrain and its heightmap: the noise generator's (superflat worlds stack their layers)
-  terrain(cx, cz) { return this.v.terrain(cx, cz); },
+  terrain(cx, cz) { return this.v.terrain(cx, cz, this.beardOf(cx, cz)); },
+  // the buildings around chunk (cx, cz) of the structures that adapt the terrain to them, in vanilla heights (Java's
+  // Beardifier.forStructuresInChunk: the pieces within 12 blocks)
+  beardOf(cx, cz) {
+    const x0 = cx * 16 - 12, z0 = cz * 16 - 12, x1 = cx * 16 + 27, z1 = cz * 16 + 27, rig = [], jun = [];
+    for (const Sd of STRUCTURES) {
+      if (!Sd.beard || this.noStruct.has(Sd.name) || !VS.SETS[Sd.name]) continue;
+      const [rx0, rx1] = this.vRegions(Sd.name, (x0 - Sd.reach) >> 4, (x1 + Sd.reach) >> 4), [rz0, rz1] = this.vRegions(Sd.name, (z0 - Sd.reach) >> 4, (z1 + Sd.reach) >> 4);
+      for (let rz = rz0; rz <= rz1; rz++) for (let rx = rx0; rx <= rx1; rx++) {
+        const p = this.vPlan(Sd.name, rx, rz);
+        if (!p || !p.beard || p.bbox[0] - 12 > x1 || p.bbox[2] + 12 < x0 || p.bbox[1] - 12 > z1 || p.bbox[3] + 12 < z0) continue;
+        for (const r of p.beard.rig) if (r[0] <= x1 && r[2] >= x0 && r[1] <= z1 && r[3] >= z0) rig.push([r[0], r[1], r[2], r[3], r[4] - VY]);
+        for (const j of p.beard.jun) if (j[0] >= x0 && j[0] <= x1 && j[2] >= z0 && j[2] <= z1) jun.push([j[0], j[1] - VY, j[2]]);
+      }
+    }
+    return rig.length || jun.length ? { rig, jun } : null;
+  },
   cityY: -51 + VY,                                   // the floor of an ancient city
   cityOk(x, z) { return this.v.biomeAt(x, -27, z) === BI.DEEP_DARK; },
   trialY: h => -40 + VY + Math.floor(h * 21),        // trial chambers start between y -40 and -20
@@ -6239,12 +6372,14 @@ Object.assign(VanillaWorldGen.prototype, {
     p = null;
     if (st && Sd) {
       const h = (i) => hash2(st.cx, st.cz, this.seed + i);
-      if (name === 'village') p = planVillageLayout(this, st.X, st.Z, st.type);
+      if (name === 'village') p = planVillageLayout(this, st.X, st.Z, st.type, st.abandoned);
       else if (name === 'ancient_city') p = ancientCityAt(this, st.X, st.Z);
       else if (name === 'mineshaft') p = mineshaftAt(st.X, this.mineY(h(1)), st.Z, h(2));
       else if (name === 'trial_chambers') p = trialChambersAt(st.X, st.y + VY, st.Z, h(3));
       else if (Sd.opts) p = placedPlanAt(Sd.opts, this, st.X, st.Z, h(4), h(5), h(6), false);
       if (p) { p.kind = name; p.build = ctx => Sd.build(p, ctx); if (!p.rects) p.rects = []; p.start = st; }
+      // a single-piece structure that adapts the terrain (beard_thin): its footprint, with its ground on its floor
+      if (p && Sd.beard && !p.beard && p.rect) p.beard = { rig: [[p.rect[0], p.rect[1], p.rect[2], p.rect[3], p.y + 1]], jun: [] };
     }
     this.plans.set(k, p);
     return p;

@@ -176,7 +176,8 @@ versions of Blockcraft have it on). Without it, only the commands any Java playe
   litter, pale moss, ores, lakes, springs, geodes, dungeons, icebergs, ice spikes, coral reefs, kelp forests,
   bamboo, vines, bee nests, glow lichen, moss and dripleaves in lush caves, dripstone, sulfur spikes and potent
   sulfur pools in the sulfur caves, and sculk in the deep dark, each where Java Edition puts it for the seed (see below).
-- **Structures**: villages in five styles with villagers, an iron golem, cats and loot; ancient
+- **Structures**: villages in five styles with villagers, an iron golem, cats and loot (now and then an
+  abandoned one, taken over by zombie villagers and cobwebs); ancient
   cities in the deep dark; desert pyramids and wells, jungle temples, swamp huts, igloos, pillager
   outposts, ocean monuments, trail ruins, ruined portals, shipwrecks, buried treasure, dungeons,
   mineshafts, trial chambers and strongholds; Nether fortresses and bastion remnants; End cities
@@ -201,7 +202,9 @@ decoration of 26.3):
   jungle temples, swamp huts, igloos, pillager outposts, ocean monuments, shipwrecks, ruined
   portals, ancient cities, trail ruins, trial chambers, buried treasure, mineshafts, desert wells
   and all 128 strongholds start where Java Edition starts them, so `/locate` and seed maps agree.
-  The buildings themselves are Blockcraft's own designs, not Mojang's.
+  The buildings themselves are Blockcraft's own designs, not Mojang's, but they sit on the land the way Java's
+  do: villages and pillager outposts shape the ground around their buildings with Java's own terrain adaptation,
+  and abandoned villages turn up where Java's do.
 
 How it was checked: the biomes against [cubiomes](https://github.com/Cubitect/cubiomes) for tens
 of thousands of positions on several seeds (Large Biomes too, with 1.21's layout), and since Part 64 26.3's
@@ -894,6 +897,19 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   longer to make than before: the ground around you appears about as quickly as it used to, but farther chunks fill in
   more slowly when a world is first loaded (each chunk's terrain and decoration is worked out once and shared between
   the background workers).
+- **Villages like Java's** (Part 65): villages and pillager outposts now shape the land around their buildings
+  the way Java Edition does, with the terrain adaptation Java uses for them: the ground rises in a smooth mound under
+  a house on a slope and opens up above one set into a hillside, where houses used to stand on cobblestone pillars or
+  in boxes cut out of the hill. Like Java's, a village is laid out on the water's surface when it starts by a lake or
+  a river, so it no longer shrinks to a lone well there; streets cross rivers on planks and stop at the shore of wider
+  water. Streets keep a few grass blocks in them like Java's (one in ten in the plains, one in five in savanna, taiga
+  and snowy villages; in snowy villages they get a layer of snow). Farms are sown with wheat, with carrots, potatoes and beetroots
+  (or melons, pumpkins and potatoes, depending on the style) mixed in at Java's odds for each style, all just
+  planted. A house's villager is a nitwit one time in twelve and a baby one time in twelve, as in Java. And one
+  village in fifty is **abandoned**, where Java has its abandoned villages: zombie villagers instead of villagers
+  (they never despawn), no iron golem or cats, no doors or torches, cobwebs, mossy cobblestone and brown, grimy
+  windows, at the odds of Java's abandoned villages. New chunks of worlds made before this version follow the new
+  rules, so the ground can step where old and new chunks meet near a village.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
