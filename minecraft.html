@@ -10448,7 +10448,12 @@ defI('shears', { stack: 1, dur: 238, tool: { type: 'shears', lvl: 0, speed: 1.5,
 defI('brush', { stack: 1, dur: 64, ench: 1 });
 defI('name_tag'); defI('lead');
 defI('compass', { compass: true }); defI('recovery_compass', { compass: true, rarity: 1 }); defI('clock', { clock: true }); defI('spyglass', { stack: 1 });
-defI('map', { display: 'Empty Map' }); defI('filled_map', { display: 'Map' });
+defI('map', { display: 'Empty Map' }); defI('filled_map', { display: 'Map', map: true });
+// 26.3's explorer maps are items of their own: filled maps with their own picture and name
+const EXPLORER_MAP_ITEMS = ['ocean_monument_map', 'woodland_mansion_map', 'buried_trial_chambers_map', 'jungle_pyramid_map', 'swamp_hut_map', 'desert_village_map', 'plains_village_map',
+  'savanna_village_map', 'snowy_village_map', 'taiga_village_map', 'buried_treasure_map', 'buried_ancient_city_map', 'buried_mineshaft_map', 'desert_pyramid_map', 'abandoned_camp_map', 'warm_ocean_ruins_map'];
+for (const n of EXPLORER_MAP_ITEMS) defI(n, { map: true });
+const isFilledMap = id => !!(ITEMS[id] && ITEMS[id].map);
 defI('writable_book', { stack: 1, display: 'Book and Quill' }); defI('written_book', { stack: 16 });
 defI('ender_pearl', { stack: 16, throw: 'pearl' });
 defI('ender_eye', { display: 'Eye of Ender' });
@@ -12658,6 +12663,16 @@ TEXGEN.push(function texItems() {
   IT('spyglass', (d) => { for (let i = 0; i < 9; i++) { sp(d, 3 + i, 12 - i, [200, 120, 90]); sp(d, 4 + i, 12 - i, [170, 96, 70]); } rect(d, 11, 2, 13, 4, [200, 160, 240]); });
   IT('map', (d, r) => rect(d, 2, 2, 13, 13, (x, y) => (x === 2 || y === 2 || x === 13 || y === 13) ? [200, 180, 130] : mul([230, 216, 170], 0.92 + r() * 0.08)));
   IT('filled_map', (d, r) => { rect(d, 2, 2, 13, 13, (x, y) => (x === 2 || y === 2 || x === 13 || y === 13) ? [200, 180, 130] : mul([110, 160, 90], 0.9 + r() * 0.12)); dline(d, 4, 10, 11, 5, [80, 110, 200]); });
+  // explorer maps: parchment with the mark of what they lead to
+  const MAP_MARKS = { ocean_monument_map: [40, 120, 200], woodland_mansion_map: [90, 60, 40], buried_trial_chambers_map: [196, 108, 72], jungle_pyramid_map: [70, 140, 50], swamp_hut_map: [60, 90, 60],
+    desert_village_map: [220, 190, 110], plains_village_map: [120, 170, 80], savanna_village_map: [180, 150, 70], snowy_village_map: [230, 240, 250], taiga_village_map: [60, 110, 80],
+    buried_treasure_map: [200, 40, 30], buried_ancient_city_map: [30, 60, 80], buried_mineshaft_map: [140, 110, 70], desert_pyramid_map: [210, 170, 90], abandoned_camp_map: [150, 90, 60], warm_ocean_ruins_map: [60, 170, 170] };
+  for (const n of EXPLORER_MAP_ITEMS) IT(n, (d, r) => {
+    rect(d, 2, 2, 13, 13, (x, y) => (x === 2 || y === 2 || x === 13 || y === 13) ? [200, 180, 130] : mul([226, 210, 162], 0.92 + r() * 0.08));
+    const c = MAP_MARKS[n];
+    if (n === 'buried_treasure_map') { dline(d, 5, 5, 10, 10, c); dline(d, 10, 5, 5, 10, c); }
+    else { rect(d, 6, 7, 9, 10, c); rect(d, 7, 5, 8, 6, mul(c, 0.8)); }
+  });
   IT('writable_book', (d) => { fillPoly(d, [[2, 3], [12, 2], [14, 12], [4, 14]], [130, 72, 40]); dline(d, 13, 2, 7, 10, [240, 240, 240]); sp(d, 6, 11, [30, 30, 30]); });
   IT('written_book', (d) => { fillPoly(d, [[2, 3], [12, 2], [14, 12], [4, 14]], [130, 72, 40]); rect(d, 6, 5, 10, 6, [240, 200, 60]); });
   IT('enchanted_book', (d) => { fillPoly(d, [[2, 3], [12, 2], [14, 12], [4, 14]], [120, 40, 140]); fillPoly(d, [[4, 12], [13.5, 10.5], [14, 12], [4, 14]], [236, 232, 220]); rect(d, 6, 5, 9, 6, [240, 200, 60]); });
@@ -18471,18 +18486,25 @@ class Mob extends Entity {
     let yaw = (this.pyaw + (this.bodyYaw - this.pyaw) * a);
     const hurt = this.hurtTime > 0 || this.deathTime > 0;
     const tint = hurt ? [1, 0.45, 0.45, 1] : [1, 1, 1, 1];
-    const tilt = this.deathTime > 0 ? Math.min(1, (this.deathTime + a) / 15) * Math.PI / 2 : 0;
+    let tilt = deathRoll(this, a);
+    const at0 = [p[0], p[1] + (this.yOffset || 0), p[2]];
+    // a roll of the whole body (a cat lying down): [angle, then a shift to its left, up and forward]
+    const roll = this.renderRoll && this.renderRoll(a);
+    if (roll) { tilt += roll[0]; const c = Math.cos(yaw), s = Math.sin(yaw); at0[0] += roll[1] * c + roll[3] * s; at0[1] += roll[2]; at0[2] += roll[3] * c - roll[1] * s; }
     const light = this.T.glow ? [15, 15] : this.lightAt();
     const sc = (this.renderScale ? this.renderScale(a) : 1);
     const skins = this.skins();
     if (this.data.armor) for (const s of armorPasses(this.data.armor, md)) skins.push(s);
-    const at = drawMob(r, md, skins, [p[0], p[1] + (this.yOffset || 0), p[2]], yaw, st, tint, light, sc, tilt);
+    const at = drawMob(r, md, skins, at0, yaw, st, tint, light, sc, tilt);
     if (this.data.hand && md.parts.some(q => q.n === 'right_arm')) drawMobItem(r, this.game, this.data.hand, at, 'right_arm', [-1, 10, 0], light);
     if ((this.data.offhand || this.data.hand2) && md.parts.some(q => q.n === 'left_arm')) drawMobItem(r, this.game, this.data.hand2 || this.data.offhand, at, 'left_arm', [1, 10, 0], light);
     if (this.renderExtra) this.renderExtra(r, a, p, yaw, st, light, at);
   }
   savePrev() { this.px = this.x; this.py = this.y; this.pz = this.z; this.pyaw = this.bodyYaw !== undefined ? this.bodyYaw : this.yaw; }
 }
+// LivingEntityRenderer.setupRotations: a dying mob tips over onto its left side, quickly at first (a quarter turn times
+// sqrt(1.6 (deathTime - 1) / 20), at most 1); in drawMob's terms a negative roll
+const deathRoll = (m, a) => m.deathTime > 0 ? -Math.min(1, Math.sqrt(Math.max(0, (m.deathTime + a - 1) / 20 * 1.6))) * Math.PI / 2 : 0;
 const MOB_INIT = {};      // type -> (mob, opts) set up variants, gear, size
 const MOB_INTERACT = {};  // type -> (mob, player, held, name) -> handled
 const MOB_SKINS = {};     // type -> (mob) -> skin passes
@@ -18505,6 +18527,8 @@ const pick = (R, list) => list[Math.floor(R() * list.length)];
 const biomeAt = (g, x, z) => { const c = g.world.getChunk(Math.floor(x) >> 4, Math.floor(z) >> 4); return c && c.biomes ? c.biomes[((Math.floor(z) & 15) << 4) | (Math.floor(x) & 15)] : -1; };
 
 /* ---------------- goals ---------------- */
+// FollowOwnerGoal's start and stop distances: Cat (10, 5), Wolf (10, 2), Parrot (5, 1)
+const FOLLOW_DIST = { cat: [10, 5], wolf: [10, 2], parrot: [5, 1] };
 const GOALS = {
   // run away after being hurt
   panic(m) {
@@ -18776,18 +18800,36 @@ const GOALS = {
     m.data.pitch = -Math.atan2(dy, Math.hypot(dx, dz)) * 0.5;
     return true;
   },
+  // FollowOwnerGoal: it sets off once its owner is startDistance away and keeps on until within stopDistance (FOLLOW_DIST),
+  // finding its way again every 10 ticks; 12 blocks or more away it tries instead to turn up next to its owner
+  // (TamableAnimal.teleportToAroundBlockPos: 10 tries, 2 or 3 blocks out and a block up or down, somewhere it can stand out of
+  // water, not on leaves unless it flies). Not while told to sit, on a lead or riding, nor for an owner in spectator mode
   followOwner(m) {
-    const o = m.ownerEntity();
-    if (!o || o.dead || m.data.sitting || !m.data.tame) return false;
-    const d = m.distTo(o);
-    if (d > 12 && o.onGround && m.game.world.dim === (m.dim || m.game.world.dim)) {
-      for (let k = 0; k < 10; k++) { const x = Math.floor(o.x + (Math.random() - 0.5) * 6), z = Math.floor(o.z + (Math.random() - 0.5) * 6), y = Math.floor(o.y); if (NAV.stand(m.game.world, x, y, z, m)) { m.x = m.px = x + 0.5; m.y = m.py = y; m.z = m.pz = z + 0.5; m.nav = null; break; } }
-      return true;
-    }
-    if (d < (m.type === 'parrot' ? 3 : 4)) return false;
-    if (m.T.flying) { const dx = o.x - m.x, dy = o.y + 2 - m.y, dz = o.z - m.z, l = Math.hypot(dx, dy, dz) || 1; m.move = [dx / l, dz / l, m.T.run, false, dy / l]; }
-    else m.goTo(o.x, o.y, o.z, m.T.run, 2);
-    m.lookAt(o.x, o.y + 1.5, o.z);
+    const o = m.ownerEntity(), w = m.game.world;
+    if (!o || o.dead || o.mode === 3 || m.data.sitting || !m.data.tame || m.leashed || m.vehicle) { m._follow = 0; return false; }
+    const d = m.distTo(o), [start, stop] = FOLLOW_DIST[m.type] || FOLLOW_DIST.wolf;
+    if (!m._follow) { if (d < start) return false; m._follow = 1; m._followT = 0; }
+    else if (d <= stop) { m._follow = 0; return false; }
+    const far = d >= 12;
+    if (!far) m.lookAt(o.x, o.y + 1.5, o.z);
+    if (--m._followT <= 0) {
+      m._followT = 10;
+      if (far) {
+        const bx = Math.floor(o.x), by = Math.floor(o.y), bz = Math.floor(o.z);
+        if (w.dim === (m.dim || w.dim)) for (let k = 0; k < 10; k++) {
+          const dx = Math.floor(Math.random() * 7) - 3, dz = Math.floor(Math.random() * 7) - 3;
+          if (Math.abs(dx) < 2 && Math.abs(dz) < 2) continue;
+          const x = bx + dx, y = by + Math.floor(Math.random() * 3) - 1, z = bz + dz;
+          if (!NAV.stand(w, x, y, z, m) || w.getBlock(x, y, z) === B.WATER || (!m.T.flying && BLK[w.getBlock(x, y - 1, z)].leaves)) continue;
+          m.x = m.px = x + 0.5; m.y = m.py = y; m.z = m.pz = z + 0.5; m.nav = null;
+          break;
+        }
+        return true;
+      }
+      // PathNavigation.moveTo(entity): a path that ends next to the owner (accuracy 1)
+      if (!m.T.flying) m.goTo(o.x, o.y, o.z, m.T.run);
+    } else if (!m.T.flying && m.nav && !m.navDone()) m.followPath();
+    if (m.T.flying && !far) { const dx = o.x - m.x, dy = o.y + 1 - m.y, dz = o.z - m.z, l = Math.hypot(dx, dy, dz) || 1; m.move = [dx / l, dz / l, m.T.run, false, dy / l]; }
     return true;
   },
   // water mobs swim around and stay in water
@@ -27900,7 +27942,7 @@ Game.prototype.dispense = function (x, y, z) {
   const front = w.getBlock(fx, fy, fz);
   const giveBack = (nid) => { if (st.count === 1) be.items[i] = { id: nid, count: 1 }; else { take(); const left = this.insertItem(be, { id: nid, count: 1 }); if (left) this.dropItem(px, py, pz, left); } w.setBE(x, y, z, be); };
   if (id === B.DROPPER) {
-    const target = w.getBE(fx, fy, fz);
+    const target = this.containerAt ? this.containerAt(fx, fy, fz) : w.getBE(fx, fy, fz);
     if (target && target.items) { if (!this.insertItem(target, { id: st.id, count: 1, tag: st.tag })) { take(); w.setBE(fx, fy, fz, target); } return; }
   } else {
     const ex = typeof dispenseExtra === 'function' ? dispenseExtra(this, { x, y, z, d, fx, fy, fz, px, py, pz, st, it, i, be, take, giveBack }) : false;
@@ -28027,7 +28069,7 @@ Game.prototype.tickHopper = function (x, y, z) {
   let moved = false;
   // push where it points first (down, or sideways: into the side of a furnace goes the fuel)
   const f = hopperFace(w.getMeta(x, y, z)), tx = x + DX[f], ty = y + DY[f], tz = z + DZ[f], side = f !== 3;
-  const below = w.getBE(tx, ty, tz), bid = w.getBlock(tx, ty, tz);
+  const below = this.containerAt ? this.containerAt(tx, ty, tz) : w.getBE(tx, ty, tz), bid = w.getBlock(tx, ty, tz);
   if (below && below.items) {
     for (let i = 0; i < be.items.length && !moved; i++) {
       const s = be.items[i];
@@ -28039,7 +28081,7 @@ Game.prototype.tickHopper = function (x, y, z) {
     for (let i = 0; i < be.items.length && !moved; i++) { const s = be.items[i]; if (s && this.compost && this.compost(x, y - 1, z, s)) { s.count--; if (!s.count) be.items[i] = null; moved = true; } }
   }
   // then pull from above
-  const above = w.getBE(x, y + 1, z);
+  const above = this.containerAt ? this.containerAt(x, y + 1, z) : w.getBE(x, y + 1, z);
   if (above && above.items) {
     const from = above.type === 'furnace' ? [2] : above.items.map((s, i) => i);
     for (const i of from) {
@@ -28444,7 +28486,7 @@ class Minecart extends Vehicle {
   // hopper minecarts pull items from the container above and from the ground
   suck() {
     const g = this.game, w = g.world, x = Math.floor(this.x), y = Math.floor(this.y), z = Math.floor(this.z);
-    const above = w.getBE(x, y + 1, z), host = { items: this.data.items };
+    const above = g.containerAt ? g.containerAt(x, y + 1, z) : w.getBE(x, y + 1, z), host = { items: this.data.items };
     if (above && above.items) {
       for (let i = 0; i < above.items.length; i++) { const s = above.items[i]; if (!s) continue; if (!g.insertItem(host, { id: s.id, count: 1, tag: s.tag, dmg: s.dmg })) { s.count--; if (!s.count) above.items[i] = null; w.setBE(x, y + 1, z, above); } break; }
       return;
@@ -29264,7 +29306,7 @@ Game.prototype.tickMaps = function () {
   const p = this.player;
   if (!p || p.dead) return;
   for (const st of [p.inv[p.sel], p.offhand[0]]) {
-    if (!st || st.id !== I.FILLED_MAP || !st.tag) continue;
+    if (!st || !isFilledMap(st.id) || !st.tag) continue;
     const map = this.mapById(st.tag.map);
     if (map && !map.locked && map.dim === this.world.dim) this.updateMap(map, p);
   }
@@ -29291,10 +29333,10 @@ Game.prototype.biomePreview = function (map) {
   map.ver = (map.ver || 0) + 1;
 };
 // ExplorationMapFunction: the structure it looks for (villages of one style), the marker, the zoom (2 unless the loot says otherwise)
-const EXPLORER = { buried_treasure: { scale: 1, mark: 'red_x', name: 'Buried Treasure Map' }, trial_chambers: { scale: 2, mark: 'trial_chambers', name: 'Trial Explorer Map' },
-  ocean_monument: { scale: 2, mark: 'monument', name: 'Ocean Explorer Map' }, woodland_mansion: { scale: 2, mark: 'mansion', name: 'Woodland Explorer Map' },
-  jungle_temple: { scale: 2, mark: 'jungle_temple', name: 'Jungle Explorer Map' }, swamp_hut: { scale: 2, mark: 'swamp_hut', name: 'Swamp Explorer Map' } };
-for (const st of ['desert', 'plains', 'savanna', 'snowy', 'taiga']) EXPLORER['village_' + st] = { scale: 2, struct: 'village', style: st, mark: 'village_' + st, name: titleCase(st) + ' Village Map' };
+const EXPLORER = { buried_treasure: { scale: 1, mark: 'red_x', item: 'buried_treasure_map' }, trial_chambers: { scale: 2, mark: 'trial_chambers', item: 'buried_trial_chambers_map' },
+  ocean_monument: { scale: 2, mark: 'monument', item: 'ocean_monument_map' }, woodland_mansion: { scale: 2, mark: 'mansion', item: 'woodland_mansion_map' },
+  jungle_temple: { scale: 2, mark: 'jungle_temple', item: 'jungle_pyramid_map' }, swamp_hut: { scale: 2, mark: 'swamp_hut', item: 'swamp_hut_map' } };
+for (const st of ['desert', 'plains', 'savanna', 'snowy', 'taiga']) EXPLORER['village_' + st] = { scale: 2, struct: 'village', style: st, mark: 'village_' + st, item: st + '_village_map' };
 Game.prototype.createExplorerMap = function (dest, x, z) {
   const E = EXPLORER[dest], name = E && E.struct || dest, S = STRUCTURES.find(q => q.name === name);
   if (!S || !E || this.world.dim !== 'overworld') return null;
@@ -29307,7 +29349,7 @@ Game.prototype.createExplorerMap = function (dest, x, z) {
 };
 // maps made at a table or found in loot are finished once they reach the player: { post: 'zoom' | 'lock' | 'explore' }
 Game.prototype.resolveMapStack = function (st) {
-  if (!st || st.id !== I.FILLED_MAP || !st.tag || !st.tag.post) return;
+  if (!st || !isFilledMap(st.id) || !st.tag || !st.tag.post) return;
   const t = st.tag, p = this.player, m = this.mapById(t.map);
   if (t.post === 'zoom' && m) t.map = this.createMap(m.x, m.z, Math.min(4, m.scale + 1), m.dim);
   else if (t.post === 'lock' && m) {
@@ -29465,7 +29507,7 @@ function mapCanvas(g, id) {
 // first person: with the other hand free both hands hold it, and looking down raises it into view (vanilla's poses)
 const _renderHandSideMap = Game.prototype.renderHandSide;
 Game.prototype.renderHandSide = function (held, s, alpha, l) {
-  if (held && held.id === I.FILLED_MAP) return this.renderHeldMap(held, s, alpha, l);
+  if (held && isFilledMap(held.id)) return this.renderHeldMap(held, s, alpha, l);
   return _renderHandSideMap.call(this, held, s, alpha, l);
 };
 Game.prototype.renderHeldMap = function (held, s, alpha, l) {
@@ -29510,13 +29552,14 @@ Game.prototype.pushMapArm = function (r, m, side, l) {
 /* ---------------- the cartography table ---------------- */
 // a filled map with paper zooms out, with an empty map copies, with a glass pane locks
 SCREEN_LOGIC.cartography = {
-  accept(ui, c, i, st) { if (c !== 'local') return true; return i === 0 ? st.id === I.FILLED_MAP : st.id === I.PAPER || st.id === I.MAP || st.id === I.GLASS_PANE; },
+  accept(ui, c, i, st) { if (c !== 'local') return true; return i === 0 ? isFilledMap(st.id) : st.id === I.PAPER || st.id === I.MAP || st.id === I.GLASS_PANE; },
   mode(ui) {
     const [a, b] = ui.inv.local;
-    if (!a || a.id !== I.FILLED_MAP || !b) return null;
+    if (!a || !isFilledMap(a.id) || !b) return null;
     const m = ui.game.mapById(a.tag && a.tag.map);
     if (!m) return null;
-    if (b.id === I.PAPER) return m.locked || m.scale >= 4 ? 'bad' : 'zoom';
+    // only a plain map zooms out (#extendable_maps); an explorer map copies and locks as itself
+    if (b.id === I.PAPER) return m.locked || m.scale >= 4 || a.id !== I.FILLED_MAP ? 'bad' : 'zoom';
     if (b.id === I.MAP) return 'clone';
     if (b.id === I.GLASS_PANE) return m.locked ? 'bad' : 'lock';
     return null;
@@ -29524,8 +29567,8 @@ SCREEN_LOGIC.cartography = {
   result(ui) {
     const md = this.mode(ui), a = ui.inv.local[0];
     if (!md || md === 'bad') return null;
-    if (md === 'clone') return { id: I.FILLED_MAP, count: 2, tag: { map: a.tag.map } };
-    return { id: I.FILLED_MAP, count: 1, tag: { map: a.tag.map, post: md } };
+    if (md === 'clone') return { id: a.id, count: 2, tag: { map: a.tag.map } };
+    return { id: a.id, count: 1, tag: { map: a.tag.map, post: md } };
   },
   take(ui) {
     for (let k = 0; k < 2; k++) { const s = ui.inv.local[k]; if (!s) continue; s.count--; if (s.count <= 0) ui.inv.local[k] = null; }
@@ -29541,12 +29584,12 @@ SCREEN_LOGIC.cartography = {
   update(ui) {
     const cv = ui._cart;
     if (!cv) return;
-    const a = ui.inv.local[0], md = this.mode(ui), id = a && a.id === I.FILLED_MAP && a.tag ? a.tag.map : null, m = ui.game.mapById(id);
+    const a = ui.inv.local[0], md = this.mode(ui), id = a && isFilledMap(a.id) && a.tag ? a.tag.map : null, m = ui.game.mapById(id);
     const key = id + ':' + md + ':' + (m ? m.ver : -1) + ':' + (ui.inv.local[1] ? ui.inv.local[1].id : 0);
     if (key === ui._cartKey) return;
     ui._cartKey = key;
     const c = cv.getContext('2d'); c.imageSmoothingEnabled = false; c.clearRect(0, 0, 128, 128);
-    if (!a || a.id !== I.FILLED_MAP) return;
+    if (!a || !isFilledMap(a.id)) return;
     const pic = mapCanvas(ui.game, id);
     if (md === 'zoom') { c.drawImage(pic, 0, 0, 128, 128); c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(0, 0, 128, 128); c.drawImage(pic, 24, 24, 80, 80); }
     else if (md === 'clone') { c.drawImage(pic, 0, 0, 100, 100); c.drawImage(pic, 28, 28, 100, 100); }
@@ -29565,9 +29608,10 @@ SCREEN_LOGIC.cartography = {
 
 /* ---------------- crafting with maps ---------------- */
 // a filled map and empty maps: that many more copies of it
+// (map_cloning: any of #clonable_maps, copied as itself)
 for (let k = 1; k <= 8; k++) {
-  shapeless('filled_map', k + 1, ['filled_map', ...new Array(k).fill('map')]);
-  RECIPES[RECIPES.length - 1].fn = (grid, out) => { const src = grid.find(s => s && s.id === I.FILLED_MAP); if (!src || !src.tag || src.tag.map === undefined || src.tag.post) return null; out.tag = { map: src.tag.map }; return out; };
+  shapeless('filled_map', k + 1, [ids(['filled_map', ...EXPLORER_MAP_ITEMS]), ...new Array(k).fill('map')]);
+  RECIPES[RECIPES.length - 1].fn = (grid, out) => { const src = grid.find(s => s && isFilledMap(s.id)); if (!src || !src.tag || src.tag.map === undefined || src.tag.post) return null; out.id = src.id; out.tag = { map: src.tag.map }; return out; };
 }
 // paper all around a filled map zooms it out a level
 shaped('filled_map', 1, ['PPP', 'PMP', 'PPP'], { P: 'paper', M: 'filled_map' });
@@ -29588,7 +29632,7 @@ stackName = function (st) {
 const _tooltipLinesM = tooltipLines;
 tooltipLines = function (st) {
   const out = _tooltipLinesM(st);
-  if (st.id !== I.FILLED_MAP) return out;
+  if (!isFilledMap(st.id)) return out;
   const g = window.game, t = st.tag || {}, m = g ? g.mapById(t.map) : null, gray = '#aaaaaa', extra = [];
   if (m && (m.locked || t.post === 'lock')) extra.push(['Locked', gray]);
   if (OPTIONS.advTooltips) {
@@ -29605,12 +29649,12 @@ if (LOOT.shipwreck_map) LOOT.shipwreck_map[0][1] = [['filled_map', 1, 1, 1, { ex
 const _lootStackM = lootStack;
 lootStack = function (e, R) {
   const x = e[4];
-  if (x && x.explore) return { id: I.FILLED_MAP, count: 1, tag: { post: 'explore', dest: x.explore, name: EXPLORER[x.explore].name } };
+  if (x && x.explore) return { id: itemOf(EXPLORER[x.explore].item), count: 1, tag: { post: 'explore', dest: x.explore } };
   return _lootStackM(e, R);
 };
 const _makeOfferM = makeOffer;
 makeOffer = function (tp, R) {
-  if (tp.kind === 'explorer') return { buy: [I.EMERALD, tp.price], buy2: [I.COMPASS, 1], sell: { id: I.FILLED_MAP, count: 1, tag: { post: 'explore', dest: tp.item, name: EXPLORER[tp.item].name } }, uses: 0, max: tp.uses, xp: tp.xp };
+  if (tp.kind === 'explorer') return { buy: [I.EMERALD, tp.price], buy2: [I.COMPASS, 1], sell: { id: itemOf(EXPLORER[tp.item].item), count: 1, tag: { post: 'explore', dest: tp.item } }, uses: 0, max: tp.uses, xp: tp.xp };
   return _makeOfferM(tp, R);
 };
 
@@ -29746,7 +29790,7 @@ class ItemFrame extends Hanging {
     this.savePrev();
   }
   center() { const d = HANG_DIRS[this.data.f]; return [this.data.bx + 0.5 - d[0] * 0.46875, this.data.by + 0.5 - d[1] * 0.46875, this.data.bz + 0.5 - d[2] * 0.46875]; }
-  isMap() { const it = this.data.item; return !!(it && it.id === I.FILLED_MAP); }
+  isMap() { const it = this.data.item; return !!(it && isFilledMap(it.id)); }
   halfW() { return this.isMap() ? 0.5 : 0.375; }
   halfH() { return this.halfW(); }
   survives() { const [x, y, z] = this.wallPos(), id = this.game.world.getBlock(x, y, z); return !!(SOLID[id] || SHAPE[id] === SH.DIODE); }
@@ -29757,9 +29801,9 @@ class ItemFrame extends Hanging {
     if (this.data.item) { this.forgetMap(); if (drops) g.dropItem(c[0], c[1], c[2], this.data.item); this.data.item = null; }
   }
   // the frame's spot on its map, for the green marker
-  forgetMap() { const it = this.data.item; if (!it || it.id !== I.FILLED_MAP || !it.tag) return; const m = this.game.mapById(it.tag.map); if (m && m.frames) m.frames = m.frames.filter(q => !(q.x === this.data.bx && q.y === this.data.by && q.z === this.data.bz)); }
+  forgetMap() { const it = this.data.item; if (!it || !isFilledMap(it.id) || !it.tag) return; const m = this.game.mapById(it.tag.map); if (m && m.frames) m.frames = m.frames.filter(q => !(q.x === this.data.bx && q.y === this.data.by && q.z === this.data.bz)); }
   noteMap() {
-    const it = this.data.item; if (!it || it.id !== I.FILLED_MAP || !it.tag) return;
+    const it = this.data.item; if (!it || !isFilledMap(it.id) || !it.tag) return;
     const m = this.game.mapById(it.tag.map); if (!m) return;
     this.forgetMap(); (m.frames || (m.frames = [])).push({ x: this.data.bx, y: this.data.by, z: this.data.bz, f: this.data.f });
     m.ver = (m.ver || 0) + 1;
@@ -31368,7 +31412,7 @@ Game.prototype.crafterCraft = function (x, y, z) {
   });
   // out of the front: into a container there, or flying out
   for (const st of [res, ...spare]) {
-    const tgt = w.getBE(fx, y, fz);
+    const tgt = this.containerAt ? this.containerAt(fx, y, fz) : w.getBE(fx, y, fz);
     let left = st;
     if (tgt && tgt.items && tgt.type !== 'crafter') { left = this.insertItem(tgt, st); w.setBE(fx, y, fz, tgt); }
     if (left) { const e = this.dropItem(x + 0.5 + DX[f] * 0.7, y + 0.35, z + 0.5 + DZ[f] * 0.7, left); e.vx = DX[f] * 0.15; e.vy = 0.05; e.vz = DZ[f] * 0.15; e.pickupDelay = 10; }
@@ -33159,7 +33203,7 @@ Game.prototype.renderHandSide = function (held, s, alpha, l) {
   const use = p.using && (p.using.hand === 'main') === main ? p.using : null;
   // maps keep their own poses; shields are drawn as their 3D model
   if (p.mhh !== undefined && held && held.id === I.SHIELD && this.renderShieldHand) return this.renderShieldHand(held, s, alpha, l);
-  if (p.mhh === undefined || (held && (held.id === I.FILLED_MAP || held.id === I.SHIELD))) return _renderHandSideHD.call(this, held, s, alpha, l);
+  if (p.mhh === undefined || (held && (isFilledMap(held.id) || held.id === I.SHIELD))) return _renderHandSideHD.call(this, held, s, alpha, l);
   const r = this.r, eq = equipOf(p, main, alpha);
   const h = main && p.swingT > 0 ? Math.max(0, Math.min(1, 1 - (p.swingT - alpha) / 6)) : 0;
   const P = this.handBase(alpha);
@@ -42464,7 +42508,7 @@ Game.prototype.toggleMapBanner = function (st, x, y, z) {
 // (the item's use, so it works while sneaking too; ItemStack.useOn needs a player who may build)
 const _useItemSpecialMB = Game.prototype.useItemSpecial;
 Game.prototype.useItemSpecial = function (p, hit, held, it) {
-  if (hit && held && held.id === I.FILLED_MAP && SHAPE[hit.id] === SH.BANNER && p.mayBuild) { if (this.toggleMapBanner(held, hit.x, hit.y, hit.z)) p.doSwing(); return true; }
+  if (hit && held && isFilledMap(held.id) && SHAPE[hit.id] === SH.BANNER && p.mayBuild) { if (this.toggleMapBanner(held, hit.x, hit.y, hit.z)) p.doSwing(); return true; }
   return _useItemSpecialMB.call(this, p, hit, held, it);
 };
 // MapItemSavedData.checkBanners: while the map is being drawn around a marker, a banner that is gone or changed loses it
@@ -44423,6 +44467,7 @@ AUDIO.play = function (name, x, y, z, ...rest) {
      blocks), untamed wolves from llamas (24 blocks, by strength)
    - phantoms break off their swoop near a cat, which hisses at them
    - a tamed cat by its owner's bed may leave a gift in the morning
+     (Part 75 gives it to the cat that lay on the bed, as Java does)
    - parrots: tamed with seeds one time in 10, killed by cookies, ride
      their owner's shoulders (until a jump, water, flying, sleep or a
      hit), dance by a playing jukebox and imitate monsters nearby
@@ -44478,24 +44523,7 @@ GOALS.phantom = function (m) {
   return _phantomCT.call(this, m);
 };
 
-/* ---------------- morning gifts ---------------- */
-// CatRelaxOnOwnerGoal: when its owner has slept the night through, a tamed cat close by (not told to sit) brings one
-// thing from gameplay/cat_morning_gift seven times in ten
-const CAT_GIFTS = [['rabbit_hide', 10], ['rabbit_foot', 10], ['chicken', 10], ['feather', 10], ['rotten_flesh', 10], ['string', 10], ['phantom_membrane', 2]];
-const _sleepTickCG = Game.prototype.sleepTick;
-Game.prototype.sleepTick = function () {
-  const t0 = this.world.time;
-  _sleepTickCG.call(this);
-  if (this.sleeping !== 100 || this.world.time === t0) return;
-  const p = this.player;
-  for (const c of this.entities) {
-    if (c.type !== 'cat' || c.dead || !c.data.tame || !c.data.owner || c.data.sitting || c.distTo(p) > 10 || Math.random() >= 0.7) continue;
-    let k = Math.random() * 62, name = CAT_GIFTS[0][0];
-    for (const [n, wt] of CAT_GIFTS) if ((k -= wt) < 0) { name = n; break; }
-    const a = c.bodyYaw || 0;
-    this.dropItem(c.x - Math.sin(a) * 0.8, c.y + 0.2, c.z + Math.cos(a) * 0.8, { id: itemOf(name), count: 1 });
-  }
-};
+/* ---------------- morning gifts: see Part 75 (CatRelaxOnOwnerGoal) ---------------- */
 
 /* ---------------- parrots ---------------- */
 // #parrot_food tames one time in ten; #parrot_poisonous_food (cookies) kills
@@ -49108,7 +49136,7 @@ Mob.prototype.customRender = function (r, a, p, st) {
   // Java's turn about X becomes the opposite turn here (our z points ahead), the shift likewise
   st.swimRot = -th * Math.PI / 180; st.swimShift = 0;
   const pos = [p[0] - Math.sin(yaw) * tz, p[1] + ty + (this.yOffset || 0), p[2] - Math.cos(yaw) * tz];
-  const hurt = this.hurtTime > 0 || this.deathTime > 0, tilt = this.deathTime > 0 ? Math.min(1, (this.deathTime + a) / 15) * Math.PI / 2 : 0, light = this.lightAt();
+  const hurt = this.hurtTime > 0 || this.deathTime > 0, tilt = deathRoll(this, a), light = this.lightAt();
   const at = drawMob(r, MOB_MODELS.panda, this.skins(), pos, yaw, st, hurt ? [1, 0.45, 0.45, 1] : [1, 1, 1, 1], light, 1, tilt);
   // PandaHoldsItemLayer: sitting (not scared), what it holds is at its paws, bobbing as it eats
   const d = this.data;
@@ -58999,6 +59027,569 @@ TEXGEN.push(function texCopperAge() {
     }
   });
 });
+
+/* @file 180_double_chests.js */
+/* ===================================================================
+   Part 74: chests like Java's
+   - two chests side by side join into a large chest of 54 slots, as
+     ChestBlock decides: a chest placed next to a lone chest that faces
+     the same way joins it; sneaking keeps it alone, or joins it to the
+     side of the chest you click (taking that chest's facing); trapped
+     chests join only trapped chests
+   - the large chest opens as one screen, the right-hand half (as the
+     chest sees it) holding the top three rows; hoppers, hopper carts,
+     droppers and crafters fill and empty it in that order and
+     comparators read both halves together
+   - breaking either half leaves the other a single chest again
+   - the two halves are drawn as one long chest with one lock across
+     the middle (from the pack's chest textures too)
+   - a chest, large chest or ender chest won't open with a solid block
+     on top (anything that carries redstone power)
+   - trapped chests give a redstone signal while open: as strong as the
+     number of people looking in, and strong power into the block below
+   =================================================================== */
+const CHEST_PAIRS = new Set([B.CHEST, B.TRAPPED_CHEST]);
+const chestType = m => (m >> 2) & 3;                       // 0 single, 1 left, 2 right (ChestType)
+const chestFront = m => [DX[FRONT4[m & 3]], DZ[FRONT4[m & 3]]];
+const cwV = v => [-v[1], v[0]], ccwV = v => [v[1], -v[0]];
+// ChestBlock.getConnectedDirection: a left half's other half is clockwise of its facing, a right half's counterclockwise
+const chestLink = m => { const t = chestType(m); return t === 1 ? cwV(chestFront(m)) : t === 2 ? ccwV(chestFront(m)) : null; };
+// the other half of a large chest, when (x, y, z) is half of one
+function chestPartner(w, x, y, z) {
+  const id = w.getBlock(x, y, z);
+  if (!CHEST_PAIRS.has(id)) return null;
+  const m = w.getMeta(x, y, z), d = chestLink(m);
+  if (!d) return null;
+  const px = x + d[0], pz = z + d[1], pm = w.getMeta(px, y, pz);
+  if (w.getBlock(px, y, pz) !== id || (pm & 3) !== (m & 3) || chestType(pm) !== 3 - chestType(m)) return null;
+  return [px, y, pz];
+}
+
+/* ---------------- placing and breaking ---------------- */
+// ChestBlock.getStateForPlacement: which way it faces and whether it joins a neighbour
+function chestPlacement(w, x, y, z, id, facing, face, sneak) {
+  const lone = (dx, dz) => { const nm = w.getMeta(x + dx, y, z + dz); return w.getBlock(x + dx, y, z + dz) === id && chestType(nm) === 0 ? (nm & 3) : -1; };
+  let type = 0;
+  if (DY[face] === 0 && sneak) {
+    // clicking the side of a lone chest while sneaking: join it, facing its way, if that isn't along the click
+    const back = [-DX[face], -DZ[face]], f2 = lone(back[0], back[1]);
+    if (f2 >= 0) {
+      const fv = chestFront(f2);
+      if (fv[0] * back[0] + fv[1] * back[1] === 0) { facing = f2; const c = ccwV(fv); type = c[0] === back[0] && c[1] === back[1] ? 2 : 1; }
+    }
+  }
+  if (type === 0 && !sneak) {
+    const fv = chestFront(facing), a = cwV(fv), b = ccwV(fv);
+    if (lone(a[0], a[1]) === facing) type = 1; else if (lone(b[0], b[1]) === facing) type = 2;
+  }
+  return facing | (type << 2);
+}
+const _placeBlockDC = Game.prototype.placeBlock;
+Game.prototype.placeBlock = function (p, hit, id) { this._chestHit = hit; try { return _placeBlockDC.call(this, p, hit, id); } finally { this._chestHit = null; } };
+const _afterPlaceDC = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  if (CHEST_PAIRS.has(id) && this.world.getBlock(x, y, z) === id) {
+    const w = this.world, hit = this._chestHit, clicked = hit && hit.x + DX[hit.face] === x && hit.y + DY[hit.face] === y && hit.z + DZ[hit.face] === z;
+    const m = chestPlacement(w, x, y, z, id, w.getMeta(x, y, z) & 3, clicked ? hit.face : 2, !!(p && p.sneaking));
+    if (m !== w.getMeta(x, y, z)) w.setBlock(x, y, z, id, m);
+    // ChestBlock.updateShape: the lone neighbour becomes the other half
+    const d = chestLink(m);
+    if (d) w.setBlock(x + d[0], y, z + d[1], id, (m & 3) | ((3 - chestType(m)) << 2));
+  }
+  return _afterPlaceDC.call(this, p, x, y, z, id);
+};
+// whatever takes a half away (breaking, explosions, commands) leaves the other half single
+const _setBlockDC = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id, meta, notify) {
+  const old = this.getBlock(x, y, z);
+  if (!CHEST_PAIRS.has(old)) return _setBlockDC.call(this, x, y, z, id, meta, notify);
+  const om = this.getMeta(x, y, z), d = chestLink(om), r = _setBlockDC.call(this, x, y, z, id, meta, notify);
+  if (r && d && (id !== old || ((meta || 0) & 15) !== om)) {
+    const px = x + d[0], pz = z + d[1], pm = this.getMeta(px, y, pz);
+    const stillPaired = id === old && chestLink(meta || 0) && (meta & 3) === (om & 3) && chestType(meta) === chestType(om);
+    if (!stillPaired && this.getBlock(px, y, pz) === old && chestType(pm) === 3 - chestType(om)) _setBlockDC.call(this, px, y, pz, old, pm & 3, notify);
+  }
+  return r;
+};
+
+/* ---------------- the joined container ---------------- */
+// CompoundContainer: the right half (FIRST) then the left half; 54 slots read and written straight into the two halves
+function chestItems(w, x, y, z) {
+  let be = w.getBE(x, y, z);
+  if (!be || !be.items) { be = Object.assign(be || {}, { type: 'chest', kind: 'chest', items: new Array(27).fill(null) }); w.setBE(x, y, z, be); }
+  be.x = x; be.y = y; be.z = z;
+  return be;
+}
+Game.prototype.chestCompound = function (x, y, z) {
+  const w = this.world, q = chestPartner(w, x, y, z);
+  if (!q) return null;
+  const right = chestType(w.getMeta(x, y, z)) === 2 ? [x, y, z] : q, left = right === q ? [x, y, z] : q;
+  const a = chestItems(w, ...right), b = chestItems(w, ...left);
+  const items = new Proxy(new Array(54).fill(null), {
+    get(t, k) {
+      if (typeof k === 'string' && /^\d+$/.test(k)) { const i = +k; return i < 27 ? a.items[i] : i < 54 ? b.items[i - 27] : undefined; }
+      if (k === 'length') return 54;
+      return Reflect.get(t, k);
+    },
+    set(t, k, v) {
+      if (typeof k === 'string' && /^\d+$/.test(k)) { const i = +k; if (i < 27) a.items[i] = v; else if (i < 54) b.items[i - 27] = v; return true; }
+      if (k === 'length') return true;
+      return Reflect.set(t, k, v);
+    },
+  });
+  return { type: 'chest', kind: 'chest', compound: true, halves: [a, b], items, title: 'Large Chest', x: right[0], y: right[1], z: right[2] };
+};
+// what a hopper, dropper or comparator sees at a block: a large chest as one
+const PLAIN_SIZES = { chest: 27, barrel: 27, shulker: 27, dispenser: 9, dropper: 9, hopper: 5 };
+Game.prototype.containerAt = function (x, y, z) {
+  const c = this.chestCompound(x, y, z);
+  if (c) return c;
+  const w = this.world, be = w.getBE(x, y, z);
+  if (be && be.items) return be;
+  // a container nothing has opened yet has its (empty) slots all the same, as in Java
+  const d = BLK[w.getBlock(x, y, z)], use = d && (d.shulker ? 'shulker' : d.use);
+  if (!PLAIN_SIZES[use]) return be;
+  const nb = Object.assign(be || {}, { type: use, kind: use, items: new Array(PLAIN_SIZES[use]).fill(null), x, y, z });
+  w.setBE(x, y, z, nb);
+  return nb;
+};
+// writing a joined container back is writing its two halves
+const _setBEDC = World.prototype.setBE;
+World.prototype.setBE = function (x, y, z, be) {
+  if (be && be.compound) { for (const h of be.halves) { const c = this.getChunk(h.x >> 4, h.z >> 4); if (c) c.modified = c.unsaved = true; } return; }
+  return _setBEDC.call(this, x, y, z, be);
+};
+const _markBEDirtyDC = Game.prototype.markBEDirty;
+Game.prototype.markBEDirty = function (be) { if (be && be.compound) { for (const h of be.halves) _markBEDirtyDC.call(this, h); return; } return _markBEDirtyDC.call(this, be); };
+
+/* ---------------- opening ---------------- */
+// ChestBlock.isChestBlockedAt: a block that carries redstone power on top keeps the lid down, and so does a cat in its sitting
+// pose in the space above (isCatSittingOnChest); an ender chest minds only the block
+const catOnChest = (w, x, y, z) => {
+  const g = window.game;
+  return !!g && g.world === w && g.entities.some(e => e.type === 'cat' && !e.dead && (e.data.sitting || e._sitPose) &&
+    e.x + e.w / 2 > x && e.x - e.w / 2 < x + 1 && e.z + e.w / 2 > z && e.z - e.w / 2 < z + 1 && e.y + e.h > y + 1 && e.y < y + 2);
+};
+const chestBlocked = (w, x, y, z) => conductive(w.getBlock(x, y + 1, z)) || catOnChest(w, x, y, z);
+SCREENS.large_chest = CHEST_DEF('Large Chest', 6);
+SCREENS.large_chest.pack = 'large_chest';
+const _useBlockDC = Game.prototype.useBlock;
+Game.prototype.useBlock = function (p, hit, held) {
+  const w = this.world, id = hit.id;
+  if ((CHEST_PAIRS.has(id) || id === B.ENDER_CHEST) && !(p.sneaking && held)) {
+    if (id === B.ENDER_CHEST) { if (conductive(w.getBlock(hit.x, hit.y + 1, hit.z))) return true; }
+    else { const q = chestPartner(w, hit.x, hit.y, hit.z); if (chestBlocked(w, hit.x, hit.y, hit.z) || (q && chestBlocked(w, q[0], q[1], q[2]))) return true; }
+  }
+  return _useBlockDC.call(this, p, hit, held);
+};
+// opening either half opens the large chest (the half's own opening has done what opening a chest does: loot, statistics,
+// angry piglins)
+const _openContainerDC = Game.prototype.openContainer;
+Game.prototype.openContainer = function (hit, use) {
+  const r = _openContainerDC.call(this, hit, use);
+  if (use === 'chest' && this.ui.inv && this.ui.inv.type === 'chest') {
+    const c = CHEST_PAIRS.has(this.world.getBlock(hit.x, hit.y, hit.z)) ? this.chestCompound(hit.x, hit.y, hit.z) : null;
+    if (c) this.ui.openInv('large_chest', c);
+    this.chestOpened(this.ui.inv.data);
+  }
+  return r;
+};
+
+/* ---------------- trapped chests ---------------- */
+// TrappedChestBlock.getSignal: the number of people looking in (only you here); getDirectSignal: that much into the block below
+const S_TRAPPED = 14;
+RS_SRC[B.TRAPPED_CHEST] = S_TRAPPED; RS_ANY[B.TRAPPED_CHEST] = 1;
+Game.prototype.trappedViewers = function (x, y, z) {
+  const inv = this.ui && this.ui.inv, d = inv && inv.data;
+  if (!d || (inv.type !== 'chest' && inv.type !== 'large_chest')) return 0;
+  const at = h => h && h.x === x && h.y === y && h.z === z;
+  return (d.compound ? d.halves.some(at) : at(d)) ? 1 : 0;
+};
+const _emitDC = RS.emit;
+RS.emit = function (w, x, y, z, f, strong) {
+  if (w.getBlock(x, y, z) === B.TRAPPED_CHEST) { const g = window.game, n = g && g.world === w ? g.trappedViewers(x, y, z) : 0; return strong ? (f === 3 ? n : 0) : n; }
+  return _emitDC.call(this, w, x, y, z, f, strong);
+};
+Game.prototype.chestOpened = function (data) {
+  const w = this.world, halves = data && data.compound ? data.halves : [data];
+  for (const h of halves) if (h && h.x !== undefined && w.getBlock(h.x, h.y, h.z) === B.TRAPPED_CHEST) RS.changed(w, h.x, h.y, h.z);
+  this._openChest = halves.filter(h => h && h.x !== undefined).map(h => [h.x, h.y, h.z]);
+};
+const _closeInvDC = UI.prototype.closeInv;
+UI.prototype.closeInv = function () {
+  const r = _closeInvDC.apply(this, arguments), g = this.game, list = g && g._openChest;
+  if (list) { g._openChest = null; for (const [x, y, z] of list) if (g.world.getBlock(x, y, z) === B.TRAPPED_CHEST) RS.changed(g.world, x, y, z); }
+  return r;
+};
+
+/* ---------------- comparators ---------------- */
+const _containerSignalDC = RS.containerSignal;
+RS.containerSignal = function (w, x, y, z) {
+  const g = window.game, c = g && g.world === w && CHEST_PAIRS.has(w.getBlock(x, y, z)) ? g.chestCompound(x, y, z) : null;
+  if (!c) return _containerSignalDC.call(this, w, x, y, z);
+  let sum = 0, any = false;
+  for (let i = 0; i < 54; i++) { const s = c.items[i]; if (s) { any = true; sum += s.count / (ITEMS[s.id].stack || 64); } }
+  return any ? Math.floor(1 + sum / 54 * 14) : 0;
+};
+
+/* ---------------- the model: one long chest ---------------- */
+// the half reaches its partner's edge; the lock straddles the middle (a pixel of it on each half)
+MDL[SH.CHEST] = (d, m) => {
+  const b = [1, 0, 1, 15, 14, 15], link = CHEST_PAIRS.has(B[d.name.toUpperCase()]) ? chestLink(m) : null;
+  if (link) { if (link[0] > 0) b[3] = 16; else if (link[0] < 0) b[0] = 0; else if (link[1] > 0) b[5] = 16; else b[2] = 0; }
+  return [BX(...b)];
+};
+const _modelCollisionDC = modelCollision;
+modelCollision = function (id, meta, ctx) {
+  if (CHEST_PAIRS.has(id) && chestType(meta)) { const ps = blockParts(id, meta, null); return ps.map(p => p.b.slice()); }
+  return _modelCollisionDC(id, meta, ctx);
+};
+// which edge of the front texture the lock sits on: the side nearer the other half, as the face's texture runs
+function lockOnRight(m) {
+  const f = FRONT4[m & 3], d = chestLink(m);
+  if (f === 4) return d[0] > 0; if (f === 5) return d[0] < 0;
+  if (f === 0) return d[1] < 0; return d[1] > 0;
+}
+const _resolveFaceTexturesDC = resolveFaceTextures;
+resolveFaceTextures = function () {
+  _resolveFaceTexturesDC();
+  for (const [id, pre] of [[B.CHEST, 'chest'], [B.TRAPPED_CHEST, 'trapped_chest']]) {
+    const L = n => texLayer(n, 0), side = L('chest_side'), top = L('chest_top');
+    const sets = { s: Int16Array.of(side, side, top, top, L(pre + '_front'), side), l: Int16Array.of(side, side, top, top, L(pre + '_front_left'), side), r: Int16Array.of(side, side, top, top, L(pre + '_front_right'), side) };
+    VARTEX[id] = m => !chestType(m) ? sets.s : lockOnRight(m) ? sets.r : sets.l;
+  }
+};
+// the half fronts come from the single front, whatever drew it (the game or a pack): the lock lifted off the middle and its
+// outer pixel put back at the edge nearer the other half
+function composeChestHalves() {
+  const R = TEX.res;
+  for (const pre of ['chest', 'trapped_chest']) {
+    const si = TEX.idx[pre + '_front'], src = TEX.imgs[si];
+    if (!src || src.length !== R * R * 4) continue;
+    const x0 = Math.round(R * 7 / 16), x1 = Math.round(R * 9 / 16), y0 = Math.round(R * 4 / 16), y1 = Math.round(R * 9 / 16), w1 = Math.max(1, Math.round(R / 16));
+    for (const right of [false, true]) {
+      const i = TEX.idx[pre + '_front_' + (right ? 'right' : 'left')];
+      if (i === undefined) continue;
+      const d = TEX.imgs[i] = new Uint8Array(src);
+      const copy = (sx, sy, dx, dy) => { const s = (sy * R + sx) * 4, t = (dy * R + dx) * 4; for (let k = 0; k < 4; k++) d[t + k] = src[s + k]; };
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) copy(x0 - 1 - ((x - x0) % Math.max(1, x0 - 1)), y, x, y);
+      for (let y = y0; y < y1; y++) for (let k = 0; k < w1; k++) copy(right ? x0 + k : x1 - w1 + k, y, right ? R - w1 + k : k, y);
+    }
+  }
+}
+const _uploadTexturesDC = Renderer.prototype.uploadTextures;
+Renderer.prototype.uploadTextures = function () { composeChestHalves(); return _uploadTexturesDC.call(this); };
+TEXGEN.push(function texChestHalves() {
+  for (const pre of ['chest', 'trapped_chest']) for (const s of ['left', 'right']) T(pre + '_front_' + s, d => d.set(copyOf(pre + '_front')));
+});
+// a pack's chest screen for six rows: generic_54 whole
+const _applyPackGUIDC = applyPackGUI;
+applyPackGUI = function (img, first) {
+  const r = _applyPackGUIDC(img, first), g54 = img('gui/container/generic_54');
+  if (g54 && PACK_GUI_STATE.containers) {
+    const s = g54.width / 256, c = document.createElement('canvas'); c.width = 176 * s; c.height = 222 * s;
+    const q = c.getContext('2d'); q.imageSmoothingEnabled = false;
+    q.drawImage(g54, 0, 0, 176 * s, 222 * s, 0, 0, 176 * s, 222 * s);
+    PACK_GUI_STATE.containers.large_chest = c.toDataURL();
+  } else if (PACK_GUI_STATE.containers) delete PACK_GUI_STATE.containers.large_chest;
+  return r;
+};
+
+/* @file 181_cats.js */
+/* ===================================================================
+   Part 75: tamed cats like Java's (Cat's goals)
+   - a tamed cat that hasn't been told to sit looks for a seat now
+     and then (CatSitOnBlockGoal): the nearest closed chest, lit
+     furnace or bed foot within 8 blocks with nothing on top, a block
+     up or down at most. It walks there and sits for 1 to 3 minutes,
+     and gives up if it hasn't got there within a minute. After that
+     it waits 10 to 20 seconds before looking again
+   - a cat sitting on a chest, told to or of its own accord, keeps
+     the lid shut the way a solid block on top does. Hoppers don't
+     mind it, and an ender chest only minds the block
+   - every 4 seconds it also looks for a bed with room above it to
+     lie on (CatLieOnBedGoal). Java's search order starts 2 layers
+     down and then skips past its own layer, so it only finds beds 2
+     to 5 blocks above it or 3 to 7 below
+   - when its owner sleeps in a bed within 10 blocks
+     (CatRelaxOnOwnerGoal), it goes to the foot of the bed (unless
+     another cat is already settling there), rests its head for a
+     moment, then lies down and purrs. The morning gift (seven times
+     in ten, gameplay/cat_morning_gift) comes from the cat that spent
+     the night there, after a hop of up to 5 blocks to somewhere
+     near by. Before, any tamed cat close by brought one
+   - tamed cats aren't drawn to fish any more (CatTemptGoal)
+   - pets follow their owners as FollowOwnerGoal does: they set off
+     once the owner is 10 blocks away (parrots 5) and stop within 5
+     (cats), 2 (wolves) or 1 (parrots). From 12 blocks away they turn
+     up next to the owner instead, 2 or 3 blocks out, never on leaves
+     unless they fly
+   - lying cats lie on their side with their legs out, the head
+     turned and the tail curled (CatModel, CatRenderer)
+   - you sleep at the head end of a bed whichever half you click, as
+     in Java
+   - dying mobs tip over onto their left side, quickly at first, as
+     LivingEntityRenderer turns them (they went the other way, evenly)
+   =================================================================== */
+
+/* ---------------- helpers ---------------- */
+// the goal selector's full ticks (Mob.serverAiStep): new goals are tried and running ones checked every other tick
+const catFull = m => ((m.age + m.id) & 1) === 0;
+const catRand = n => Math.floor(Math.random() * n);
+const catSleeping = g => g.sleeping > 0 && g.sleeping < 100;
+// MoveToBlockGoal.findNearestBlock: rings outward from the cat's block, the layers in the order vstart, then k > 0 ? -k : 1 - k
+// up to vrange (each layer k is the one k - 1 from the cat's feet)
+function catFind(m, range, vrange, vstart, ok) {
+  const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  for (let k = vstart; k <= vrange; k = k > 0 ? -k : 1 - k)
+    for (let l = 0; l < range; l++)
+      for (let i = 0; i <= l; i = i > 0 ? -i : 1 - i)
+        for (let j = i < l && i > -l ? l : 0; j <= l; j = j > 0 ? -j : 1 - j)
+          if (ok(bx + i, by + k - 1, bz + j)) return [bx + i, by + k - 1, bz + j];
+  return null;
+}
+const chestOpenAt = (g, x, y, z) => !!(g._openChest && g._openChest.some(q => q[0] === x && q[1] === y && q[2] === z));
+// walking to stand on a block (its cell above)
+const catGo = (m, at, speed) => m.goTo(at[0] + 0.5, at[1] + 1, at[2] + 0.5, speed, 0.5);
+
+/* ---------------- sitting on chests, furnaces and beds; lying on beds ---------------- */
+// MoveToBlockGoal: when it may start (every other tick, while nothing ahead of it holds the cat), it counts down to its next
+// search; running, it walks to the block (finding its way again every 40 ticks of trying) and sits or lies once it is within a
+// block of the middle of the space on top; it stops after 1200 ticks of trying, after its stay (1200 to 3598 ticks, counted
+// down while there), when the block won't do any more or when a goal ahead of it takes over
+const CAT_SIT = {
+  name: 'catSit', range: 8, vrange: 1, vstart: 0, speed: () => jms(0.3, 0.8),
+  can: m => m.data.tame && !m.data.sitting,
+  delay: () => Math.ceil((200 + catRand(200)) / 2),
+  valid(m, x, y, z) {
+    const g = m.game, w = g.world;
+    if (w.getBlock(x, y + 1, z) !== 0) return false;
+    const id = w.getBlock(x, y, z);
+    if (id === B.CHEST) return !chestOpenAt(g, x, y, z);
+    if (id === B.LIT_FURNACE) return true;
+    return !!BLK[id].bed && !(w.getMeta(x, y, z) & 4);
+  },
+  start(m) { m._sitPose = false; },
+  tick(m, s) { m._sitPose = s.reached; },
+  stop(m) { m._sitPose = false; },
+};
+const CAT_BED = {
+  name: 'catBed', range: 8, vrange: 6, vstart: -2, speed: () => jms(0.3, 1.1),
+  can: m => m.data.tame && !m.data.sitting && !m._lying,
+  delay: () => 40,
+  valid(m, x, y, z) { const w = m.game.world; return w.getBlock(x, y + 1, z) === 0 && !!BLK[w.getBlock(x, y, z)].bed; },
+  start(m) { m._sitPose = false; },
+  tick(m, s) { m._sitPose = false; m._lying = s.reached; },
+  stop(m) { m._lying = false; },
+};
+function catStop(m, o, s) { s.run = false; o.stop(m); }
+function catMoveToBlock(m, o) {
+  const key = '_' + o.name, s = m[key] || (m[key] = { next: 0, run: false });
+  const full = catFull(m);
+  if (s.run) {
+    if (full && !(s.try >= -s.stay && s.try <= 1200 && o.valid(m, ...s.pos))) { catStop(m, o, s); return false; }
+  } else {
+    if (!full || !o.can(m)) return false;
+    if (s.next > 0) { s.next--; return false; }
+    s.next = o.delay(m);
+    const pos = catFind(m, o.range, o.vrange, o.vstart, (x, y, z) => o.valid(m, x, y, z));
+    if (!pos) return false;
+    Object.assign(s, { run: true, pos, try: 0, stay: catRand(catRand(1200) + 1200) + 1200, reached: false, fresh: true });
+    o.start(m);
+  }
+  const [x, y, z] = s.pos, dx = x + 0.5 - m.x, dy = y + 1.5 - m.y, dz = z + 0.5 - m.z;
+  if (dx * dx + dy * dy + dz * dz >= 1) {
+    s.reached = false; s.try++;
+    if (s.fresh || s.try % 40 === 0) { s.fresh = false; m.nav = null; catGo(m, s.pos, o.speed(m)); }
+    else if (m.nav && !m.navDone()) m.followPath();
+  } else {
+    // reaching it doesn't stop the walk: the path still leads on to the middle of the block
+    s.reached = true; s.try--;
+    if (m.nav && !m.navDone()) m.followPath();
+  }
+  o.tick(m, s);
+  // LookAtPlayerGoal holds only the head, so it carries on meanwhile
+  GOALS.look(m);
+  return true;
+}
+GOALS.catSit = m => catMoveToBlock(m, CAT_SIT);
+GOALS.catBed = m => catMoveToBlock(m, CAT_BED);
+
+/* ---------------- with its owner in bed ---------------- */
+// CatRelaxOnOwnerGoal (it holds nothing, so nothing takes over from it): the owner asleep in a bed within 10 blocks, it makes for
+// the foot of the bed, unless another cat lying down or settling is within 2 blocks of it; once within reach of its owner its
+// head goes down for 8 goes, then it lies down
+const relaxSpot = m => {
+  const w = m.game.world, o = m.ownerEntity(), bx = Math.floor(o.x), by = Math.floor(o.y), bz = Math.floor(o.z);
+  if (!BLK[w.getBlock(bx, by, bz)].bed) return null;
+  const d = BED_DIR[w.getMeta(bx, by, bz) & 3];
+  return [bx - d[0], by, bz - d[1]];
+};
+const relaxTaken = (m, at) => m.game.entities.some(e => e !== m && e.type === 'cat' && !e.dead && (e._lying || e._relaxOne) &&
+  e.x + e.w / 2 > at[0] - 2 && e.x - e.w / 2 < at[0] + 3 && e.y + e.h > at[1] - 2 && e.y < at[1] + 3 && e.z + e.w / 2 > at[2] - 2 && e.z - e.w / 2 < at[2] + 3);
+const relaxOwner = m => { const o = m.ownerEntity(); return o && o === m.game.player && !o.dead ? o : null; };
+function relaxCanUse(m, s) {
+  if (!m.data.tame || m.data.sitting) return false;
+  const o = relaxOwner(m);
+  if (!o || !catSleeping(m.game)) return false;
+  const dx = o.x - m.x, dy = o.y - m.y, dz = o.z - m.z;
+  if (dx * dx + dy * dy + dz * dz > 100) return false;
+  s.spot = relaxSpot(m);
+  return !!s.spot && !relaxTaken(m, s.spot);
+}
+const relaxGoesOn = (m, s) => m.data.tame && !m.data.sitting && !!relaxOwner(m) && catSleeping(m.game) && !!s.spot && !relaxTaken(m, s.spot);
+// DimensionType.timeOfDay, as Level.getTimeOfDay gives it
+const catTimeOfDay = t => { const d = t / 24000 - 0.25 - Math.floor(t / 24000 - 0.25), e = 0.5 - Math.cos(d * Math.PI) / 2; return (d * 2 + e) / 3; };
+function relaxStop(m, s) {
+  const g = m.game, t = catTimeOfDay(g.world.time);
+  m._lying = false;
+  // woken by the morning (the sleep timer had reached 100) just after daybreak
+  if (g.sleeping >= 100 && t > 0.77 && t < 0.8 && Math.random() < 0.7) catMorningGift(m);
+  s.onBed = 0; m._relaxOne = false; m.nav = null; s.run = false;
+}
+GOALS.catRelax = function (m) {
+  const s = m._relaxG || (m._relaxG = { run: false, onBed: 0 });
+  if (!catFull(m)) { if (s.run && m.nav && !m.navDone()) m.followPath(); return s.run; }
+  if (!s.run) {
+    if (!relaxCanUse(m, s)) return false;
+    s.run = true; s.onBed = 0;
+  } else if (!relaxGoesOn(m, s)) { relaxStop(m, s); return false; }
+  const o = relaxOwner(m);
+  m._sitPose = false;
+  catGo(m, s.spot, jms(0.3, 1.1));
+  const dx = o.x - m.x, dy = o.y - m.y, dz = o.z - m.z;
+  if (dx * dx + dy * dy + dz * dz < 2.5) {
+    if (++s.onBed > 8) { m._lying = true; m._relaxOne = false; }
+    else { m.lookAt(o.x, o.y + 0.2, o.z); m._relaxOne = true; }
+  } else m._lying = false;
+  return true;
+};
+
+/* ---------------- the morning gift ---------------- */
+// Cat.CatRelaxOnOwnerGoal.giveMorningGift: a random hop to within 5 blocks across and 2 up or down of where it is (or of what
+// holds its lead), then one thing from gameplay/cat_morning_gift a block ahead of the corner of its block
+const CAT_GIFTS = [['rabbit_hide', 10], ['rabbit_foot', 10], ['chicken', 10], ['feather', 10], ['rotten_flesh', 10], ['string', 10], ['phantom_membrane', 2]];
+// LivingEntity.randomTeleport: down to the first block that blocks motion, and only if it fits there out of any liquid
+function catRandomTeleport(m, x, y, z) {
+  const w = m.game.world;
+  if (!w.isLoadedAt(Math.floor(x), Math.floor(z))) return false;
+  let by = Math.min(Math.floor(y), CH_TOP + 1), ty = y, landed = false;
+  while (!landed && by > 0) { if (emBlocksMotion(w, Math.floor(x), by - 1, Math.floor(z))) landed = true; else { ty--; by--; } }
+  if (!landed) return false;
+  const hw = m.w / 2;
+  if (aabbHitsBlock(w, x - hw, ty, z - hw, x + hw, ty + m.h, z + hw, id => (SOLID[id] === 1 && !BLK[id].noCollide) || BLK[id].liquid)) return false;
+  m.x = m.px = x; m.y = m.py = ty; m.z = m.pz = z; m.nav = null; m.move = null;
+  return true;
+}
+function catMorningGift(m) {
+  const g = m.game, h = m.leashed && m.leashed.x !== undefined ? m.leashed : m;
+  const bx = Math.floor(h.x), by = Math.floor(h.y), bz = Math.floor(h.z);
+  catRandomTeleport(m, bx + catRand(11) - 5, by + catRand(5) - 2, bz + catRand(11) - 5);
+  let k = Math.random() * 62, name = CAT_GIFTS[0][0];
+  for (const [n, wt] of CAT_GIFTS) if ((k -= wt) < 0) { name = n; break; }
+  const a = m.bodyYaw || 0;
+  g.dropItem(Math.floor(m.x) + Math.sin(a), Math.floor(m.y), Math.floor(m.z) + Math.cos(a), { id: itemOf(name), count: 1 });
+}
+
+/* ---------------- the goals in Java's order ---------------- */
+if (MOB_TYPES.cat) MOB_TYPES.cat.ai = ['sit', 'panic', 'catRelax', 'tempt', 'catBed', 'followOwner', 'catSit', 'breed', 'wander', 'look'];
+// CatTemptGoal: only strays come for fish
+const _temptCT = GOALS.tempt;
+GOALS.tempt = function (m) { return m.type === 'cat' && m.data.tame ? false : _temptCT(m); };
+// a goal that something ahead of it took over from stops (its pose goes); the owner goal is looked at every other tick whatever
+// is going on
+const _thinkCT = Mob.prototype.think;
+Mob.prototype.think = function () {
+  _thinkCT.call(this);
+  if (this.type !== 'cat') return;
+  for (const o of [CAT_SIT, CAT_BED]) { const s = this['_' + o.name]; if (s && s.run && this.goal !== o.name) catStop(this, o, s); }
+  const r = this._relaxG;
+  if (r && r.run && this.goal !== 'catRelax' && catFull(this) && !relaxGoesOn(this, r)) relaxStop(this, r);
+};
+
+/* ---------------- poses ---------------- */
+// Cat.handleLieDown: purring while lying or settling (every 5 ticks); lying down over 7 ticks (tail over 13), getting up over 5
+// (8); the head going down over 10 (back over 8); lying near a sleeping player lifts it a little (isLyingOnTopOfSleepingPlayer)
+const _tickCT = Mob.prototype.tick;
+Mob.prototype.tick = function () {
+  const r = _tickCT.apply(this, arguments);
+  if (this.type !== 'cat' || this.dead) return r;
+  const g = this.game;
+  if ((this._lying || this._relaxOne) && this.age % 5 === 0 && !this.data.silent) AUDIO.play('cat_purr', this.x, this.y + 0.3, this.z, 0.6 + 0.4 * (Math.random() - Math.random()));
+  this._lieO = this._lie || 0; this._lieTO = this._lieT || 0; this._relO = this._rel || 0;
+  if (this._lying) { this._lie = Math.min(1, this._lieO + 0.15); this._lieT = Math.min(1, this._lieTO + 0.08); }
+  else { this._lie = Math.max(0, this._lieO - 0.22); this._lieT = Math.max(0, this._lieTO - 0.13); }
+  this._rel = this._relaxOne ? Math.min(1, this._relO + 0.1) : Math.max(0, this._relO - 0.13);
+  const p = g.player, bx = Math.floor(this.x), by = Math.floor(this.y), bz = Math.floor(this.z);
+  this._onSleeper = !!(this._lying && p && catSleeping(g) && p.x > bx - 2 && p.x < bx + 3 && p.y > by - 2 && p.y < by + 3 && p.z > bz - 2 && p.z < bz + 3);
+  return r;
+};
+{
+  const base = MOB_ANIM.cat;
+  MOB_ANIM.cat = (m, st) => { if (base) base(m, st); if (m._sitPose) st.sit = true; };
+}
+// the lying and settling amounts between ticks
+const _animStateCT = Mob.prototype.animState;
+Mob.prototype.animState = function (a) {
+  const st = _animStateCT.call(this, a);
+  if (this.type === 'cat') {
+    const L = (o, n) => (o || 0) + ((n || 0) - (o || 0)) * a;
+    st.lie = L(this._lieO, this._lie); st.lieTail = L(this._lieTO, this._lieT); st.relax = L(this._relO, this._rel);
+  }
+  return st;
+};
+// CatModel.setupAnim: lying, the head turned onto its side, the legs out, the tail curled; settling, the head down
+{
+  const rotl = (a, b, f) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + f * d; };
+  const md = MOB_MODELS.cat, base = md.anim;
+  md.anim = function (P, st) {
+    base.call(this, P, st);
+    const f = st.lie || 0, ft = st.lieTail || 0, rl = st.relax || 0;
+    if (f > 0) {
+      const h = P.head || [0, 0, 0];
+      P.head = [h[0], rotl(h[1], 1.2707963, f), rotl(h[2] || 0, -1.2707963, f)];
+      P.left_front_leg = [-1.2707963, 0, 0];
+      P.right_front_leg = [-0.47079635, 0, -0.2]; P['right_front_leg#p'] = [-0.2, 14.1, -5];
+      P.left_hind_leg = [-0.4, 0, 0];
+      P.right_hind_leg = [0.5, 0, -0.5]; P['right_hind_leg#p'] = [-0.3, 20, 5];
+      P.tail1 = [rotl((P.tail1 || [0.9])[0], 0.8, ft), 0, 0]; P.tail2 = [rotl((P.tail2 || [1.7278])[0], -0.4, ft), 0, 0];
+    }
+    if (rl > 0) { const h = P.head || [0, 0, 0]; P.head = [rotl(h[0], -0.58177644, rl), h[1], h[2] || 0]; }
+  };
+}
+// CatRenderer.setupRotations: on its side (a quarter turn, toward its left), moved 0.4 to its right, 0.15 up and 0.1 back, and
+// 0.15 further (up, once turned) beside a sleeping player; in Mob.render's terms [roll, left, up, forward]
+Mob.prototype.renderRoll = function (a) {
+  if (this.type !== 'cat') return null;
+  const f = (this._lieO || 0) + ((this._lie || 0) - (this._lieO || 0)) * a;
+  if (f <= 0) return null;
+  const th = f * Math.PI / 2, k = this.baby ? 0.5 : 1, n = this._onSleeper ? 0.15 * f : 0;
+  return [-th, (-0.4 * f - n * Math.cos(th)) * k, (0.15 * f + n * Math.sin(th)) * k, -0.1 * f * k];
+};
+
+/* ---------------- sleeping at the head of the bed ---------------- */
+// BedBlock.use: the foot sends you to the head
+const _tryToSleepCT = Game.prototype.tryToSleep;
+Game.prototype.tryToSleep = function (p, hit) {
+  const w = this.world, m = w.getMeta(hit.x, hit.y, hit.z);
+  if (BLK[w.getBlock(hit.x, hit.y, hit.z)].bed && !(m & 4)) {
+    const hx = hit.x + BED_DIR[m & 3][0], hz = hit.z + BED_DIR[m & 3][1];
+    if (BLK[w.getBlock(hx, hit.y, hz)].bed) hit = Object.assign({}, hit, { x: hx, z: hz });
+  }
+  return _tryToSleepCT.call(this, p, hit);
+};
+
+/* ---------------- the purr ---------------- */
+SND_CAT.cat_purr = 'neutral'; SUB_TEXT.cat_purr = 'Cat purrs';
+const _audioPlayCT = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  if (name !== 'cat_purr') return _audioPlayCT.call(this, name, x, y, z, ...rest);
+  if (!this.ctx) return;
+  const dst = this.out(x, y, z, Math.max(0.2, rest[0] || 0.6) * 0.5);
+  if (!dst) return;
+  const t = this.ctx.currentTime;
+  for (let k = 0; k < 6; k++) this.noiseHit(dst, 'lowpass', 160 + Math.random() * 40, 1, 0.035, 0.5, t + k * 0.045);
+};
 
 </script>
 </body>

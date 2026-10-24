@@ -572,6 +572,17 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   near a cat (which hisses at them), and a tamed cat by your bed may leave you a gift in the
   morning. Skeletons run from wolves, and wild wolves run from llamas (the stronger the llama, the
   more surely).
+- **Tamed cats like Java's** (Part 75): a tamed cat that hasn't been told to sit picks a seat now
+  and then (the nearest closed chest, lit furnace or foot of a bed within 8 blocks, with nothing
+  on top), sits there for one to three minutes, and keeps a chest shut while it sits on it. It
+  lies down on beds a few blocks above or below it (Java's search for those skips the cat's own
+  level). When you sleep, a cat nearby goes to the foot of your bed, rests its head for a moment
+  and lies down purring, and that cat is the one that brings the morning gift. Strays come for
+  fish but tamed cats don't. Cats, wolves and parrots follow you as in Java: they set off once you
+  are 10 blocks away (parrots 5), stop within 5 (cats), 2 (wolves) or 1 (parrots), and from 12
+  blocks they turn up next to you. You also sleep at the head of the bed now, whichever half you
+  click.
+- **Dying mobs** tip over onto their left side, quickly at first, as in Java (Part 75).
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
@@ -1016,6 +1027,20 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   Java; clicking it with a block in hand still places the block.
 - **Pack smoke the right way round** (Part 73): with a resource pack, smoke and other puffs now shrink as they fade like
   Java's (the pack's frames were taken in the reverse order).
+- **Large chests** (Part 74): two chests side by side join into a large chest of 54 slots, the way Java decides it: a
+  chest placed next to a lone chest facing the same way joins it; sneaking keeps it alone, or joins it to the side of the
+  chest you click (taking that chest's facing); trapped chests only join trapped chests. The two halves are drawn as one
+  long chest with a single lock (from resource packs too), open as one "Large Chest" screen, and hoppers, hopper
+  minecarts, droppers, crafters and comparators treat them as one container; breaking a half leaves the other a single
+  chest with its own items. Hoppers and droppers also fill containers nobody has opened yet.
+- **Chest lids and trapped chests like Java's** (Part 74): a chest, large chest or ender chest won't open under a solid
+  block (anything that carries redstone power; glass, slabs and the like don't stop it), and a chest or large chest won't
+  open while a cat sits on it (Part 75). A trapped chest gives a redstone signal while you look inside, and powers the
+  block under it.
+- **Explorer maps as 26.3 items** (Part 74): the maps cartographers sell and shipwrecks hide are items of their own, as
+  in 26.3 (Ocean Monument Map, Woodland Mansion Map, Buried Trial Chambers Map, Jungle Pyramid Map, Swamp Hut Map, the
+  five village maps, Buried Treasure Map and the rest), each with its own picture. They work like any filled map: they
+  copy as themselves at the crafting or cartography table and lock with glass, but only a plain map zooms out.
 - **Armor trims**: a smithing template, a piece of armor and a trim material at the smithing
   table give the armor one of the 18 trim patterns in the material's colour (iron, copper, gold,
   lapis, emerald, diamond, netherite, redstone, amethyst or quartz; a trim of the armor's own
