@@ -232,8 +232,8 @@ starts and the strongholds against cubiomes.
   chunks overlap at their border, Java's result depends on which chunk it decorated first; Blockcraft
   gives one of those results, the same however the world is explored. Fossils, which Java builds from structure
   files, are placed where Java places them but built to the game's own designs; desert wells (a structure file in 26.x
-  too) come out block for block like Java's. The sulfur caves' springs and 26.3's abandoned camps (structure files as
-  well) aren't placed yet. Chunks of worlds made before this
+  too) come out block for block like Java's, and the sulfur caves' springs (structure files too) are placed where Java
+  places them, built to the game's own design. 26.3's abandoned camps aren't placed yet. Chunks of worlds made before this
   version keep their old decoration, so a tree can be cut off where old and new chunks meet.
 
 ### Creating a world
@@ -362,7 +362,7 @@ Java tutorials work:
   bottom of the world and its top block, packs of up to four, never within 24 blocks of you or
   the world spawn, and the vanilla mob caps (70 monsters, 10 animals every 20 seconds, 15 bats,
   5 squid, 5 glow squid, 5 axolotls, 20 fish).
-- **The vanilla rules for every spot**: each biome's 1.21 spawn list and weights, monsters only
+- **The vanilla rules for every spot**: each biome's 26.3 spawn list and weights, monsters only
   in the dark (block light 0 in the Overworld and the End, 7 or less in the Nether, with the
   vanilla sky-light test), what mobs may stand on (not glass,
   leaves, ice, bedrock, trapdoors, copper grates or bottom slabs; jack o'lanterns are fine), room
@@ -729,6 +729,28 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   blocks under the water that hold pottery sherds, an emerald, a brick, suspicious stew or a stick to brush out.
   Ghasts' tentacles now have Java's lengths, and feeding a baby animal takes a tenth of the time it still has to grow
   off, as in Java.
+- **Warm and cold farm animals** (Part 106, from Java 1.21.5): cows, pigs and chickens now come in Java's three kinds,
+  by the biome they spawn in: warm ones in deserts, jungles, savannas, badlands, mangrove swamps, warm oceans and the
+  Nether, cold ones in snowy and icy places, taigas, windswept hills, the deep dark, cold oceans and the End, and
+  temperate ones everywhere else. Babies take after one parent or the other. The warm cow has long horns, the cold cow
+  a shaggy coat and swept horns, the cold pig a woolly coat and the cold chicken a ruff of feathers (the cold cow's horns
+  and the chicken's ruff are placed by eye). Cold chickens lay blue eggs and warm ones brown eggs, and a thrown egg hatches
+  a chick of its own kind (one egg in eight hatches, and one in 32 of those gives four chicks); any egg makes a cake or
+  a pumpkin pie. Like 26.x, each animal also gets a voice at random: moody cows, big or mini pigs, picky chickens, and
+  piglets and chicks have voices of their own. Resource packs now keep all of their textures when added, so textures
+  later versions of the game use show up without adding the pack again; a pack added before this version says so once.
+  Zombies, husks and drowned are now 1.95 blocks tall as in Java (they were 1.8) and tropical fish 0.4; bees, rabbits
+  and zombie horses have 26.x's sizes and stats (zombie horses: 25 health and a horse's speed). 26.x also redrew nearly every baby animal with a model of its own; those
+  models aren't in the game yet, so babies are smaller copies of the grown-ups as in 1.21.
+- **Sulfur springs** (Part 107): the sulfur caves now have 26.3's springs where Java's seed puts them: mounds of tuff,
+  stone, granite and cinnabar lined with sulfur round a pool of water, with dormant potent sulfur over a magma block at
+  the bottom of the pool, sulfur spikes about it and sulfur roots reaching down from it. Java builds them from structure
+  files, so the springs themselves are the game's own design, at the sizes of Java's.
+- **Mob spawning like 26.3** (Part 108): every biome's spawn lists are now 26.3's: farm animals in the badlands, more
+  rabbits and now camels in deserts, where half of the skeletons give way to 26.x's parched, slightly fewer zombies in
+  plains, savannas and snowy plains, where 26.x adds zombie horses, and nautiluses in the oceans. Mobs the game doesn't
+  have yet (the parched, the nautilus, the sulfur cube) and the natural zombie horses keep their place in the lists
+  without spawning, so every other mob comes as often as in Java.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

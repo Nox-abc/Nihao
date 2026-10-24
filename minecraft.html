@@ -9938,6 +9938,8 @@ F.fossil = (C, cf, r, ox, oy, oz) => {
      sandstone block, the air inside cleared
    - desert_well/suspicious_sand: one suspicious sand block, its loot
      from the template's rule processor (archaeology/desert_well)
+   - spring/sulfur_spring_*: the sulfur caves' springs, the game's own
+     design at the sizes of Java's ten files (Part 107)
    =================================================================== */
 (() => {
 const F = VF.FEATURES, S = ST;
@@ -9964,6 +9966,45 @@ const TEMPLATES = {
     return true;
   },
 };
+// the sulfur caves' springs (26.3): the game's own design at the sizes of Java's files, a mound of tuff, stone and granite with
+// cinnabar further in and sulfur round a pool of water; a magma block under dormant potent sulfur at the bottom of the pool, sulfur
+// spikes in the water and on the rim, the air above cleared
+const SPRING_SIZES = { small_1: [8, 9], small_2: [9, 8], small_3: [9, 9], small_4: [9, 9], medium_1: [11, 11], medium_2: [12, 11], medium_3: [12, 12],
+  large_1: [13, 12], large_2: [12, 13], extra_large_1: [16, 16] };
+const springBuilder = (sx, sz, salt) => (C, cf, x, y, z) => {
+  const R = C.R, ax = x - (sx >> 1), az = z - (sz >> 1), cx = (sx - 1) / 2, cz = (sz - 1) / 2;
+  const h = (i, j, k) => hash2(ax + i + k * 4099, az + j - k * 2053, salt);
+  const TUFF = st('tuff'), STONE = st('stone'), GRANITE = st('granite'), CIN = st('cinnabar'), SULF = st('sulfur'), WATER = st('water'), AIR = st('air');
+  const spike = wet => S.set(S.set(S.set(st('sulfur_spike'), 'thickness', 'tip'), 'vertical_direction', 'up'), 'waterlogged', wet ? 'true' : 'false');
+  const pool = 0.3 + 0.2 * (Math.min(sx, sz) - 8) / 8;
+  const edge = (i, j) => Math.hypot((i - cx) / (sx / 2), (j - cz) / (sz / 2)) + (h(i, j, 11) - 0.5) * 0.2;
+  for (let i = 0; i < sx; i++) for (let j = 0; j < sz; j++) {
+    const e = edge(i, j);
+    if (e > 1) continue;
+    for (let k = 0; k <= 10; k++) {
+      const q = h(i, j, k);
+      let s;
+      if (k === 6 && e < pool * 0.6) s = WATER;
+      else if (k < 7) s = e < pool + 0.12 && k >= 4 ? (q < 0.85 ? SULF : CIN) : e < 0.62 ? (q < 0.5 ? GRANITE : q < 0.8 ? CIN : SULF) : (q < 0.55 ? TUFF : q < 0.8 ? STONE : GRANITE);
+      else if (k === 7) s = e < pool ? WATER : e < pool + 0.16 ? SULF : AIR;
+      else s = AIR;
+      R.set(ax + i, y + k, az + j, s);
+    }
+  }
+  const mi = Math.round(cx), mj = Math.round(cz);
+  R.set(ax + mi, y + 5, az + mj, st('magma_block'));
+  R.set(ax + mi, y + 6, az + mj, S.set(st('potent_sulfur'), 'potent_sulfur_state', 'dormant'));
+  // spikes: in the water standing on the pool's floor, and on the rim (now and then on a bump of sulfur)
+  for (let i = 0; i < sx; i++) for (let j = 0; j < sz; j++) {
+    const e = edge(i, j), q = h(i, j, 12);
+    if (e < pool && e >= pool * 0.6 && q < 0.25) R.set(ax + i, y + 7, az + j, spike(true));
+    else if (e >= pool && e < pool + 0.16 && q < 0.22) {
+      if (q < 0.06) { R.set(ax + i, y + 8, az + j, SULF); R.set(ax + i, y + 9, az + j, spike(false)); } else R.set(ax + i, y + 8, az + j, spike(false));
+    }
+  }
+  return true;
+};
+Object.keys(SPRING_SIZES).forEach((k, n) => { TEMPLATES['spring/sulfur_spring_' + k] = springBuilder(SPRING_SIZES[k][0], SPRING_SIZES[k][1], 811 + n); });
 // one of the templates by weight, then built if the game knows it
 F.template = (C, cf, r, x, y, z) => {
   const list = cf.templates || [];
@@ -10925,6 +10966,8 @@ for (const e of [['camel', 0xfcc369, 0xcb9337], ['donkey', 0x534539, 0x867566], 
 for (const c of COLORS) defI(c + '_harness', { stack: 1, harness: c, display: titleCase(c) + ' Harness' });
 for (const e of [['happy_ghast', 0xf9f9f9, 0xbcbcbc]]) { SPAWN_EGGS.push(e); defI(e[0] + '_spawn_egg', { egg: e[0], eggCol: [e[1], e[2]] }); EGG_MOBS[e[0]] = true; }
 
+// blue and brown eggs, laid by cold and warm chickens (Part 106)
+defI('blue_egg', { stack: 16, throw: 'egg' }); defI('brown_egg', { stack: 16, throw: 'egg' });
 /* ---------------- tables used everywhere ---------------- */
 const I = {};
 for (const n in ITEM_BY_NAME) I[n.toUpperCase()] = ITEM_BY_NAME[n].id;
@@ -10979,6 +11022,7 @@ const TAGS = {
   terracotta_any: ids(['terracotta', ...COLORS.map(c => c + '_terracotta')]),
   glass_any: ids(['glass', ...COLORS.map(c => c + '_stained_glass')]),
   logs_any: [],
+  eggs: ids(['egg', 'blue_egg', 'brown_egg']),
 };
 TAGS.logs_any = TAGS.logs.concat(ids(['bamboo_block', 'stripped_bamboo_block']));
 const RECIPES = [];
@@ -11338,9 +11382,9 @@ shaped('glass_bottle', 3, ['# #', ' # '], { '#': 'glass' });
 
 /* ---------------- food and brewing ---------------- */
 shaped('bread', 1, ['###'], { '#': 'wheat' });
-shaped('cake', 1, ['MMM', 'SES', 'WWW'], { M: 'milk_bucket', S: 'sugar', E: 'egg', W: 'wheat' });
+shaped('cake', 1, ['MMM', 'SES', 'WWW'], { M: 'milk_bucket', S: 'sugar', E: '#eggs', W: 'wheat' });
 shaped('cookie', 8, ['WCW'], { W: 'wheat', C: 'cocoa_beans' });
-shapeless('pumpkin_pie', 1, ['pumpkin', 'sugar', 'egg']);
+shapeless('pumpkin_pie', 1, ['pumpkin', 'sugar', '#eggs']);
 shaped('golden_apple', 1, ['GGG', 'GAG', 'GGG'], { G: 'gold_ingot', A: 'apple' });
 shaped('golden_carrot', 1, ['GGG', 'GCG', 'GGG'], { G: 'gold_nugget', C: 'carrot' });
 shaped('glistering_melon_slice', 1, ['GGG', 'GMG', 'GGG'], { G: 'gold_nugget', M: 'melon_slice' });
@@ -13085,6 +13129,9 @@ TEXGEN.push(function texItems() {
   IT('painting', (d, r) => { rect(d, 1, 2, 14, 13, (x, y) => (x < 2 || y < 3 || x > 13 || y > 12) ? [140, 104, 58] : y < 8 ? [110, 170, 230] : mul([80, 140, 60], 0.9 + r() * 0.12)); });
   IT('end_crystal', (d) => { fillPoly(d, [[8, 1], [14, 8], [8, 15], [2, 8]], (x, y) => Math.abs(x - 8) + Math.abs(y - 8) < 3 ? [250, 160, 230] : [200, 170, 240]); });
   IT('egg', (d, r) => fillEl(d, 8, 9, 4.5, 5.5, (x, y) => mul([230, 210, 170], x < 7 ? 1.06 : 0.9)));
+  // the cold chicken's pale blue egg and the warm chicken's speckled brown one
+  IT('blue_egg', (d, r) => fillEl(d, 8, 9, 4.5, 5.5, (x, y) => mul([150, 196, 222], (x < 7 ? 1.06 : 0.9) * (hash2(x, y, 61) < 0.12 ? 0.85 : 1))));
+  IT('brown_egg', (d, r) => fillEl(d, 8, 9, 4.5, 5.5, (x, y) => mul([182, 124, 76], (x < 7 ? 1.06 : 0.9) * (hash2(x, y, 62) < 0.18 ? 0.78 : 1))));
   IT('wind_charge', (d) => { fillEl(d, 8, 8, 5, 5, (x, y) => (Math.atan2(y - 7.5, x - 7.5) * 3 + Math.hypot(x - 7.5, y - 7.5)) % 3 < 1.5 ? [220, 220, 250] : [160, 170, 230]); });
   IT('totem_of_undying', (d) => { rect(d, 6, 1, 9, 5, [240, 200, 60]); sp(d, 7, 3, [30, 100, 30]); sp(d, 9, 3, [30, 100, 30]); rect(d, 3, 6, 12, 8, [240, 200, 60]); rect(d, 5, 9, 10, 13, [220, 180, 50]); rect(d, 7, 14, 8, 15, [200, 160, 40]); });
 
@@ -16314,7 +16361,11 @@ class Projectile extends Entity {
     if (this.kind === 'egg') {
       if (e) e.hurt(0, 'egg', this.owner);
       g.particles.poof(this.x, this.y, this.z, [0.95, 0.9, 0.75], 6);
-      if (g.spawnMob && Math.random() < 0.125) { const c = g.spawnMob('chicken', this.x, this.y, this.z); if (c && c.makeBaby) c.makeBaby(); }
+      // ThrownEgg.onHit: one time in 8 a chick of the egg's variant (chicken/variant), one time in 32 of those four
+      if (g.spawnMob && Math.random() < 0.125) {
+        const n = Math.random() < 1 / 32 ? 4 : 1, variant = this.eggId === I.BLUE_EGG ? 'cold' : this.eggId === I.BROWN_EGG ? 'warm' : 'temperate';
+        for (let k = 0; k < n; k++) { const c = g.spawnMob('chicken', this.x, this.y, this.z, { variant }); if (c && c.makeBaby) c.makeBaby(); }
+      }
       return;
     }
     if (this.kind === 'potion') { g.sound('break_glass', this.x, this.y, this.z); if (g.splashPotion) g.splashPotion(this.x, this.y, this.z, this.stack, this.owner); return; }
@@ -16356,7 +16407,7 @@ class Projectile extends Entity {
   render(r, a) {
     const p = this.ipos(a);
     if (this.kind !== 'arrow' && this.kind !== 'trident') {
-      const tex = { fire: 'fireball', ghast: 'fire_charge', void: 'void_orb', snow: 'snowball', pearl: 'ender_pearl', egg: 'egg', potion: 'splash_potion', xp: 'experience_bottle', wind: 'wind_charge', skull: 'wither_skeleton_skull', bullet: 'end_rod' }[this.kind] || 'snowball';
+      const tex = this.kind === 'egg' && this.eggId === I.BLUE_EGG ? 'blue_egg' : this.kind === 'egg' && this.eggId === I.BROWN_EGG ? 'brown_egg' : { fire: 'fireball', ghast: 'fire_charge', void: 'void_orb', snow: 'snowball', pearl: 'ender_pearl', egg: 'egg', potion: 'splash_potion', xp: 'experience_bottle', wind: 'wind_charge', skull: 'wither_skeleton_skull', bullet: 'end_rod' }[this.kind] || 'snowball';
       const L = texLayer(tex, texL('snowball')), big = this.kind === 'ghast' ? 1.1 : this.kind === 'fire' ? 0.5 : this.kind === 'void' ? 0.7 : this.kind === 'skull' ? 0.45 : 0.3;
       drawSprite(r, this.kind === 'skull' ? itemLayer(I.WITHER_SKELETON_SKULL) : L, p[0], p[1], p[2], big, (this.game.camYaw || 0), this.kind === 'skull' && this.blue ? [0.5, 0.6, 1.4, 1] : [1, 1, 1, 1], ['fire', 'void', 'ghast', 'bullet'].includes(this.kind) ? [15, 15] : this.lightAt());
       return;
@@ -16832,9 +16883,7 @@ Object.assign(MOB_MODELS, {
   pig: { tw: 64, th: 32, anim: animQuad, babyHead: ['head'], parts: [
     P_('head', [0, 12, -6], [[0, 0, -4, -4, -8, 8, 8, 8], [16, 16, -2, 0, -9, 4, 3, 1]]),
     P_('body', [0, 11, 2], [[28, 8, -5, -10, -7, 10, 16, 8]], [HPI, 0, 0]), ...VQ(6, 3, 7, -5)] },
-  cow: { tw: 64, th: 32, anim: animQuad, babyHead: ['head'], parts: [
-    P_('head', [0, 4, -8], [[0, 0, -4, -4, -6, 8, 8, 6], [22, 0, -5, -5, -4, 1, 3, 1], [22, 0, 4, -5, -4, 1, 3, 1]]),
-    P_('body', [0, 5, 2], [[18, 4, -6, -10, -7, 12, 18, 10], [52, 0, -2, 2, -8, 4, 6, 1]], [HPI, 0, 0]), ...VQ(12, 4, 7, -6, true)] },
+  // cows and mooshrooms: Part 106 (the 1.21.5 model with its variants)
   sheep: { tw: 64, th: 32, babyHead: ['head'], anim(P, st) { animQuad(P, st); if (st.eat) { P['head#p'] = [0, 6 + st.eat * 9, -8]; P.head = [st.eat * 1.2 + Math.sin(st.age * 0.9) * 0.1 * st.eat, 0, 0]; } },
     parts: [P_('head', [0, 6, -8], [[0, 0, -3, -4, -6, 6, 6, 8]]), P_('body', [0, 5, 2], [[28, 8, -4, -10, -7, 8, 16, 6]], [HPI, 0, 0]), ...VQ(12, 3, 7, -5)],
     fur: [P_('head', [0, 6, -8], [[0, 0, -3, -4, -4, 6, 6, 6, 0.6]]), P_('body', [0, 5, 2], [[28, 8, -4, -10, -7, 8, 16, 6, 1.75]], [HPI, 0, 0]),
@@ -17479,7 +17528,7 @@ MOB_MODELS.ocelot = MOB_MODELS.cat;
 MOB_MODELS.wandering_trader = MOB_MODELS.villager;
 for (const k of ['pillager', 'vindicator', 'evoker', 'illusioner']) MOB_MODELS[k] = MOB_MODELS.illager;
 MOB_MODELS.husk = MOB_MODELS.zombie; MOB_MODELS.stray = MOB_MODELS.skeleton; MOB_MODELS.wither_skeleton = MOB_MODELS.skeleton;
-MOB_MODELS.cave_spider = MOB_MODELS.spider; MOB_MODELS.mooshroom = MOB_MODELS.cow;
+MOB_MODELS.cave_spider = MOB_MODELS.spider;
 MOB_MODELS.zombified_piglin = MOB_MODELS.piglin; MOB_MODELS.piglin_brute = MOB_MODELS.piglin;
 MOB_MODELS.zoglin = MOB_MODELS.hoglin; MOB_MODELS.elder_guardian = MOB_MODELS.guardian; MOB_MODELS.glow_squid = MOB_MODELS.squid;
 for (const k of ['donkey', 'mule', 'skeleton_horse', 'zombie_horse']) MOB_MODELS[k] = MOB_MODELS.horse;
@@ -17521,25 +17570,7 @@ defSkin('entity/pig/pig', 64, 32, () => {
 });
 defSkin('entity/pig/pig_saddle', 64, 32, () => skinParts(64, 32, [P_('body', [0, 0, 0], [[28, 8, -5, -10, -7, 10, 16, 8]])], {
   body: (f, x, y, W, H, R) => (f === 'front' || f === 'back' || y > H * 0.3 && y < H * 0.75) && f !== 'bottom' ? nz(f === 'front' && x > 2 && x < 7 ? [60, 40, 26] : [110, 70, 40], R) : null }, 12));
-function cowSkin(base, patchCol, seed, mooshroom) {
-  return skinParts(64, 32, MM.cow.parts, {
-    head: (f, x, y, W, H, R, ci) => {
-      if (ci > 0) return nz([212, 206, 196], R);
-      if (f === 'front') {
-        if (y === 3 && (x === 1 || x === 6)) return [20, 16, 16];
-        if (y === 2 && (x === 1 || x === 6)) return [235, 235, 235];
-        if (y >= 5) return y === 6 && (x === 2 || x === 5) ? [80, 50, 50] : nz(mooshroom ? [205, 150, 140] : [200, 160, 150], R);
-        if (!mooshroom && x >= 3 && x <= 4 && y >= 1) return nz(patchCol, R);
-      }
-      return nz(patch(f, x, y, ci, seed + 3, 2.5, 0.72) ? patchCol : base, R);
-    },
-    body: (f, x, y, W, H, R, ci) => ci === 1 ? nz([236, 170, 170], R) : nz(patch(f, x, y, ci, seed, 3.5, 0.62) ? patchCol : base, R),
-    '*': (f, x, y, W, H, R) => f === 'bottom' || y >= H - 1 ? nz([60, 52, 48], R) : y >= H - 5 ? nz(patchCol, R) : nz(base, R),
-  }, seed);
-}
-defSkin('entity/cow/cow', 64, 32, () => cowSkin([68, 50, 38], [236, 232, 222], 21));
-defSkin('entity/cow/red_mooshroom', 64, 32, () => cowSkin([166, 26, 28], [222, 212, 210], 22, true));
-defSkin('entity/cow/brown_mooshroom', 64, 32, () => cowSkin([146, 104, 70], [220, 206, 186], 23, true));
+// cows and mooshrooms: Part 106 (the 1.21.5 model, 64 x 64)
 defSkin('entity/sheep/sheep', 64, 32, () => skinParts(64, 32, MM.sheep.parts, {
   head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 1 || x === 4) ? [30, 26, 22] : f === 'front' && y === 4 && (x === 2 || x === 3) ? [196, 140, 140] : nz([218, 196, 172], R),
   body: (f, x, y, W, H, R) => nz([232, 196, 186], R),
@@ -18232,7 +18263,7 @@ defMob('mooshroom', { w: 0.9, h: 1.4, hp: 10, walk: 0.9, run: 2.2, xp: [1, 3], b
 defMob('sheep', { w: 0.9, h: 1.3, hp: 8, walk: 1.0, run: 2.3, xp: [1, 3], baby: true, breed: ['wheat'], ai: ['panic', 'breed', 'tempt', 'followParent', 'eatGrass', 'wander', 'look'], drops: [drop('mutton', 1, 2, { cook: 'cooked_mutton' })], sounds: ['baa', 'hurt_animal', 'hurt_animal'] });
 defMob('chicken', { w: 0.4, h: 0.7, hp: 4, walk: 1.0, run: 2.3, xp: [1, 3], baby: true, breed: ['wheat_seeds', 'pumpkin_seeds', 'melon_seeds', 'beetroot_seeds', 'torchflower_seeds', 'pitcher_pod'], ai: ANIMAL_AI, noFall: true,
   drops: [drop('chicken', 1, 1, { cook: 'cooked_chicken' }), drop('feather', 0, 2)], sounds: ['cluck', 'cluck', 'cluck'] });
-defMob('rabbit', { w: 0.4, h: 0.5, hp: 3, walk: 1.6, run: 3.2, xp: [1, 3], baby: true, breed: ['carrot', 'golden_carrot', 'dandelion'], ai: ['panic', 'breed', 'tempt', 'avoidPlayer', 'wander', 'look'], hops: true,
+defMob('rabbit', { w: 0.49, h: 0.6, hp: 3, walk: 1.6, run: 3.2, xp: [1, 3], baby: true, breed: ['carrot', 'golden_carrot', 'dandelion'], ai: ['panic', 'breed', 'tempt', 'avoidPlayer', 'wander', 'look'], hops: true,
   drops: [drop('rabbit', 0, 1, { cook: 'cooked_rabbit' }), drop('rabbit_hide', 0, 1), drop('rabbit_foot', 1, 1, { chance: 0.1 })], sounds: ['hurt_animal', 'hurt_animal', 'hurt_animal'] });
 defMob('wolf', { w: 0.6, h: 0.85, hp: 8, walk: 1.4, run: 3.0, dmg: 4, xp: [1, 3], baby: true, breed: ['beef', 'porkchop', 'chicken', 'mutton', 'rabbit', 'rotten_flesh', 'cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'cooked_mutton', 'cooked_rabbit'], tameItem: 'bone',
   ai: ['sit', 'panicTame', 'target', 'melee', 'followOwner', 'breed', 'followParent', 'wander', 'look'], neutral: true, hunts: ['sheep', 'rabbit', 'fox', 'skeleton', 'stray', 'wither_skeleton', 'bogged', 'llama'], sounds: ['wolf', 'hurt_animal', 'hurt_animal'] });
@@ -18241,7 +18272,7 @@ defMob('ocelot', { w: 0.6, h: 0.7, hp: 10, walk: 1.4, run: 3.2, dmg: 3, xp: [1, 
 defMob('fox', { w: 0.6, h: 0.7, hp: 10, walk: 1.4, run: 3.2, dmg: 2, xp: [1, 3], baby: true, breed: ['sweet_berries', 'glow_berries'], tempt: ['sweet_berries', 'glow_berries'], ai: ['panic', 'avoidPlayer', 'breed', 'tempt', 'target', 'melee', 'sleepDay', 'wander', 'look'], hunts: ['chicken', 'rabbit', 'cod', 'salmon'], sounds: ['hurt_animal', 'hurt_animal', 'hurt_animal'], drops: [] });
 defMob('parrot', { w: 0.5, h: 0.9, hp: 6, walk: 1.0, run: 2.0, xp: [1, 3], flying: 'flap', tempt: ['wheat_seeds', 'melon_seeds', 'pumpkin_seeds', 'beetroot_seeds'], tameItem: ['wheat_seeds', 'melon_seeds', 'pumpkin_seeds', 'beetroot_seeds'], ai: ['sit', 'panic', 'followOwner', 'wander', 'look'], drops: [drop('feather', 1, 2)], sounds: ['cluck', 'hurt_animal', 'hurt_animal'], noFall: true });
 defMob('bat', { w: 0.5, h: 0.9, hp: 6, walk: 1.5, cat: 'ambient', flying: 'bat', ai: [], sounds: ['bat', 'bat', 'bat'] });
-defMob('bee', { w: 0.7, h: 0.6, hp: 10, walk: 1.5, run: 2.5, dmg: 2, xp: [1, 3], baby: true, flying: 'hover', breed: ['dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'sunflower'],
+defMob('bee', { w: 0.55, h: 0.5, hp: 10, walk: 1.5, run: 2.5, dmg: 2, xp: [1, 3], baby: true, flying: 'hover', breed: ['dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'sunflower'],
   tempt: ['dandelion', 'poppy', 'cornflower', 'oxeye_daisy', 'azure_bluet', 'allium'], neutral: true, arthropod: true, ai: ['target', 'melee', 'breed', 'tempt', 'wander', 'look'], sounds: ['bee', 'hurt_animal', 'hurt_animal'], noFall: true });
 defMob('goat', { w: 0.9, h: 1.3, hp: 10, walk: 1.2, run: 2.6, xp: [1, 3], baby: true, breed: ['wheat'], tempt: ['wheat'], ai: ['panic', 'breed', 'tempt', 'followParent', 'ram', 'wander', 'look'], jumpy: true, sounds: ['baa', 'hurt_animal', 'hurt_animal'], noFall: 10 });
 defMob('polar_bear', { w: 1.4, h: 1.4, hp: 30, walk: 1.3, run: 2.6, dmg: 6, xp: [1, 3], baby: true, neutral: true, ai: ['target', 'melee', 'panic', 'followParent', 'wander', 'look'], drops: [drop('cod', 0, 2, { cook: 'cooked_cod' }), drop('salmon', 0, 2, { chance: 0.25 })], sounds: ['groan', 'hurt_animal', 'hurt_animal'] });
@@ -18252,7 +18283,7 @@ defMob('horse', { w: 1.4, h: 1.6, hp: 22, walk: 1.4, run: 3.0, xp: [1, 3], baby:
 defMob('donkey', { w: 1.4, h: 1.5, hp: 20, walk: 1.2, run: 2.6, xp: [1, 3], baby: true, breed: ['golden_apple', 'golden_carrot'], tempt: ['golden_apple', 'golden_carrot', 'apple', 'wheat', 'sugar'], ai: ['panic', 'breed', 'tempt', 'followParent', 'wander', 'look'], drops: [drop('leather', 0, 2)], sounds: ['horse', 'horse', 'horse'], tameable: 'mount', rideable: 'saddle', chestable: true });
 defMob('mule', { w: 1.4, h: 1.6, hp: 20, walk: 1.2, run: 2.6, xp: [1, 3], ai: ['panic', 'tempt', 'wander', 'look'], tempt: ['golden_apple', 'golden_carrot', 'apple', 'wheat'], drops: [drop('leather', 0, 2)], sounds: ['horse', 'horse', 'horse'], tameable: 'mount', rideable: 'saddle', chestable: true });
 defMob('skeleton_horse', { w: 1.4, h: 1.6, hp: 15, walk: 1.4, run: 3.0, xp: [1, 3], undead: true, ai: ['wander', 'look'], drops: [drop('bone', 0, 2)], sounds: ['rattle', 'rattle', 'rattle'], rideable: 'saddle', tameable: 'tamed' });
-defMob('zombie_horse', { w: 1.4, h: 1.6, hp: 15, walk: 1.0, run: 2.0, xp: [1, 3], undead: true, ai: ['wander', 'look'], drops: [drop('rotten_flesh', 0, 2)], sounds: ['groan', 'zhurt', 'zdeath'] });
+defMob('zombie_horse', { w: 1.4, h: 1.6, hp: 25, walk: 1.0, run: 2.0, xp: [1, 3], undead: true, ai: ['wander', 'look'], drops: [drop('rotten_flesh', 0, 2)], sounds: ['groan', 'zhurt', 'zdeath'] });
 defMob('camel', { w: 1.7, h: 2.375, hp: 32, walk: 1.0, run: 2.6, xp: [1, 3], baby: true, breed: ['cactus'], tempt: ['cactus'], ai: ['panic', 'breed', 'tempt', 'followParent', 'wander', 'look'], sounds: ['hurt_animal', 'hurt_animal', 'hurt_animal'], rideable: 'saddle' });
 defMob('armadillo', { w: 0.7, h: 0.65, hp: 12, walk: 0.8, run: 1.8, xp: [1, 3], baby: true, breed: ['spider_eye'], tempt: ['spider_eye'], ai: ['roll', 'breed', 'tempt', 'followParent', 'wander', 'look'], arthropodLike: true, sounds: ['hurt_animal', 'hurt_animal', 'hurt_animal'] });
 defMob('sniffer', { w: 1.9, h: 1.75, hp: 14, walk: 0.6, run: 1.2, xp: [1, 3], baby: true, breed: ['torchflower_seeds'], tempt: ['torchflower_seeds'], ai: ['panic', 'breed', 'tempt', 'followParent', 'sniff', 'wander', 'look'], sounds: ['moo', 'hurt_animal', 'hurt_animal'] });
@@ -18264,7 +18295,7 @@ defMob('glow_squid', { w: 0.8, h: 0.8, hp: 10, walk: 1.0, cat: 'water', swims: t
 defMob('dolphin', { w: 0.9, h: 0.6, hp: 10, walk: 2.4, run: 5, dmg: 3, cat: 'water', swims: true, airBreather: true, neutral: true, ai: ['target', 'melee', 'followPlayerSwim', 'swim'], drops: [drop('cod', 0, 1, { cook: 'cooked_cod' })], sounds: ['bat', 'hurt_animal', 'hurt_animal'], xp: [1, 3] });
 defMob('turtle', { w: 1.2, h: 0.4, hp: 30, walk: 0.5, run: 1.0, xp: [1, 3], baby: true, breed: ['seagrass'], tempt: ['seagrass'], amphibious: true, ai: ['panic', 'breed', 'tempt', 'swim', 'wander', 'look'], drops: [drop('seagrass', 0, 2)], sounds: ['hurt_animal', 'hurt_animal', 'hurt_animal'] });
 for (const [f, d] of [['cod', 'cod'], ['salmon', 'salmon'], ['pufferfish', 'pufferfish'], ['tropical_fish', 'tropical_fish']])
-  defMob(f, { w: f === 'salmon' ? 0.7 : 0.5, h: f === 'salmon' ? 0.4 : 0.3, hp: 3, walk: 1.0, run: 2.0, cat: 'water', swims: true, fish: true, ai: ['fishFlee', 'swim'], drops: [drop(d, 1, 1, { cook: d === 'cod' || d === 'salmon' ? 'cooked_' + d : null }), drop('bone_meal', 1, 1, { chance: 0.05 })], sounds: ['slime', 'slime', 'slime'], xp: [1, 3] });
+  defMob(f, { w: f === 'salmon' ? 0.7 : 0.5, h: f === 'salmon' || f === 'tropical_fish' ? 0.4 : 0.3, hp: 3, walk: 1.0, run: 2.0, cat: 'water', swims: true, fish: true, ai: ['fishFlee', 'swim'], drops: [drop(d, 1, 1, { cook: d === 'cod' || d === 'salmon' ? 'cooked_' + d : null }), drop('bone_meal', 1, 1, { chance: 0.05 })], sounds: ['slime', 'slime', 'slime'], xp: [1, 3] });
 defMob('allay', { w: 0.35, h: 0.6, hp: 20, walk: 2.0, run: 3.0, flying: 'hover', ai: ['allay', 'wander', 'look'], sounds: ['amethyst', 'amethyst', 'amethyst'], noFall: true });
 // village
 defMob('villager', { w: 0.6, h: 1.95, hp: 20, walk: 1.0, run: 2.0, baby: true, ai: ['panicVillager', 'villagerLife', 'wander', 'look'], sounds: ['villager', 'villager', 'villager'], persistent: true, opensDoors: true });
@@ -18272,9 +18303,9 @@ defMob('wandering_trader', { w: 0.6, h: 1.95, hp: 20, walk: 1.0, run: 2.0, ai: [
 defMob('iron_golem', { w: 1.4, h: 2.7, hp: 100, walk: 0.9, run: 1.6, dmg: 15, armor: 0, kbRes: 1, ai: ['target', 'melee', 'golemVillage', 'wander', 'look'], drops: [drop('iron_ingot', 3, 5), drop('poppy', 0, 2)], sounds: ['golem', 'golem_hit', 'golem_hit'], noFall: true, persistent: true });
 defMob('snow_golem', { w: 0.7, h: 1.9, hp: 4, walk: 1.0, run: 1.6, ai: ['target', 'ranged', 'wander', 'look'], ranged: { kind: 'snow', every: 20, range: 10 }, drops: [drop('snowball', 0, 15)], sounds: ['step_snow', 'hit_snow', 'break_snow'], persistent: true });
 // monsters of the overworld
-defMob('zombie', { cat: 'monster', hp: 20, walk: 1.2, run: 2.3, dmg: 3, armor: 2, xp: 5, undead: true, burns: true, baby: 'rare', ai: MONSTER_AI, follow: 35, drops: [drop('rotten_flesh', 0, 2), drop('iron_ingot', 1, 1, { rare: 0.025 }), drop('carrot', 1, 1, { rare: 0.025 }), drop('potato', 1, 1, { rare: 0.025 })], sounds: ['groan', 'zhurt', 'zdeath'], attacks: ['villager', 'wandering_trader', 'iron_golem', 'turtle'] });
-defMob('husk', { cat: 'monster', hp: 20, walk: 1.2, run: 2.3, dmg: 3, armor: 2, xp: 5, undead: true, baby: 'rare', ai: MONSTER_AI, follow: 35, drops: [drop('rotten_flesh', 0, 2), drop('iron_ingot', 1, 1, { rare: 0.025 })], sounds: ['groan', 'zhurt', 'zdeath'], hitEffect: ['hunger', 140], attacks: ['villager', 'wandering_trader', 'iron_golem'] });
-defMob('drowned', { cat: 'monster', hp: 20, walk: 1.2, run: 2.3, dmg: 3, armor: 2, xp: 5, undead: true, burns: true, baby: 'rare', amphibious: true, swims: true, ai: ['target', 'tridentThrow', 'melee', 'swim', 'wander', 'look'], follow: 35, drops: [drop('rotten_flesh', 0, 2), drop('copper_ingot', 1, 1, { rare: 0.11 })], sounds: ['groan', 'zhurt', 'zdeath'], attacks: ['villager', 'iron_golem', 'axolotl'] });
+defMob('zombie', { cat: 'monster', h: 1.95, hp: 20, walk: 1.2, run: 2.3, dmg: 3, armor: 2, xp: 5, undead: true, burns: true, baby: 'rare', ai: MONSTER_AI, follow: 35, drops: [drop('rotten_flesh', 0, 2), drop('iron_ingot', 1, 1, { rare: 0.025 }), drop('carrot', 1, 1, { rare: 0.025 }), drop('potato', 1, 1, { rare: 0.025 })], sounds: ['groan', 'zhurt', 'zdeath'], attacks: ['villager', 'wandering_trader', 'iron_golem', 'turtle'] });
+defMob('husk', { cat: 'monster', h: 1.95, hp: 20, walk: 1.2, run: 2.3, dmg: 3, armor: 2, xp: 5, undead: true, baby: 'rare', ai: MONSTER_AI, follow: 35, drops: [drop('rotten_flesh', 0, 2), drop('iron_ingot', 1, 1, { rare: 0.025 })], sounds: ['groan', 'zhurt', 'zdeath'], hitEffect: ['hunger', 140], attacks: ['villager', 'wandering_trader', 'iron_golem'] });
+defMob('drowned', { cat: 'monster', h: 1.95, hp: 20, walk: 1.2, run: 2.3, dmg: 3, armor: 2, xp: 5, undead: true, burns: true, baby: 'rare', amphibious: true, swims: true, ai: ['target', 'tridentThrow', 'melee', 'swim', 'wander', 'look'], follow: 35, drops: [drop('rotten_flesh', 0, 2), drop('copper_ingot', 1, 1, { rare: 0.11 })], sounds: ['groan', 'zhurt', 'zdeath'], attacks: ['villager', 'iron_golem', 'axolotl'] });
 defMob('zombie_villager', { cat: 'monster', w: 0.6, h: 1.95, hp: 20, walk: 1.2, run: 2.3, dmg: 3, armor: 2, xp: 5, undead: true, burns: true, baby: 'rare', ai: MONSTER_AI, follow: 35, drops: [drop('rotten_flesh', 0, 2)], sounds: ['groan', 'zhurt', 'zdeath'], attacks: ['villager', 'iron_golem'] });
 defMob('skeleton', { cat: 'monster', w: 0.6, h: 1.99, hp: 20, walk: 1.3, run: 2.5, dmg: 2, xp: 5, undead: true, burns: true, ai: ['target', 'ranged', 'wander', 'look'], ranged: { kind: 'arrow', every: 40, hard: 20, range: 15 }, drops: [drop('bone', 0, 2), drop('arrow', 0, 2)], sounds: ['rattle', 'rattle', 'rattle'], avoid: ['wolf'] });
 defMob('stray', { cat: 'monster', w: 0.6, h: 1.99, hp: 20, walk: 1.3, run: 2.5, dmg: 2, xp: 5, undead: true, burns: true, ai: ['target', 'ranged', 'wander', 'look'], ranged: { kind: 'arrow', every: 40, hard: 20, range: 15, potion: 'slowness' }, drops: [drop('bone', 0, 2), drop('arrow', 0, 2)], sounds: ['rattle', 'rattle', 'rattle'], avoid: ['wolf'] });
@@ -21150,7 +21181,7 @@ function buildCreativeTabs() {
   add('mace', 'trident', 'shield');
   for (const [m] of ARMOR_MATS) add(ARMOR_PIECES.map(p => m + '_' + p));
   add('turtle_helmet', 'leather_horse_armor', 'copper_horse_armor', 'iron_horse_armor', 'golden_horse_armor', 'diamond_horse_armor', 'netherite_horse_armor', 'wolf_armor', 'totem_of_undying', 'tnt', 'end_crystal', 'snowball',
-    'egg', 'wind_charge', 'bow', 'crossbow', { id: I.FIREWORK_ROCKET, tag: { flight: 1 } }, 'arrow', 'spectral_arrow');
+    'egg', 'blue_egg', 'brown_egg', 'wind_charge', 'bow', 'crossbow', { id: I.FIREWORK_ROCKET, tag: { flight: 1 } }, 'arrow', 'spectral_arrow');
   if (typeof POTION_TYPES !== 'undefined') for (const p of POTION_TYPES) if (p.arrow !== false && p.key !== 'water' && p.key !== 'mundane' && p.key !== 'thick' && p.key !== 'awkward') add({ id: I.TIPPED_ARROW, tag: { potion: p.key } });
   CREATIVE.combat = take();
   // ---- food and drinks
@@ -21159,7 +21190,7 @@ function buildCreativeTabs() {
   CREATIVE.food = take();
   // ---- ingredients
   add('coal', 'charcoal', 'raw_iron', 'raw_copper', 'raw_gold', 'emerald', 'lapis_lazuli', 'diamond', 'quartz', 'amethyst_shard', 'iron_nugget', 'copper_nugget', 'gold_nugget', 'iron_ingot',
-    'copper_ingot', 'gold_ingot', 'netherite_scrap', 'netherite_ingot', 'stick', 'flint', 'wheat', 'bone', 'string', 'feather', 'snowball', 'egg', 'leather', 'rabbit_hide',
+    'copper_ingot', 'gold_ingot', 'netherite_scrap', 'netherite_ingot', 'stick', 'flint', 'wheat', 'bone', 'string', 'feather', 'snowball', 'egg', 'blue_egg', 'brown_egg', 'leather', 'rabbit_hide',
     'honeycomb', 'ink_sac', 'glow_ink_sac', 'turtle_scute', 'armadillo_scute', 'slime_ball', 'clay_ball', 'prismarine_shard', 'prismarine_crystals', 'nautilus_shell',
     'heart_of_the_sea', 'fire_charge', 'blaze_rod', 'breeze_rod', 'heavy_core', 'nether_star', 'ender_pearl', 'ender_eye', 'shulker_shell', 'popped_chorus_fruit', 'echo_shard',
     'disc_fragment_5', COLORS.map(c => c + '_dye'), 'bowl', 'brick', 'nether_brick', 'resin_brick', 'resin_clump', 'paper', 'book', 'firework_star', 'glass_bottle', 'nether_wart', 'redstone', 'glowstone_dust',
@@ -22528,15 +22559,16 @@ const PACKS = {
     const probe = entries.find(e => e.name.includes(PACK_ROOT) && e.name.endsWith('.png'));
     if (!probe) throw new Error('No Minecraft textures were found in "' + file.name + '". Choose a Java Edition resource pack (.zip) or a Minecraft version file (.jar).');
     const prefix = probe.name.slice(0, probe.name.indexOf('assets/minecraft/'));
-    const want = packWanted(), jobs = [];
+    // every texture is kept, so the ones later versions of the game draw are there without adding the pack again
+    const jobs = [];
     let versionEntry = null;
     for (const e of entries) {
       if (!e.name.startsWith(prefix)) continue;
       const rel = e.name.slice(prefix.length);
       if (rel.startsWith(PACK_ROOT)) {
         const t = rel.slice(PACK_ROOT.length);
-        if (t.endsWith('.png') && want.has(t.slice(0, -4))) jobs.push([e, 'png', t.slice(0, -4)]);
-        else if (t.endsWith('.png.mcmeta') && want.has(t.slice(0, -11))) jobs.push([e, 'meta', t.slice(0, -11)]);
+        if (t.endsWith('.png')) jobs.push([e, 'png', t.slice(0, -4)]);
+        else if (t.endsWith('.png.mcmeta')) jobs.push([e, 'meta', t.slice(0, -11)]);
       } else if (rel === 'pack.mcmeta' || rel === 'pack.png') jobs.push([e, rel, rel]);
       else if (e.name === 'version.json') versionEntry = e;
     }
@@ -25663,6 +25695,7 @@ Object.assign(Game.prototype, {
       const e = p.eye(), d = p.look(), sp = it.throw === 'xp' ? 0.7 : it.throw === 'potion' ? 0.5 : 1.5;
       const pr = this.spawnProjectile(it.throw === 'snow' || it.throw === 'egg' || it.throw === 'pearl' || it.throw === 'wind' ? it.throw : it.throw, e[0] + d[0] * 0.3, e[1] - 0.1 + d[1] * 0.3, e[2] + d[2] * 0.3, d[0] * sp, d[1] * sp + (it.throw === 'potion' || it.throw === 'xp' ? 0.2 : 0.1), d[2] * sp, p);
       if (pr && held.tag) pr.stack = copyStack(held, 1);
+      if (pr && it.throw === 'egg') pr.eggId = held.id;
       this.sound('throw', e[0], e[1], e[2]);
       if (it.throw === 'pearl') p.pearlCd = 20;
       p.consumeHeld(1); p.useCd = 6; return done();
@@ -26773,7 +26806,7 @@ Mob.prototype.die = function (source, attacker) {
 };
 // chickens lay eggs, babies grow up, piglins zombify outside the nether
 const MOB_TICK = {
-  chicken(m) { if (!m.baby && (m.data.eggT = (m.data.eggT || 6000 + Math.random() * 6000) - 1) <= 0) { m.data.eggT = 6000 + Math.random() * 6000; m.game.dropItem(m.x, m.y + 0.3, m.z, { id: I.EGG, count: 1 }); m.game.sound('pop', m.x, m.y, m.z); } },
+  chicken(m) { if (!m.baby && (m.data.eggT = (m.data.eggT || 6000 + Math.random() * 6000) - 1) <= 0) { m.data.eggT = 6000 + Math.random() * 6000; m.game.dropItem(m.x, m.y + 0.3, m.z, { id: m.data.variant === 'cold' ? I.BLUE_EGG : m.data.variant === 'warm' ? I.BROWN_EGG : I.EGG, count: 1 }); m.game.sound('pop', m.x, m.y, m.z); } },
   piglin(m) { piglinTick(m); }, piglin_brute(m) { zombifyTick(m); }, hoglin(m) { zombifyTick(m); },
   pufferfish(m) { if (m.data.puff > 0) { m.data.puff--; const p = m.game.player; if (p && m.distTo(p) < 1.5 && m.age % 20 === 0) { p.hurt(1 + (m.data.puff > 20 ? 1 : 0), 'pufferfish', m); p.addEffect('poison', 120, 0); } } },
   bat(m) { if (!m.data.resting && Math.random() < 0.002 && SOLID[m.game.world.getBlock(Math.floor(m.x), Math.floor(m.y + 1), Math.floor(m.z))]) m.data.resting = true; if (m.data.resting) { m.vx = m.vy = m.vz = 0; const p = m.game.player; if (p && m.distTo(p) < 4 || Math.random() < 0.002) m.data.resting = false; return; } if (!m._bt || Math.random() < 0.03) m._bt = [m.x + (Math.random() - 0.5) * 8, m.y + (Math.random() - 0.4) * 4, m.z + (Math.random() - 0.5) * 8]; const dx = m._bt[0] - m.x, dy = m._bt[1] - m.y, dz = m._bt[2] - m.z, l = Math.hypot(dx, dy, dz) || 1; m.move = [dx / l, dz / l, m.T.walk, false, dy / l]; },
@@ -28393,7 +28426,7 @@ Game.prototype.dispense = function (x, y, z) {
     const shoot = (kind, sp) => { const pr = this.spawnProjectile(kind, px, py, pz, DX[d] * sp, DY[d] * sp + 0.1, DZ[d] * sp, null); return pr; };
     if (st.id === I.ARROW || st.id === I.SPECTRAL_ARROW || st.id === I.TIPPED_ARROW) { const pr = shoot('arrow', 1.1); if (pr) { pr.arrowStack = { id: st.id, count: 1, tag: st.tag }; pr.pickup = true; } take(); this.sound('shoot', px, py, pz); return; }
     if (st.id === I.SNOWBALL) { shoot('snow', 1.1); take(); return; }
-    if (st.id === I.EGG) { shoot('egg', 1.1); take(); return; }
+    if (st.id === I.EGG || st.id === I.BLUE_EGG || st.id === I.BROWN_EGG) { const pr = shoot('egg', 1.1); if (pr) pr.eggId = st.id; take(); return; }
     if (st.id === I.FIRE_CHARGE) { shoot('fire', 1.0); take(); this.sound('blast', px, py, pz); return; }
     // WindChargeItem.asProjectile: from a block out of the front, at about one block a tick
     if (st.id === I.WIND_CHARGE) { const tri = v => v + 0.11485000000000001 * (Math.random() - Math.random()); this.spawnProjectile('wind', x + 0.5 + DX[d], y + 0.5 + DY[d], z + 0.5 + DZ[d], tri(DX[d]), tri(DY[d]), tri(DZ[d]), null); take(); this.sound('wind_charge_throw', px, py, pz); return; }
@@ -33777,10 +33810,11 @@ function drawPlayerPreview(c) {
    vanilla 1.21's, and mobs despawn the vanilla way, so spawning
    platforms, dark rooms and other mob farms fill as they do in Java.
    =================================================================== */
-// the spawn lists of every biome, as the vanilla 1.21 biomes have them: [type, weight, min, max]
+// the spawn lists of every biome, as 26.3's biomes have them: [type, weight, min, max] (a mob the game doesn't have yet keeps its
+// weight and spawns nothing, so the others come as often as in Java)
 const V_LISTS = [
   [["bat",10,8,8]],
-  [["armadillo",6,1,2]],
+  [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["armadillo",6,1,2]],
   [["spider",100,4,4],["zombie",95,4,4],["zombie_villager",5,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1]],
   [["glow_squid",10,4,6]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["chicken",10,4,4],["parrot",40,1,2],["panda",80,1,2]],
@@ -33792,17 +33826,18 @@ const V_LISTS = [
   [["pig",1,1,2],["rabbit",2,2,6],["sheep",2,2,4]],
   [["spider",100,4,4],["zombie",95,4,4],["zombie_villager",5,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1],["drowned",5,1,1]],
   [["cod",15,3,6],["salmon",15,1,5]],
-  [["squid",3,1,4]],
+  [["squid",3,1,4],["nautilus",2,1,1]],
   [["zombified_piglin",1,2,4],["hoglin",9,3,4],["piglin",5,3,4]],
+  [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["rabbit",4,2,4],["fox",4,2,4]],
   [["polar_bear",1,1,2]],
   [["salmon",15,1,5]],
-  [["squid",1,1,4]],
+  [["squid",1,1,4],["nautilus",2,1,1]],
   [["cod",8,3,6],["pufferfish",5,1,3],["tropical_fish",25,8,8]],
-  [["squid",8,1,4],["dolphin",2,1,2]],
+  [["squid",8,1,4],["dolphin",2,1,2],["nautilus",5,1,1]],
   [["cod",10,3,6]],
-  [["squid",1,1,4],["dolphin",1,1,2]],
-  [["rabbit",4,2,3]],
-  [["spider",100,4,4],["zombie",19,4,4],["zombie_villager",1,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1],["husk",80,4,4]],
+  [["squid",1,1,4],["dolphin",1,1,2],["nautilus",5,1,1]],
+  [["rabbit",12,2,3],["camel",1,1,1]],
+  [["spider",100,4,4],["zombie",19,4,4],["zombie_villager",1,1,1],["skeleton",50,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1],["husk",80,4,4],["parched",50,4,4]],
   [["spider",100,4,4],["zombie",95,4,4],["zombie_villager",5,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1],["drowned",95,4,4]],
   [["enderman",10,4,4]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["rabbit",4,2,3]],
@@ -33817,7 +33852,7 @@ const V_LISTS = [
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["chicken",10,4,4],["parrot",40,1,2],["panda",1,1,2]],
   [["spider",100,4,4],["zombie",95,4,4],["zombie_villager",5,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1],["ocelot",2,1,3]],
   [["cod",15,3,6],["pufferfish",5,1,3],["tropical_fish",25,8,8]],
-  [["squid",10,1,2],["dolphin",2,1,2]],
+  [["squid",10,1,2],["dolphin",2,1,2],["nautilus",5,1,1]],
   [["axolotl",10,4,6]],
   [["tropical_fish",25,8,8]],
   [["frog",10,2,5]],
@@ -33828,22 +33863,22 @@ const V_LISTS = [
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["wolf",8,4,4],["rabbit",4,2,3],["fox",8,2,4]],
   [["spider",100,4,4],["zombie",100,4,4],["zombie_villager",25,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["horse",5,2,6],["donkey",1,1,3]],
+  [["spider",100,4,4],["zombie",90,4,4],["zombie_villager",5,1,1],["zombie_horse",5,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1]],
   [["spider",100,4,4],["zombie",95,4,4],["zombie_villager",5,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1],["drowned",100,1,1]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["horse",1,2,6],["donkey",1,1,1],["armadillo",10,2,3]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["horse",1,2,6],["donkey",1,1,1],["armadillo",10,2,3],["llama",8,4,4],["wolf",8,4,8]],
+  [["spider",100,4,4],["zombie",90,4,4],["zombie_villager",5,1,1],["zombie_horse",5,1,1],["skeleton",20,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1],["stray",80,4,4]],
   [["rabbit",4,2,3],["goat",5,1,3]],
   [["skeleton",20,5,5],["ghast",50,4,4],["enderman",1,4,4]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["chicken",10,4,4],["wolf",8,2,4]],
+  [["sulfur_cube",100,2,4],["creeper",50,2,2],["skeleton",50,2,2],["slime",25,1,1],["cave_spider",20,1,1],["zombie",50,2,2],["enderman",10,1,1],["witch",1,1,1],["zombie_villager",5,1,1]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["frog",10,2,5]],
   [["drowned",5,1,1],["spider",100,4,4],["zombie",95,4,4],["zombie_villager",5,1,1],["skeleton",100,4,4],["creeper",100,4,4],["slime",100,4,4],["enderman",10,1,4],["witch",5,1,1]],
   [["pufferfish",15,1,3],["tropical_fish",25,8,8]],
-  [["squid",10,4,4],["dolphin",2,1,2]],
+  [["nautilus",5,1,1],["squid",10,4,4],["dolphin",2,1,2]],
   [["enderman",1,4,4]],
   [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["llama",5,4,6]],
-  [["armadillo",6,1,2],["wolf",2,4,8]],
-  // 26.x: the dappled forest's animals, the sulfur caves' monsters (sulfur cubes are a mob the game hasn't got: their share fails)
-  [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["rabbit",4,2,4],["fox",4,2,4]],
-  [["sulfur_cube",100,2,4],["creeper",50,2,2],["skeleton",50,2,2],["slime",25,1,1],["cave_spider",20,1,1],["zombie",50,2,2],["enderman",10,1,1],["witch",1,1,1],["zombie_villager",5,1,1]],
+  [["sheep",12,4,4],["pig",10,4,4],["chicken",10,4,4],["cow",8,4,4],["armadillo",6,1,2],["wolf",2,4,8]],
 ];
 // biome -> category letter (m monster, c creature, a ambient, x axolotls, u underground water creature, w water creature, f water ambient) + list
 const V_BIOME_SPAWNS = {
@@ -33855,66 +33890,65 @@ const V_BIOME_SPAWNS = {
   cherry_grove: 'a0 c10 m2 u3',
   cold_ocean: 'a0 m11 u3 f12 w13',
   crimson_forest: 'c6 m14',
+  dappled_forest: 'a0 c15 m2 u3',
   dark_forest: 'a0 c9 m2 u3',
   deep_cold_ocean: 'a0 m11 u3 f12 w13',
   deep_dark: '',
-  deep_frozen_ocean: 'a0 c15 m11 u3 f16 w17',
-  deep_lukewarm_ocean: 'a0 m11 u3 f18 w19',
-  deep_ocean: 'a0 m11 u3 f20 w21',
-  desert: 'a0 c22 m23 u3',
-  dripstone_caves: 'a0 m24 u3',
-  end_barrens: 'm25',
-  end_highlands: 'm25',
-  end_midlands: 'm25',
+  deep_frozen_ocean: 'a0 c16 m11 u3 f17 w18',
+  deep_lukewarm_ocean: 'a0 m11 u3 f19 w20',
+  deep_ocean: 'a0 m11 u3 f21 w22',
+  desert: 'a0 c23 m24 u3',
+  dripstone_caves: 'a0 m25 u3',
+  end_barrens: 'm26',
+  end_highlands: 'm26',
+  end_midlands: 'm26',
   eroded_badlands: 'a0 c1 m2 u3',
-  flower_forest: 'a0 c26 m2 u3',
-  forest: 'a0 c27 m2 u3',
-  frozen_ocean: 'a0 c15 m11 u3 f16 w17',
-  frozen_peaks: 'a0 c28 m2 u3',
-  frozen_river: 'a0 m29 u3 f30 w31',
-  grove: 'a0 c32 m2 u3',
-  ice_spikes: 'a0 c33 m34 u3',
-  jagged_peaks: 'a0 c28 m2 u3',
-  jungle: 'a0 c35 m36 u3',
-  lukewarm_ocean: 'a0 m11 u3 f37 w38',
-  lush_caves: 'a0 x39 m2 u3 f40',
-  mangrove_swamp: 'a0 c41 m42 u3 f40',
-  meadow: 'a0 c43 m2 u3',
-  mushroom_fields: 'a0 c44 u3',
-  nether_wastes: 'c6 m45',
-  ocean: 'a0 m11 u3 f20 w21',
+  flower_forest: 'a0 c27 m2 u3',
+  forest: 'a0 c28 m2 u3',
+  frozen_ocean: 'a0 c16 m11 u3 f17 w18',
+  frozen_peaks: 'a0 c29 m2 u3',
+  frozen_river: 'a0 m30 u3 f31 w32',
+  grove: 'a0 c33 m2 u3',
+  ice_spikes: 'a0 c34 m35 u3',
+  jagged_peaks: 'a0 c29 m2 u3',
+  jungle: 'a0 c36 m37 u3',
+  lukewarm_ocean: 'a0 m11 u3 f38 w39',
+  lush_caves: 'a0 x40 m2 u3 f41',
+  mangrove_swamp: 'a0 c42 m43 u3 f41',
+  meadow: 'a0 c44 m2 u3',
+  mushroom_fields: 'a0 c45 u3',
+  nether_wastes: 'c6 m46',
+  ocean: 'a0 m11 u3 f21 w22',
   old_growth_birch_forest: 'a0 c9 m2 u3',
-  old_growth_pine_taiga: 'a0 c46 m47 u3',
-  old_growth_spruce_taiga: 'a0 c46 m2 u3',
-  plains: 'a0 c48 m2 u3',
-  river: 'a0 m49 u3 f30 w31',
-  savanna: 'a0 c50 m2 u3',
-  savanna_plateau: 'a0 c51 m2 u3',
-  small_end_islands: 'm25',
+  old_growth_pine_taiga: 'a0 c47 m48 u3',
+  old_growth_spruce_taiga: 'a0 c47 m2 u3',
+  pale_garden: 'a0 m2 u3',
+  plains: 'a0 c49 m50 u3',
+  river: 'a0 m51 u3 f31 w32',
+  savanna: 'a0 c52 m50 u3',
+  savanna_plateau: 'a0 c53 m50 u3',
+  small_end_islands: 'm26',
   snowy_beach: 'a0 m2 u3',
-  snowy_plains: 'a0 c33 m34 u3',
-  snowy_slopes: 'a0 c52 m2 u3',
-  snowy_taiga: 'a0 c46 m2 u3',
-  soul_sand_valley: 'c6 m53',
-  sparse_jungle: 'a0 c54 m2 u3',
+  snowy_plains: 'a0 c34 m54 u3',
+  snowy_slopes: 'a0 c55 m2 u3',
+  snowy_taiga: 'a0 c47 m2 u3',
+  soul_sand_valley: 'c6 m56',
+  sparse_jungle: 'a0 c57 m2 u3',
   stony_peaks: 'a0 m2 u3',
   stony_shore: 'a0 m2 u3',
-  sunflower_plains: 'a0 c48 m2 u3',
-  swamp: 'a0 c55 m42 u3',
-  taiga: 'a0 c46 m2 u3',
-  the_end: 'm25',
+  sulfur_caves: 'a0 m58',
+  sunflower_plains: 'a0 c49 m50 u3',
+  swamp: 'a0 c59 m43 u3',
+  taiga: 'a0 c47 m2 u3',
+  the_end: 'm26',
   the_void: '',
-  warm_ocean: 'a0 m56 u3 f57 w58',
-  warped_forest: 'c6 m59',
-  windswept_forest: 'a0 c60 m2 u3',
-  windswept_gravelly_hills: 'a0 c60 m2 u3',
-  windswept_hills: 'a0 c60 m2 u3',
-  windswept_savanna: 'a0 c50 m2 u3',
-  wooded_badlands: 'a0 c61 m2 u3',
-  // 26.x (no animals in the pale garden)
-  pale_garden: 'a0 m2 u3',
-  dappled_forest: 'a0 c62 m2 u3',
-  sulfur_caves: 'a0 m63',
+  warm_ocean: 'a0 m60 u3 f61 w62',
+  warped_forest: 'c6 m63',
+  windswept_forest: 'a0 c64 m2 u3',
+  windswept_gravelly_hills: 'a0 c64 m2 u3',
+  windswept_hills: 'a0 c64 m2 u3',
+  windswept_savanna: 'a0 c52 m50 u3',
+  wooded_badlands: 'a0 c65 m2 u3',
 };
 // Nether biomes that limit crowding (MobSpawnCost: charge, energy budget)
 const V_SPAWN_COSTS = {soul_sand_valley: {enderman: [0.7, 0.15], ghast: [0.7, 0.15], skeleton: [0.7, 0.15], strider: [0.7, 0.15]}, warped_forest: {enderman: [1.0, 0.12]}};
@@ -33930,6 +33964,8 @@ const V_BSP = BIOME_NAMES.map(n => {
 });
 const V_BCOST = BIOME_NAMES.map(n => V_SPAWN_COSTS[n.toLowerCase().replace(/ /g, '_')] || null);
 const V_NONE = [];
+// 26.x's natural zombie horses (in the monster lists of plains, savannas and snowy plains) aren't spawned yet: their share spawns nothing
+const V_NOT_YET = new Set(['zombie_horse']);
 // categories: [cap, despawn distance]
 const V_MOBCAT = { monster: [70, 128], creature: [10, 128], ambient: [15, 128], axolotls: [5, 128], underground_water_creature: [5, 128], water_creature: [5, 128], water_ambient: [20, 64] };
 const V_FISHES = new Set(['cod', 'salmon', 'tropical_fish', 'pufferfish']);
@@ -34181,7 +34217,7 @@ Object.assign(Game.prototype, {
           n = data[2] + Math.floor(R() * (1 + data[3] - data[2]));
         }
         const type = data[0], T = MOB_TYPES[type];
-        if (!T || T.hidden) continue;
+        if (!T || T.hidden || V_NOT_YET.has(type)) continue;
         // animals may start far from the player; the rest not beyond their despawn distance
         if (cat !== 'creature' && d2 > far * far) continue;
         if (!this.vPlacementOk(type, x, y, z)) continue;
@@ -45713,7 +45749,7 @@ function dispShear(g, m) {
   }
   if (t === 'mooshroom') {
     if (m.baby) return false;
-    const cow = createMob(g, 'cow', m.x, m.y, m.z);
+    const cow = createMob(g, 'cow', m.x, m.y, m.z, { variant: 'temperate' });
     if (!cow) return false;
     cow.yaw = cow.bodyYaw = m.yaw; cow.health = m.health; cow.persistent = m.persistent; if (m.customName) cow.customName = m.customName;
     cow.savePrev(); g.entities.push(cow); m.dead = true; m.removed = true;
@@ -53760,7 +53796,7 @@ const RIDDEN = {
   pig: () => 0.25 * 0.225 / 0.454 * 20 / 1.1,
   strider: () => 0.175 * 0.55 / 0.454 * 20,
   horse: m => 43.17 * (m.data.spd || 0.225), donkey: () => 43.17 * 0.175, mule: () => 43.17 * 0.175,
-  skeleton_horse: () => 43.17 * 0.2, zombie_horse: () => 43.17 * 0.2,
+  skeleton_horse: () => 43.17 * 0.2, zombie_horse: () => 43.17 * 0.225,
   camel: m => m.game.input && m.game.input.keys.has('ControlLeft') ? 43.17 * 0.19 / 1.6 : 43.17 * 0.09,
 };
 const _riddenAS = Mob.prototype.riddenTick;
@@ -53783,7 +53819,8 @@ const HORSE_STATS = {
   donkey: R => ({ hp: hsHealth(R), spd: 0.175, jump: 0.5 }),
   mule: R => ({ hp: hsHealth(R), spd: 0.175, jump: 0.5 }),
   skeleton_horse: R => ({ hp: 15, spd: 0.2, jump: hsJump(R) }),
-  zombie_horse: R => ({ hp: 15, spd: 0.2, jump: hsJump(R) }),
+  // 26.x's zombie horse: 25 health, the horse's 0.225 speed
+  zombie_horse: R => ({ hp: 25, spd: 0.225, jump: hsJump(R) }),
 };
 for (const t of Object.keys(HORSE_STATS)) {
   const f = MOB_INIT[t];
@@ -55447,7 +55484,7 @@ MOB_SKINS.camel = m => {
 
 /* ---------------- packs added before this ---------------- */
 // a pack read before these names were known lacks its newer textures until it is added again
-const PACK_VERSION = 3;
+const PACK_VERSION = 4;
 const _importFileNP = PACKS.importFile;
 PACKS.importFile = async function (file, progress) {
   const rec = await _importFileNP.call(this, file, progress);
@@ -55455,7 +55492,8 @@ PACKS.importFile = async function (file, progress) {
   try { await DB.putPack(rec); } catch (e) { rec.unsaved = true; }
   return rec;
 };
-const packNeedsReadd = r => !r.embedded && !(r.v >= PACK_VERSION) && !!r.files['entity/zombie/zombie'] && (!r.files['entity/cow/cow'] || !r.files['entity/experience_orb']);
+// a whole pack (it has the zombie) read before every texture was kept lacks the ones added since (version 4 keeps them all)
+const packNeedsReadd = r => !r.embedded && !(r.v >= PACK_VERSION) && !!r.files['entity/zombie/zombie'];
 const _renderPS = PackScreen.render;
 PackScreen.render = async function () {
   await _renderPS.call(this);
@@ -64291,6 +64329,199 @@ AUDIO.play = function (name, x, y, z, ...rest) {
   const dull = m[1] === '_oxidized' ? 0.6 : m[1] === '_weathered' ? 0.8 : 1, v = (0.9 + Math.random() * 0.1) * dull;
   if (m[2] === 'open') { this.noiseHit(dst, 'bandpass', 2600 * v, 2, 0.12, 0.3); this.tone(dst, 'triangle', 620 * v, 760 * v, 0.18, 0.08); }
   else { this.noiseHit(dst, 'bandpass', 1800 * v, 2, 0.1, 0.35); this.tone(dst, 'triangle', 520 * v, 300 * v, 0.16, 0.1); }
+};
+
+/* @file 211_farm_variants.js */
+/* ===================================================================
+   Part 106: farm animal variants (Java 1.21.5, 26.x)
+   - cows, pigs and chickens come temperate, warm or cold (cow_variant,
+     pig_variant, chicken_variant): at spawn the variant whose spawn
+     condition holds with the highest priority, warm in
+     #spawns_warm_variant_farm_animals biomes, cold in
+     #spawns_cold_variant_farm_animals, else temperate; bred, either
+     parent's at random; a chick from an egg the egg's
+     (chicken/variant); a cow sheared out of a mooshroom temperate
+   - CowModel since 1.21.5: the muzzle a box of its own (6 x 3 x 1 from
+     1, 33); the warm cow's horns out to the side (4 x 2 x 2 from 27, 0)
+     with tips (2 x 2 x 2 from 39, 0); the cold cow's coat (its body
+     again from 20, 32, half a pixel out), muzzle from 9, 33 and horns
+     (2 x 6 x 2 from 0, 32 and 0, 40, swept out and up by eye); the
+     cold pig's coat (its body again from 28, 32); the cold chicken's
+     ruff over the top of its head (4 x 4 x 3 from 50, 25, by eye)
+   - entity/cow/cow_temperate, cow_warm, cow_cold (1.21.5's
+     temperate_cow, warm_cow, cold_cow), the same for pigs and chickens;
+     a pack's 1.21 cow (64 x 32) keeps the muzzle painted on its face
+   - sound variants (cow_sound_variant and the rest), one at random:
+     cows classic or moody, pigs classic, big or mini, chickens classic
+     or picky; piglets and chicks have their own
+   - a pack added before every texture was kept says so once in chat
+   =================================================================== */
+
+/* ---------------- variants and where they spawn ---------------- */
+const FARM_TYPES = new Set(['cow', 'pig', 'chicken']);
+const biomeSetFV = names => new Set(names.map(n => BI[n.toUpperCase()]).filter(b => b !== undefined));
+// the two biome tags with their is_jungle, is_savanna, is_nether, is_badlands and is_end spelt out
+const WARM_FARM = biomeSetFV(['desert', 'warm_ocean', 'jungle', 'sparse_jungle', 'bamboo_jungle', 'savanna', 'savanna_plateau', 'windswept_savanna',
+  'nether_wastes', 'soul_sand_valley', 'crimson_forest', 'warped_forest', 'basalt_deltas', 'badlands', 'eroded_badlands', 'wooded_badlands',
+  'mangrove_swamp', 'deep_lukewarm_ocean', 'lukewarm_ocean']);
+const COLD_FARM = biomeSetFV(['snowy_plains', 'ice_spikes', 'frozen_peaks', 'jagged_peaks', 'snowy_slopes', 'frozen_ocean', 'deep_frozen_ocean', 'grove',
+  'deep_dark', 'frozen_river', 'snowy_taiga', 'snowy_beach', 'the_end', 'end_highlands', 'end_midlands', 'small_end_islands', 'end_barrens',
+  'cold_ocean', 'deep_cold_ocean', 'old_growth_pine_taiga', 'old_growth_spruce_taiga', 'taiga', 'windswept_forest', 'windswept_gravelly_hills',
+  'windswept_hills', 'stony_peaks', 'dappled_forest']);
+// VariantUtils.selectVariantToSpawn: warm and cold (priority 1) where their biomes are, temperate (priority 0) anywhere
+function farmVariantAt(g, x, y, z) {
+  const b = g.vBiome ? g.vBiome(Math.floor(x), Math.floor(y), Math.floor(z)) : biomeAt(g, x, z);
+  return WARM_FARM.has(b) ? 'warm' : COLD_FARM.has(b) ? 'cold' : 'temperate';
+}
+const FARM_SOUNDS = { cow: ['classic', 'moody'], pig: ['classic', 'big', 'mini'], chicken: ['classic', 'picky'] };
+for (const t of FARM_TYPES) {
+  const f = MOB_INIT[t];
+  MOB_INIT[t] = function (m, o) {
+    if (f) f(m, o);
+    if (o.loading) return;
+    const par = o.parents && o.parents.length === 2 ? (Math.random() < 0.5 ? o.parents[0] : o.parents[1]).data.variant : null;
+    m.data.variant = o.variant || par || farmVariantAt(m.game, m.x, m.y, m.z);
+    m.data.sound = pick(Math.random, FARM_SOUNDS[t]);
+  };
+}
+
+/* ---------------- models ---------------- */
+const COW_PARTS = [
+  P_('head', [0, 4, -8], [[0, 0, -4, -4, -6, 8, 8, 6]]),
+  P_('muzzle', [0, 0, 0], [[1, 33, -3, 1, -7, 6, 3, 1]], null, 'head'),
+  P_('horns', [0, 0, 0], [[22, 0, -5, -5, -4, 1, 3, 1], [22, 0, 4, -5, -4, 1, 3, 1]], null, 'head'),
+  P_('warm_horns', [0, 0, 0], [[27, 0, -8, -3, -5, 4, 2, 2], [39, 0, -8, -5, -5, 2, 2, 2], [27, 0, 4, -3, -5, 4, 2, 2, 0, 1], [39, 0, 6, -5, -5, 2, 2, 2, 0, 1]], null, 'head'),
+  P_('cold_muzzle', [0, 0, 0], [[9, 33, -3, 1, -7, 6, 3, 1]], null, 'head'),
+  P_('cold_right_horn', [-4, -3, -3.5], [[0, 32, -1, 0, -1, 2, 6, 2]], [0, 0, 1.92], 'head'),
+  P_('cold_left_horn', [4, -3, -3.5], [[0, 40, -1, 0, -1, 2, 6, 2]], [0, 0, -1.92], 'head'),
+  P_('body', [0, 5, 2], [[18, 4, -6, -10, -7, 12, 18, 10], [52, 0, -2, 2, -8, 4, 6, 1]], [HPI, 0, 0]),
+  P_('coat', [0, 5, 2], [[20, 32, -6, -10, -7, 12, 18, 10, 0.5]], [HPI, 0, 0]),
+  ...VQ(12, 4, 7, -6, true)];
+// a pack's 1.21 cow (64 x 32) paints the muzzle on the face
+MOB_MODELS.cow = MOB_MODELS.mooshroom = { tw: 64, th: 64, anim: animQuad, babyHead: ['head'], parts: COW_PARTS, legacy: { muzzle: [], cold_muzzle: [] } };
+const COW_EXTRA = ['muzzle', 'horns', 'warm_horns', 'cold_muzzle', 'cold_right_horn', 'cold_left_horn', 'coat'];
+const COW_OWN = { temperate: ['muzzle', 'horns'], warm: ['muzzle', 'warm_horns'], cold: ['cold_muzzle', 'cold_right_horn', 'cold_left_horn', 'coat'] };
+const cowSkip = v => COW_EXTRA.filter(n => !COW_OWN[v].includes(n));
+MM.pig.parts.push(P_('coat', [0, 11, 2], [[28, 32, -5, -10, -7, 10, 16, 8, 0.5]], [HPI, 0, 0]));
+MM.chicken.parts.push(P_('ruff', [0, 15, -4], [[50, 25, -2, -6, -2, 4, 4, 3, 0.5]]));
+MM.chicken.babyHead.push('ruff');
+const _chickenAnimFV = MM.chicken.anim;
+MM.chicken.anim = function (P, st) { _chickenAnimFV.call(this, P, st); P.ruff = P.head; };
+// the newer cow's muzzle is a box again: nothing to move onto the face
+for (const k of ['entity/cow/cow', 'entity/cow/red_mooshroom', 'entity/cow/brown_mooshroom']) delete PACK_ADAPT[k];
+
+/* ---------------- skins ---------------- */
+const variantKey = (t, v) => v === 'temperate' || !v ? null : t === 'chicken' ? 'entity/chicken/' + v + '_chicken' : 'entity/' + t + '/' + v + '_' + t;
+for (const t of FARM_TYPES) for (const v of ['warm', 'cold']) PACK_ALIASES[variantKey(t, v)] = ['entity/' + t + '/' + t + '_' + v];
+MOB_SKINS.cow = m => { const v = m.data.variant || 'temperate'; return [{ key: variantKey('cow', v) || 'entity/cow/cow', skip: cowSkip(v) }]; };
+const _mooshroomSkinFV = MOB_SKINS.mooshroom;
+MOB_SKINS.mooshroom = m => _mooshroomSkinFV(m).map(s => s.key.startsWith('entity/cow/') ? Object.assign({}, s, { skip: (s.skip || []).concat(cowSkip('temperate')) }) : s);
+const _pigSkinFV = MOB_SKINS.pig;
+MOB_SKINS.pig = m => {
+  const v = m.data.variant || 'temperate';
+  return _pigSkinFV(m).map(s => s.only ? s : Object.assign({}, s, s.key === 'entity/pig/pig' && variantKey('pig', v) ? { key: variantKey('pig', v) } : {}, v === 'cold' ? {} : { skip: (s.skip || []).concat(['coat']) }));
+};
+const _chickenSkinFV = MOB_SKINS.chicken;
+MOB_SKINS.chicken = m => {
+  const v = m.data.variant || 'temperate';
+  return _chickenSkinFV(m).map(s => s.only ? s : Object.assign({}, s, s.key === 'entity/chicken' && variantKey('chicken', v) ? { key: variantKey('chicken', v) } : {}, v === 'cold' ? {} : { skip: (s.skip || []).concat(['ruff']) }));
+};
+
+// the game's own pictures: 64 x 64 cows (the muzzle below the head), the variants' coats and horns
+function cowSkinFV(v, base, patchCol, seed, mooshroom) {
+  const skip = cowSkip(v), parts = COW_PARTS.filter(p => !skip.includes(p.n)), nose = mooshroom ? [205, 150, 140] : v === 'cold' ? [222, 150, 132] : [200, 160, 150];
+  const coatCol = shd(base, 1.08), hornBase = [168, 150, 132];
+  const muzzle = (f, x, y, W, H, R) => f === 'front' && y === 1 && (x === 1 || x === 4) ? [80, 50, 50] : nz(nose, R);
+  return skinParts(64, 64, parts, {
+    head: (f, x, y, W, H, R) => {
+      if (f === 'front' && y === 3 && (x === 1 || x === 6)) return [20, 16, 16];
+      if (f === 'front' && y === 2 && (x === 1 || x === 6)) return [235, 235, 235];
+      if (f === 'front' && v === 'temperate' && !mooshroom && x >= 3 && x <= 4 && y >= 1 && y < 5) return nz(patchCol, R);
+      return nz(patch(f, x, y, 0, seed + 3, 2.5, 0.72) ? patchCol : base, R);
+    },
+    muzzle, cold_muzzle: muzzle,
+    horns: (f, x, y, W, H, R) => nz([212, 206, 196], R),
+    warm_horns: (f, x, y, W, H, R, ci) => nz(ci % 2 ? [238, 230, 212] : [206, 194, 172], R),
+    // pale at the head, darker towards the tip
+    cold_right_horn: (f, x, y, W, H, R) => nz(shd(hornBase, f === 'top' ? 1 : f === 'bottom' ? 0.62 : 1 - y * 0.07), R),
+    cold_left_horn: (f, x, y, W, H, R) => nz(shd(hornBase, f === 'top' ? 1 : f === 'bottom' ? 0.62 : 1 - y * 0.07), R),
+    body: (f, x, y, W, H, R, ci) => ci === 1 ? nz([236, 170, 170], R) : nz(patch(f, x, y, ci, seed, 3.5, 0.62) ? patchCol : base, R),
+    // the coat leaves the belly bare and hangs in tufts along its edges
+    coat: (f, x, y, W, H, R) => f === 'front' || (f === 'right' && x >= W - 2 && R() < 0.5) || (f === 'left' && x <= 1 && R() < 0.5) ? null : nz(vnoise(x / 1.5 + FACE_I[f] * 7, y / 2.5, seed) > 0.6 ? shd(coatCol, 0.86) : coatCol, R),
+    '*': (f, x, y, W, H, R) => f === 'bottom' || y >= H - 1 ? nz([60, 52, 48], R) : y >= H - 5 ? nz(v === 'temperate' ? patchCol : shd(base, 0.8), R) : nz(base, R),
+  }, seed);
+}
+defSkin('entity/cow/cow', 64, 64, () => cowSkinFV('temperate', [68, 50, 38], [236, 232, 222], 21));
+defSkin('entity/cow/warm_cow', 64, 64, () => cowSkinFV('warm', [146, 66, 42], [216, 164, 132], 24));
+defSkin('entity/cow/cold_cow', 64, 64, () => cowSkinFV('cold', [192, 106, 56], [168, 86, 44], 25));
+defSkin('entity/cow/red_mooshroom', 64, 64, () => cowSkinFV('temperate', [166, 26, 28], [222, 212, 210], 22, true));
+defSkin('entity/cow/brown_mooshroom', 64, 64, () => cowSkinFV('temperate', [146, 104, 70], [220, 206, 186], 23, true));
+// pigs: the warm one browner and spotted, the cold one pale under a woolly coat
+function pigSkinFV(v, pink, spot, seed) {
+  const hoof = shd(pink, 0.55), parts = MM.pig.parts.filter(p => p.n !== 'coat' || v === 'cold');
+  return skinParts(64, 64, parts, {
+    head: (f, x, y, W, H, R, ci) => {
+      if (ci === 1) return f === 'front' && y === 1 && (x === 1 || x === 2) ? shd(pink, 0.5) : nz(shd(pink, 1.03), R, 0.05);
+      if (f === 'front' && y === 3 && (x === 1 || x === 6)) return [250, 250, 250];
+      if (f === 'front' && y === 3 && (x === 2 || x === 5)) return [24, 18, 18];
+      return nz(spot && patch(f, x, y, ci, seed, 2, 0.75) ? spot : pink, R, 0.06);
+    },
+    body: (f, x, y, W, H, R, ci) => nz(spot && patch(f, x, y, ci, seed + 1, 2.5, 0.68) ? spot : f === 'back' ? shd(pink, 0.92) : pink, R, 0.06),
+    coat: (f, x, y, W, H, R) => f === 'front' || (f === 'right' && x >= W - 2 && R() < 0.5) || (f === 'left' && x <= 1 && R() < 0.5) ? null : nz(vnoise(x / 1.4 + FACE_I[f] * 5, y / 1.8, seed) > 0.62 ? [214, 196, 184] : [238, 224, 212], R, 0.04),
+    '*': (f, x, y, W, H, R) => (y >= H - 1 && f !== 'top') || f === 'bottom' ? nz(hoof, R) : nz(pink, R, 0.06),
+  }, seed);
+}
+defSkin('entity/pig/warm_pig', 64, 64, () => pigSkinFV('warm', [196, 128, 108], [116, 70, 56], 13));
+defSkin('entity/pig/cold_pig', 64, 64, () => pigSkinFV('cold', [236, 170, 162], null, 14));
+// chickens: the warm one brown, the cold one grey-blue with a ruff
+function chickenSkinFV(v, feather, wing, seed) {
+  const parts = MM.chicken.parts.filter(p => p.n !== 'ruff' || v === 'cold');
+  const eyes = (f, x, y) => f === 'front' && y === (v === 'cold' ? 1 : 2) && (x === 0 || x === 3);
+  return skinParts(64, 32, parts, {
+    head: (f, x, y, W, H, R) => f === 'front' && y === 2 && (x === 0 || x === 3) ? [20, 20, 20] : nz(feather, R, 0.05),
+    ruff: (f, x, y, W, H, R) => eyes(f, x, y) ? [20, 20, 20] : f === 'bottom' || (y === H - 1 && R() < 0.4) ? null : nz(shd(feather, 1.08), R, 0.06),
+    beak: (f, x, y, W, H, R) => nz(y === 0 && f === 'front' ? [255, 196, 60] : [236, 160, 40], R),
+    red_thing: () => [210, 30, 30],
+    body: (f, x, y, W, H, R) => nz(feather, R, 0.05),
+    right_wing: (f, x, y, W, H, R) => nz(wing, R, 0.05), left_wing: (f, x, y, W, H, R) => nz(wing, R, 0.05),
+    '*': (f, x, y, W, H, R) => (f === 'front' || f === 'back' || f === 'right' || f === 'left') && (x === 1 || y === H - 1) || f === 'bottom' ? nz([230, 150, 40], R) : null,
+  }, seed);
+}
+defSkin('entity/chicken/warm_chicken', 64, 32, () => chickenSkinFV('warm', [176, 100, 52], [146, 78, 40], 42));
+defSkin('entity/chicken/cold_chicken', 64, 32, () => chickenSkinFV('cold', [150, 150, 176], [128, 128, 156], 43));
+
+/* ---------------- sounds ---------------- */
+// the variants' voices: a moody cow lower and longer, a big pig deeper, a mini one higher, a picky chicken in threes; piglets
+// squeal and chicks peep
+const _audioPlayFV = AUDIO.play;
+AUDIO.play = function (name, x, y, z, ...rest) {
+  const m = this.src;
+  if (!this.ctx || !m || !FARM_TYPES.has(m.type) || !(name === 'moo' || name === 'oink' || name === 'cluck' || name === 'hurt_animal')) return _audioPlayFV.call(this, name, x, y, z, ...rest);
+  const s = m.data.sound || 'classic', baby = m.baby && m.type !== 'cow';
+  if (s === 'classic' && !baby) return _audioPlayFV.call(this, name, x, y, z, ...rest);
+  const dst = this.out(x, y, z, 1);
+  if (!dst) return;
+  const now = this.ctx.currentTime, hurt = name === 'hurt_animal';
+  if (baby && m.type === 'pig') { this.tone(dst, 'sawtooth', hurt ? 760 : 520, hurt ? 420 : 360, 0.09, 0.1); if (!hurt) this.tone(dst, 'sawtooth', 600, 400, 0.07, 0.08, now + 0.11); return; }
+  if (baby) { this.tone(dst, 'sine', hurt ? 3200 : 2500, hurt ? 2400 : 3000, 0.07, 0.12); if (!hurt) this.tone(dst, 'sine', 2600, 3100, 0.06, 0.1, now + 0.1); return; }
+  const k = s === 'moody' ? 0.82 : s === 'big' ? 0.74 : s === 'mini' ? 1.45 : s === 'picky' ? 1.12 : 1;
+  if (hurt) { this.tone(dst, 'square', 520 * k, 300 * k, 0.12 * (k < 1 ? 1.3 : 0.9), 0.12); return; }
+  if (name === 'moo') { const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 520; f.connect(dst); this.tone(f, 'sawtooth', 130 * k, 72, 1.25, 0.3); this.tone(f, 'triangle', 96 * k, 66, 1.1, 0.12, now + 0.15); return; }
+  if (name === 'oink') { const d = s === 'big' ? 0.18 : 0.08; this.tone(dst, 'sawtooth', 200 * k, 150 * k, d, 0.12); this.tone(dst, 'sawtooth', 230 * k, 160 * k, d, 0.1, now + d + 0.04); return; }
+  for (let i = 0; i < 3; i++) this.tone(dst, 'square', (900 + i * 80) * k, 600 * k, 0.045, 0.08, now + i * 0.07);
+};
+
+/* ---------------- packs from before every texture was kept ---------------- */
+let packNoteFV = false;
+const _applyPackRecordsFV = applyPackRecords;
+applyPackRecords = async function (game, recs) {
+  const r = await _applyPackRecordsFV.call(this, game, recs);
+  const old = recs.filter(packNeedsReadd);
+  if (old.length && !packNoteFV && game && game.ui && game.ui.chat) {
+    packNoteFV = true;
+    game.ui.chat('The resource pack "' + old[0].name + '" was added before this version: add it again (Options, Resource Packs) to see the textures added since.', '#ffd080');
+  }
+  return r;
 };
 
 </script>
