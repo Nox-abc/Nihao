@@ -926,6 +926,23 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   world, a plains village, an outpost, trail ruins, trial chambers and an ancient city come out block for block where
   the reference itself follows Java. A jar you added before this version needs to be added again; worlds made
   without a jar keep the game's own structures.
+- **Woodland mansions and abandoned camps from your jar** (Part 132): with your Minecraft jar added, new worlds now
+  also get woodland mansions laid out the way Java lays them out (the same floor plans, rooms, roofs and carpets, its
+  chests, vindicators, evokers and allays, and the cobblestone under it), checked against Java's own layouts and a
+  reference world, and the 26.x abandoned camps built from the jar's tents. Witches, guardians, pillagers and the
+  quiet of ancient cities and trial chambers now keep to the real outline of the structures they belong to.
+- **Java's Nether** (Part 133): vanilla worlds created from now on get the Nether Java Edition generates for the same
+  seed: its terrain and lava sea, its five biomes, soul sand, basalt, blackstone and nylium where Java puts them, its
+  caves, and all of its decoration (fungus forests, basalt deltas and pillars, glowstone, ores and debris, vines, fires,
+  springs). Nether fortresses stand where Java builds them, piece for piece, with their blaze spawners, chests and
+  nether wart, and their own mobs on their bricks; /locate finds them. With your Minecraft jar added, bastions, nether
+  fossils and the Nether's ruined portals come from it too. Worlds made before keep the Nether they already have.
+- **Java's End** (Part 134): new vanilla worlds also get the End Java generates for the seed: the main island and the
+  outer islands with their biomes, chorus trees, small floating islands and gateways back, the obsidian platform at
+  100, 48, 0, Java's ten spikes for the seed (the two caged ones included) with their crystals, and the exit podium.
+  End cities are laid out as Java lays them out, ships with their elytra and dragon heads included, when your
+  Minecraft jar is added (the game's own cities stand in for them otherwise); /locate end_city finds them. Gateways lead
+  out to the islands the way Java's do. Banners and heads hung on walls in structures from your jar now show up too.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
