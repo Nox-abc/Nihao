@@ -819,6 +819,23 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   block squeezed into one space: its four sides (plain or each sherd's pattern), its top and bottom, and the neck and
   rim standing a quarter of a block above, turned to face whoever put it down. It wobbles when you put something in and
   shakes when it can't take any more, and its box is a full block high, as in Java.
+- **Items held, dropped and framed like Java's** (Part 118): every item is now placed by its own item model's transforms
+  for each place, as in Java: held in first and third person (by the player and by mobs), lying on the ground, in item
+  frames and on shelves. Java gives dozens of models their own: tools and swords, fishing rods, bows, crossbows,
+  brushes, maces, music discs, stairs, carpets, trapdoors and pressure plates, fences and walls, furnaces, pumpkins and
+  glazed terracotta, chests and shulker boxes, conduits, shelves and more. So a held furnace shows its front, a crossbow
+  is held level, a skeleton's bow lies across its hand and a zombie holds a block upright. Beds (both halves, the straw
+  bed too), banners (with their designs) and decorated pots (with their sherds) are now 3D models everywhere, not only
+  in the inventory. A held head is drawn full size, and heads on the ground and in frames are twice as big as before.
+  Shields lie on the ground and hang in frames as their models. Dropped items float and bob as in 26.x, with their
+  bottoms just above the bob, and big stacks show up to five copies. Items in frames sit as close to the wall as in
+  Java, so blocks no longer stick out of the frame.
+- **Illagers' arms like Java's** (Part 119): a pillager holding a crossbow now always holds it up and aimed where it
+  looks, pulls it back while loading, and never folds its arms (one without a crossbow swings its arms as it walks).
+  Vindicators fold their arms until they attack, evokers until they cast a spell, illusioners until they cast or draw
+  their bow. An illager attacking with a weapon swings it down from above its head, and one without a weapon reaches
+  out like a zombie. When raiders win a raid they stand about jumping until it ends, and vindicators and evokers
+  celebrate with their arms up. Illagers riding something sit with their legs out.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

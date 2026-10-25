@@ -33718,13 +33718,7 @@ PACKS.exportGame = async function () {
    sway and bobbing of Java Edition's item-in-hand renderer, and each
    item held by its model's first-person display transform
    =================================================================== */
-// display transforms of the vanilla item models: [rotation xyz in degrees, translation in pixels, scale] for the right and left hand
-const HAND_DISPLAY = {
-  generated: [[0, -90, 25], [1.13, 3.2, 1.13], 0.68, [0, 90, -25]],
-  rod: [[0, 90, 25], [0, 1.6, 0.8], 0.68, [0, 90, 25]],
-  block: [[0, 45, 0], [0, 0, 0], 0.4, [0, 225, 0]],
-};
-const HAND_RODS = () => new Set([I.FISHING_ROD, I.CARROT_ON_A_STICK, I.WARPED_FUNGUS_ON_A_STICK]);
+// (each item model's display transforms: Part 118)
 const D2R = Math.PI / 180;
 
 // ---------- the equip dip and the sway, kept per tick like the vanilla client ----------
@@ -33826,10 +33820,10 @@ Game.prototype.renderHandSide = function (held, s, alpha, l) {
     // a loaded crossbow is held up, ready
     if (held.id === I.CROSSBOW && held.tag && held.tag.charged && h < 0.001 && main) P.t(o * -0.641864, 0, 0).ry(o * 10);
   }
-  // the model's own first-person transform
-  const style = itemStyle(held.id), disp = style !== 'sprite' ? HAND_DISPLAY.block : HAND_RODS().has(held.id) ? HAND_DISPLAY.rod : HAND_DISPLAY.generated;
-  const rot = main ? disp[0] : [disp[3][0], -disp[3][1], -disp[3][2]], tr = disp[1];
-  P.t(o * tr[0] / 16, tr[1] / 16, tr[2] / 16).rxyz(rot).s(disp[2]);
+  // the item model's own first-person transform (Part 118); beds, banners, pots, chests, heads and shulker boxes as their models
+  if (itemModelKind(held)) { drawItemIn(this, r, held, main ? 'fp' : 'fpl', P.m, l, !main); return; }
+  const style = itemStyle(held.id);
+  applyDisplay(P, itemDisplay(held, main ? 'fp' : 'fpl'), !main);
   if (style !== 'sprite') { this.pushBlockItem(r, P.m, held.id, l); return; }
   let layer;
   if (kind === 'bow') { const k = Math.min(1, useT / 20); layer = texLayer('bow_pulling_' + (k >= 0.9 ? 2 : k >= 0.65 ? 1 : 0), itemLayer(I.BOW)); }
@@ -65866,12 +65860,11 @@ iconFor = function (id, tag, st) {
   const key = 'bedmodel#' + id;
   return ICONS[key] || (ICONS[key] = guiRaster(guiBedFaces(id), GUI_VIEWS[SH.BED], 'side', blockTintFor(id)).toDataURL());
 };
-// in hand, dropped and framed: the item model's state too (a furnace's front to the north). An item frame turns what it holds half
-// round (ItemFrameRenderer), so a block model shows its north face; chests, heads and shulker boxes turn back with their own fixed views
+// in hand, dropped and framed: the item model's state too (a furnace's front to the north; in a frame, which turns what it holds half
+// round, its north face shows: Part 118)
 const _pushBlockItemGV = Game.prototype.pushBlockItem;
 Game.prototype.pushBlockItem = function (r, m, id, l) {
   const meta = guiItemMeta(id), named = GUI_NAMED_PARTS[BLK[id] && BLK[id].name], special = CHEST_DRAWN.has(id) || HEAD_IDS.has(id) || SHULKER_IDS.has(id);
-  if (this._xformHolder instanceof ItemFrame && !special) { m = Float32Array.from(m); for (const k of [0, 1, 2, 8, 9, 10]) m[k] = -m[k]; }
   if ((!meta && !named && !UVROT_FN[id]) || special || itemStyle(id) === 'sprite') return _pushBlockItemGV.call(this, r, m, id, l);
   const tf = blockTintFor(id);
   for (const fc of guiModelFaces(id, meta, named ? named(id) : itemStyle(id) === 'cube' ? [BX(0, 0, 0, 16, 16, 16)] : itemParts(id))) {
@@ -66111,6 +66104,397 @@ Game.prototype.drawPots = function (r, a) {
       drawPotModel(r, potTransform(x, y, z, w.getMeta(x, y, z), be, t), potSherds(be), [lr >> 4, lr & 15]);
     }
   }
+};
+
+/* @file 221_item_models.js */
+/* ===================================================================
+   PART 118 — ITEMS HELD, DROPPED AND FRAMED LIKE JAVA'S
+   Java places an item by its item model's own display transform for
+   each place: in first and third person, lying on the ground, in an
+   item frame and on a shelf. Every item now takes its model's (item/
+   generated's, item/handheld's, block/block's, and the dozens of models
+   with their own, such as stairs, carpets and trapdoors, fences and
+   walls, furnaces and glazed terracotta, music discs, bows, crossbows,
+   brushes, maces, conduits and rods), so a held furnace shows its
+   front, a skeleton's bow is drawn crosswise and a zombie's block
+   stands upright as in Java. Beds, banners and decorated pots are
+   drawn as their 3D models everywhere, not only in the inventory, and
+   chests, heads, shulker boxes and shields by their own transforms:
+   a held head is drawn full size, and heads on the ground and in frames
+   are twice as big as before. Dropped items sit and bob as 26.x's do,
+   and items in frames lie as deep in them as Java's.
+   =================================================================== */
+
+// display transforms of the item models: [first person, first person left, third person, third person left, ground, item frame,
+// shelf], each [rotation (degrees), translation (pixels), scale] or null to leave the model as it is (a model without its own takes
+// its parent's; a model without a left hand's takes the right's, mirrored as ItemTransform.apply does)
+const ITEM_PLACES = ['fp', 'fpl', 'tp', 'tpl', 'ground', 'fixed', 'on_shelf'];
+const ITEM_DISPLAYS = {
+  generated: [[[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[0, 0, 0], [0, 3, 1], 0.55], [[0, 0, 0], [0, 3, 1], 0.55], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  handheld: [[[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[0, 90, -25], [1.13, 3.2, 1.13], 0.68], [[0, -90, 55], [0, 4, 0.5], 0.85], [[0, 90, -55], [0, 4, 0.5], 0.85], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  rod: [[[0, 90, 25], [0, 1.6, 0.8], 0.68], [[0, -90, -25], [0, 1.6, 0.8], 0.68], [[0, 90, 55], [0, 4, 2.5], 0.85], [[0, -90, -55], [0, 4, 2.5], 0.85], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  mace: [[[0, -90, 25], [0, 3, 0.8], 0.9], [[0, 90, -25], [0, 3, 0.8], 0.9], [[0, -90, 55], [0, 4, 1], 1], [[0, 90, -55], [0, 4, 1], 1], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  bow: [[[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[0, 90, -25], [1.13, 3.2, 1.13], 0.68], [[-80, 260, -40], [-1, -2, 2.5], 0.9], [[-80, -280, 40], [-1, -2, 2.5], 0.9], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  crossbow: [[[-90, 0, -55], [1.13, 3.2, 1.13], 0.68], [[-90, 0, 35], [1.13, 3.2, 1.13], 0.68], [[-90, 0, -60], [2, 0.1, -3], 0.9], [[-90, 0, 30], [2, 0.1, -3], 0.9], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  brush: [[[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[55, -85, 0], [8, 0.5, -5.5], 1], [[0, 0, 45], [0, 4, 0], 0.9], [[0, 0, -45], [0, 4, 0], 0.9], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  goat_horn: [[[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[0, 90, -25], [1.13, 3.2, 1.13], 0.68], [[0, 180, 0], [0, 3, 1], 0.55], [[0, 0, 0], [0, 3, 1], 0.55], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  disc: [[[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[0, -90, 25], [1.13, 3.2, 1.13], 0.68], [[0, 0, 0], [0, 3, 1], 0.55], [[0, 0, 0], [0, 3, 1], 0.55], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [-0.5, 0, 0], 1], null],
+  dripstone: [[[0, 100, 0], [0, -2, 0], 0.9], [[0, 100, 0], [0, -2, 0], 0.9], [[0, 100, 0], [-1, -1, 0], 0.9], [[0, 100, 0], [-1, -1, 0], 0.9], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  hanging_roots: [[[0, -90, 25], [1.13, 0, 1.13], 0.68], [[0, -90, 25], [1.13, 0, 1.13], 0.68], [[0, 0, 0], [0, 0, 1], 0.55], [[0, 0, 0], [0, 0, 1], 0.55], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  large_amethyst_bud: [[[0, -90, 25], [0, 5, 0], 0.68], [[0, -90, 25], [0, 5, 0], 0.68], [[0, 0, 0], [0, 4, 1], 0.55], [[0, 0, 0], [0, 4, 1], 0.55], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 0, 0], [0, 4, 0], 1], null],
+  medium_amethyst_bud: [[[0, -90, 25], [0, 5, 0], 0.68], [[0, -90, 25], [0, 5, 0], 0.68], [[0, 0, 0], [0, 4, 1], 0.55], [[0, 0, 0], [0, 4, 1], 0.55], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 0, 0], [0, 6, 0], 1], null],
+  small_amethyst_bud: [[[0, -90, 25], [0, 6, 0], 0.68], [[0, -90, 25], [0, 6, 0], 0.68], [[0, 0, 0], [0, 4, 1], 0.55], [[0, 0, 0], [0, 4, 1], 0.55], [[0, 0, 0], [0, 2, 0], 0.5], [[0, 0, 0], [0, 7, 0], 1], null],
+  block: [[[0, 45, 0], [0, 0, 0], 0.4], [[0, 225, 0], [0, 0, 0], 0.4], [[75, 45, 0], [0, 2.5, 0], 0.375], [[75, 45, 0], [0, 2.5, 0], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  stairs: [[[0, 45, 0], [0, 0, 0], 0.4], [[0, 225, 0], [0, 0, 0], 0.4], [[75, 45, 0], [0, 2.5, 0], 0.375], [[75, -135, 0], [0, 2.5, 0], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  thin: [[[0, 45, 0], [0, 4.2, 0], 0.4], [[0, 225, 0], [0, 4.2, 0], 0.4], [[75, 45, 0], [0, 2.5, 2], 0.375], [[75, 45, 0], [0, 2.5, 2], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  fence: [[[0, 45, 0], [0, 0, 0], 0.4], [[0, 225, 0], [0, 0, 0], 0.4], [[75, 45, 0], [0, 2.5, 0], 0.375], [[75, 45, 0], [0, 2.5, 0], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 90, 0], [0, 0, 0], 0.5], [[0, 90, 0], [0, 0, 0], 1]],
+  front: [[[0, 135, 0], [0, 0, 0], 0.4], [[0, 225, 0], [0, 0, 0], 0.4], [[75, 45, 0], [0, 2.5, 0], 0.375], [[75, 45, 0], [0, 2.5, 0], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  shelf: [[[0, 135, 0], [0, -2, 0], 0.5], [[0, 225, 0], [0, 0, 0], 0.4], [[75, 135, 0], [-3, 1, 0], 0.4], [[75, 135, 0], [-3, 1, 0], 0.4], [[0, 0, 0], [0, 3, -1.375], 0.25], [[0, 0, 0], [0, 0, -4], 0.5], [[0, 180, 0], [0, 0, 4], 1]],
+  lightning_rod: [[[0, 45, 0], [0, 0, 0], 0.4], [[0, 225, 0], [0, 0, 0], 0.4], [[0, 0, 0], [0, 2, 0.5], 0.4], [[0, 0, 0], [0, 2, 0.5], 0.4], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  end_rod: [[[0, 45, 0], [0, 0, 0], 0.4], [[0, 225, 0], [0, 0, 0], 0.4], [[0, 0, 0], [0, 0, 0], 0.375], [[0, 0, 0], [0, 0, 0], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  calibrated_sculk_sensor: [[[0, 45, 0], [0, 0, 0], 0.4], [[0, 225, 0], [0, 0, 0], 0.4], [[75, 45, 0], [0, 2.5, 0], 0.375], [[75, -45, 0], [0, 2.5, 0], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  big_dripleaf: [[[0, 0, 0], [1.13, 0, 1.13], 0.68], [[0, 225, 0], [0, 0, 0], 0.4], [[0, 0, 0], [0, 1, 0], 0.55], [[0, 0, 0], [0, 1, 0], 0.55], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 0, 0], [0, 0, -1], 0.5], [[0, 180, 0], [0, 0, 0], 1]],
+  shelf_mushroom: [[[0, 45, 0], [0, 0, 0], 0.5], [[0, 45, 0], [0.25, 0, 0], 0.5], [[53, 0, 0], [0, 2.25, 0.25], 0.375], [[53, 0, 0], [0, 2.25, 0.25], 0.375], [[0, 0, 0], [0, 2.55, -1.35], 0.3], [[0, 0, 0], [0, -1, -6.75], 1], [[0, 180, 0], [0, 0, 4], 1]],
+  heavy_core: [null, null, [[45, 45, 0], [0, 3, 0], 0.5], [[45, 45, 0], [0, 3, 0], 0.5], [[0, 0, 0], [0, 3, 0], 0.5], [[0, 180, 0], [0, 4, 0], 1], null],
+  conduit: [[[0, 315, 0], [0, 0, 0], 0.8], [[0, 315, 0], [0, 0, 0], 0.8], [[75, 315, 0], [0, 2.5, 0], 0.5], [[75, 315, 0], [0, 2.5, 0], 0.5], [[0, 0, 0], [0, 3, 0], 0.5], [[0, 180, 0], [0, 0, 0], 1], null],
+  chest: [[[0, 315, 0], [0, 0, 0], 0.4], [[0, 315, 0], [0, 0, 0], 0.4], [[75, 315, 0], [0, 2.5, 0], 0.375], [[75, 315, 0], [0, 2.5, 0], 0.375], [[0, 0, 0], [0, 3, 0], 0.25], [[0, 180, 0], [0, 0, 0], 0.5], null],
+  skull: [null, null, [[45, 45, 0], [0, 3, 0], 0.5], [[45, 45, 0], [0, 3, 0], 0.5], [[0, 0, 0], [0, 3, 0], 0.5], [[0, 180, 0], [0, 4, 0], 1], [[0, 0, 0], [0, 8, 0], 2]],
+  dragon_head: [null, null, [[0, 180, 0], [0, -1, 2], 0.5], [[0, 180, 0], [0, -1, 2], 0.5], [[0, 0, 0], [0, 3, 0], 0.5], [[0, 180, 0], [0, 4, 0], 1], [[0, 0, 0], [0, 2, 0], 1.25]],
+  banner: [[[0, 90, 0], [0, 0, 0], 0.375], [[0, 90, 0], [0, 0, 0], 0.375], [[0, 90, 0], [0, 2, 0.5], 0.375], [[0, 90, 0], [0, 2, 0.5], 0.375], [[0, 0, 0], [0, 1, 0], 0.25], [[0, 180, 0], [0, 0, 0], 0.5], null],
+  bed: [[[30, 340, 0], [0, 3, 0], 0.375], [[30, 340, 0], [0, 3, 0], 0.375], [[30, 340, 0], [0, 3, -2], 0.23], [[30, 340, 0], [0, 3, -2], 0.23], [[0, 180, 0], [0, 1, 2], 0.25], [[270, 180, 0], [0, 4, -2], 0.5], [[90, 0, 0], [0, 14.5, 2.5], 0.9375]],
+  straw_bed: [[[30, 340, 0], [0, 3, 0], 0.375], [[30, 340, 0], [0, 3, 0], 0.375], [[30, 340, 0], [0, 3, -2], 0.23], [[30, 340, 0], [0, 3, -2], 0.23], [[0, 180, 0], [0, 1, 2], 0.25], [[270, 180, 0], [0, 4, -3], 0.5], [[90, 0, 0], [0, 14.5, 2.5], 0.9375]],
+  shield: [[[0, 180, 5], [-10, 1.75, -10], 1.25], [[0, 180, 5], [10, 0, -10], 1.25], [[0, 90, 0], [10, 6, -4], 1], [[0, 90, 0], [10, 6, 12], 1], [[0, 0, 0], [2, 4, 2], 0.25], [[0, 180, 0], [-4.5, 4.5, -5], 0.55], [[0, 0, 0], [11, 18.5, 8.7], 1.4]],
+};
+// which models the items have: by name, then by the shapes of names; the rest item/generated's when drawn flat, block/block's when not
+const DISPLAY_NAMED = {
+  fishing_rod: 'rod', carrot_on_a_stick: 'rod', warped_fungus_on_a_stick: 'rod', mace: 'mace', bow: 'bow', crossbow: 'crossbow', brush: 'brush',
+  goat_horn: 'goat_horn', pointed_dripstone: 'dripstone', sulfur_spike: 'dripstone', hanging_roots: 'hanging_roots', large_amethyst_bud: 'large_amethyst_bud',
+  medium_amethyst_bud: 'medium_amethyst_bud', small_amethyst_bud: 'small_amethyst_bud', daylight_detector: 'thin', snow: 'thin', end_rod: 'end_rod',
+  calibrated_sculk_sensor: 'calibrated_sculk_sensor', big_dripleaf: 'big_dripleaf', shelf_mushroom: 'shelf_mushroom', heavy_core: 'heavy_core',
+  conduit: 'conduit', dragon_head: 'dragon_head', decorated_pot: 'banner', straw_bed: 'straw_bed', shield: 'shield',
+};
+const DISPLAY_SHAPES = [
+  [/_stairs$/, 'stairs'], [/(_pressure_plate|_trapdoor|_carpet)$/, 'thin'], [/(_fence|_wall|anvil)$/, 'fence'], [/^music_disc_/, 'disc'],
+  [/_(sword|axe|pickaxe|shovel|hoe)$|^(stick|bamboo|blaze_rod|breeze_rod|bone|debug_stick)$/, 'handheld'],
+  [/_glazed_terracotta$|^(bee_nest|beehive|blast_furnace|carved_pumpkin|dispenser|dropper|furnace|jack_o_lantern|lectern|loom|pumpkin|smoker)$/, 'front'],
+  [/(chest|shulker_box)$/, 'chest'], [/_banner$/, 'banner'], [/_bed$/, 'bed'], [/_shelf$/, 'shelf'], [/lightning_rod$/, 'lightning_rod'], [/_(head|skull)$/, 'skull'],
+];
+// the models drawn flat (from the item's picture); an item the game draws the other way keeps the plain transforms of the way it's drawn
+const FLAT_DISPLAYS = new Set(['generated', 'handheld', 'rod', 'mace', 'bow', 'crossbow', 'brush', 'goat_horn', 'disc', 'dripstone', 'hanging_roots', 'large_amethyst_bud', 'medium_amethyst_bud', 'small_amethyst_bud']);
+const ITEM_DISPLAY_OF = [];
+function itemDisplaySet(st) {
+  const id = st.id;
+  if (ITEM_DISPLAY_OF[id] !== undefined) return ITEM_DISPLAY_OF[id];
+  const n = ITEMS[id] ? ITEMS[id].name : '', flat = !itemModelKind(st) && itemStyle(id) === 'sprite';
+  let k = DISPLAY_NAMED[n] || (DISPLAY_SHAPES.find(q => q[0].test(n)) || [])[1];
+  if (!k || FLAT_DISPLAYS.has(k) !== flat) k = flat ? 'generated' : 'block';
+  return ITEM_DISPLAY_OF[id] = k;
+}
+const itemDisplay = (st, place) => ITEM_DISPLAYS[itemDisplaySet(st)][ITEM_PLACES.indexOf(place)];
+const displayMatrix = (d, left) => { const P = handPose(); if (d) applyDisplay(P, d, left); return P.m; };
+
+// the items drawn as models of their own: beds, banners, pots, chests, shulker boxes, heads and shields
+function itemModelKind(st) {
+  const id = st && st.id;
+  if (id === undefined || !ITEMS[id]) return null;
+  if (id === I.DECORATED_POT) return 'pot';
+  if (id === I.SHIELD) return VTEX['entity/shield_base_nopattern'] ? 'shield' : null;
+  if (isBannerItem(id)) return 'banner';
+  if (!isBlockId(id) || !BLK[id]) return null;
+  if (SHAPE[id] === SH.BED) return 'bed';
+  if (BLK[id].strawBed) return 'straw_bed';
+  if (CHEST_DRAWN.has(id) && VTEX['entity/chest/normal']) return 'chest';
+  if (SHULKER_IDS.has(id) && VTEX['entity/shulker/shulker']) return 'shulker';
+  const K = HEAD_IDS.has(id) && HEAD_KINDS[BLK[id].name];
+  if (K && VTEX[K.key]) return BLK[id].name === 'dragon_head' ? 'dragon_head' : 'skull';
+  return null;
+}
+
+/* ---------------- the models ---------------- */
+// a bed's, banner's or pot's faces (Part 115's), with each corner's place on its texture and each face's shade (by the way it turns in
+// the model, as block items are lit), kept per design until the textures change; and the box round the model (pixels)
+const ITEM_MODELS = new Map();
+function itemModelFaces(st, kind) {
+  let key, make, flag = null;
+  if (kind === 'bed') { key = 'bed#' + st.id; make = () => guiBedFaces(st.id); }
+  else if (kind === 'straw_bed') { key = 'straw_bed'; make = () => guiStrawBedFaces(st.id); }
+  else if (kind === 'banner') {
+    const color = BLK[ITEMS[st.id].block].color, pats = (st.tag && st.tag.patterns) || [];
+    key = 'banner#' + bannerKey(color, pats); flag = [color, pats]; make = () => guiBannerFaces(color, pats);
+  } else { const sh = st.tag && st.tag.sherds; key = 'pot#' + (sh ? sh.join(',') : ''); make = () => guiPotFaces(sh); }
+  const e = ITEM_MODELS.get(key);
+  if (e && e.atlas === ATLAS.canvas && e.tex === TEX.imgs) return e;
+  const A = ATLAS.S, skins = ['entity/banner_base', 'entity/decorated_pot/decorated_pot_base'].map(k => [guiSkin(k), VTEX[k]]);
+  const tf = isBlockId(st.id) ? blockTintFor(st.id) : () => null, faces = [], box = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
+  for (const fc of make()) {
+    const P = fc.P, ux = P[1][0] - P[0][0], uy = P[1][1] - P[0][1], uz = P[1][2] - P[0][2], vx = P[3][0] - P[0][0], vy = P[3][1] - P[0][1], vz = P[3][2] - P[0][2];
+    const s = jShade(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx), tk = fc.tk ? tf(fc.tk) : null;
+    const out = { P, c: tk ? [tk[0] / 255 * s, tk[1] / 255 * s, tk[2] / 255 * s] : [s, s, s], L: fc.L, two: !!fc.two && !fc.img };
+    if (!fc.img) out.uv = fc.U.map(([u, v]) => [u / 16, v / 16]);
+    else {
+      const sk = skins.find(q => q[0] === fc.img);
+      if (sk) { const vt = sk[1], rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th; out.L = -1; out.uv = fc.U.map(([u, v]) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A]); }
+      else { out.flag = true; out.uv = flagUV(fc.U); }
+    }
+    faces.push(out);
+    for (const p of P) for (let k = 0; k < 3; k++) { box[k] = Math.min(box[k], p[k]); box[k + 3] = Math.max(box[k + 3], p[k]); }
+  }
+  const v = { faces, box, flag, atlas: ATLAS.canvas, tex: TEX.imgs };
+  if (ITEM_MODELS.size > 64) ITEM_MODELS.clear();
+  ITEM_MODELS.set(key, v);
+  return v;
+}
+// a flag face's corners on the design (20 by 40, as the banners in the world use it) rather than the flag's own unwrap: the front, the
+// back seeing it through, the sides its first and last columns, the top and bottom its first and last rows
+function flagUV(U) {
+  const us = U.map(q => q[0]), vs = U.map(q => q[1]), u0 = Math.min(...us), u1 = Math.max(...us), v1 = Math.max(...vs);
+  return U.map(([u, v]) => {
+    if (v1 <= 1) return u1 <= 21 ? [u - 1, 0.5] : [u - 21, 39.5];
+    if (u1 <= 1) return [0.5, v - 1];
+    if (u0 >= 21 && u1 <= 22) return [19.5, v - 1];
+    return u0 >= 22 ? [42 - u, v - 1] : [u - 1, v - 1];
+  });
+}
+// a model's box (pixels), to set it on the ground: the faces' for beds, banners and pots, the chest's, a head's, a full block for a
+// shulker box, the shield's (from the item block's corner, turned over), a block item's parts, a flat item's square
+const ITEM_BOXES = new Map();
+function itemModelBox(st, kind, style) {
+  if (kind === 'chest') return [1, 0, 1, 15, 14, 15];
+  if (kind === 'shield') return [-6, -11, -5, 6, 11, 2];
+  if (kind === 'skull' || kind === 'dragon_head') return [4, 0, 4, 12, 8, 12];
+  if (kind === 'shulker') return [0, 0, 0, 16, 16, 16];
+  if (kind) return itemModelFaces(st, kind).box;
+  if (style === 'sprite') return [0, 0, 7.5, 16, 16, 8.5];
+  if (style === 'cube') return [0, 0, 0, 16, 16, 16];
+  let b = ITEM_BOXES.get(st.id);
+  if (!b) {
+    b = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
+    const add = (x, y, z) => { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.min(b[2], z); b[3] = Math.max(b[3], x); b[4] = Math.max(b[4], y); b[5] = Math.max(b[5], z); };
+    for (const p of itemParts(st.id)) { if (p.q) for (const v of p.q) add(v[0], v[1], v[2]); else if (p.b) { add(p.b[0], p.b[1], p.b[2]); add(p.b[3], p.b[4], p.b[5]); } }
+    if (b[0] > b[3]) b = [0, 0, 0, 16, 16, 16];
+    ITEM_BOXES.set(st.id, b);
+  }
+  return b;
+}
+// the box's corners through a display matrix (blocks)
+function boxUnder(m, b) {
+  const o = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
+  for (let k = 0; k < 8; k++) {
+    const q = M4.xform(m, (k & 1 ? b[3] : b[0]) / 16 - 0.5, (k & 2 ? b[4] : b[1]) / 16 - 0.5, (k & 4 ? b[5] : b[2]) / 16 - 0.5);
+    for (let i = 0; i < 3; i++) { o[i] = Math.min(o[i], q[i]); o[i + 3] = Math.max(o[i + 3], q[i]); }
+  }
+  return o;
+}
+
+/* ---------------- drawing ---------------- */
+// a bed, banner or pot model through m (the item's space after its display transform: a block across, its middle at the origin)
+function pushItemModel(g, r, st, kind, m, light) {
+  const md = itemModelFaces(st, kind), A = ATLAS.S;
+  let fl = null;
+  if (md.flag) { const vt = bannerTexture(g, md.flag[0], md.flag[1]); if (vt) fl = [vt.reg.x / A, vt.reg.y / A, vt.reg.w / vt.tw / A, vt.reg.h / vt.th / A]; }
+  for (const fc of md.faces) {
+    if (fc.flag && !fl) continue;
+    const Q = fc.P.map(p => M4.xform(m, p[0] / 16 - 0.5, p[1] / 16 - 0.5, p[2] / 16 - 0.5));
+    const uv = fc.flag ? fc.uv.map(([u, v]) => [fl[0] + u * fl[2], fl[1] + v * fl[3]]) : fc.uv, L = fc.flag ? -1 : fc.L, c = fc.c;
+    for (const order of fc.two ? [[0, 1, 2, 3], [1, 0, 3, 2]] : [[0, 1, 2, 3]]) for (const k of order) r.dv(Q[k][0], Q[k][1], Q[k][2], uv[k][0], uv[k][1], L, c[0], c[1], c[2], 1, light[0], light[1]);
+  }
+}
+// SkullSpecialRenderer: the head turned over, its base on the floor of the item's block, in the middle
+function pushHeadItem(r, m, id, l) {
+  const t = [m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14]];
+  drawHeadModel(r, BLK[id].name, BKM.mul(t, BKM.mul(BKM.t(0, -0.5, 0), BKM_FLIP)), 180, 0, [l[0], l[1]]);
+}
+// an item through m: its own model, its flat picture or its block model
+function drawItemModel(g, r, st, kind, m, light) {
+  if (kind === 'chest' || kind === 'shulker') g.pushBlockItem(r, m, st.id, light);
+  else if (kind === 'skull' || kind === 'dragon_head') pushHeadItem(r, m, st.id, light);
+  // ShieldSpecialRenderer: from the item block's corner, turned over
+  else if (kind === 'shield') { const sm = M4.mul(M4.create(), M4.mul(M4.create(), m, M4.trans(M4.create(), -0.5, -0.5, -0.5)), M4.scale(M4.create(), 1, -1, -1)); g.pushShield(r, st, light, q => M4.xform(sm, q[0] / 16, q[1] / 16, q[2] / 16)); }
+  else if (kind) pushItemModel(g, r, st, kind, m, light);
+  else if (itemStyle(st.id) === 'sprite') g.pushItemXform(r, m, st, light);
+  else g.pushBlockItem(r, m, st.id, light);
+}
+// in a place: M is the place's own space (ItemInHandRenderer's, ItemInHandLayer's, the frame's, the shelf's), the model's display
+// transform for the place goes on top
+function drawItemIn(g, r, st, place, M, light, left) {
+  const d = itemDisplay(st, place);
+  drawItemModel(g, r, st, itemModelKind(st), d ? M4.mul(M4.create(), M, displayMatrix(d, left)) : M, light);
+}
+
+/* ---------------- held ---------------- */
+// first person: in 118_hand.js's renderHandSide. Third person (ItemInHandLayer): from the hand, turned out of the arm, then the model's
+// third-person transform (shields and spears keep theirs, Parts 26 and 114)
+function atMatrix(at, part) {
+  const o = at(part, [0, 0, 0]), x = at(part, [1, 0, 0]), y = at(part, [0, 1, 0]), z = at(part, [0, 0, 1]);
+  if (!o || !x || !y || !z) return null;
+  return new Float32Array([x[0] - o[0], x[1] - o[1], x[2] - o[2], 0, y[0] - o[0], y[1] - o[1], y[2] - o[2], 0, z[0] - o[0], z[1] - o[1], z[2] - o[2], 0, o[0], o[1], o[2], 1]);
+}
+const _drawMobItemIM = drawMobItem;
+drawMobItem = function (r, g, st, at, part, hx, light, scale, opts) {
+  const own = !st || !g || !ITEMS[st.id] || st.id === I.SHIELD || spearOf(st) || (part !== 'right_arm' && part !== 'left_arm');
+  const PM = own ? null : atMatrix(at, part);
+  if (!PM) return _drawMobItemIM(r, g, st, at, part, hx, light, scale, opts);
+  const left = part === 'left_arm', P = handPose();
+  P.s(16).rx(-90).ry(180).t((left ? -1 : 1) / 16, 0.125, -0.625);
+  drawItemIn(g, r, st, left ? 'tpl' : 'tp', M4.mul(M4.create(), PM, P.m), light, left);
+};
+
+/* ---------------- on the ground ---------------- */
+// ItemEntityRenderer: bobbing a tenth of a block either way about a tenth up, the model's bottom (its box under its ground transform) a
+// pixel above that, turning a radian every 20 ticks; 2 copies from 2 items, 3 from 17, 4 from 33, 5 from 49, set apart by a random
+// seeded with the item (flat ones one behind another)
+function groundSpread(e, st, n, flat, zs) {
+  const key = st.id + ':' + n + ':' + flat;
+  if (e._spread && e._spread.key === key) return e._spread.v;
+  const R = mulberry32(st.id * 31 + (st.dmg || 0)), v = [];
+  const z0 = flat ? -zs * 1.5 * (n - 1) / 2 : 0;
+  for (let i = 0; i < n; i++) {
+    let x = 0, y = 0, z = flat ? z0 + zs * 1.5 * i : 0;
+    if (i > 0) {
+      const k = flat ? 0.075 : 0.15;
+      x = (R() * 2 - 1) * k; y = (R() * 2 - 1) * k;
+      if (!flat) z = (R() * 2 - 1) * k;
+    }
+    v.push([x, y, z]);
+  }
+  e._spread = { key, v };
+  return v;
+}
+ItemEntity.prototype.render = function (r, a) {
+  const st = this.stack;
+  if (!st || !ITEMS[st.id]) return;
+  const p = this.ipos(a), g = this.game, L = this.lightAt(), age = this.age + a, kind = itemModelKind(st), style = itemStyle(st.id);
+  const bob = Math.sin(age / 10 + this.spin) * 0.1 + 0.1, turn = age / 20 + this.spin;
+  // far away or with a full vertex buffer, a flat item is a picture turning with it
+  if (!kind && style === 'sprite' && ((p[0] - r.org[0]) ** 2 + (p[1] - r.org[1]) ** 2 + (p[2] - r.org[2]) ** 2 >= 24 * 24 || r.dynN >= 50000)) {
+    drawSprite(r, itemLayer(st.id), p[0], p[1] + bob + 0.3125, p[2], 0.5, turn, [1, 1, 1, 1], L);
+    return;
+  }
+  const D = displayMatrix(itemDisplay(st, 'ground'), false);
+  const box = boxUnder(D, itemModelBox(st, kind, style)), zs = box[5] - box[2], flat = zs <= 0.0625;
+  const n = st.count > 48 ? 5 : st.count > 32 ? 4 : st.count > 16 ? 3 : st.count > 1 ? 2 : 1;
+  let M = M4.trans(M4.create(), p[0], p[1] + bob - box[1] + 0.0625, p[2]);
+  M = M4.mul(M4.create(), M, M4.rotY(M4.create(), turn));
+  for (const o of groundSpread(this, st, n, flat, zs)) drawItemModel(g, r, st, kind, M4.mul(M4.create(), M4.mul(M4.create(), M, M4.trans(M4.create(), o[0], o[1], o[2])), D), L);
+};
+
+/* ---------------- in item frames ---------------- */
+// ItemFrameRenderer: the item's middle a pixel out from the wall (the frame's front), half size, turned in eighths, the frame's space
+// turned half round (its z into the wall), then the model's fixed transform: a flat item faces out, a block shows its north face, a
+// chest, a head or a pot its front
+const _frameRenderIM = ItemFrame.prototype.render;
+ItemFrame.prototype.render = function (r, a) {
+  const it = this.data.item;
+  if (!it || this.isMap()) return _frameRenderIM.call(this, r, a);
+  this.data.item = null;
+  try { _frameRenderIM.call(this, r, a); } finally { this.data.item = it; }
+  const g = this.game, [R, U, N] = hangBasis(this.data.f, this.data.rot), o = this.center(), k = 0.5;
+  const li = this.type === 'glow_item_frame' ? [15, 15] : this.lightAt(), c = [o[0] + N[0] / 32, o[1] + N[1] / 32, o[2] + N[2] / 32];
+  const M = new Float32Array([-R[0] * k, -R[1] * k, -R[2] * k, 0, U[0] * k, U[1] * k, U[2] * k, 0, -N[0] * k, -N[1] * k, -N[2] * k, 0, c[0], c[1], c[2], 1]);
+  g._xformHolder = this;
+  try { drawItemIn(g, r, it, 'fixed', M, li, false); } finally { g._xformHolder = null; }
+};
+
+/* ---------------- on shelves ---------------- */
+// as Part 101's shelves (a quarter size, side by side, flat items a pixel further back), each through its on_shelf transform in the
+// shelf's space facing out
+Game.prototype.drawShelfItems = function (r) {
+  const w = this.world, p = this.player;
+  for (const [x, y, z, be] of this._shelves || []) {
+    if (!be.items || !be.items.some(Boolean) || (x - p.x) ** 2 + (z - p.z) ** 2 > 48 * 48 || !IS_SHELF[w.getBlock(x, y, z)]) continue;
+    const m = w.getMeta(x, y, z), [fx, fz] = shelfFront(m), [rx, rz] = shelfRight(m), l = w.getLightRaw(x, y, z), li = [l >> 4, l & 15];
+    be.items.forEach((st, i) => {
+      if (!st) return;
+      const k = 0.25, back = !itemModelKind(st) && itemStyle(st.id) === 'sprite' ? 0.25 : 0.18, s = (i - 1) * 0.3125;
+      const cx = x + 0.5 + rx * s - fx * back, cy = y + 0.5 + (be.bottom ? -0.25 + k * 0.5 : 0), cz = z + 0.5 + rz * s - fz * back;
+      drawItemIn(this, r, st, 'on_shelf', new Float32Array([rx * k, 0, rz * k, 0, 0, k, 0, 0, fx * k, 0, fz * k, 0, cx, cy, cz, 1]), li, false);
+    });
+  }
+};
+
+/* @file 222_illager_poses.js */
+/* ===================================================================
+   PART 119 — ILLAGERS' ARMS LIKE JAVA'S
+   Each illager's arms follow AbstractIllager.getArmPose and
+   IllagerModel's angles for it. A pillager with a crossbow always holds
+   it up, aimed where it looks, draws it back while loading, and never
+   folds its arms (without one it swings its arms as it walks).
+   Vindicators fold their arms until they attack, evokers until they
+   cast, illusioners until they cast or draw their bow. A weapon swings
+   down from above the head, empty hands reach out like a zombie's, and
+   raiders who have won a raid jump about until it ends, vindicators and
+   evokers with their arms up. Illagers riding sit with their legs out.
+   =================================================================== */
+
+// AbstractIllager.getArmPose for each kind (Pillager, Vindicator, SpellcasterIllager, Illusioner)
+const ILLAGER_POSE = {
+  pillager: m => m.data.charging ? 'charge' : holdsCrossbow(m) ? 'hold' : m.target ? 'attack' : 'neutral',
+  vindicator: m => m.target ? 'attack' : raiderCelebrating(m) ? 'celebrate' : 'crossed',
+  evoker: m => m.data.castT > 0 ? 'spell' : raiderCelebrating(m) ? 'celebrate' : 'crossed',
+  illusioner: m => m.data.castT > 0 || m.data.spell > 0 ? 'spell' : m.target ? 'bow' : 'crossed',
+};
+// Raider.RaiderCelebration: in a raid the village lost, with nothing to fight
+const raiderCelebrating = m => { const r = m.data.raid && m.game.raidOf(m.data.raid); return !!(r && r.status === 'loss' && !m.target); };
+for (const k in ILLAGER_POSE) {
+  const prev = MOB_ANIM[k];
+  MOB_ANIM[k] = (m, st) => {
+    if (prev) prev(m, st);
+    st.armPose = ILLAGER_POSE[k](m);
+    st.empty = !m.data.hand;
+    st.atk = m.attackAnim > 0 ? 1 - m.attackAnim / 10 : 0;
+    const S = m._xb;
+    st.charge = st.armPose === 'charge' && S ? Math.min(1, S.use / Math.max(1, xbCharge(m))) : 0;
+  };
+}
+// AnimationUtils.bobArms: the idle sway on top of a raised pose
+function illagerBob(P, age) {
+  const c = Math.cos(age * 0.09) * 0.05 + 0.05, s = Math.sin(age * 0.067) * 0.05;
+  P.right_arm[2] += c; P.left_arm[2] -= c; P.right_arm[0] += s; P.left_arm[0] -= s;
+}
+const _illagerAnim = MOB_MODELS.illager.anim;
+MOB_MODELS.illager.anim = function (P, st) {
+  if (!st.armPose) return _illagerAnim(P, st);
+  lookHead(P, st); P['hat#hide'] = 1;
+  const hx = st.hp, hy = -st.hy, age = st.age;
+  // IllagerModel.setupAnim: riding, or walking with the arms swinging
+  if (st.sit) {
+    P.right_arm = [-Math.PI / 5, 0, 0]; P.left_arm = [-Math.PI / 5, 0, 0];
+    P.right_leg = [-1.4137167, Math.PI / 10, 0.07853982]; P.left_leg = [-1.4137167, -Math.PI / 10, -0.07853982];
+  } else {
+    P.right_arm = [legSwing(st, 2, Math.PI) * 0.5, 0, 0]; P.left_arm = [legSwing(st, 2) * 0.5, 0, 0];
+    P.right_leg = [legSwing(st, 1.4) * 0.5, 0, 0]; P.left_leg = [legSwing(st, 1.4, Math.PI) * 0.5, 0, 0];
+  }
+  const f = Math.sin(st.atk * Math.PI), f1 = Math.sin((1 - (1 - st.atk) * (1 - st.atk)) * Math.PI);
+  switch (st.armPose) {
+    case 'attack':
+      if (st.empty) {
+        // AnimationUtils.animateZombieArms
+        const x = -Math.PI / 1.5 + f * 1.2 - f1 * 0.4;
+        P.right_arm = [x, -(0.1 - f * 0.6), 0]; P.left_arm = [x, 0.1 - f * 0.6, 0];
+      } else {
+        // AnimationUtils.swingWeaponDown
+        P.right_arm = [-1.8849558 + Math.cos(age * 0.09) * 0.15 + f * 2.2 - f1 * 0.4, Math.PI / 20, 0];
+        P.left_arm = [Math.cos(age * 0.19) * 0.5 + f * 1.2 - f1 * 0.4, -Math.PI / 20, 0];
+      }
+      illagerBob(P, age);
+      break;
+    case 'spell': { const s = Math.cos(age * 0.6662) * 0.25; P.right_arm = [s, 0, Math.PI * 0.75]; P.left_arm = [s, 0, -Math.PI * 0.75]; break; }
+    case 'bow': P.right_arm = [-Math.PI / 2 + hx, -0.1 + hy, 0]; P.left_arm = [-0.9424779 + hx, hy - 0.4, Math.PI / 2]; break;
+    // AnimationUtils.animateCrossbowHold and animateCrossbowCharge (right-handed)
+    case 'hold': P.right_arm = [-Math.PI / 2 + hx + 0.1, -0.3 + hy, 0]; P.left_arm = [-1.5 + hx, 0.6 + hy, 0]; break;
+    case 'charge': { const c = st.charge; P.right_arm = [-0.97079635, -0.8, 0]; P.left_arm = [-0.97079635 + (-Math.PI / 2 + 0.97079635) * c, 0.4 + 0.45 * c, 0]; break; }
+    case 'celebrate': { const c = Math.cos(age * 0.6662) * 0.05; P.right_arm = [c, 0, 2.670354]; P.left_arm = [c, 0, -2.3561945]; break; }
+  }
+  const crossed = st.armPose === 'crossed';
+  if (crossed) P['right_arm#hide'] = P['left_arm#hide'] = 1; else P['arms#hide'] = 1;
+};
+// RaiderCelebration (in place of heading for the village): standing about, a jump one tick in 50
+const _raidGoalIP = GOALS.raid;
+GOALS.raid = m => {
+  if (!raiderCelebrating(m)) return _raidGoalIP(m);
+  m.nav = null;
+  if (m.onGround && !m.vehicle && Math.random() < 0.02) m.vy = 0.42;
+  return true;
 };
 
 </script>
