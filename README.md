@@ -917,6 +917,15 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   triple rooms), the same wings, entrance, roof and penthouse, the gold blocks of the core, the sponge rooms, the sea
   lanterns, the pillars it stands on and the water cleared round it, and its three elder guardians. Checked against
   a reference world: the whole monument matches block for block.
+- **Structures from your own Minecraft jar** (Part 131): when you add the version .jar of a Minecraft installation
+  you own on the Resource Packs screen, the game now also keeps its structure files (they stay in your browser and
+  are never uploaded). Worlds you create after that build their structures from them the way Java does: villages,
+  pillager outposts, trail ruins, trial chambers and ancient cities piece by piece with Java's jigsaw rules, and
+  igloos, shipwrecks, ocean ruins, ruined portals and fossils from Java's own layouts, with the ground shaped round
+  them as Java shapes it, their chests, pots, spawners, vaults, villagers and animals. Checked against a reference
+  world, a plains village, an outpost, trail ruins, trial chambers and an ancient city come out block for block where
+  the reference itself follows Java. A jar you added before this version needs to be added again; worlds made
+  without a jar keep the game's own structures.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
