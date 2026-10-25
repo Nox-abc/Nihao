@@ -1410,7 +1410,7 @@ Generator.prototype.genChunk = function (cx, cz) {
             const n = Math.floor(hash3(wx, y, wz, seed + 7107) * 3);
             let ok = true;
             for (let k = 0; k <= n; k++) if (blocks[i + k * 256] !== B.AIR) ok = false;
-            if (ok) { for (let k = 0; k < n; k++) blocks[i + k * 256] = B.BIG_DRIPLEAF_STEM; blocks[i + n * 256] = B.BIG_DRIPLEAF; meta[i + n * 256] = Math.floor(r * 50) & 3; }
+            if (ok) { const f = Math.floor(r * 50) & 3; for (let k = 0; k < n; k++) { blocks[i + k * 256] = B.BIG_DRIPLEAF_STEM; meta[i + k * 256] = f; } blocks[i + n * 256] = B.BIG_DRIPLEAF; meta[i + n * 256] = f; }
           } else if (!clay) {
             if (r2 < 0.24) blocks[i] = B.MOSS_CARPET;
             else if (r2 < 0.33) blocks[i] = B.SHORT_GRASS;
@@ -5745,7 +5745,7 @@ vS([BI.LUSH_CAVES], 62, (D, r, x, z) => {
       D.set(bx, fy, bz, B.CLAY);
       const p = rr();
       if (p < 0.3) { if (D.get(bx, fy + 2, bz) === B.AIR) { D.set(bx, fy + 1, bz, B.SMALL_DRIPLEAF); D.set(bx, fy + 2, bz, B.SMALL_DRIPLEAF, 1); } }
-      else if (p < 0.5) { const n = rInt(rr, 3); let ok = true; for (let k = 1; k <= n + 1; k++) if (D.get(bx, fy + k, bz) !== B.AIR) ok = false; if (ok) { for (let k = 1; k <= n; k++) D.set(bx, fy + k, bz, B.BIG_DRIPLEAF_STEM); D.set(bx, fy + n + 1, bz, B.BIG_DRIPLEAF, rInt(rr, 4)); } }
+      else if (p < 0.5) { const n = rInt(rr, 3); let ok = true; for (let k = 1; k <= n + 1; k++) if (D.get(bx, fy + k, bz) !== B.AIR) ok = false; if (ok) { const f = rInt(rr, 4); for (let k = 1; k <= n; k++) D.set(bx, fy + k, bz, B.BIG_DRIPLEAF_STEM, f); D.set(bx, fy + n + 1, bz, B.BIG_DRIPLEAF, f); } }
     }
   }
 }, 3);
@@ -9664,7 +9664,7 @@ const STANDIN = {};
 const OPPF = { north: 'south', south: 'north', east: 'west', west: 'east' };
 const POTENT = ['dry', 'wet', 'dormant', 'erupting', 'continuous'], HEART = ['uprooted', 'dormant', 'awake'], WALLSIDE = { none: 0, low: 1, tall: 2 };
 const BUDS = new Set(['small_amethyst_bud', 'medium_amethyst_bud', 'large_amethyst_bud', 'amethyst_cluster']);
-const FRONTED = new Set(['big_dripleaf', 'bee_nest', 'beehive', 'chest', 'trapped_chest', 'furnace', 'carved_pumpkin', 'jack_o_lantern']);
+const FRONTED = new Set(['big_dripleaf', 'big_dripleaf_stem', 'bee_nest', 'beehive', 'chest', 'trapped_chest', 'furnace', 'carved_pumpkin', 'jack_o_lantern']);
 const bits = (st, names) => { let m = 0; for (const n of names) if (S.get(st, n) === 'true') m |= 1 << FACE[n]; return m; };
 function metaOf(st, n) {
   const g = p => S.get(st, p);
@@ -14448,7 +14448,8 @@ function shapeBoxes(id, meta, conn, forCollision, ctx) {
       return out;
     }
     case SH.PANE: {
-      const c = conn || 15, out = [[7, 0, 7, 9, 16, 9]];
+      // a pane joined to nothing is just its post, as Java's glass_pane_post and noside models draw it (Part 124)
+      const c = conn, out = [[7, 0, 7, 9, 16, 9]];
       if (c & 1) out.push([9, 0, 7, 16, 16, 9]); if (c & 2) out.push([0, 0, 7, 7, 16, 9]);
       if (c & 4) out.push([7, 0, 9, 9, 16, 16]); if (c & 8) out.push([7, 0, 0, 9, 16, 7]);
       return out;
@@ -14642,12 +14643,13 @@ function meshCross(mb, id, meta, pi, X, Y, Z, tint, to, world, wx, wy, wz) {
     return;
   }
   const layer = crossLayer(id, meta, pi, world, wx, wy, wz);
-  let ox = 0, oz = 0;
-  if (OFFSET[id]) { ox = (hash2(wx, wz, 11) - 0.5) * 6; oz = (hash2(wx, wz, 12) - 0.5) * 6; }
-  const x = X + ox, z = Z + oz, a = 0.8, c = 15.2;
+  // set off the middle of the block as Java sets it (Part 124)
+  let ox = 0, oy = 0, oz = 0;
+  if (OFFSET[id]) [ox, oy, oz] = plantOffset(id, wx, wz);
+  const x = X + ox, z = Z + oz, a = 0.8, c = 15.2, y = Y + oy;
   const fl = WAVE[id] && !BLK[id].noWave ? FL_WAVE : 0, top = d.tall && (meta & 1);
-  const p1 = [[x + a, Y, z + a], [x + c, Y, z + c], [x + c, Y + 16, z + c], [x + a, Y + 16, z + a]];
-  const p2 = [[x + c, Y, z + a], [x + a, Y, z + c], [x + a, Y + 16, z + c], [x + c, Y + 16, z + a]];
+  const p1 = [[x + a, y, z + a], [x + c, y, z + c], [x + c, y + 16, z + c], [x + a, y + 16, z + a]];
+  const p2 = [[x + c, y, z + a], [x + a, y, z + c], [x + a, y + 16, z + c], [x + c, y + 16, z + a]];
   for (const P of [p1, p2]) {
     quad(mb, P, layer, UV_FULL, sky, blk, r, g, b, fl, !top);
     quad(mb, [P[1], P[0], P[3], P[2]], layer, UV_FULL, sky, blk, r, g, b, fl, !top);
@@ -14828,14 +14830,19 @@ function meshSection(world, c, sy) {
           for (let f = 0; f < 6; f++) { if (OPAQUE[pBlk[pi + FND[f]]]) continue; const vt = FV[f]; for (let k = 0; k < 4; k++) opq.v(X + vt[k][0] * 16, Y + vt[k][1] * 16, Z + vt[k][2] * 16, FACETEX[id * 6], vt[k][3], vt[k][4], 240, 240, 255, 255, 255, FL_EPORTAL); }
           break;
         }
-        const y = Y + 12;
+        // TheEndPortalRenderer: the top at 12/16 and, seen from below, the bottom at 6/16 (Part 124)
+        const y = Y + 12, yb = Y + 6;
         quad(opq, [[X, y, Z + 16], [X + 16, y, Z + 16], [X + 16, y, Z], [X, y, Z]], FACETEX[id * 6], UV_FULL, 240, 240, 255, 255, 255, FL_EPORTAL);
+        if (!OPAQUE[pBlk[pi + FND[3]]]) quad(opq, [[X, yb, Z], [X + 16, yb, Z], [X + 16, yb, Z + 16], [X, yb, Z + 16]], FACETEX[id * 6], UV_FULL, 240, 240, 255, 255, 255, FL_EPORTAL);
         break;
       }
       default: {
         if (!MDL[shape] || NOMESH[id]) break;
         const ps = blockParts(id, meta, DYNAMIC_SHAPES.has(shape) ? padCtx(pi, id) : null);
-        emitParts(TRANSL[id] ? trn : opq, ps, X, Y, Z, pi, id, meta, tint, to, 0);
+        // bamboo stands off the middle of its block as Java sets it (Part 124)
+        let ox = 0, oz = 0;
+        if (OFFSET[id]) [ox, , oz] = plantOffset(id, c.cx * 16 + lx, c.cz * 16 + lz);
+        emitParts(TRANSL[id] ? trn : opq, ps, X + ox, Y, Z + oz, pi, id, meta, tint, to, 0);
       }
     }
     // plants and other blocks standing in water, and blocks holding it
@@ -15007,7 +15014,7 @@ function resolveFaceTextures() {
       CROP_LAYERS[id] = arr;
     } else CROP_LAYERS[id] = null;
     const nm = d.name;
-    OFFSET[id] = d.flower || d.tall || nm === 'short_grass' || nm === 'fern' || nm === 'crimson_roots' || nm === 'warped_roots' || nm === 'nether_sprouts' || nm === 'pointed_dripstone' || nm === 'sulfur_spike' ? 1 : 0;
+    OFFSET[id] = d.flower || d.tall || nm === 'short_grass' || nm === 'fern' || nm === 'crimson_roots' || nm === 'warped_roots' || nm === 'nether_sprouts' || nm === 'pointed_dripstone' || nm === 'sulfur_spike' || nm === 'bamboo' || nm === 'bamboo_sapling' || nm === 'mangrove_propagule' ? 1 : 0;
   }
   ALTMASK[B.OBSERVER] = 8; FACETEX_ALT[B.OBSERVER * 6 + 5] = L('observer_back_on');
   ALTMASK[B.BARREL] = 8; FACETEX_ALT[B.BARREL * 6 + 2] = L('barrel_top_open');
@@ -16061,7 +16068,10 @@ function collectBoxes(world, x0, y0, z0, x1, y1, z1) {
     if (!SOLID[id]) continue;
     if (SHAPE[id] === SH.CUBE) { _boxes.push([x, y, z, x + 1, y + CUBE_TOP[id], z + 1]); continue; }
     const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? world.shapeCtx(x, y, z, id) : null;
-    for (const b of shapeBoxes(id, world.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx)) _boxes.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + b[4] / 16, z + b[5] / 16]);
+    // bamboo's stalk is where its model stands, off the middle of the block (Part 124)
+    let ox = x, oz = z;
+    if (OFFSET[id]) { const o = plantOffset(id, x, z); ox += o[0] / 16; oz += o[2] / 16; }
+    for (const b of shapeBoxes(id, world.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx)) _boxes.push([ox + b[0] / 16, y + b[1] / 16, oz + b[2] / 16, ox + b[3] / 16, y + b[4] / 16, oz + b[5] / 16]);
   }
   return _boxes;
 }
@@ -62574,10 +62584,10 @@ modelCollision = function (id, meta, ctx) {
     const t = GLOW.get(id);
     if (t) {
       const d = BLK[id], sky = (pLight[pi] >> 4) * 16, L = texLayer(t, FACETEX[id * 6]), k = 255 * FSHADE[2];
-      let ox = 0, oz = 0;
-      if (OFFSET[id]) { ox = (hash2(wx, wz, 11) - 0.5) * 6; oz = (hash2(wx, wz, 12) - 0.5) * 6; }
-      const x = X + ox, z = Z + oz, a = 0.8, c = 15.2, fl = WAVE[id] && !d.noWave ? FL_WAVE : 0, top = d.tall && (meta & 1);
-      for (const P of [[[x + a, Y, z + a], [x + c, Y, z + c], [x + c, Y + 16, z + c], [x + a, Y + 16, z + a]], [[x + c, Y, z + a], [x + a, Y, z + c], [x + a, Y + 16, z + c], [x + c, Y + 16, z + a]]]) {
+      let ox = 0, oy = 0, oz = 0;
+      if (OFFSET[id]) [ox, oy, oz] = plantOffset(id, wx, wz);
+      const x = X + ox, z = Z + oz, y = Y + oy, a = 0.8, c = 15.2, fl = WAVE[id] && !d.noWave ? FL_WAVE : 0, top = d.tall && (meta & 1);
+      for (const P of [[[x + a, y, z + a], [x + c, y, z + c], [x + c, y + 16, z + c], [x + a, y + 16, z + a]], [[x + c, y, z + a], [x + a, y, z + c], [x + a, y + 16, z + c], [x + c, y + 16, z + a]]]) {
         quad(mb, P, L, UV_FULL, sky, 240, k, k, k, fl, !top);
         quad(mb, [P[1], P[0], P[3], P[2]], L, UV_FULL, sky, 240, k, k, k, fl, !top);
       }
@@ -66977,6 +66987,7 @@ function terrainParticle(P, x, y, z, xa, ya, za, id, meta, bx, by, bz, power, sc
 }
 // the boxes of a block's outline (its VoxelShape), in pixels
 function outlineBoxes(w, id, meta, x, y, z) {
+  if (typeof outlineShape === 'function') return outlineShape(id, meta, w, x, y, z);
   const sh = SHAPE[id];
   if (sh === SH.CUBE) return [[0, 0, 0, 16, 16, 16]];
   const ctx = w && (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null;
@@ -67064,6 +67075,570 @@ Mob.prototype.landed = function (dist) {
   if (!T.flying && !(this instanceof Hanging)) landingDust(this, dist, typeof T.noFall === 'number' && T.noFall < 1000 ? T.noFall : 3);
   return _mobLandedBP.apply(this, arguments);
 };
+
+/* @file 227_outlines.js */
+/* ===================================================================
+   PART 124 — OUTLINES, PLANT OFFSETS, BUTTONS AND LEVERS LIKE JAVA'S
+   The outline round the block you look at is drawn the way Java draws
+   it, along the edges of the block's own shape: a stair shows its step,
+   a fence its post and the bars to its neighbours, a cauldron its rim
+   and legs. What a click finds is the shape too, so the empty corner of
+   a stair or the gap beside a fence post lets the click through to what
+   is behind. Plants, crops and many other blocks have Java's shapes
+   (a flower is a narrow column standing where the flower stands, a
+   sapling 12 pixels high, wheat as high as it has grown, sugar cane,
+   mushrooms, signs, repeaters, campfires, stonecutters and more).
+   Flowers, grass and the other plants Java sets off the middle of their
+   block stand where Java puts them, worked out from the position the
+   way Java does it, grass and ferns a little lower or higher too.
+   Buttons and levers are turned the way Java turns them: a button on a
+   wall is wider than it is tall, a lever's handle is a little post, and
+   on a floor or ceiling both face the way you were facing.
+   =================================================================== */
+
+/* ---------------- plant offsets ---------------- */
+// Mth.getSeed and BlockBehaviour's offset functions: up to a quarter block each way (an eighth for pointed dripstone), and for grass,
+// ferns and small dripleaves up to a fifth of a block down; in pixels
+const OFFSET_XYZ = new Uint8Array(MAXB), OFFSET_MAXH = new Float32Array(MAXB).fill(0.25);
+for (const n of ['short_grass', 'fern', 'small_dripleaf']) { const id = B[n.toUpperCase()]; if (id !== undefined) OFFSET_XYZ[id] = 1; }
+for (const n of ['pointed_dripstone', 'sulfur_spike']) { const id = B[n.toUpperCase()]; if (id !== undefined) OFFSET_MAXH[id] = 0.125; }
+function javaPosSeed(x, y, z) {
+  let i = BigInt(Math.imul(x | 0, 3129871)) ^ (BigInt(z | 0) * 116129781n) ^ BigInt(y | 0);
+  i = BigInt.asIntN(64, i);
+  i = BigInt.asIntN(64, i * i * 42317861n + i * 11n);
+  return i >> 16n;
+}
+const OFFSET_CACHE = new Map();
+function plantOffset(id, x, z) {
+  const k = x * 67108864 + z, f = OFFSET_MAXH[id];
+  let s = OFFSET_CACHE.get(k);
+  if (s === undefined) { const i = javaPosSeed(x, 0, z); s = [Number(i & 15n), Number((i >> 4n) & 15n), Number((i >> 8n) & 15n)]; if (OFFSET_CACHE.size > 50000) OFFSET_CACHE.clear(); OFFSET_CACHE.set(k, s); }
+  const h = n => Math.max(-f, Math.min(f, (Math.fround(n / 15) - 0.5) * 0.5));
+  return [h(s[0]) * 16, OFFSET_XYZ[id] ? (Math.fround(s[1] / 15) - 1) * Math.fround(0.2) * 16 : 0, h(s[2]) * 16];
+}
+
+/* ---------------- buttons and levers ---------------- */
+// FaceAttachedHorizontalDirectionalBlock's blockstate rotations for our meta: bits 0-2 the side it hangs from (0 facing west, 1 east,
+// 2 ceiling, 3 floor, 4 north, 5 south), bits 4-5 the way one on a floor or ceiling faces (north, east, south, west)
+function attachedRot(m) {
+  const a = m & 7, f = (m >> 4) & 3;
+  if (a === 3) return [0, f * 90];
+  if (a === 2) return [180, [180, 270, 0, 90][f]];
+  return [90, a === 4 ? 0 : a === 1 ? 90 : a === 5 ? 180 : 270];
+}
+// a point of a model turned as a blockstate variant turns it (about the middle of the block: X by -x, then Y by -y)
+function variantPoint(p, xr, yr) {
+  let x = p[0] - 8, y = p[1] - 8, z = p[2] - 8;
+  const a = -xr * Math.PI / 180, ca = Math.round(Math.cos(a)), sa = Math.round(Math.sin(a));
+  [y, z] = [y * ca - z * sa, y * sa + z * ca];
+  const b = -yr * Math.PI / 180, cb = Math.round(Math.cos(b)), sb = Math.round(Math.sin(b));
+  [x, z] = [x * cb + z * sb, -x * sb + z * cb];
+  return [x + 8, y + 8, z + 8];
+}
+const variantBox = (b, xr, yr) => { const p = variantPoint([b[0], b[1], b[2]], xr, yr), q = variantPoint([b[3], b[4], b[5]], xr, yr); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.min(p[2], q[2]), Math.max(p[0], q[0]), Math.max(p[1], q[1]), Math.max(p[2], q[2])]; };
+// a box's faces as quads (each corner [x, y, z, u, v]), with the face's uv as a block model gives it, seen the right way round
+function boxQuads(b, uvs, faces) {
+  const [x0, y0, z0, x1, y1, z1] = b, out = [];
+  const F = {
+    north: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], south: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+    west: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], east: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]],
+    up: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], down: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
+  };
+  for (const f of faces) {
+    const [u1, v1, u2, v2] = uvs[f], P = F[f], uv = [[u1, v2], [u2, v2], [u2, v1], [u1, v1]];
+    out.push(P.map((p, k) => [p[0], p[1], p[2], uv[k][0], uv[k][1]]));
+  }
+  return out;
+}
+// the button (button and button_pressed) turned as its state is
+MDL[SH.BUTTON] = (d, m) => { const [xr, yr] = attachedRot(m); return [BX(...variantBox([5, 0, 6, 11, (m & 8) ? 1.02 : 2, 10], xr, yr))]; };
+// the lever (lever_on unpowered, lever powered): the cobblestone base and the handle, a 2x10x2 post tipped 45 degrees about X
+MDL[SH.LEVER] = (d, m) => {
+  const [xr, yr] = attachedRot(m), ang = ((m & 8) ? -45 : 45) * Math.PI / 180, c = Math.cos(ang), s = Math.sin(ang);
+  const tip = p => { const y = p[1] - 1, z = p[2] - 8; return [p[0], 1 + y * c - z * s, 8 + y * s + z * c]; };
+  const ps = [BX(...variantBox([5, -0.02, 4, 11, 2.98, 12], xr, yr), 'cobblestone')];
+  const uv = { up: [7, 6, 9, 8], north: [7, 6, 9, 16], south: [7, 6, 9, 16], west: [7, 6, 9, 16], east: [7, 6, 9, 16] };
+  for (const q of boxQuads([7, 1, 7, 9, 11, 9], uv, ['up', 'north', 'south', 'west', 'east'])) ps.push({ q: q.map(v => { const p = variantPoint(tip(v), xr, yr); return [p[0], p[1], p[2], v[3], v[4]]; }), t: 'lever' });
+  return ps;
+};
+// on a floor or ceiling they face the way the player faces (BlockPlaceContext.getHorizontalDirection)
+const _afterPlaceOL = Game.prototype.afterPlace;
+Game.prototype.afterPlace = function (p, x, y, z, id) {
+  const r = _afterPlaceOL.apply(this, arguments), w = this.world, sh = SHAPE[id];
+  if ((sh === SH.BUTTON || sh === SH.LEVER) && w.getBlock(x, y, z) === id && p) {
+    const m = w.getMeta(x, y, z);
+    if ((m & 7) === 2 || (m & 7) === 3) {
+      const dx = -Math.sin(p.yaw), dz = -Math.cos(p.yaw), f = Math.abs(dz) >= Math.abs(dx) ? (dz < 0 ? 0 : 2) : (dx > 0 ? 1 : 3);
+      w.setMeta(x, y, z, (m & ~48) | (f << 4));
+      if (this.remeshNear) this.remeshNear(x, z);
+    }
+  }
+  return r;
+};
+
+/* ---------------- Java's shapes ---------------- */
+// the outline (and what a click finds) of each block Java shapes differently from its model's box, in pixels
+const OUTLINE_OF = new Map();
+const olSet = (names, f) => { for (const n of names) { const id = B[n.toUpperCase()]; if (id !== undefined) OUTLINE_OF.set(id, typeof f === 'function' ? f : () => f); } };
+const OL_FULL = [[0, 0, 0, 16, 16, 16]];
+const OL_FLOWERS = ['dandelion', 'golden_dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'oxeye_daisy', 'cornflower',
+  'lily_of_the_valley', 'wither_rose', 'torchflower', 'open_eyeblossom', 'closed_eyeblossom'];
+// FlowerBlock: a 6x10 column that moves with the flower (as do bamboo's and a propagule's columns)
+const FLOWER_SET = new Set(OL_FLOWERS.map(n => B[n.toUpperCase()]).filter(v => v !== undefined));
+// BambooStalkBlock, BambooSaplingBlock and MangrovePropaguleBlock are set off the middle of the block too (XZ, up to a quarter block)
+for (const n of ['bamboo', 'bamboo_sapling', 'mangrove_propagule']) { const id = B[n.toUpperCase()]; if (id !== undefined) FLOWER_SET.add(id); }
+olSet(OL_FLOWERS, [[5, 0, 5, 11, 10, 11]]);
+olSet(BLOCK_NAMES.filter(n => n && /_sapling$/.test(n)), [[2, 0, 2, 14, 12, 14]]);
+olSet(['red_mushroom', 'brown_mushroom'], [[5, 0, 5, 11, 6, 11]]);
+olSet(['crimson_fungus', 'warped_fungus'], [[4, 0, 4, 12, 9, 12]]);
+olSet(['tube', 'brain', 'bubble', 'fire', 'horn'].flatMap(c => [c + '_coral', 'dead_' + c + '_coral']), [[2, 0, 2, 14, 15, 14]]);
+olSet(['bush', 'red_shrub'], [[0, 0, 0, 16, 13, 16]]);
+olSet(['firefly_bush', 'cobweb', 'sunflower', 'lilac', 'rose_bush', 'peony', 'tall_grass', 'large_fern', 'pitcher_plant', 'sculk_shrieker'], OL_FULL);
+olSet(['cactus_flower'], [[1, 0, 1, 15, 12, 15]]);
+olSet(['short_dry_grass'], [[2, 0, 2, 14, 10, 14]]);
+olSet(['tall_dry_grass', 'cave_vines'], [[1, 0, 1, 15, 16, 15]]);
+olSet(['hanging_roots'], [[2, 10, 2, 14, 16, 14]]);
+olSet(['spore_blossom'], [[2, 13, 2, 14, 16, 14]]);
+olSet(['seagrass'], [[2, 0, 2, 14, 12, 14]]);
+olSet(['nether_sprouts'], [[2, 0, 2, 14, 3, 14]]);
+olSet(['sugar_cane'], [[2, 0, 2, 14, 16, 14]]);
+olSet(['small_dripleaf'], [[2, 0, 2, 14, 13, 14]]);
+olSet(['cactus'], [[1, 0, 1, 15, 16, 15]]);
+olSet(['sculk_sensor', 'calibrated_sculk_sensor'], [[0, 0, 0, 16, 8, 16]]);
+olSet(['campfire', 'soul_campfire'], [[0, 0, 0, 16, 7, 16]]);
+olSet(['comparator', 'repeater'], [[0, 0, 0, 16, 2, 16]]);
+olSet(['stonecutter'], [[0, 0, 0, 16, 9, 16]]);
+olSet(['brewing_stand'], [[1, 0, 1, 15, 2, 15], [7, 2, 7, 9, 14, 9]]);
+olSet(['dried_ghast'], [[3, 0, 3, 13, 10, 13]]);
+olSet(['frogspawn'], [[0, 0, 0, 16, 1.5, 16]]);
+olSet(['lily_pad'], [[1, 0, 1, 15, 1.5, 15]]);
+olSet(['structure_void'], [[5, 5, 5, 11, 11, 11]]);
+olSet(['fire', 'soul_fire'], [[0, 0, 0, 16, 1, 16]]);
+olSet(['nether_portal'], m => (m & 1) ? [[6, 0, 0, 10, 16, 16]] : [[0, 0, 6, 16, 16, 10]]);
+olSet(['azalea', 'flowering_azalea'], [[0, 8, 0, 6, 16, 16], [6, 0, 6, 10, 16, 10], [6, 8, 0, 16, 16, 6], [6, 8, 10, 16, 16, 16], [10, 8, 6, 16, 16, 10]]);
+// AbstractCauldronBlock: the block less its inside and the gaps between its feet
+const CAULDRON_SHAPE = [[0, 0, 0, 2, 16, 4], [0, 0, 12, 2, 16, 16], [0, 3, 4, 16, 4, 12], [0, 4, 4, 2, 16, 12], [2, 0, 0, 4, 16, 2], [2, 0, 14, 4, 16, 16], [2, 3, 2, 14, 4, 4], [2, 3, 12, 14, 4, 14],
+  [4, 3, 0, 12, 16, 2], [4, 3, 14, 12, 16, 16], [12, 0, 0, 16, 16, 2], [12, 0, 14, 16, 16, 16], [14, 0, 2, 16, 16, 4], [14, 0, 12, 16, 16, 14], [14, 4, 4, 16, 16, 12]];
+olSet(BLOCK_NAMES.filter(n => n && /cauldron$/.test(n)), CAULDRON_SHAPE);
+// ComposterBlock: the block less the space above the compost (its level, two pixels a level)
+olSet(['composter'], m => { const h = Math.max(2, 1 + 2 * Math.min(m & 15, 7)); return [[0, 0, 0, 16, h, 16], [0, h, 0, 2, 16, 16], [14, h, 0, 16, 16, 16], [2, h, 0, 14, 16, 2], [2, h, 14, 14, 16, 16]]; });
+// HopperBlock: its rim, funnel and spout, as its model has them
+olSet(['hopper'], (m, id) => blockParts(id, m, null).filter(p => p.b).map(p => p.b));
+// crops as high as they have grown
+const cropShape = hs => m => [[0, 0, 0, 16, hs[Math.min(m & 7, hs.length - 1)], 16]];
+olSet(['wheat'], cropShape([2, 4, 6, 8, 10, 12, 14, 16]));
+olSet(['carrots', 'potatoes'], cropShape([2, 3, 4, 5, 6, 7, 8, 9]));
+olSet(['beetroots'], cropShape([2, 4, 6, 8]));
+olSet(['nether_wart'], cropShape([5, 8, 11, 14]));
+olSet(['torchflower_crop'], m => (m & 7) ? [[5, 0, 5, 11, 10, 11]] : [[5, 0, 5, 11, 6, 11]]);
+olSet(['sweet_berry_bush'], m => (m & 3) === 0 ? [[3, 0, 3, 13, 8, 13]] : (m & 3) < 3 ? [[1, 0, 1, 15, 16, 15]] : OL_FULL);
+// candles and turtle eggs by how many there are
+olSet(BLOCK_NAMES.filter(n => n && /(^|_)candle$/.test(n)), m => [[[7, 0, 7, 9, 6, 9]], [[5, 0, 6, 11, 6, 9]], [[5, 0, 6, 10, 6, 11]], [[5, 0, 5, 11, 6, 10]]][m & 3]);
+olSet(['turtle_egg'], m => (m & 3) ? [[1, 0, 1, 15, 7, 15]] : [[3, 0, 3, 12, 7, 12]]);
+// the plant part of kelp and vines is a full column, the tip shorter
+olSet(['kelp'], (m, id, w, x, y, z) => w && w.getBlock(x, y + 1, z) === id ? OL_FULL : [[0, 0, 0, 16, 9, 16]]);
+olSet(['twisting_vines'], (m, id, w, x, y, z) => w && w.getBlock(x, y + 1, z) === id ? [[4, 0, 4, 12, 16, 12]] : [[4, 0, 4, 12, 15, 12]]);
+olSet(['weeping_vines'], (m, id, w, x, y, z) => w && w.getBlock(x, y - 1, z) === id ? [[1, 0, 1, 15, 16, 15]] : [[4, 9, 4, 12, 16, 12]]);
+// SignBlock: a post's column standing; WallSignBlock: a board 8 pixels high against the wall
+const WALL_SIGN = [[0, 4.5, 0, 16, 12.5, 2], [14, 4.5, 0, 16, 12.5, 16], [0, 4.5, 14, 16, 12.5, 16], [0, 4.5, 0, 2, 12.5, 16]];
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.SIGN) OUTLINE_OF.set(id, m => (m & 16) ? [WALL_SIGN[m & 3]] : [[4, 0, 4, 12, 16, 12]]);
+// CeilingHangingSignBlock: thin along the sign when it hangs square to the world, a 10x16 column otherwise
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.HSIGN) OUTLINE_OF.set(id, m => { const r = m & 15; return r % 4 ? [[3, 0, 3, 13, 16, 13]] : r % 8 ? [[7, 0, 1, 9, 10, 15]] : [[1, 0, 7, 15, 10, 9]]; });
+// coral fans: low on a floor, a slab off the wall on a wall (turned as the model is)
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.FAN) OUTLINE_OF.set(id, m => { const a = m & 7; return a === 2 || a === 3 ? [[2, 0, 2, 14, 4, 14]] : rotParts([BX(0, 4, 5, 16, 12, 16)], DIR_ROT[a]).map(p => p.b); });
+// buttons as their model, levers their base's footprint six pixels deep
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.LEVER) OUTLINE_OF.set(id, m => { const [xr, yr] = attachedRot(m); return [variantBox([5, 0, 4, 11, 6, 12], xr, yr)]; });
+olSet(['dragon_head'], m => (m & 16) ? null : [[4, 0, 4, 12, 8.5, 12]]);
+// EndPortalBlock: the slab from 6 to 12 its surfaces are drawn at; an end gateway is the whole block
+olSet(['end_portal'], [[0, 6, 0, 16, 12, 16]]);
+olSet(['end_gateway'], OL_FULL);
+// anvils, piston heads (the plate and the arm reaching into the piston) and shelf mushrooms: their model's boxes
+olSet(['anvil', 'chipped_anvil', 'damaged_anvil', 'piston_head', 'shelf_mushroom'], (m, id) => blockParts(id, m, null).filter(p => p.b).map(p => p.b));
+// the shapes below are Java's facing south, turned as the model is (our facing 0 south, 1 west, 2 north, 3 east)
+const olTurn = (bs, r) => rotParts(bs.map(b => BX(...b)), r).map(p => p.b);
+// BellBlock on a floor: the frame's box across the bell
+olSet(['bell'], m => (m & 1) ? [[4, 0, 0, 12, 16, 16]] : [[0, 0, 4, 16, 16, 12]]);
+// GrindstoneBlock on a floor: the legs, the stone and the pins holding it
+const GRINDSTONE_SHAPE = [[2, 0, 6, 4, 13, 10], [12, 0, 6, 14, 13, 10], [4, 4, 2, 12, 16, 14], [2, 7, 5, 4, 13, 6], [2, 7, 10, 4, 13, 11], [12, 7, 5, 14, 13, 6], [12, 7, 10, 14, 13, 11]];
+olSet(['grindstone'], m => olTurn(GRINDSTONE_SHAPE, m & 3));
+// LecternBlock: the base, the post and the top in steps up its slope
+const LECTERN_SHAPE = [[0, 0, 0, 16, 2, 16], [4, 2, 4, 12, 14, 12], [0, 10, 10.667, 4, 14, 15], [4, 10, 12, 16, 14, 15], [12, 10, 10.667, 16, 14, 12], [0, 12, 6.333, 4, 16, 10.667],
+  [12, 12, 6.333, 16, 16, 10.667], [0, 14, 2, 16, 18, 6.333], [4, 14, 6.333, 12, 16, 10.667]];
+olSet(['lectern'], m => olTurn(LECTERN_SHAPE, m & 3));
+// TripWireHookBlock: the plate and the hook out from the wall
+olSet(['tripwire_hook'], m => olTurn([[5, 0, 0, 11, 10, 6]], m & 3));
+// TripWireBlock hooked up: a low slab round the string
+olSet(['tripwire'], [[0, 1, 0, 16, 2.5, 16]]);
+// ShelfBlock: the back and the two ledges
+for (let id = 0; id < MAXB; id++) if (IS_SHELF[id]) OUTLINE_OF.set(id, m => olTurn(SHELF_BOXES, m & 3));
+// the straw bed's head has the pillow's rise along its far half
+olSet(['straw_bed'], m => olTurn((m & 4) ? [[0, 0, 0, 16, 4, 16], [0, 4, 8, 16, 5, 16]] : [[0, 0, 0, 16, 4, 16]], m & 3));
+// BedBlock: the mattress on two legs at the end of each half
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.BED) OUTLINE_OF.set(id, m => olTurn([[0, 3, 0, 16, 9, 16], ...((m & 4) ? [[0, 0, 13, 3, 3, 16], [13, 0, 13, 16, 3, 16]] : [[0, 0, 0, 3, 3, 3], [13, 0, 0, 16, 3, 3]])], m & 3));
+// FenceGateBlock: the whole gate's height, four pixels thick, open or shut
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.GATE) OUTLINE_OF.set(id, m => (m & 1) ? [[6, 0, 0, 10, 16, 16]] : [[0, 0, 6, 16, 16, 10]]);
+// BaseRailBlock: two pixels flat, eight on a slope
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.RAIL) OUTLINE_OF.set(id, (m, id) => { const s = BLK[id].rail === 'rail' ? m & 15 : m & 7; return s >= 2 && s <= 5 ? [[0, 0, 0, 16, 8, 16]] : [[0, 0, 0, 16, 2, 16]]; });
+// ScaffoldingBlock: the frame (with its bottom ring when it hangs), the whole block to someone holding scaffolding
+const SCAFFOLD_FRAME = [[0, 0, 0, 2, 16, 2], [0, 0, 14, 2, 16, 16], [14, 0, 0, 16, 16, 2], [14, 0, 14, 16, 16, 16], [0, 14, 2, 16, 16, 14], [2, 14, 0, 14, 16, 2], [2, 14, 14, 14, 16, 16]];
+olSet(['scaffolding'], m => {
+  const p = typeof game !== 'undefined' && game.player, held = p && p.inv && p.inv[p.sel];
+  if (held && held.id === B.SCAFFOLDING) return OL_FULL;
+  return (m & 8) ? [[0, 0, 0, 16, 2, 16], ...SCAFFOLD_FRAME] : SCAFFOLD_FRAME;
+});
+// AmethystClusterBlock: a box as high as the crystal off the face it grows from
+const BUD_SHAPE = { amethyst_cluster: [3, 0, 3, 13, 7, 13], large_amethyst_bud: [3, 0, 3, 13, 5, 13], medium_amethyst_bud: [3, 0, 3, 13, 4, 13], small_amethyst_bud: [4, 0, 4, 12, 3, 12] };
+for (const n in BUD_SHAPE) olSet([n], m => orientParts([BX(...BUD_SHAPE[n])], m & 7).map(p => p.b));
+// PointedDripstoneBlock: a column as thick as that part of the row, a tip shorter, moved with the model
+const SPELEOTHEM_SHAPE = { tip_merge: [5, 0, 5, 11, 16, 11], frustum: [4, 0, 4, 12, 16, 12], middle: [3, 0, 3, 13, 16, 13], base: [2, 0, 2, 14, 16, 14] };
+olSet(['pointed_dripstone', 'sulfur_spike'], (m, id, w, x, y, z) => {
+  const up = m & 1, t = w ? speleothemThickness(w, id, up, x, y, z) : 'tip';
+  const b = t === 'tip' ? (up ? [5, 0, 5, 11, 11, 11] : [5, 5, 5, 11, 16, 11]) : SPELEOTHEM_SHAPE[t];
+  if (!w) return [b];
+  const o = plantOffset(id, x, z);
+  return [[b[0] + o[0], b[1], b[2] + o[2], b[3] + o[0], b[4], b[5] + o[2]]];
+});
+// MangrovePropaguleBlock and BambooStalkBlock: thin columns (the bamboo wider with big leaves)
+olSet(['mangrove_propagule'], [[7, 0, 7, 9, 16, 9]]);
+olSet(['bamboo'], m => (m & 1) ? [[3, 0, 3, 13, 16, 13]] : [[5, 0, 5, 11, 16, 11]]);
+// HangingMossBlock: its tip stops two pixels short
+olSet(['pale_hanging_moss'], (m, id, w, x, y, z) => w && w.getBlock(x, y - 1, z) === id ? [[1, 0, 1, 15, 16, 15]] : [[1, 2, 1, 15, 16, 15]]);
+// StemBlock: two pixels a stage; AttachedStemBlock: bent to the fruit beside it
+const ATTACHED_STEM = { 0: [6, 0, 6, 16, 10, 10], 1: [0, 0, 6, 10, 10, 10], 4: [6, 0, 6, 10, 10, 16], 5: [6, 0, 0, 10, 10, 10] };
+for (let id = 0; id < MAXB; id++) if (BLK[id] && BLK[id].stem) OUTLINE_OF.set(id, (m, id, w, x, y, z) => {
+  const age = m & 7, fruit = B[BLK[id].stem.toUpperCase()];
+  if (age === 7 && w) for (const f of [0, 1, 4, 5]) if (w.getBlock(x + DX[f], y, z + DZ[f]) === fruit) return [ATTACHED_STEM[f]];
+  return [[7, 0, 7, 9, 2 + 2 * age, 9]];
+});
+// SegmentableBlock: one box round the quarters the flowers or leaves cover, three pixels high (one for leaf litter)
+const SEG_ONE = [[8, 8, 16, 16], [0, 8, 8, 16], [0, 0, 8, 8], [8, 0, 16, 8]], SEG_TWO = [[8, 0, 16, 16], [0, 8, 16, 16], [0, 0, 8, 16], [0, 0, 16, 8]];
+for (let id = 0; id < MAXB; id++) if (BLK[id] && (BLK[id].flat === 'petals' || BLK[id].flat === 'litter')) OUTLINE_OF.set(id, (m, id) => {
+  const n = (m >> 2) & 3, h = BLK[id].flat === 'litter' ? 1 : 3, q = n >= 2 ? [0, 0, 16, 16] : (n ? SEG_TWO : SEG_ONE)[m & 3];
+  return [[q[0], 0, q[1], q[2], h, q[3]]];
+});
+// MultifaceBlock and VineBlock: a pixel-thin plate on each face it covers
+const MULTIFACE = [[1, [15, 0, 0, 16, 16, 16]], [2, [0, 0, 0, 1, 16, 16]], [4, [0, 15, 0, 16, 16, 16]], [8, [0, 0, 0, 16, 1, 16]], [16, [0, 0, 15, 16, 16, 16]], [32, [0, 0, 0, 16, 16, 1]]];
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.VINE) OUTLINE_OF.set(id, m => { const bs = MULTIFACE.filter(f => m & f[0]).map(f => f[1]); return bs.length ? bs : [MULTIFACE[3][1]]; });
+// RedStoneWireBlock: the middle, a pixel-high arm to each side it runs to and a plate up each block it climbs (east, west, south, north)
+const WIRE_ARM = [[3, 0, 3, 16, 1, 13], [0, 0, 3, 13, 1, 13], [3, 0, 3, 13, 1, 16], [3, 0, 0, 13, 1, 13]], WIRE_UP = [[15, 0, 3, 16, 16, 13], [0, 0, 3, 1, 16, 13], [3, 0, 15, 13, 16, 16], [3, 0, 0, 13, 16, 1]];
+olSet(['redstone_wire'], (m, id, w, x, y, z) => {
+  const k = w ? w.shapeCtx(x, y, z, id).wire : 0, bs = [[3, 0, 3, 13, 1, 13]];
+  for (let s = 0; s < 4; s++) { if (k & (17 << s)) bs.push(WIRE_ARM[s]); if (k & (16 << s)) bs.push(WIRE_UP[s]); }
+  return bs;
+});
+// ChorusPlantBlock (a PipeBlock 10 pixels thick): the core and an arm to each plant or flower it joins (east, west, up, down, south, north)
+const CHORUS_ARM = [[13, 3, 3, 16, 13, 13], [0, 3, 3, 3, 13, 13], [3, 13, 3, 13, 16, 13], [3, 0, 3, 13, 3, 13], [3, 3, 13, 13, 13, 16], [3, 3, 0, 13, 13, 3]];
+olSet(['chorus_plant'], (m, id, w, x, y, z) => { const k = w ? w.shapeCtx(x, y, z, id).chorus : 0; return [[3, 3, 3, 13, 13, 13], ...CHORUS_ARM.filter((a, s) => k & (1 << s))]; });
+// the outline of a block (boxes in pixels), moved with the flower for flowers
+function outlineShape(id, meta, w, x, y, z) {
+  const f = OUTLINE_OF.get(id);
+  let bs = f ? f(meta, id, w, x, y, z) : null;
+  if (!bs) {
+    const sh = SHAPE[id];
+    if (sh === SH.CUBE) return OL_FULL;
+    const ctx = w && (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null;
+    bs = shapeBoxes(id, meta, ctx ? ctx.conn : 0, false, ctx);
+  }
+  if (FLOWER_SET.has(id) && OFFSET[id] && w) { const o = plantOffset(id, x, z); bs = bs.map(b => [b[0] + o[0], b[1], b[2] + o[2], b[3] + o[0], b[4], b[5] + o[2]]); }
+  return bs;
+}
+// one box round it all, for whatever wants just one (in blocks, kept within half a block of the block)
+selBox = function (id, meta, world, x, y, z) {
+  const bb = [16, 16, 16, 0, 0, 0];
+  for (const b of outlineShape(id, meta, world, x, y, z)) for (let k = 0; k < 3; k++) { bb[k] = Math.min(bb[k], b[k]); bb[k + 3] = Math.max(bb[k + 3], b[k + 3]); }
+  if (bb[0] >= bb[3]) return [0, 0, 0, 1, 1, 1];
+  return bb.map(v => Math.max(-0.5, Math.min(1.5, v / 16)));
+};
+
+/* ---------------- finding the block looked at ---------------- */
+// BlockGetter.clip with the outline: each box of the shape is tried and the nearest hit kept, so a click goes through the empty parts
+raycast = function (world, ox, oy, oz, dx, dy, dz, maxD, fluids) {
+  let x = Math.floor(ox), y = Math.floor(oy), z = Math.floor(oz);
+  const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+  const tdx = Math.abs(1 / dx), tdy = Math.abs(1 / dy), tdz = Math.abs(1 / dz);
+  let tx = (dx > 0 ? x + 1 - ox : ox - x) * tdx, ty = (dy > 0 ? y + 1 - oy : oy - y) * tdy, tz = (dz > 0 ? z + 1 - oz : oz - z) * tdz;
+  let face = -1, t = 0;
+  for (let i = 0; i < 200 && t <= maxD; i++) {
+    const id = world.getBlock(x, y, z);
+    const isFluid = fluids && BLK[id].liquid && world.getMeta(x, y, z) === 0;
+    if (TARGET[id] || isFluid) {
+      if (SHAPE[id] === SH.CUBE || isFluid) { if (face >= 0 || i === 0) return { x, y, z, face: face < 0 ? 2 : face, id, t }; }
+      else {
+        let best = null;
+        for (const b of outlineShape(id, world.getMeta(x, y, z), world, x, y, z)) {
+          const h = rayBox(ox - x, oy - y, oz - z, dx, dy, dz, [b[0] / 16, b[1] / 16, b[2] / 16, b[3] / 16, b[4] / 16, b[5] / 16]);
+          if (h && (!best || h.t < best.t)) best = h;
+        }
+        if (best && best.t <= maxD) return { x, y, z, face: best.face, id, t: best.t };
+      }
+    }
+    if (tx < ty && tx < tz) { x += sx; t = tx; tx += tdx; face = sx > 0 ? 1 : 0; }
+    else if (ty < tz) { y += sy; t = ty; ty += tdy; face = sy > 0 ? 3 : 2; }
+    else { z += sz; t = tz; tz += tdz; face = sz > 0 ? 5 : 4; }
+  }
+  return null;
+};
+
+/* ---------------- the outline ---------------- */
+// VoxelShape.forAllEdges: on the grid the boxes' sides make, an edge runs where one or three of the four cells round it are filled, or
+// two across a corner from each other; straight runs are joined (pixels in, blocks out)
+function shapeEdges(boxes) {
+  const ax = [new Set(), new Set(), new Set()];
+  for (const b of boxes) for (let k = 0; k < 3; k++) { ax[k].add(b[k]); ax[k].add(b[k + 3]); }
+  const C = ax.map(s => [...s].sort((a, b) => a - b)), N = C.map(c => c.length - 1);
+  if (N.some(n => n < 1)) return [];
+  const F = new Uint8Array(N[0] * N[1] * N[2]);
+  for (let i = 0; i < N[0]; i++) for (let j = 0; j < N[1]; j++) for (let k = 0; k < N[2]; k++) {
+    const cx = (C[0][i] + C[0][i + 1]) / 2, cy = (C[1][j] + C[1][j + 1]) / 2, cz = (C[2][k] + C[2][k + 1]) / 2;
+    for (const b of boxes) if (cx > b[0] && cx < b[3] && cy > b[1] && cy < b[4] && cz > b[2] && cz < b[5]) { F[(i * N[1] + j) * N[2] + k] = 1; break; }
+  }
+  const full = (c) => c[0] >= 0 && c[1] >= 0 && c[2] >= 0 && c[0] < N[0] && c[1] < N[1] && c[2] < N[2] && F[(c[0] * N[1] + c[1]) * N[2] + c[2]] === 1;
+  const out = [];
+  for (let a = 0; a < 3; a++) {
+    const b1 = (a + 1) % 3, b2 = (a + 2) % 3;
+    for (let p = 0; p <= N[b1]; p++) for (let q = 0; q <= N[b2]; q++) {
+      let start = -1;
+      for (let r = 0; r <= N[a]; r++) {
+        let n = 0, par = 0;
+        for (let j = 0; j <= 1; j++) for (let k = 0; k <= 1; k++) {
+          const c = [0, 0, 0]; c[a] = r; c[b1] = p + j - 1; c[b2] = q + k - 1;
+          if (r < N[a] && full(c)) { n++; par ^= j ^ k; }
+        }
+        const edge = n === 1 || n === 3 || (n === 2 && (par & 1) === 0);
+        if (edge) { if (start < 0) start = r; }
+        else if (start >= 0) {
+          const s = [0, 0, 0], e = [0, 0, 0];
+          s[a] = C[a][start]; e[a] = C[a][r]; s[b1] = e[b1] = C[b1][p]; s[b2] = e[b2] = C[b2][q];
+          out.push([s[0] / 16, s[1] / 16, s[2] / 16, e[0] / 16, e[1] / 16, e[2] / 16]);
+          start = -1;
+        }
+      }
+    }
+  }
+  return out;
+}
+// rendertype_lines: each line a strip LineWidth pixels wide across the screen (max(2.5, 2.5 x width / 1920)), its ends pulled 1/256 of
+// the way to the eye (VIEW_SHRINK) so the faces under it don't hide it
+const SH_WIDE_V = `#version 300 es
+precision highp float; layout(location=0) in vec3 aPos; layout(location=1) in vec3 aDir; layout(location=2) in float aSide;
+uniform mat4 uVP; uniform vec2 uScreen; uniform float uWidth;
+void main(){
+  const float SHRINK = 1.0 - 1.0 / 256.0;
+  vec4 p0 = uVP * vec4(aPos * SHRINK, 1.0), p1 = uVP * vec4((aPos + aDir) * SHRINK, 1.0);
+  vec2 d = normalize((p1.xy / p1.w - p0.xy / p0.w) * uScreen), off = vec2(-d.y, d.x) * uWidth / uScreen;
+  if (off.x < 0.0) off = -off;
+  gl_Position = vec4((p0.xyz / p0.w + vec3(off * aSide, 0.0)) * p0.w, p0.w);
+}`;
+Renderer.prototype.drawWideLines = function (pts, col) {
+  const gl = this.gl;
+  if (!this.progWide) {
+    this.progWide = this.prog(SH_WIDE_V, SH_LINE_F);
+    this.uWide = { vp: gl.getUniformLocation(this.progWide, 'uVP'), scr: gl.getUniformLocation(this.progWide, 'uScreen'), w: gl.getUniformLocation(this.progWide, 'uWidth'), col: gl.getUniformLocation(this.progWide, 'uCol') };
+    this.wideVao = gl.createVertexArray(); this.wideVbo = gl.createBuffer();
+    gl.bindVertexArray(this.wideVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.wideVbo);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 28, 12);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 28, 24);
+    gl.bindVertexArray(null);
+  }
+  const n = pts.length / 6, d = new Float32Array(n * 6 * 7);
+  let o = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts.slice(i * 6, i * 6 + 3), b = pts.slice(i * 6 + 3, i * 6 + 6), dir = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    // two triangles: the start's two sides and the end's
+    for (const [p, sd] of [[a, 1], [a, -1], [b, 1], [b, 1], [a, -1], [b, -1]]) { d[o++] = p[0]; d[o++] = p[1]; d[o++] = p[2]; d[o++] = dir[0]; d[o++] = dir[1]; d[o++] = dir[2]; d[o++] = sd; }
+  }
+  const W = this.canvas.width, H = this.canvas.height;
+  gl.useProgram(this.progWide);
+  gl.uniformMatrix4fv(this.uWide.vp, false, this.vp); gl.uniform2f(this.uWide.scr, W, H); gl.uniform1f(this.uWide.w, Math.max(2.5, W / 1920 * 2.5)); gl.uniform4fv(this.uWide.col, col);
+  gl.bindVertexArray(this.wideVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.wideVbo); gl.bufferData(gl.ARRAY_BUFFER, d, gl.STREAM_DRAW);
+  gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+  gl.drawArrays(gl.TRIANGLES, 0, n * 6);
+  gl.depthMask(true); gl.disable(gl.BLEND); gl.enable(gl.CULL_FACE); gl.bindVertexArray(null);
+};
+// LevelRenderer.renderHitOutline: the shape's edges in black at 0.4
+const _renderSelectionOL = Game.prototype.renderSelection;
+Game.prototype.renderSelection = function (eye, env) {
+  const r = this.r, t = this.target, dl = r.drawLines;
+  let want = false;
+  r.drawLines = () => { want = true; };
+  try { _renderSelectionOL.call(this, eye, env); } finally { r.drawLines = dl; }
+  if (!want || !t) return;
+  const w = this.world, pts = [];
+  for (const e of shapeEdges(outlineShape(t.id, w.getMeta(t.x, t.y, t.z), w, t.x, t.y, t.z))) pts.push(t.x + e[0] - eye[0], t.y + e[1] - eye[1], t.z + e[2] - eye[2], t.x + e[3] - eye[0], t.y + e[4] - eye[1], t.z + e[5] - eye[2]);
+  if (pts.length) r.drawWideLines(pts, [0, 0, 0, 0.4]);
+};
+
+/* @file 228_dripleaf.js */
+/* ===================================================================
+   Part 125: big dripleaf like Java's — BigDripleafBlock tips its leaf under whatever stands on it (unstable, then partial and
+   full 10 ticks apart, back up 100 ticks later), a projectile tips it at once and redstone power holds it level; the leaf and
+   its stem drawn as Java's models (the stem a cross at the back of the leaf, turned with it), shaped and solid as Java's, and
+   bone meal grows it a block taller
+   =================================================================== */
+
+// meta: bits 0-1 the way the leaf faces (0 south, 1 west, 2 north, 3 east, toward the player), bits 2-3 its tilt
+const DL_UNSTABLE = 1, DL_PARTIAL = 2, DL_FULL = 3;
+const dlTilt = m => (m >> 2) & 3;
+// BigDripleafBlock.DELAY_UNTIL_NEXT_TILT_STATE (none waits for something to stand on it)
+const DL_DELAY = [-1, 10, 10, 100];
+
+// the front edge of the leaf, the game's own drawing: the leaf's green darkening toward its rim
+T('big_dripleaf_tip', (d, r) => fillF(d, (x, y) => y < 4 ? mul([88, 134, 42], (0.8 + r() * 0.12) * (1 - y * 0.04)) : [0, 0, 0, 0]));
+
+/* ---------------- models ---------------- */
+// big_dripleaf, big_dripleaf_partial_tilt and big_dripleaf_full_tilt (the leaf turned down about its back edge), and the stem
+const dlStem = h => [45, -45].map(a => jE([5, 0, 12], [11, h, 12], { north: [[3, 0, 14, 16], 'big_dripleaf_stem'], south: [[3, 0, 14, 16], 'big_dripleaf_stem'] }, { origin: [8, 8, 12], axis: 'y', angle: a, rescale: true }));
+const dlLeaf = a => {
+  const rot = a ? { origin: [8, 15, 16], axis: 'x', angle: a } : undefined, side = { east: [[16, 0, 0, 4], 'big_dripleaf_side'], west: [[0, 0, 16, 4], 'big_dripleaf_side'] };
+  return [jE([0, 15, 0], [16, 15, 16], { down: [a ? [16, 16, 0, 0] : [0, 16, 16, 0], 'big_dripleaf_top'], up: [[0, 0, 16, 16], 'big_dripleaf_top'] }, rot),
+    jE([0, 11, 0], [16, 15, a ? 0 : 0.002], { north: [[0, 0, 16, 4], 'big_dripleaf_tip'], south: [a ? [0, 0, 16, 4] : [16, 0, 0, 4], 'big_dripleaf_tip'] }, rot),
+    jE([0, 11, 0], [0.002, 15, 16], side, rot), jE([15.998, 11, 0], [16, 15, 16], side, rot)];
+};
+const DL_Q = [0, 0, -22.5, -45].map(a => jFaceSouth(jQuads([...dlLeaf(a), ...dlStem(15)])));
+const DL_STEM_Q = jFaceSouth(jQuads(dlStem(16)));
+BOX_MODELS.big_dripleaf = (d, m) => rotParts(DL_Q[dlTilt(m)], m & 3);
+const _meshCrossDL = meshCross;
+meshCross = function (mb, id, meta, pi, X, Y, Z, tint, to) {
+  if (id !== B.BIG_DRIPLEAF_STEM) return _meshCrossDL.apply(this, arguments);
+  emitParts(mb, rotParts(DL_STEM_Q, meta & 3), X, Y, Z, pi, id, meta, tint, to, 0);
+};
+
+/* ---------------- shapes ---------------- */
+// the leaf (four pixels thick, two less once it starts to tip, nothing when it hangs down) on its stem at the back
+const DL_LEAF = [[0, 11, 0, 16, 15, 16], [0, 11, 0, 16, 15, 16], [0, 11, 0, 16, 13, 16], null];
+olSet(['big_dripleaf'], m => { const t = dlTilt(m), bs = [[5, 0, 1, 11, t >= DL_PARTIAL ? 13 : 15, 7]]; if (DL_LEAF[t]) bs.push(DL_LEAF[t]); return olTurn(bs, m & 3); });
+olSet(['big_dripleaf_stem'], m => olTurn([[5, 0, 1, 11, 16, 7]], m & 3));
+// what stands on it: only the leaf, and nothing once it has tipped right down
+const _modelCollisionDL = modelCollision;
+modelCollision = function (id, meta, ctx) {
+  if (id !== B.BIG_DRIPLEAF) return _modelCollisionDL(id, meta, ctx);
+  const b = DL_LEAF[dlTilt(meta)];
+  return b ? [b] : [];
+};
+
+/* ---------------- tipping ---------------- */
+// BigDripleafBlock.setTilt: the new tilt, a vibration for the ones that cause one (not unstable) and the sound
+function dlSetTilt(g, w, x, y, z, t, sound) {
+  const m = w.getMeta(x, y, z), old = dlTilt(m);
+  w.setMeta(x, y, z, (m & ~12) | (t << 2));
+  if (t !== DL_UNSTABLE && t !== old && g && g.vibrate) g.vibrate(x + 0.5, y + 0.5, z + 0.5, 'block_change', null, B.BIG_DRIPLEAF);
+  if (sound && g) g.sound(sound, x + 0.5, y + 0.5, z + 0.5);
+}
+// setTiltAndScheduleTick
+function dlTip(g, w, x, y, z, t, sound) {
+  dlSetTilt(g, w, x, y, z, t, sound);
+  if (DL_DELAY[t] > 0) w.schedule(x, y, z, DL_DELAY[t], 'dripleaf');
+}
+// resetTilt: level again, with the sound of it springing up
+const dlReset = (g, w, x, y, z) => dlSetTilt(g, w, x, y, z, 0, 'place_grass');
+// BigDripleafBlock.tick: on through the tilts, or level if powered
+const _runScheduledDL = World.prototype.runScheduled;
+World.prototype.runScheduled = function (game) {
+  const arr = game && this.sched.get(this.tick), due = arr && arr.filter(s => s[3] === 'dripleaf');
+  const r = _runScheduledDL.apply(this, arguments);
+  if (due) for (const [x, y, z] of due) {
+    if (this.getBlock(x, y, z) !== B.BIG_DRIPLEAF) continue;
+    const t = dlTilt(this.getMeta(x, y, z));
+    if (RS.powered(this, x, y, z)) { if (t) dlReset(game, this, x, y, z); }
+    else if (t === DL_UNSTABLE) dlTip(game, this, x, y, z, DL_PARTIAL, 'hit_grass');
+    else if (t === DL_PARTIAL) dlTip(game, this, x, y, z, DL_FULL, 'hit_grass');
+    else if (t === DL_FULL) dlReset(game, this, x, y, z);
+  }
+  return r;
+};
+// neighborChanged: power sets it level at once
+const _neighborChangedDL = World.prototype.neighborChanged;
+World.prototype.neighborChanged = function (x, y, z) {
+  _neighborChangedDL.call(this, x, y, z);
+  if (this.getBlock(x, y, z) === B.BIG_DRIPLEAF && dlTilt(this.getMeta(x, y, z)) && RS.powered(this, x, y, z)) dlReset(typeof game !== 'undefined' ? game : null, this, x, y, z);
+};
+// entityInside with canEntityTilt: something on the ground above 11 pixels into a level, unpowered leaf starts it tipping
+Game.prototype.tickDripleaves = function () {
+  const w = this.world;
+  for (const e of [this.player, ...this.entities]) {
+    if (!e || e.dead || !e.onGround || !(e.w > 0)) continue;
+    const y = Math.floor(e.y), hw = e.w / 2 - 1e-7;
+    if (e.y <= y + 0.6875) continue;
+    for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) {
+      if (w.getBlock(x, y, z) !== B.BIG_DRIPLEAF || dlTilt(w.getMeta(x, y, z)) || RS.powered(w, x, y, z)) continue;
+      dlTip(this, w, x, y, z, DL_UNSTABLE, null);
+    }
+  }
+};
+const _gameTickDL = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const r = _gameTickDL.apply(this, arguments);
+  if (this.world && this.player) this.tickDripleaves();
+  return r;
+};
+// onProjectileHit: an arrow, snowball or any other projectile tips it right down
+const _impactDL = Projectile.prototype.impact;
+Projectile.prototype.impact = function (e) {
+  if (!e) {
+    const g = this.game, w = g.world, l = Math.hypot(this.vx, this.vy, this.vz) || 1;
+    for (let k = 0; k <= 4; k++) {
+      const x = Math.floor(this.x + this.vx / l * k * 0.3), y = Math.floor(this.y + this.vy / l * k * 0.3), z = Math.floor(this.z + this.vz / l * k * 0.3);
+      if (w.getBlock(x, y, z) !== B.BIG_DRIPLEAF) continue;
+      if (dlTilt(w.getMeta(x, y, z)) !== DL_FULL) dlTip(g, w, x, y, z, DL_FULL, 'hit_grass');
+      break;
+    }
+  }
+  return _impactDL.apply(this, arguments);
+};
+
+/* ---------------- growing ---------------- */
+// BigDripleafBlock.updateShape: a leaf with another on top of it becomes stem, facing the same way
+const _onPlacedDL = Game.prototype.onPlaced;
+Game.prototype.onPlaced = function (x, y, z, id) {
+  const r = _onPlacedDL.apply(this, arguments), w = this.world;
+  if (id === B.BIG_DRIPLEAF && w.getBlock(x, y - 1, z) === B.BIG_DRIPLEAF) w.setBlock(x, y - 1, z, B.BIG_DRIPLEAF_STEM, w.getMeta(x, y - 1, z) & 3);
+  return r;
+};
+// BigDripleafBlock and BigDripleafStemBlock.performBonemeal: the leaf moves up a block (into air, water or a small dripleaf)
+const dlRoom = (w, x, y, z) => { const a = w.getBlock(x, y, z); return y < CH_TOP && (a === B.AIR || a === B.WATER || a === B.SMALL_DRIPLEAF); };
+const _boneMealDL = Game.prototype.boneMeal;
+Game.prototype.boneMeal = function (x, y, z) {
+  const w = this.world, id = w.getBlock(x, y, z);
+  if (id !== B.BIG_DRIPLEAF && id !== B.BIG_DRIPLEAF_STEM) return _boneMealDL.apply(this, arguments);
+  let hy = y;
+  while (w.getBlock(x, hy, z) === B.BIG_DRIPLEAF_STEM) hy++;
+  if (w.getBlock(x, hy, z) !== B.BIG_DRIPLEAF || !dlRoom(w, x, hy + 1, z)) return false;
+  const f = w.getMeta(x, hy, z) & 3;
+  w.setBlock(x, hy, z, B.BIG_DRIPLEAF_STEM, f);
+  w.setBlock(x, hy + 1, z, B.BIG_DRIPLEAF, f);
+  return true;
+};
+
+/* @file 229_gate_walls.js */
+/* ===================================================================
+   Part 126: fence gates in walls like Java's — FenceGateBlock's in_wall: a gate with a wall beside it along its line is
+   drawn three pixels lower (the fence_gate_wall models: the same boxes and texture, moved down) and its outline stops
+   three pixels short of the top; what stops you is the same
+   =================================================================== */
+// whether a wall stands east or west of it (for a gate across x) and north or south (across z)
+DYNAMIC_SHAPES.add(SH.GATE);
+const _shapeCtxGW = shapeCtx;
+shapeCtx = function (id, at) {
+  if (SHAPE[id] !== SH.GATE) return _shapeCtxGW(id, at);
+  const wall = n => SHAPE[n] === SH.WALL;
+  return { conn: 0, up: 0, upWall: false, wire: 0, chorus: 0, wallX: wall(at(1, 0, 0)) || wall(at(-1, 0, 0)), wallZ: wall(at(0, 0, 1)) || wall(at(0, 0, -1)) };
+};
+// a gate facing north or south runs across x (our facings 0 and 2), one facing east or west across z
+const gateInWall = (m, c) => !!c && !!((m & 1) ? c.wallZ : c.wallX);
+// each face keeps the texture it shows unlowered (the wall models give their boxes the same uv)
+const lockedUV = b => [[16 - b[5], 16 - b[4], 16 - b[2], 16 - b[1]], [b[2], 16 - b[4], b[5], 16 - b[1]], [b[0], b[2], b[3], b[5]], [b[0], 16 - b[5], b[3], 16 - b[2]],
+  [b[0], 16 - b[4], b[3], 16 - b[1]], [16 - b[3], 16 - b[4], 16 - b[0], 16 - b[1]]];
+const _gateModelGW = MDL[SH.GATE];
+MDL[SH.GATE] = (d, m, c) => {
+  const ps = _gateModelGW(d, m, c);
+  if (!gateInWall(m, c)) return ps;
+  return ps.map(p => p.b ? Object.assign({}, p, { b: [p.b[0], p.b[1] - 3, p.b[2], p.b[3], p.b[4] - 3, p.b[5]], uv: p.uv || lockedUV(p.b) }) : p);
+};
+for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.GATE) OUTLINE_OF.set(id, (m, id, w, x, y, z) => {
+  const h = w && gateInWall(m, w.shapeCtx(x, y, z, id)) ? 13 : 16;
+  return (m & 1) ? [[6, 0, 0, 10, h, 16]] : [[0, 0, 6, 16, h, 10]];
+});
 
 </script>
 </body>

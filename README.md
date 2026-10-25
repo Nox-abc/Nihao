@@ -862,6 +862,31 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   names for particles: beds, banners and chests give oak planks, heads soul sand, ender chests obsidian, furnaces and
   crafting tables their front, shelves stripped logs. Sprinting now kicks up bits of the block underfoot, and landing
   after a fall of more than about four blocks throws up a burst of them, more the harder the fall, for mobs too.
+- **Outlines, plant positions, buttons and levers like Java's** (Part 124): the outline round the block you look at
+  now follows the edges of the block's real shape, in Java's thicker lines: a stair shows its step, a fence its post
+  and bars, a cauldron its rim and feet. Clicks find the shape too, so aiming into the empty corner of a stair or
+  beside a fence post reaches the block behind. Plants and many other blocks now have Java's shapes: flowers are a
+  narrow column where the flower stands, saplings and mushrooms are their size, crops are as tall as they have grown,
+  tall flowers and tall grass fill the block, and signs, repeaters, campfires, stonecutters, composters, hoppers,
+  candles and turtle eggs match too, and so do bells, grindstones, lecterns, anvils, beds, fence gates, rails,
+  scaffolding (the whole block while you hold scaffolding), amethyst, dripstone, stems, petals, leaf litter, vines and
+  glow lichen, redstone dust and chorus plants. A glass pane or iron bars standing alone is now a thin post as in
+  Java, and an end portal also shows its underside when seen from below. Flowers, grass, bamboo, mangrove propagules
+  and the other plants Java sets off the middle of their block now stand exactly where they stand in Java at the same
+  position (bamboo's stalk is solid where it stands), and grass and ferns sit a little lower or higher as in Java.
+  Buttons on walls are wider than tall as in Java, a lever's handle is a little post, and buttons and levers on floors
+  and ceilings now face the way you were facing when you placed them.
+- **Big dripleaf like Java's** (Part 125): stand on a big dripleaf (or drop an item on it) and, as in Java, it starts to
+  give, tips halfway after half a second and right down half a second later, dropping whatever was on it, then springs
+  back up five seconds after that. Hitting it with an arrow, snowball or any other projectile tips it straight down, and
+  a powered leaf stays level (powering a tipped one sets it level at once). The leaf and its stem are now Java's models:
+  the stem rises to the back of the leaf, turned the way the leaf faces, the leaf's front edge has its own texture, and
+  the tipping leaf bends down about its back edge. You stand on the leaf itself, a pixel lower than before as in Java,
+  its outline follows the leaf and stem, bone meal on the leaf or its stem grows it one block taller, a big dripleaf
+  placed on another turns the one below into stem, and generated dripleaves have their stems turned with their leaves.
+- **Fence gates in walls like Java's** (Part 126): a fence gate with a wall beside it, along the line it closes, now sits
+  three pixels lower, as Java draws gates set into walls, so its top lines up with the wall; its outline is lower too,
+  open or shut, and it still stops you just as before. Fences beside a gate don't lower it.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
