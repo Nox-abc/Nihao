@@ -893,6 +893,30 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   puts the same vines and pods on the same trees, and the leaves' distances are worked out the way Java's pass does.
   Holding a key no longer counts as pressing it again and again: holding space doesn't switch flying on and off,
   holding W doesn't start sprinting, and a quick double tap of space flies (or lands) and of W sprints, as in Java.
+- **Jungle temples, desert pyramids and swamp huts built as Java builds them** (Part 128): in vanilla worlds these
+  three are no longer the game's own lookalikes. They are put up block for block the way Java's code does it, at the same moment of world
+  generation (the surface-structures step, before that step's features, with the same random), so a seed gives the
+  same temple: the same facing, the same height, the same mix of mossy and plain cobblestone, both arrow traps with
+  their tripwires and dispensers, the lever puzzle and the two chests. Desert pyramids get their towers, coloured
+  terracotta, the treasure room with its four chests over the TNT trap, and the newer cellar with its collapsed
+  roof and the same handful of suspicious sand blocks. Swamp huts stand on their oak legs over the water with the
+  same roof, pot, table and cauldron, and come with their witch and black cat. Checked against a reference world:
+  the temple's and pyramids' shapes, and everything that grows around them, match exactly.
+- **Mineshafts, strongholds and buried treasure built as Java builds them** (Part 129): in vanilla worlds the
+  abandoned mineshafts are laid out room by room and tunnel by tunnel the way Java's code does it, from the same seed:
+  the same corridors, crossings and stairs at the same depth, the same supports, rails, cobwebs, cave spider
+  spawners and chest minecarts (with their loot), and the badlands' dark oak ones where Java puts them. Strongholds
+  are no longer a lone portal room: the whole stronghold is there, its spiral stairs, corridors, prison cells,
+  fountains, libraries and store rooms, with the portal room (its frames, eyes and silverfish spawner) where Java
+  puts it, which is where eyes of ender now lead. Buried treasure chests lie exactly where treasure maps point, packed
+  in sand the way Java packs them. The ground also settles round a stronghold the way Java's does (it buries
+  itself in a little extra rock), so even the sea floor above one comes out the same. Checked against a reference
+  world: mineshafts and strongholds match block for block.
+- **Ocean monuments built as Java builds them** (Part 130): a vanilla world's monuments are laid out from the same
+  seed the way Java's code does it: the same room graph (which doors are open and which rooms join into double and
+  triple rooms), the same wings, entrance, roof and penthouse, the gold blocks of the core, the sponge rooms, the sea
+  lanterns, the pillars it stands on and the water cleared round it, and its three elder guardians. Checked against
+  a reference world: the whole monument matches block for block.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

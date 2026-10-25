@@ -4274,7 +4274,8 @@ function beardK(x, y, z, toGround) {
   const d = toGround + 0.5, e = x * x + d * d + z * z;
   return -d / Math.sqrt(e / 2) / 2 * BEARD_K[(z + 12) * 576 + (x + 12) * 24 + (y + 12)];
 }
-// bd: { rig: [[minX, minZ, maxX, maxZ, groundY]...], jun: [[x, groundY, z]...] }; for each of a chunk's 4x4 cell columns
+// bd: { rig: [[minX, minZ, maxX, maxZ, groundY]...], jun: [[x, groundY, z]...], bury: [[minX, minY, minZ, maxX, maxY, maxZ]...] };
+// for each of a chunk's 4x4 cell columns
 // the pieces and junctions that reach it and the heights they reach (null where none do)
 function beardCells(cx, cz, bd) {
   const out = new Array(16).fill(null), x0 = cx * 16, z0 = cz * 16;
@@ -4289,7 +4290,12 @@ function beardCells(cx, cz, bd) {
       if (j[0] - 12 > bx || j[0] + 11 < ax || j[2] - 12 > bz || j[2] + 11 < az) continue;
       jun.push(j); lo = Math.min(lo, j[1] - 12); hi = Math.max(hi, j[1] + 11);
     }
-    if (rig.length || jun.length) out[ci * 4 + ck] = { lo, hi, rig, jun };
+    const bury = [];
+    if (bd.bury) for (const b of bd.bury) {
+      if (Math.max(0, b[0] - bx, ax - b[3]) >= 6 || Math.max(0, b[2] - bz, az - b[5]) >= 6) continue;
+      bury.push(b); lo = Math.min(lo, b[1] - 12); hi = Math.max(hi, b[1] + 12);
+    }
+    if (rig.length || jun.length || bury.length) out[ci * 4 + ck] = { lo, hi, rig, jun, bury };
   }
   return out;
 }
@@ -4302,6 +4308,11 @@ function beardAt(c, x, y, z) {
   for (const j of c.jun) {
     const a = x - j[0], b = y - j[1], e = z - j[2];
     if (a >= -12 && a <= 11 && b >= -12 && b <= 11 && e >= -12 && e <= 11) v += beardK(a, b, e, b) * 0.4;
+  }
+  // bury: solid ground fading out six blocks from a piece's floor (half as fast up and down)
+  for (const b of c.bury) {
+    const dx = Math.max(0, b[0] - x, x - b[3]), dz = Math.max(0, b[2] - z, z - b[5]), dy = (y - b[1]) / 2, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < 6) v += 1 - d / 6;
   }
   return v;
 }
@@ -6022,7 +6033,14 @@ Object.assign(VanillaWorldGen.prototype, {
         for (const j of p.beard.jun) if (j[0] >= x0 && j[0] <= x1 && j[2] >= z0 && j[2] <= z1) jun.push([j[0], j[1] - VY, j[2]]);
       }
     }
-    return rig.length || jun.length ? { rig, jun } : null;
+    // strongholds bury themselves (terrain_adaptation bury): every piece within 12 blocks, in the chunks the stronghold spans
+    const bury = [];
+    if (this.vdeco && this.deco && !this.noStrongholds && this.vStronghold) for (const h of this.strongholdsNear(cx * 16 + 8, cz * 16 + 8, 160)) {
+      const st = this.vStronghold(h.x >> 4, h.z >> 4);
+      if (!st || st.box[0] > cx * 16 + 15 || st.box[3] < cx * 16 || st.box[2] > cz * 16 + 15 || st.box[5] < cz * 16) continue;
+      for (const p of st.pieces) { const b = p.box; if (b[0] <= x1 && b[3] >= x0 && b[2] <= z1 && b[5] >= z0) bury.push(b); }
+    }
+    return rig.length || jun.length || bury.length ? { rig, jun, bury } : null;
   },
   cityY: -51 + VY,                                   // the floor of an ancient city
   cityOk(x, z) { return this.v.biomeAt(x, -27, z) === BI.DEEP_DARK; },
@@ -6113,7 +6131,8 @@ VanillaWorldGen.prototype.genChunk = function (cx, cz, parts) {
     for (const s of structs) { try { s.build(ctx); } catch (e) { /* a structure that doesn't fit is skipped */ } }
   }
   // the end portal rooms of the strongholds nearby
-  for (const s of this.strongholdsNear(x0, z0, 64)) {
+  // (the decoration builds whole strongholds as Java does: 19_vfeat_struct.js)
+  if (!vd) for (const s of this.strongholdsNear(x0, z0, 64)) {
     const room = this.portalRoomOf(s);
     if (Math.abs(room.x - (x0 + 8)) < 40 && Math.abs(room.z - (z0 + 8)) < 40) buildPortalRoom(blocks, cx, cz, this.seed, be, meta, room);
   }
@@ -6397,6 +6416,8 @@ Object.assign(VanillaWorldGen.prototype, {
       else if (name === 'trial_chambers') p = trialChambersAt(st.X, st.y + VY, st.Z, h(3));
       else if (Sd.opts) p = placedPlanAt(Sd.opts, this, st.X, st.Z, h(4), h(5), h(6), false);
       if (p) { p.kind = name; p.build = ctx => Sd.build(p, ctx); if (!p.rects) p.rects = []; p.start = st; }
+      // one the decoration builds as Java does (19_vfeat_struct.js): this plan only places it for /locate and maps
+      if (p && this.deco && this.vdeco && typeof VSP !== 'undefined' && VSP.ENGINE.has(name)) { p.build = () => {}; p.rects = []; p.engine = true; }
       // a single-piece structure that adapts the terrain (beard_thin): its footprint, with its ground on its floor
       if (p && Sd.beard && !p.beard && p.rect) p.beard = { rig: [[p.rect[0], p.rect[1], p.rect[2], p.rect[3], p.y + 1]], jun: [] };
     }
@@ -9700,15 +9721,26 @@ const FRONT = { south: 0, west: 1, north: 2, east: 3 };
 // vanilla blocks the game shows as one of its own: wall fans are fans held by their side, a kelp or cave vine is one block
 const ALIAS = { cave_air: 'air', void_air: 'air', kelp_plant: 'kelp', cave_vines_plant: 'cave_vines', twisting_vines_plant: 'twisting_vines', weeping_vines_plant: 'weeping_vines' };
 for (const c of ['tube', 'brain', 'bubble', 'fire', 'horn']) for (const d of ['', 'dead_']) ALIAS[d + c + '_coral_wall_fan'] = d + c + '_coral_fan';
+// a potted plant is the game's flower pot holding it
+if (typeof POTTABLE !== 'undefined') for (const p of POTTABLE) ALIAS['potted_' + p] = 'flower_pot';
+// a torch on a wall is the game's torch held by its side
+ALIAS.wall_torch = 'torch';
 // blocks of newer versions the game has no block for yet: the nearest it has (none: the write is left out)
 const STANDIN = {};
 const OPPF = { north: 'south', south: 'north', east: 'west', west: 'east' };
 const POTENT = ['dry', 'wet', 'dormant', 'erupting', 'continuous'], HEART = ['uprooted', 'dormant', 'awake'], WALLSIDE = { none: 0, low: 1, tall: 2 };
 const BUDS = new Set(['small_amethyst_bud', 'medium_amethyst_bud', 'large_amethyst_bud', 'amethyst_cluster']);
-const FRONTED = new Set(['big_dripleaf', 'big_dripleaf_stem', 'bee_nest', 'beehive', 'chest', 'trapped_chest', 'furnace', 'carved_pumpkin', 'jack_o_lantern']);
+const FRONTED = new Set(['big_dripleaf', 'big_dripleaf_stem', 'bee_nest', 'beehive', 'chest', 'trapped_chest', 'furnace', 'carved_pumpkin', 'jack_o_lantern', 'tripwire_hook', 'repeater', 'comparator']);
+// blocks that face any of the six ways: the game's face of the facing
+const FACING6 = new Set(['dispenser', 'dropper', 'piston', 'sticky_piston']);
+// stairs: the tall side's way (north, east, south, west), 4 for the upper half
+const STAIR = { north: 0, east: 1, south: 2, west: 3 };
+// rail shapes in the game's order
+const RAILS = ['north_south', 'east_west', 'ascending_east', 'ascending_west', 'ascending_north', 'ascending_south', 'south_east', 'south_west', 'north_west', 'north_east'];
 const bits = (st, names) => { let m = 0; for (const n of names) if (S.get(st, n) === 'true') m |= 1 << FACE[n]; return m; };
 function metaOf(st, n) {
   const g = p => S.get(st, p);
+  if (n.startsWith('potted_') && typeof POTTABLE !== 'undefined') return POTTABLE.indexOf(n.slice(7)) + 1;
   if (n.endsWith('_leaves')) return g('persistent') === 'true' ? 4 : 0;
   // the creaking heart: axis, state << 2, 16 when the world made it
   if (n === 'creaking_heart') return ({ y: 0, x: 1, z: 2 }[g('axis')] || 0) | (HEART.indexOf(g('creaking_heart_state')) << 2) | (g('natural') === 'true' ? 16 : 0);
@@ -9730,6 +9762,14 @@ function metaOf(st, n) {
   if (n === 'cocoa') return FRONT[g('facing')] | (+g('age') << 2);
   if (n === 'pink_petals' || n === 'wildflowers' || n === 'leaf_litter') return FRONT[g('facing')] | ((+(g('flower_amount') || g('segment_amount')) - 1) << 2);
   if (FRONTED.has(n)) return FRONT[g('facing')] || 0;
+  if (FACING6.has(n)) return FACE[g('facing')];
+  if (n === 'wall_torch' || n === 'ladder') return { east: 1, west: 2, south: 3, north: 4 }[g('facing')];
+  if (/_door$/.test(n)) return FRONT[g('facing')] | (g('open') === 'true' ? 4 : 0) | (g('half') === 'upper' ? 8 : 0);
+  if (n === 'end_portal_frame') return FRONT[g('facing')] | (g('eye') === 'true' ? 4 : 0);
+  if (/rail$/.test(n)) { const i = RAILS.indexOf(g('shape')); return n === 'rail' ? i : (i & 7) | (g('powered') === 'true' ? 8 : 0); }
+  if (n.endsWith('_stairs')) return STAIR[g('facing')] | (g('half') === 'top' ? 4 : 0);
+  // a lever: the face its support is on, 8 when on
+  if (n === 'lever' || n.endsWith('_button')) return (g('face') === 'floor' ? 3 : g('face') === 'ceiling' ? 2 : FACE[OPPF[g('facing')]]) | (g('powered') === 'true' ? 8 : 0);
   if (n === 'snow') return +g('layers') - 1;
   if (n === 'sea_pickle') return +g('pickles') - 1;
   if (n === 'cave_vines' || n === 'cave_vines_plant') return g('berries') === 'true' ? 1 : 0;
@@ -9792,6 +9832,9 @@ VanillaWorldGen.prototype.vDecoration = function (sx, sz) {
   const C = { R, seed: this.vseed, seaLevel: this.seaLevel, safe: true, onTop: () => { group++; },
     blockEntity: (x, y, z, e) => { ents.push([x, y, z, e, group]); } };
   if (this.noUnder) C.skipSteps = new Set([3, 4]);
+  // the structures Java builds in code, in their steps (19_vfeat_struct.js)
+  C.structStarts = name => this.vEngineStarts(name, sx, sz);
+  C.structures = (step, r, deco) => VSP.run(C, step, r, deco);
   VF.decorate(C, sx, sz);
   // the surface structures over these chunks: a placement reaching into one's footprint near the ground is left out
   const rects = new Set();
@@ -9822,6 +9865,55 @@ VanillaWorldGen.prototype.vDecoration = function (sx, sz) {
   }
   for (const [x, y, z, e, g] of ents) if (!drop[g]) out[((z >> 4) - sz + 1) * 3 + ((x >> 4) - sx + 1)].ents.push([x, y, z, e]);
   return lru(M, key, { out, errors: C.errors || 0 }, 40);
+};
+// the starts of a structure the engine builds (its registry name) that reach chunk (cx, cz); each is made once and kept,
+// as its pieces settle at the height the first chunk they are drawn in finds
+VanillaWorldGen.prototype.vEngineStarts = function (name, cx, cz) {
+  const kind = VSP.GAME[name];
+  if (!kind || this.noStruct.has(kind) || !this.vdeco) return [];
+  const M = this._vs || (this._vs = new Map()), reach = VSP.REACH[name] || 0, out = [];
+  const meetsChunk = s => s && s.box[0] <= cx * 16 + 15 && s.box[3] >= cx * 16 && s.box[2] <= cz * 16 + 15 && s.box[5] >= cz * 16;
+  // strongholds: the ring positions near the chunk
+  if (kind === 'stronghold') {
+    if (this.noStrongholds) return [];
+    for (const h of this.strongholdsNear(cx * 16 + 8, cz * 16 + 8, (reach + 1) * 16)) {
+      const sx = h.x >> 4, sz = h.z >> 4;
+      if (Math.abs(sx - cx) > reach || Math.abs(sz - cz) > reach) continue;
+      const s = this.vStronghold(sx, sz);
+      if (meetsChunk(s)) out.push(s);
+    }
+    return out;
+  }
+  const sp = V_PER_CHUNK.has(kind) ? 1 : VS.SETS[kind][0];
+  const ctx = this._vsctx || (this._vsctx = { qb: (x, y, z) => this.v.quartBiome(x, y, z), base: (x, z) => this.wsTop(x, z) + 1 });
+  for (let rz = Math.floor((cz - reach) / sp); rz <= Math.floor((cz + reach) / sp); rz++) for (let rx = Math.floor((cx - reach) / sp); rx <= Math.floor((cx + reach) / sp); rx++) {
+    // the chunk that holds the region's start (mineshafts pick their kind and check their biome themselves)
+    let sx = rx, sz = rz;
+    if (kind === 'stronghold') continue;
+    if (kind === 'mineshaft') { if (!VSP.mineshaftChance(this.vseed, rx, rz)) continue; }
+    else { const st = this.vStart(kind, rx, rz); if (!st) continue; sx = st.cx; sz = st.cz; }
+    if (Math.abs(sx - cx) > reach || Math.abs(sz - cz) > reach) continue;
+    const k = name + ':' + sx + ',' + sz;
+    let s = hit(M, k);
+    if (s === undefined) s = lru(M, k, VSP.makeStart(name, this.vseed, sx, sz, ctx) || 0, 300);
+    if (meetsChunk(s)) out.push(s);
+  }
+  return out;
+};
+// a stronghold's portal room where Java lays it out (the eyes lead there, /locate finds it): the portal's middle, with y the
+// storage height under its frames
+const _portalRoomOfVF = VanillaWorldGen.prototype.portalRoomOf;
+VanillaWorldGen.prototype.portalRoomOf = function (s) {
+  if (!(this.vdeco && this.deco) || this.noStrongholds) return _portalRoomOfVF.call(this, s);
+  const st = this.vStronghold(s.x >> 4, s.z >> 4), p = st && VSP.portalOf(st);
+  return p ? { x: p[0], z: p[2], y: p[1] + VY - 1 } : _portalRoomOfVF.call(this, s);
+};
+// the stronghold started in chunk (cx, cz), laid out once (its layout needs no terrain, so the main thread can ask too)
+VanillaWorldGen.prototype.vStronghold = function (cx, cz) {
+  const M = this._vsh || (this._vsh = new Map()), k = cx + ',' + cz;
+  let s = hit(M, k);
+  if (s === undefined) s = lru(M, k, VSP.makeStart('stronghold', this.vseed, cx, cz) || 0, 16);
+  return s || null;
 };
 // the parts of a chunk's 3x3 decorations that fall in it, its own first (the order vDecorate puts them in)
 const AROUND = [[0, 0], [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
@@ -9904,6 +9996,8 @@ VanillaWorldGen.prototype.vDecorate = function (cx, cz, blocks, meta, be, mobs, 
     for (const [x, y, z, e] of part.ents) {
       const idx = vIdx(x - x0, y, z - z0);
       if (e.type === 'chest' && blocks[idx] === B.CHEST) be.push([idx, { type: 'chest', kind: 'chest', loot: e.loot.replace(/^chests\//, '') }]);
+      else if (e.type === 'dispenser' && blocks[idx] === B.DISPENSER) be.push([idx, { type: 'dispenser', kind: 'dispenser', loot: e.loot.replace(/^chests\//, '') }]);
+      else if (e.type === 'mob') mobs.push([e.mob, x + 0.5, y + VY, z + 0.5, Object.assign({}, e.opts)]);
       else if (e.type === 'spawner' && blocks[idx] === B.SPAWNER) be.push([idx, { type: 'spawner', mob: e.mob, delay: 20 }]);
       else if (e.type === 'brushable' && (blocks[idx] === B.SUSPICIOUS_SAND || blocks[idx] === B.SUSPICIOUS_GRAVEL)) be.push([idx, { type: 'brushable', table: e.loot.replace(/^archaeology\/(.*)$/, '$1_archaeology') }]);
       else if (e.type === 'beehive' && blocks[idx] === B.BEE_NEST) for (let b = 0; b < e.bees.length; b++) mobs.push(['bee', x + 0.5, y + VY, z + 0.5, { hive: [x, y + VY, z] }]);
@@ -10059,6 +10153,1625 @@ F.template = (C, cf, r, x, y, z) => {
   if (!fn) { if (C.missing) C.missing['template ' + id] = (C.missing['template ' + id] || 0) + 1; return false; }
   return fn(C, cf, x, y, z);
 };
+})();
+
+/* @file 19_vfeat_struct.js */
+/* ===================================================================
+   VANILLA STRUCTURE PIECES — Java's code-built structures, placed the
+   way ChunkGenerator.applyBiomeDecoration places them: in the step each
+   belongs to, before that step's features, every structure with the
+   random setFeatureSeed(decoration seed, its index among the step's
+   structures, step) gives it, each piece of a start that reaches the
+   chunk drawn clipped to the chunk (StructurePiece: its orientation's
+   mirror and rotation, generateBox, the per-block stone selectors).
+   C.structStarts(name) hands the starts of a structure that reach the
+   chunk being decorated (the caller decides where starts are and keeps
+   them, as pieces remember the height they settled at).
+   =================================================================== */
+const VSP = (() => {
+const S = ST;
+// Direction.Plane.HORIZONTAL
+const DIRN = ['north', 'east', 'south', 'west'];
+const CW = { north: 'east', east: 'south', south: 'west', west: 'north' };
+// Mirror.LEFT_RIGHT
+const LR = { north: 'south', south: 'north' };
+const turn = (d, n) => { for (let i = 0; i < n; i++) d = CW[d] || d; return d; };
+const RAIL_CW = { north_south: 'east_west', east_west: 'north_south', ascending_east: 'ascending_south', ascending_west: 'ascending_north', ascending_north: 'ascending_east',
+  ascending_south: 'ascending_west', south_east: 'south_west', south_west: 'north_west', north_west: 'north_east', north_east: 'south_east' };
+const RAIL_LR = { ascending_north: 'ascending_south', ascending_south: 'ascending_north', south_east: 'north_east', south_west: 'north_west', north_west: 'south_west', north_east: 'south_east' };
+const SWAP_LR = { inner_left: 'inner_right', inner_right: 'inner_left', outer_left: 'outer_right', outer_right: 'outer_left' };
+
+/* ---------------- block states mirrored and rotated ---------------- */
+// BlockState.mirror(LEFT_RIGHT) when mir, then rotate(n quarter turns clockwise)
+const XF = new Map();
+function xform(st, mir, rot) {
+  if (!mir && !rot) return st;
+  const k = st * 8 + (mir ? 4 : 0) + rot;
+  let v = XF.get(k);
+  if (v === undefined) { v = xformState(st, mir, rot); XF.set(k, v); }
+  return v;
+}
+function xformState(st, mir, rot) {
+  let out = st;
+  const n = S.nameOf(st), f = S.get(st, 'facing');
+  if (f && CW[f]) {
+    let d = f;
+    if (mir) {
+      // StairBlock.mirror: across its own axis it turns round and its corner changes side; otherwise as it was
+      if (n.endsWith('_stairs')) { if (LR[f]) { d = LR[f]; const sh = S.get(st, 'shape'); if (SWAP_LR[sh]) out = S.set(out, 'shape', SWAP_LR[sh]); } }
+      else d = LR[f] || f;
+      // ChestBlock.mirror: a double chest's halves change sides
+      if (/chest$/.test(n)) { const t = S.get(st, 'type'); if (t === 'left' || t === 'right') out = S.set(out, 'type', t === 'left' ? 'right' : 'left'); }
+    }
+    out = S.set(out, 'facing', turn(d, rot));
+  }
+  // the four sides of fences, panes, walls, vines, tripwire and redstone: each side's value moves with the side
+  if (S.has(st, 'north') && S.has(st, 'east') && S.has(st, 'south') && S.has(st, 'west')) {
+    for (const d of DIRN) { const to = turn(mir ? LR[d] || d : d, rot); out = S.set(out, to, S.get(st, d)); }
+  }
+  // DoorBlock.mirror: the hinge changes side
+  if (mir && S.has(st, 'hinge')) out = S.set(out, 'hinge', S.get(st, 'hinge') === 'left' ? 'right' : 'left');
+  if ((rot & 1) && S.has(st, 'axis')) { const a = S.get(st, 'axis'); if (a !== 'y') out = S.set(out, 'axis', a === 'x' ? 'z' : 'x'); }
+  // rails: RailBlock.mirror and rotate
+  if (/rail$/.test(n) && S.has(st, 'shape')) {
+    let sh = S.get(st, 'shape');
+    if (mir) sh = RAIL_LR[sh] || sh;
+    for (let i = 0; i < rot; i++) sh = RAIL_CW[sh] || sh;
+    out = S.set(out, 'shape', sh);
+  }
+  // signs, banners and heads: sixteen turns
+  if (S.has(st, 'rotation')) {
+    let r = S.getInt(st, 'rotation');
+    if (mir) r = (8 - (r > 8 ? r - 16 : r) + 16) % 16;
+    out = S.set(out, 'rotation', (r + 4 * rot) & 15);
+  }
+  return out;
+}
+
+/* ---------------- StructurePiece ---------------- */
+// StructurePiece.isReplaceableByStructures
+const OPEN = new Set(['glow_lichen', 'seagrass', 'tall_seagrass']);
+const openForStructure = s => S.isAir(s) || S.liquid(s) || OPEN.has(S.nameOf(s));
+// a box [x0, y0, z0, x1, y1, z1]
+const inside = (b, x, y, z) => x >= b[0] && x <= b[3] && y >= b[1] && y <= b[4] && z >= b[2] && z <= b[5];
+const meets = (a, b) => a[3] >= b[0] && a[0] <= b[3] && a[5] >= b[2] && a[2] <= b[5] && a[4] >= b[1] && a[1] <= b[4];
+class Piece {
+  constructor(box, dir) { this.box = box; this.setOrientation(dir); }
+  // StructurePiece.makeBoundingBox: width runs across the facing, depth along it
+  static boxOf(x, y, z, dir, w, h, d) { return dir === 'north' || dir === 'south' ? [x, y, z, x + w - 1, y + h - 1, z + d - 1] : [x, y, z, x + d - 1, y + h - 1, z + w - 1]; }
+  setOrientation(dir) {
+    this.dir = dir;
+    this.mir = dir === 'south' || dir === 'west';
+    this.rot = dir === 'west' || dir === 'east' ? 1 : 0;
+  }
+  // (a piece without an orientation works in world coordinates)
+  wx(x, z) { const b = this.box; return !this.dir ? x : this.dir === 'west' ? b[3] - z : this.dir === 'east' ? b[0] + z : b[0] + x; }
+  wy(y) { return !this.dir ? y : this.box[1] + y; }
+  wz(x, z) { const b = this.box; return !this.dir ? z : this.dir === 'north' ? b[5] - z : this.dir === 'south' ? b[2] + z : b[2] + x; }
+  move(dx, dy, dz) { const b = this.box; b[0] += dx; b[3] += dx; b[1] += dy; b[4] += dy; b[2] += dz; b[5] += dz; }
+  // placeBlock: inside the chunk only, turned the piece's way
+  set(R, st, x, y, z, bb) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    if (!inside(bb, X, Y, Z)) return;
+    R.set(X, Y, Z, xform(st, this.mir, this.rot));
+  }
+  get(R, x, y, z, bb) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    return inside(bb, X, Y, Z) ? R.get(X, Y, Z) : S.AIR;
+  }
+  // generateBox with an edge and an inside state (onlyExisting: only over what isn't air)
+  fill(R, bb, x0, y0, z0, x1, y1, z1, edge, inner, onlyExisting) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      if (onlyExisting && S.isAir(this.get(R, x, y, z, bb))) continue;
+      this.set(R, y !== y0 && y !== y1 && x !== x0 && x !== x1 && z !== z0 && z !== z1 ? inner : edge, x, y, z, bb);
+    }
+  }
+  // fillColumnDown: the state, unturned, down through air and water from a point
+  column(R, st, x, y, z, bb) {
+    const X = this.wx(x, z), Z = this.wz(x, z);
+    let Y = this.wy(y);
+    if (!inside(bb, X, Y, Z)) return;
+    while (openForStructure(R.get(X, Y, Z)) && Y > -63) { R.set(X, Y, Z, st); Y--; }
+  }
+  air(R, bb, x0, y0, z0, x1, y1, z1) { this.fill(R, bb, x0, y0, z0, x1, y1, z1, S.AIR, S.AIR, false); }
+  // generateBox with a BlockSelector: it draws for every block of the box, in the chunk or not
+  fillSel(R, bb, x0, y0, z0, x1, y1, z1, onlyExisting, r, sel) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      if (onlyExisting && S.isAir(this.get(R, x, y, z, bb))) continue;
+      this.set(R, sel(r, x, y, z, y === y0 || y === y1 || x === x0 || x === x1 || z === z0 || z === z1), x, y, z, bb);
+    }
+  }
+  // createChest: a chest turned toward the open side (reorient), its loot seeded from the random
+  chest(C, R, bb, r, x, y, z, loot) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    if (!inside(bb, X, Y, Z) || S.nameOf(R.get(X, Y, Z)) === 'chest') return false;
+    R.set(X, Y, Z, reorient(R, X, Y, Z, S.state('chest')));
+    const seed = r.nextLong();
+    if (C.blockEntity) C.blockEntity(X, Y, Z, { type: 'chest', loot, seed });
+    return true;
+  }
+  // createDispenser: facing the way given (then turned with the piece), its loot seeded from the random
+  dispenser(C, R, bb, r, x, y, z, facing, loot) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    if (!inside(bb, X, Y, Z) || S.nameOf(R.get(X, Y, Z)) === 'dispenser') return false;
+    this.set(R, S.state('dispenser', { facing }), x, y, z, bb);
+    const seed = r.nextLong();
+    if (C.blockEntity) C.blockEntity(X, Y, Z, { type: 'dispenser', loot, seed });
+    return true;
+  }
+}
+const DV4 = { north: [0, -1], east: [1, 0], south: [0, 1], west: [-1, 0] };
+const OPP = { north: 'south', south: 'north', east: 'west', west: 'east' };
+// StructurePiece.reorient: away from the one solid side, or the facing it has turned off solid sides
+function reorient(R, x, y, z, st) {
+  let dir = null;
+  for (const d of DIRN) {
+    const s = R.get(x + DV4[d][0], y, z + DV4[d][1]);
+    if (S.nameOf(s) === 'chest') return st;
+    if (S.solidRender(s)) { if (dir) { dir = null; break; } dir = d; }
+  }
+  if (dir) return S.set(st, 'facing', OPP[dir]);
+  let f = S.get(st, 'facing');
+  const solid = d => S.solidRender(R.get(x + DV4[d][0], y, z + DV4[d][1]));
+  if (solid(f)) f = OPP[f];
+  if (solid(f)) f = CW[f];
+  if (solid(f)) f = OPP[f];
+  return S.set(st, 'facing', f);
+}
+
+/* ---------------- ScatteredFeaturePiece ---------------- */
+class Scattered extends Piece {
+  constructor(x, y, z, w, h, d, dir) { super(Piece.boxOf(x, y, z, dir, w, h, d), dir); this.w = w; this.h = h; this.d = d; this.hpos = -1; }
+  // updateAverageGroundHeight: the mean height of the columns it covers in this chunk (MOTION_BLOCKING_NO_LEAVES),
+  // kept for the other chunks it reaches
+  averageGround(R, bb, offset) {
+    if (this.hpos >= 0) return true;
+    const b = this.box;
+    let t = 0, n = 0;
+    for (let z = b[2]; z <= b[5]; z++) for (let x = b[0]; x <= b[3]; x++) if (inside(bb, x, 64, z)) { t += R.height(VF.HM.MOTION_BLOCKING_NO_LEAVES, x, z); n++; }
+    if (!n) return false;
+    this.hpos = Math.trunc(t / n);
+    this.move(0, this.hpos - b[1] + offset, 0);
+    return true;
+  }
+}
+
+/* ---------------- the jungle temple (JungleTemplePiece) ---------------- */
+// MossStoneSelector
+const COBBLE = () => S.state('cobblestone'), MOSSY = () => S.state('mossy_cobblestone');
+const moss = r => r.nextFloat() < 0.4 ? COBBLE() : MOSSY();
+class JungleTemple extends Scattered {
+  constructor(r, x, z) { super(x, 64, z, 12, 10, 15, DIRN[r.nextInt(4)]); }
+  // (Java remembers placing each chest and dispenser; a block lies in one chunk only, so that changes nothing here)
+  post(C, R, r, bb) {
+    if (!this.averageGround(R, bb, 0)) return;
+    const W = this.w, D = this.d, A = S.AIR, st = (n, p) => S.state(n, p);
+    const box = (x0, y0, z0, x1, y1, z1) => this.fillSel(R, bb, x0, y0, z0, x1, y1, z1, false, r, moss);
+    const air = (x0, y0, z0, x1, y1, z1) => this.air(R, bb, x0, y0, z0, x1, y1, z1);
+    const put = (s, x, y, z) => this.set(R, s, x, y, z, bb);
+    box(0, -4, 0, W - 1, 0, D - 1);
+    box(2, 1, 2, 9, 2, 2); box(2, 1, 12, 9, 2, 12); box(2, 1, 3, 2, 2, 11); box(9, 1, 3, 9, 2, 11);
+    box(1, 3, 1, 10, 6, 1); box(1, 3, 13, 10, 6, 13); box(1, 3, 2, 1, 6, 12); box(10, 3, 2, 10, 6, 12);
+    box(2, 3, 2, 9, 3, 12); box(2, 6, 2, 9, 6, 12); box(3, 7, 3, 8, 7, 11); box(4, 8, 4, 7, 8, 10);
+    air(3, 1, 3, 8, 2, 11); air(4, 3, 6, 7, 3, 9); air(2, 4, 2, 9, 5, 12); air(4, 6, 5, 7, 6, 9); air(5, 7, 6, 6, 7, 8);
+    air(5, 1, 2, 6, 2, 2); air(5, 2, 12, 6, 2, 12); air(5, 5, 1, 6, 5, 1); air(5, 5, 13, 6, 5, 13);
+    put(A, 1, 5, 5); put(A, 10, 5, 5); put(A, 1, 5, 9); put(A, 10, 5, 9);
+    for (let z = 0; z <= 14; z += 14) { box(2, 4, z, 2, 5, z); box(4, 4, z, 4, 5, z); box(7, 4, z, 7, 5, z); box(9, 4, z, 9, 5, z); }
+    box(5, 6, 0, 6, 6, 0);
+    for (let x = 0; x <= 11; x += 11) {
+      for (let z = 2; z <= 12; z += 2) box(x, 4, z, x, 5, z);
+      box(x, 6, 5, x, 6, 5); box(x, 6, 9, x, 6, 9);
+    }
+    box(2, 7, 2, 2, 9, 2); box(9, 7, 2, 9, 9, 2); box(2, 7, 12, 2, 9, 12); box(9, 7, 12, 9, 9, 12);
+    box(4, 9, 4, 4, 9, 4); box(7, 9, 4, 7, 9, 4); box(4, 9, 10, 4, 9, 10); box(7, 9, 10, 7, 9, 10); box(5, 9, 7, 6, 9, 7);
+    const E = st('cobblestone_stairs', { facing: 'east' }), Wst = st('cobblestone_stairs', { facing: 'west' });
+    const So = st('cobblestone_stairs', { facing: 'south' }), N = st('cobblestone_stairs', { facing: 'north' });
+    put(N, 5, 9, 6); put(N, 6, 9, 6); put(So, 5, 9, 8); put(So, 6, 9, 8);
+    put(N, 4, 0, 0); put(N, 5, 0, 0); put(N, 6, 0, 0); put(N, 7, 0, 0);
+    put(N, 4, 1, 8); put(N, 4, 2, 9); put(N, 4, 3, 10); put(N, 7, 1, 8); put(N, 7, 2, 9); put(N, 7, 3, 10);
+    box(4, 1, 9, 4, 1, 9); box(7, 1, 9, 7, 1, 9); box(4, 1, 10, 7, 2, 10); box(5, 4, 5, 6, 4, 5);
+    put(E, 4, 4, 5); put(Wst, 7, 4, 5);
+    for (let i = 0; i < 4; i++) { put(So, 5, -i, 6 + i); put(So, 6, -i, 6 + i); air(5, -i, 7 + i, 6, -i, 9 + i); }
+    air(1, -3, 12, 10, -1, 13); air(1, -3, 1, 3, -1, 13); air(1, -3, 1, 9, -1, 5);
+    for (let z = 1; z <= 13; z += 2) box(1, -3, z, 1, -2, z);
+    for (let z = 2; z <= 12; z += 2) box(1, -1, z, 3, -1, z);
+    box(2, -2, 1, 5, -2, 1); box(7, -2, 1, 9, -2, 1); box(6, -3, 1, 6, -3, 1); box(6, -1, 1, 6, -1, 1);
+    // the arrow trap across the corridor
+    const hook = f => st('tripwire_hook', { facing: f, attached: 'true' }), wire = (a, b) => st('tripwire', { [a]: 'true', [b]: 'true', attached: 'true' });
+    const dust = (a, b) => st('redstone_wire', { [a]: 'side', [b]: 'side' });
+    const MC = MOSSY();
+    put(hook('east'), 1, -3, 8); put(hook('west'), 4, -3, 8); put(wire('east', 'west'), 2, -3, 8); put(wire('east', 'west'), 3, -3, 8);
+    for (let z = 7; z >= 2; z--) put(dust('north', 'south'), 5, -3, z);
+    put(dust('north', 'west'), 5, -3, 1); put(dust('east', 'west'), 4, -3, 1); put(MC, 3, -3, 1);
+    this.dispenser(C, R, bb, r, 3, -2, 1, 'north', 'chests/jungle_temple_dispenser');
+    put(st('vine', { south: 'true' }), 3, -2, 2);
+    // the second trap, in front of the chest
+    put(hook('north'), 7, -3, 1); put(hook('south'), 7, -3, 5);
+    put(wire('north', 'south'), 7, -3, 2); put(wire('north', 'south'), 7, -3, 3); put(wire('north', 'south'), 7, -3, 4);
+    put(dust('east', 'west'), 8, -3, 6); put(dust('west', 'south'), 9, -3, 6);
+    put(st('redstone_wire', { south: 'up', north: 'side' }), 9, -3, 5); put(MC, 9, -3, 4);
+    put(dust('north', 'south'), 9, -2, 4);
+    this.dispenser(C, R, bb, r, 9, -2, 3, 'west', 'chests/jungle_temple_dispenser');
+    put(st('vine', { east: 'true' }), 8, -1, 3); put(st('vine', { east: 'true' }), 8, -2, 3);
+    this.chest(C, R, bb, r, 8, -3, 3, 'chests/jungle_temple');
+    put(MC, 9, -3, 2); put(MC, 8, -3, 1); put(MC, 4, -3, 5); put(MC, 5, -2, 5); put(MC, 5, -1, 5);
+    put(MC, 6, -3, 5); put(MC, 7, -2, 5); put(MC, 7, -1, 5); put(MC, 8, -3, 5);
+    box(9, -1, 1, 9, -1, 5);
+    // the hidden room behind the lever puzzle
+    air(8, -3, 8, 10, -1, 10);
+    const CH = st('chiseled_stone_bricks'), LV = st('lever', { face: 'wall', facing: 'north' });
+    put(CH, 8, -2, 11); put(CH, 9, -2, 11); put(CH, 10, -2, 11);
+    put(LV, 8, -2, 12); put(LV, 9, -2, 12); put(LV, 10, -2, 12);
+    box(8, -3, 8, 8, -3, 10); box(10, -3, 8, 10, -3, 10);
+    put(MC, 10, -2, 9);
+    put(dust('north', 'south'), 8, -2, 9); put(dust('north', 'south'), 8, -2, 10);
+    put(st('redstone_wire', { north: 'side', east: 'side', south: 'side', west: 'side' }), 10, -1, 9);
+    put(st('sticky_piston', { facing: 'up' }), 9, -2, 8);
+    put(st('sticky_piston', { facing: 'west' }), 10, -2, 8); put(st('sticky_piston', { facing: 'west' }), 10, -1, 8);
+    put(st('repeater', { facing: 'north' }), 10, -2, 10);
+    this.chest(C, R, bb, r, 9, -3, 10, 'chests/jungle_temple');
+  }
+}
+
+/* ---------------- the swamp hut (SwampHutPiece) ---------------- */
+class SwampHut extends Scattered {
+  constructor(r, x, z) { super(x, 64, z, 7, 7, 9, DIRN[r.nextInt(4)]); }
+  // a mob the hut is made with, standing on the floor at its spot (in the chunk that holds the spot)
+  mob(C, bb, kind, x, y, z, opts) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    if (inside(bb, X, Y, Z) && C.blockEntity) C.blockEntity(X, Y, Z, { type: 'mob', mob: kind, opts });
+  }
+  post(C, R, r, bb) {
+    if (!this.averageGround(R, bb, 0)) return;
+    const st = (n, p) => S.state(n, p), P = st('spruce_planks'), L = st('oak_log'), F = st('oak_fence');
+    const fill = (x0, y0, z0, x1, y1, z1, s) => this.fill(R, bb, x0, y0, z0, x1, y1, z1, s, s, false);
+    const put = (s, x, y, z) => this.set(R, s, x, y, z, bb);
+    fill(1, 1, 1, 5, 1, 7, P); fill(1, 4, 2, 5, 4, 7, P); fill(2, 1, 0, 4, 1, 0, P); fill(2, 2, 2, 3, 3, 2, P);
+    fill(1, 2, 3, 1, 3, 6, P); fill(5, 2, 3, 5, 3, 6, P); fill(2, 2, 7, 4, 3, 7, P);
+    fill(1, 0, 2, 1, 3, 2, L); fill(5, 0, 2, 5, 3, 2, L); fill(1, 0, 7, 1, 3, 7, L); fill(5, 0, 7, 5, 3, 7, L);
+    put(F, 2, 3, 2); put(F, 3, 3, 7);
+    put(S.AIR, 1, 3, 4); put(S.AIR, 5, 3, 4); put(S.AIR, 5, 3, 5);
+    put(st('potted_red_mushroom'), 1, 3, 5); put(st('crafting_table'), 3, 2, 6); put(st('cauldron'), 4, 2, 6);
+    put(F, 1, 2, 1); put(F, 5, 2, 1);
+    const stair = (facing, shape) => st('spruce_stairs', { facing, shape: shape || 'straight' });
+    fill(0, 4, 1, 6, 4, 1, stair('north')); fill(0, 4, 2, 0, 4, 7, stair('east')); fill(6, 4, 2, 6, 4, 7, stair('west')); fill(0, 4, 8, 6, 4, 8, stair('south'));
+    put(stair('north', 'outer_right'), 0, 4, 1); put(stair('north', 'outer_left'), 6, 4, 1);
+    put(stair('south', 'outer_left'), 0, 4, 8); put(stair('south', 'outer_right'), 6, 4, 8);
+    for (let z = 2; z <= 7; z += 5) for (let x = 1; x <= 5; x += 4) this.column(R, L, x, -1, z, bb);
+    // the witch and her black cat (kept for good, as Java's are)
+    this.mob(C, bb, 'witch', 2, 2, 5, { persistent: true });
+    this.mob(C, bb, 'cat', 2, 2, 5, { persistent: true, variant: 'all_black' });
+  }
+}
+
+/* ---------------- the desert pyramid (DesertPyramidPiece, DesertPyramidStructure.afterPlace) ---------------- */
+// Vec3i.compareTo: by y, then z, then x
+const cmpPos = (a, b) => a[1] - b[1] || a[2] - b[2] || a[0] - b[0];
+// RandomSource.create(seed).forkPositional().at(x, y, z): a java.util.Random seeded from the block position
+const legacyAt = (seed, x, y, z) => { const f = new VN.JRand(seed).nextLong(); return new VN.JRand(BigInt.asIntN(64, VN.posSeed(x, y, z) ^ f)); };
+class DesertPyramid extends Scattered {
+  constructor(r, x, z, seed) { super(x, 64, z, 21, 15, 21, DIRN[r.nextInt(4)]); this.seed = seed; this.sandAt = []; this.roofAt = null; }
+  // updateHeightPositionToLowestGroundHeight: the lowest ground under the whole pyramid, less 0-2 blocks. Java settles
+  // it in whichever chunk is decorated first; here always as the start chunk would (its random's draw for the offset)
+  lowestGround(R, drawn) {
+    if (this.hpos >= 0) return true;
+    const b = this.box;
+    let lo = 1e9;
+    for (let z = b[2]; z <= b[5]; z++) for (let x = b[0]; x <= b[3]; x++) lo = Math.min(lo, R.height(VF.HM.MOTION_BLOCKING_NO_LEAVES, x, z));
+    const cx = b[0] >> 4, cz = b[2] >> 4, j = STEPS[4].indexOf('desert_pyramid');
+    const off = cx === R.cx && cz === R.cz ? drawn : -new VF.VRand(VF.featureSeed(VF.decorationSeed(this.seed, cx * 16, cz * 16), j, 4)).nextInt(3);
+    this.hpos = lo;
+    this.move(0, lo - b[1] + off, 0);
+    return true;
+  }
+  // a spot that may become suspicious sand (Java notes it; afterPlace decides)
+  sand(x, y, z) { this.sandAt.push([this.wx(x, z), this.wy(y), this.wz(x, z)]); }
+  post(C, R, r, bb) {
+    const drawn = -r.nextInt(3);
+    this.sandAt = [];
+    if (!this.lowestGround(R, drawn)) return;
+    const st = (n, p) => S.state(n, p), A = S.AIR, SS = st('sandstone'), CUT = st('cut_sandstone'), CH = st('chiseled_sandstone');
+    const OR = st('orange_terracotta'), BL = st('blue_terracotta'), W = this.w, D = this.d;
+    const N = st('sandstone_stairs', { facing: 'north' }), So = st('sandstone_stairs', { facing: 'south' }), E = st('sandstone_stairs', { facing: 'east' }), Wst = st('sandstone_stairs', { facing: 'west' });
+    const fill = (x0, y0, z0, x1, y1, z1, e, i, only) => this.fill(R, bb, x0, y0, z0, x1, y1, z1, e, i === undefined ? e : i, !!only);
+    const put = (s, x, y, z) => this.set(R, s, x, y, z, bb);
+    fill(0, -4, 0, W - 1, 0, D - 1, SS);
+    for (let i = 1; i <= 9; i++) { fill(i, i, i, W - 1 - i, i, D - 1 - i, SS); fill(i + 1, i, i + 1, W - 2 - i, i, D - 2 - i, A); }
+    for (let x = 0; x < W; x++) for (let z = 0; z < D; z++) this.column(R, SS, x, -5, z, bb);
+    // the two towers
+    for (const t of [0, W - 5]) {
+      fill(t, 0, 0, t + 4, 9, 4, SS, A); fill(t + 1, 10, 1, t + 3, 10, 3, SS);
+      put(N, t + 2, 10, 0); put(So, t + 2, 10, 4); put(E, t, 10, 2); put(Wst, t + 4, 10, 2);
+    }
+    // the entrance and the halls to the towers
+    fill(8, 0, 0, 12, 4, 4, SS, A); fill(9, 1, 0, 11, 3, 4, A);
+    put(CUT, 9, 1, 1); put(CUT, 9, 2, 1); put(CUT, 9, 3, 1); put(CUT, 10, 3, 1); put(CUT, 11, 3, 1); put(CUT, 11, 2, 1); put(CUT, 11, 1, 1);
+    fill(4, 1, 1, 8, 3, 3, SS, A); fill(4, 1, 2, 8, 2, 2, A); fill(12, 1, 1, 16, 3, 3, SS, A); fill(12, 1, 2, 16, 2, 2, A);
+    fill(5, 4, 5, W - 6, 4, D - 6, SS); fill(9, 4, 9, 11, 4, 11, A);
+    fill(8, 1, 8, 8, 3, 8, CUT); fill(12, 1, 8, 12, 3, 8, CUT); fill(8, 1, 12, 8, 3, 12, CUT); fill(12, 1, 12, 12, 3, 12, CUT);
+    fill(1, 1, 5, 4, 4, 11, SS); fill(W - 5, 1, 5, W - 2, 4, 11, SS);
+    fill(6, 7, 9, 6, 7, 11, SS); fill(W - 7, 7, 9, W - 7, 7, 11, SS);
+    fill(5, 5, 9, 5, 7, 11, CUT); fill(W - 6, 5, 9, W - 6, 7, 11, CUT);
+    put(A, 5, 5, 10); put(A, 5, 6, 10); put(A, 6, 6, 10); put(A, W - 6, 5, 10); put(A, W - 6, 6, 10); put(A, W - 7, 6, 10);
+    fill(2, 4, 4, 2, 6, 4, A); fill(W - 3, 4, 4, W - 3, 6, 4, A);
+    put(N, 2, 4, 5); put(N, 2, 3, 4); put(N, W - 3, 4, 5); put(N, W - 3, 3, 4);
+    fill(1, 1, 3, 2, 2, 3, SS); fill(W - 3, 1, 3, W - 2, 2, 3, SS);
+    put(SS, 1, 1, 2); put(SS, W - 2, 1, 2);
+    const SLAB = st('sandstone_slab');
+    put(SLAB, 1, 2, 2); put(SLAB, W - 2, 2, 2);
+    put(Wst, 2, 1, 2); put(E, W - 3, 1, 2);
+    fill(4, 3, 5, 4, 3, 17, SS); fill(W - 5, 3, 5, W - 5, 3, 17, SS);
+    fill(3, 1, 5, 4, 2, 16, A); fill(W - 6, 1, 5, W - 5, 2, 16, A);
+    for (let z = 5; z <= 17; z += 2) { put(CUT, 4, 1, z); put(CH, 4, 2, z); put(CUT, W - 5, 1, z); put(CH, W - 5, 2, z); }
+    // the terracotta star on the floor
+    for (const [x, z] of [[10, 7], [10, 8], [9, 9], [11, 9], [8, 10], [12, 10], [7, 10], [13, 10], [9, 11], [11, 11], [10, 12], [10, 13]]) put(OR, x, 0, z);
+    put(BL, 10, 0, 10);
+    // the patterns on the towers
+    const band = [[CUT, OR, CUT], [CUT, OR, CUT], [OR, CH, OR], [CUT, OR, CUT], [OR, CH, OR], [OR, OR, OR], [CUT, CUT, CUT]];
+    for (const x of [0, W - 1]) band.forEach((row, k) => { for (let i = 0; i < 3; i++) put(row[i], x, 2 + k, 1 + i); });
+    for (const x of [2, W - 3]) band.forEach((row, k) => { for (let i = 0; i < 3; i++) put(row[i], x - 1 + i, 2 + k, 0); });
+    fill(8, 4, 0, 12, 6, 0, CUT); put(A, 8, 6, 0); put(A, 12, 6, 0); put(OR, 9, 5, 0); put(CH, 10, 5, 0); put(OR, 11, 5, 0);
+    // the treasure room and its trap
+    fill(8, -14, 8, 12, -11, 12, CUT); fill(8, -10, 8, 12, -10, 12, CH); fill(8, -9, 8, 12, -9, 12, CUT);
+    fill(8, -8, 8, 12, -1, 12, SS); fill(9, -11, 9, 11, -1, 11, A);
+    put(st('stone_pressure_plate'), 10, -11, 10);
+    fill(9, -13, 9, 11, -13, 11, st('tnt'), A);
+    for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      put(A, 10 + 2 * dx, -11, 10 + 2 * dz); put(A, 10 + 2 * dx, -10, 10 + 2 * dz);
+      put(CH, 10 + 3 * dx, -10, 10 + 3 * dz); put(CUT, 10 + 3 * dx, -11, 10 + 3 * dz);
+    }
+    // a chest in each alcove, north, east, south, west
+    for (const [dx, dz] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) this.chest(C, R, bb, r, 10 + 2 * dx, -11, 10 + 2 * dz, 'chests/desert_pyramid');
+    this.cellar(R, bb);
+    this.afterPlace(C, R, bb);
+  }
+  // the cellar of 1.20: stairs down from the west hall and a sunken room (WorldGenRegion's random picks its loose blocks)
+  cellar(R, bb) {
+    const st = n => S.state(n), x = 16, y = -4, z = 13, SAND = st('sand'), SS = st('sandstone'), CUT = st('cut_sandstone'), CH = st('chiseled_sandstone');
+    const OR = st('orange_terracotta'), BL = st('blue_terracotta'), put = (s, a, b, c) => this.set(R, s, a, b, c, bb);
+    const rr = VN.xoroPos(VN.xoroAt(VN.Xoro.seeded(this.seed).fork(), 'minecraft:worldgen_region_random').fork(), R.cx * 16, 0, R.cz * 16);
+    const sw = S.state('sandstone_stairs', { facing: 'west' });
+    put(sw, 13, -1, 17); put(sw, 14, -2, 17); put(sw, 15, -3, 17);
+    const flag = rr.nextBoolean();
+    for (let i = 4; i >= 0; i--) put(SAND, x - i, y + 4, z + 4);
+    put(SAND, x - 2, y + 3, z + 4); put(flag ? SAND : SS, x - 1, y + 3, z + 4); put(flag ? SS : SAND, x, y + 3, z + 4);
+    put(SAND, x - 1, y + 2, z + 4); put(SS, x, y + 2, z + 4); put(SAND, x, y + 1, z + 4);
+    const box = (x0, y0, z0, x1, y1, z1, s) => this.fill(R, bb, x0, y0, z0, x1, y1, z1, s, s, true);
+    for (const [yy, s] of [[y + 1, CUT], [y + 2, CH], [-1, CUT]]) {
+      box(x - 3, yy, z - 3, x - 3, yy, z + 2, s); box(x + 3, yy, z - 3, x + 3, yy, z + 2, s);
+      box(x - 3, yy, z - 3, x + 3, yy, z - 2, s); box(x - 3, yy, z + 3, x + 3, yy, z + 3, s);
+    }
+    for (let yy = y + 1; yy <= y + 3; yy++) for (let xx = x - 2; xx <= x + 2; xx++) for (let zz = z - 2; zz <= z + 2; zz++) this.sand(xx, yy, zz);
+    // the fallen roof: sandstone or sand block by block, and one spot of it Java's seed picks for suspicious sand
+    for (let xx = x - 2; xx <= x + 2; xx++) for (let zz = z - 2; zz <= z + 2; zz++) put(rr.nextFloat() < 0.33 ? SS : SAND, xx, y + 4, zz);
+    const pr = legacyAt(this.seed, this.wx(x - 2, z - 2), this.wy(y + 4), this.wz(x - 2, z - 2)), rx = x - 2 + pr.nextInt(5), rz = z - 2 + pr.nextInt(5);
+    this.roofAt = [this.wx(rx, rz), this.wy(y + 4), this.wz(rx, rz)];
+    put(BL, x, y, z);
+    for (const [a, c] of [[1, -1], [1, 1], [-1, -1], [-1, 1], [2, 0], [-2, 0], [0, 2], [0, -2]]) put(OR, x + a, y, z + c);
+    put(OR, x + 3, y, z); this.sand(x + 3, y + 1, z); this.sand(x + 3, y + 2, z); put(CUT, x + 4, y + 1, z); put(CH, x + 4, y + 2, z);
+    put(OR, x - 3, y, z); this.sand(x - 3, y + 1, z); this.sand(x - 3, y + 2, z); put(CUT, x - 4, y + 1, z); put(CH, x - 4, y + 2, z);
+    put(OR, x, y, z + 3); this.sand(x, y + 1, z + 3); this.sand(x, y + 2, z + 3);
+    put(OR, x, y, z - 3); this.sand(x, y + 1, z - 3); this.sand(x, y + 2, z - 3);
+    put(CUT, x, y + 1, z - 4); put(CH, x, -2, z - 4);
+  }
+  // DesertPyramidStructure.afterPlace: 5-7 of the noted spots (shuffled by a random of the pyramid's middle) become
+  // suspicious sand, the rest plain sand, and so does the fallen roof's spot
+  afterPlace(C, R, bb) {
+    const sus = p => { if (!inside(bb, p[0], p[1], p[2])) return; R.set(p[0], p[1], p[2], S.state('suspicious_sand')); if (C.blockEntity) C.blockEntity(p[0], p[1], p[2], { type: 'brushable', loot: 'archaeology/desert_pyramid' }); };
+    const seen = new Set(), list = [];
+    for (const p of this.sandAt) { const k = p.join(','); if (!seen.has(k)) { seen.add(k); list.push(p); } }
+    list.sort(cmpPos);
+    if (this.roofAt) sus(this.roofAt);
+    const b = this.box, rs = legacyAt(this.seed, b[0] + ((b[3] - b[0] + 1) >> 1), b[1] + ((b[4] - b[1] + 1) >> 1), b[2] + ((b[5] - b[2] + 1) >> 1));
+    for (let j = list.length; j > 1; j--) { const k = rs.nextInt(j), t = list[j - 1]; list[j - 1] = list[k]; list[k] = t; }
+    let n = Math.min(list.length, 5 + rs.nextInt(3));
+    for (const p of list) {
+      if (n > 0) { n--; sus(p); } else if (inside(bb, p[0], p[1], p[2])) R.set(p[0], p[1], p[2], S.state('sand'));
+    }
+  }
+}
+
+/* ---------------- buried treasure (BuriedTreasurePieces) ---------------- */
+// a plain source block of water or lava (BuriedTreasurePiece.isLiquid)
+const source = s => { const n = S.nameOf(s); return (n === 'water' || n === 'lava') && S.get(s, 'level') === '0'; };
+const TREASURE_BED = new Set(['sandstone', 'stone', 'andesite', 'granite', 'diorite']);
+class BuriedTreasure extends Piece {
+  constructor(x, z) { super([x, 90, z, x, 90, z], null); }
+  // down from the ocean floor to the first block over stone or sandstone: the chest there, packed in all round
+  post(C, R, r, bb) {
+    const x = this.box[0], z = this.box[2];
+    for (let y = R.height(VF.HM.OCEAN_FLOOR_WG, x, z); y > -64; y--) {
+      const here = R.get(x, y, z), below = R.get(x, y - 1, z);
+      if (!(TREASURE_BED.has(S.nameOf(below)) && below === S.state(S.nameOf(below)))) continue;
+      const fill = !S.isAir(here) && !source(here) ? here : S.state('sand');
+      for (const [dx, dy, dz] of [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]]) {
+        const s = R.get(x + dx, y + dy, z + dz);
+        if (!S.isAir(s) && !source(s)) continue;
+        const sb = R.get(x + dx, y + dy - 1, z + dz);
+        R.set(x + dx, y + dy, z + dz, (S.isAir(sb) || source(sb)) && dy !== 1 ? below : fill);
+      }
+      this.box = [x, y, z, x, y, z];
+      if (inside(bb, x, y, z) && S.nameOf(R.get(x, y, z)) !== 'chest') {
+        R.set(x, y, z, reorient(R, x, y, z, S.state('chest')));
+        const seed = r.nextLong();
+        if (C.blockEntity) C.blockEntity(x, y, z, { type: 'chest', loot: 'chests/buried_treasure', seed });
+      }
+      return;
+    }
+  }
+}
+
+/* ---------------- mineshafts (MineShaftPieces) ---------------- */
+const MS_WOOD = { normal: ['oak_log', 'oak_planks', 'oak_fence'], mesa: ['dark_oak_log', 'dark_oak_planks', 'dark_oak_fence'] };
+const biomeSet = names => new Set(BIOME_NAMES.map((n, i) => [n.toLowerCase().replace(/ /g, '_'), i]).filter(([n]) => names.includes(n)).map(([, i]) => i));
+let MS_BLOCKING = null, MS_MESA = null;
+const msBiomes = () => { if (!MS_BLOCKING) { MS_BLOCKING = biomeSet(['deep_dark']); MS_MESA = biomeSet(['badlands', 'eroded_badlands', 'wooded_badlands']); } };
+const FALLING = new Set(['sand', 'red_sand', 'gravel', 'suspicious_sand', 'suspicious_gravel', 'anvil', 'chipped_anvil', 'damaged_anvil', 'dragon_egg']);
+const falling = s => { const n = S.nameOf(s); return FALLING.has(n) || n.endsWith('_concrete_powder'); };
+const mv = (b, x, y, z) => [b[0] + x, b[1] + y, b[2] + z, b[3] + x, b[4] + y, b[5] + z];
+const DSTEP = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
+// the pieces a start has laid out so far (StructurePiecesBuilder): the first one a box runs into
+class PieceList {
+  constructor() { this.list = []; }
+  add(p) { this.list.push(p); }
+  hit(b) { for (const p of this.list) if (meets(p.box, b)) return p; return null; }
+  box() { const b = this.list[0].box.slice(); for (const p of this.list) for (let i = 0; i < 3; i++) { b[i] = Math.min(b[i], p.box[i]); b[i + 3] = Math.max(b[i + 3], p.box[i + 3]); } return b; }
+}
+class MinePiece extends Piece {
+  constructor(box, dir, depth, type) { super(box, dir); this.depth = depth; this.type = type; }
+  wood(i) { return S.state(MS_WOOD[this.type][i]); }
+  // isInInvalidLocation: the deep dark at its middle, or liquid on any face of its box (one block out, in the chunk)
+  invalid(R, bb) {
+    msBiomes();
+    const b = this.box, x0 = Math.max(b[0] - 1, bb[0]), y0 = Math.max(b[1] - 1, bb[1]), z0 = Math.max(b[2] - 1, bb[2]);
+    const x1 = Math.min(b[3] + 1, bb[3]), y1 = Math.min(b[4] + 1, bb[4]), z1 = Math.min(b[5] + 1, bb[5]);
+    if (MS_BLOCKING.has(R.biome(Math.trunc((x0 + x1) / 2), Math.trunc((y0 + y1) / 2), Math.trunc((z0 + z1) / 2)))) return true;
+    const liq = (x, y, z) => S.liquid(R.get(x, y, z));
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) if (liq(x, y0, z) || liq(x, y1, z)) return true;
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) if (liq(x, y, z0) || liq(x, y, z1)) return true;
+    for (let z = z0; z <= z1; z++) for (let y = y0; y <= y1; y++) if (liq(x0, y, z) || liq(x1, y, z)) return true;
+    return false;
+  }
+  // isInterior: in the chunk, and the block above it under the ocean floor
+  interior(R, x, y, z, bb) {
+    const X = this.wx(x, z), Y = this.wy(y + 1), Z = this.wz(x, z);
+    return inside(bb, X, Y, Z) && Y < R.height(VF.HM.OCEAN_FLOOR_WG, X, Z);
+  }
+  // setPlanksBlock: under an interior spot, unless what is there already holds things up
+  planks(R, bb, st, x, y, z) {
+    if (!this.interior(R, x, y, z, bb)) return;
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    if (!S.sturdy(R.get(X, Y, Z), 1)) R.set(X, Y, Z, st);
+  }
+}
+// generateAndAddPiece / createRandomShaftPiece
+function msAdd(start, L, r, x, y, z, dir, depth) {
+  if (depth > 8 || Math.abs(x - start.box[0]) > 80 || Math.abs(z - start.box[2]) > 80) return null;
+  const type = start.type, d = depth + 1, i = r.nextInt(100);
+  let p = null, b;
+  if (i >= 80) { if ((b = MineCrossing.find(L, r, x, y, z, dir))) p = new MineCrossing(d, b, dir, type); }
+  else if (i >= 70) { if ((b = MineStairs.find(L, x, y, z, dir))) p = new MineStairs(d, b, dir, type); }
+  else if ((b = MineCorridor.find(L, r, x, y, z, dir))) p = new MineCorridor(d, r, b, dir, type);
+  if (p) { L.add(p); p.addChildren(start, L, r); }
+  return p;
+}
+class MineRoom extends MinePiece {
+  constructor(r, x, z, type) { const x1 = x + 7 + r.nextInt(6), y1 = 54 + r.nextInt(6), z1 = z + 7 + r.nextInt(6); super([x, 50, z, x1, y1, z1], null, 0, type); this.doors = []; }
+  addChildren(start, L, r) {
+    const b = this.box, d = this.depth, xs = b[3] - b[0] + 1, zs = b[5] - b[2] + 1;
+    let h = b[4] - b[1] + 1 - 4;
+    if (h <= 0) h = 1;
+    const side = (span, at, door, dir) => {
+      for (let k = 0; k < span; k += 4) {
+        k += r.nextInt(span);
+        if (k + 3 > span) break;
+        const [x, z] = at(k), p = msAdd(start, L, r, x, b[1] + r.nextInt(h) + 1, z, dir, d);
+        if (p) this.doors.push(door(p.box));
+      }
+    };
+    side(xs, k => [b[0] + k, b[2] - 1], q => [q[0], q[1], b[2], q[3], q[4], b[2] + 1], 'north');
+    side(xs, k => [b[0] + k, b[5] + 1], q => [q[0], q[1], b[5] - 1, q[3], q[4], b[5]], 'south');
+    side(zs, k => [b[0] - 1, b[2] + k], q => [b[0], q[1], q[2], b[0] + 1, q[4], q[5]], 'west');
+    side(zs, k => [b[3] + 1, b[2] + k], q => [b[3] - 1, q[1], q[2], b[3], q[4], q[5]], 'east');
+  }
+  move(dx, dy, dz) { super.move(dx, dy, dz); this.doors = this.doors.map(e => mv(e, dx, dy, dz)); }
+  post(C, R, r, bb) {
+    if (this.invalid(R, bb)) return;
+    const b = this.box, A = S.state('cave_air');
+    this.fill(R, bb, b[0], b[1] + 1, b[2], b[3], Math.min(b[1] + 3, b[4]), b[5], A, A, false);
+    for (const e of this.doors) this.fill(R, bb, e[0], e[4] - 2, e[2], e[3], e[4], e[5], A, A, false);
+    this.halfSphere(R, bb, b[0], b[1] + 4, b[2], b[3], b[4], b[5], A);
+  }
+  // generateUpperHalfSphere (in Java's float arithmetic)
+  halfSphere(R, bb, x0, y0, z0, x1, y1, z1, st) {
+    const f = Math.fround, fx = f(x1 - x0 + 1), fy = f(y1 - y0 + 1), fz = f(z1 - z0 + 1), cx = f(x0 + f(fx / 2)), cz = f(z0 + f(fz / 2)), lim = f(1.05);
+    for (let y = y0; y <= y1; y++) {
+      const ny = f((y - y0) / fy);
+      for (let x = x0; x <= x1; x++) {
+        const nx = f(f(x - cx) / f(fx * 0.5));
+        for (let z = z0; z <= z1; z++) {
+          const nz = f(f(z - cz) / f(fz * 0.5));
+          if (f(f(f(nx * nx) + f(ny * ny)) + f(nz * nz)) <= lim) this.set(R, st, x, y, z, bb);
+        }
+      }
+    }
+  }
+}
+class MineCorridor extends MinePiece {
+  constructor(depth, r, box, dir, type) {
+    super(box, dir, depth, type);
+    this.rails = r.nextInt(3) === 0;
+    this.spider = !this.rails && r.nextInt(23) === 0;
+    this.sections = Math.trunc((dir === 'north' || dir === 'south' ? box[5] - box[2] + 1 : box[3] - box[0] + 1) / 5);
+  }
+  static find(L, r, x, y, z, dir) {
+    for (let i = r.nextInt(3) + 2; i > 0; i--) {
+      const j = i * 5, b = mv(dir === 'south' ? [0, 0, 0, 2, 2, j - 1] : dir === 'west' ? [1 - j, 0, 0, 0, 2, 2] : dir === 'east' ? [0, 0, 0, j - 1, 2, 2] : [0, 0, 1 - j, 2, 2, 0], x, y, z);
+      if (!L.hit(b)) return b;
+    }
+    return null;
+  }
+  addChildren(start, L, r) {
+    const d = this.depth, b = this.box, o = this.dir, j = r.nextInt(4), y = b[1] - 1 + r.nextInt(3);
+    const go = (x, z, dir) => msAdd(start, L, r, x, y, z, dir, d);
+    if (o === 'north') { if (j <= 1) go(b[0], b[2] - 1, o); else if (j === 2) go(b[0] - 1, b[2], 'west'); else go(b[3] + 1, b[2], 'east'); }
+    else if (o === 'south') { if (j <= 1) go(b[0], b[5] + 1, o); else if (j === 2) go(b[0] - 1, b[5] - 3, 'west'); else go(b[3] + 1, b[5] - 3, 'east'); }
+    else if (o === 'west') { if (j <= 1) go(b[0] - 1, b[2], o); else if (j === 2) go(b[0], b[2] - 1, 'north'); else go(b[0], b[5] + 1, 'south'); }
+    else { if (j <= 1) go(b[3] + 1, b[2], o); else if (j === 2) go(b[3] - 3, b[2] - 1, 'north'); else go(b[3] - 3, b[5] + 1, 'south'); }
+    if (d >= 8) return;
+    // side passages every five blocks, one in five each way
+    if (o === 'west' || o === 'east') {
+      for (let x = b[0] + 3; x + 3 <= b[3]; x += 5) { const k = r.nextInt(5); if (k === 0) msAdd(start, L, r, x, b[1], b[2] - 1, 'north', d + 1); else if (k === 1) msAdd(start, L, r, x, b[1], b[5] + 1, 'south', d + 1); }
+    } else {
+      for (let z = b[2] + 3; z + 3 <= b[5]; z += 5) { const k = r.nextInt(5); if (k === 0) msAdd(start, L, r, b[0] - 1, b[1], z, 'west', d + 1); else if (k === 1) msAdd(start, L, r, b[3] + 1, b[1], z, 'east', d + 1); }
+    }
+  }
+  sturdyAround(R, bb, x, y, z, need) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    let n = 0;
+    for (let d = 0; d < 6; d++) {
+      const [dx, dy, dz] = DSTEP[d];
+      if (inside(bb, X + dx, Y + dy, Z + dz) && S.sturdy(R.get(X + dx, Y + dy, Z + dz), d ^ 1) && ++n >= need) return true;
+    }
+    return false;
+  }
+  cobweb(R, bb, r, p, x, y, z) {
+    if (this.interior(R, x, y, z, bb) && r.nextFloat() < p && this.sturdyAround(R, bb, x, y, z, 2)) this.set(R, S.state('cobweb'), x, y, z, bb);
+  }
+  // placeSupport: two fence posts and a beam (sometimes only its ends), now and then a torch on it
+  support(R, bb, x0, y0, z, y1, x1, r) {
+    for (let x = x0; x <= x1; x++) if (S.isAir(this.get(R, x, y1 + 1, z, bb))) return;
+    const P = this.wood(1), F = this.wood(2), A = S.state('cave_air');
+    this.fill(R, bb, x0, y0, z, x0, y1 - 1, z, S.set(F, 'west', 'true'), A, false);
+    this.fill(R, bb, x1, y0, z, x1, y1 - 1, z, S.set(F, 'east', 'true'), A, false);
+    if (r.nextInt(4) === 0) { this.fill(R, bb, x0, y1, z, x0, y1, z, P, A, false); this.fill(R, bb, x1, y1, z, x1, y1, z, P, A, false); }
+    else {
+      this.fill(R, bb, x0, y1, z, x1, y1, z, P, A, false);
+      if (r.nextFloat() < 0.05) this.set(R, S.state('wall_torch', { facing: 'south' }), x0 + 1, y1, z - 1, bb);
+      if (r.nextFloat() < 0.05) this.set(R, S.state('wall_torch', { facing: 'north' }), x0 + 1, y1, z + 1, bb);
+    }
+  }
+  // the corridor's createChest: a chest minecart on a rail, on a floor
+  cart(C, R, bb, r, x, y, z) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    if (!inside(bb, X, Y, Z) || !S.isAir(R.get(X, Y, Z)) || S.isAir(R.get(X, Y - 1, Z))) return;
+    this.set(R, S.state('rail', { shape: r.nextBoolean() ? 'north_south' : 'east_west' }), x, y, z, bb);
+    const seed = r.nextLong();
+    if (C.blockEntity) C.blockEntity(X, Y, Z, { type: 'mob', mob: 'minecart', opts: { kind: 'chest_minecart', loot: 'abandoned_mineshaft', seed: String(seed) } });
+  }
+  // fillPillarDownOrChainUp: a log down to firm ground within 20, or a fence and chain up to a ceiling within 50
+  pillar(R, st, x, y, z, bb) {
+    const X = this.wx(x, z), Y0 = this.wy(y), Z = this.wz(x, z);
+    if (!inside(bb, X, Y0, Z)) return;
+    let down = true, up = true;
+    for (let j = 1; down || up; j++) {
+      if (down) {
+        const s = R.get(X, Y0 - j, Z), open = openForStructure(s) && S.nameOf(s) !== 'lava';
+        if (!open && S.sturdy(s, 1)) { for (let y = Y0 - j + 1; y < Y0; y++) R.set(X, y, Z, st); return; }
+        down = j <= 20 && open && Y0 - j > -63;
+      }
+      if (up) {
+        const s = R.get(X, Y0 + j, Z), open = openForStructure(s);
+        if (!open && S.center(s, false) && !falling(s)) {
+          R.set(X, Y0 + 1, Z, this.wood(2));
+          for (let y = Y0 + 2; y < Y0 + j; y++) R.set(X, y, Z, S.state('iron_chain'));
+          return;
+        }
+        up = j <= 50 && open && Y0 + j < 319;
+      }
+    }
+  }
+  doubleSupport(R, bb, x, y, z) {
+    const W = this.wood(0), P = S.blockOf[this.wood(1)];
+    if (S.blockOf[this.get(R, x, y, z, bb)] === P) this.pillar(R, W, x, y, z, bb);
+    if (S.blockOf[this.get(R, x + 2, y, z, bb)] === P) this.pillar(R, W, x + 2, y, z, bb);
+  }
+  post(C, R, r, bb) {
+    if (this.invalid(R, bb)) return;
+    const A = S.state('cave_air'), len = this.sections * 5 - 1, P = this.wood(1), WEB = S.state('cobweb');
+    let spawned = false;
+    this.fill(R, bb, 0, 0, 0, 2, 1, len, A, A, false);
+    // generateMaybeBox: the top layer mostly open, a spider corridor's lower two full of webs
+    for (let x = 0; x <= 2; x++) for (let z = 0; z <= len; z++) if (r.nextFloat() <= 0.8) this.set(R, A, x, 2, z, bb);
+    if (this.spider) for (let y = 0; y <= 1; y++) for (let x = 0; x <= 2; x++) for (let z = 0; z <= len; z++) if (r.nextFloat() <= 0.6 && this.interior(R, x, y, z, bb)) this.set(R, WEB, x, y, z, bb);
+    for (let i = 0; i < this.sections; i++) {
+      const z = 2 + i * 5;
+      this.support(R, bb, 0, 0, z, 2, 2, r);
+      for (const [p, dz] of [[0.1, -1], [0.1, 1], [0.05, -2], [0.05, 2]]) { this.cobweb(R, bb, r, p, 0, 2, z + dz); this.cobweb(R, bb, r, p, 2, 2, z + dz); }
+      if (r.nextInt(100) === 0) this.cart(C, R, bb, r, 2, 0, z - 1);
+      if (r.nextInt(100) === 0) this.cart(C, R, bb, r, 0, 0, z + 1);
+      // the cave spider spawner (Java remembers placing it across chunks; here each chunk decides as if it were the first)
+      if (this.spider && !spawned) {
+        const sz = z - 1 + r.nextInt(3), X = this.wx(1, sz), Y = this.wy(0), Z = this.wz(1, sz);
+        if (inside(bb, X, Y, Z) && this.interior(R, 1, 0, sz, bb)) {
+          spawned = true;
+          R.set(X, Y, Z, S.state('spawner'));
+          if (C.blockEntity) C.blockEntity(X, Y, Z, { type: 'spawner', mob: 'cave_spider' });
+        }
+      }
+    }
+    for (let x = 0; x <= 2; x++) for (let z = 0; z <= len; z++) this.planks(R, bb, P, x, -1, z);
+    this.doubleSupport(R, bb, 0, -1, 2);
+    if (this.sections > 1) this.doubleSupport(R, bb, 0, -1, len - 2);
+    if (this.rails) {
+      const rail = S.state('rail', { shape: 'north_south' });
+      for (let z = 0; z <= len; z++) {
+        const s = this.get(R, 1, -1, z, bb);
+        if (!S.isAir(s) && S.solidRender(s) && r.nextFloat() < (this.interior(R, 1, 0, z, bb) ? 0.7 : 0.9)) this.set(R, rail, 1, 0, z, bb);
+      }
+    }
+  }
+}
+class MineCrossing extends MinePiece {
+  constructor(depth, box, dir, type) { super(box, null, depth, type); this.way = dir; this.two = box[4] - box[1] + 1 > 3; }
+  static find(L, r, x, y, z, dir) {
+    const h = r.nextInt(4) === 0 ? 6 : 2;
+    const b = mv(dir === 'south' ? [-1, 0, 0, 3, h, 4] : dir === 'west' ? [-4, 0, -1, 0, h, 3] : dir === 'east' ? [0, 0, -1, 4, h, 3] : [-1, 0, -4, 3, h, 0], x, y, z);
+    return L.hit(b) ? null : b;
+  }
+  addChildren(start, L, r) {
+    const b = this.box, d = this.depth, go = (x, y, z, dir) => msAdd(start, L, r, x, y, z, dir, d);
+    const N = () => go(b[0] + 1, b[1], b[2] - 1, 'north'), S_ = () => go(b[0] + 1, b[1], b[5] + 1, 'south');
+    const Wt = () => go(b[0] - 1, b[1], b[2] + 1, 'west'), E = () => go(b[3] + 1, b[1], b[2] + 1, 'east');
+    if (this.way === 'south') { S_(); Wt(); E(); } else if (this.way === 'west') { N(); S_(); Wt(); } else if (this.way === 'east') { N(); S_(); E(); } else { N(); Wt(); E(); }
+    if (this.two) {
+      // (Random.nextBoolean)
+      if (r.next(1) !== 0) go(b[0] + 1, b[1] + 4, b[2] - 1, 'north');
+      if (r.next(1) !== 0) go(b[0] - 1, b[1] + 4, b[2] + 1, 'west');
+      if (r.next(1) !== 0) go(b[3] + 1, b[1] + 4, b[2] + 1, 'east');
+      if (r.next(1) !== 0) go(b[0] + 1, b[1] + 4, b[5] + 1, 'south');
+    }
+  }
+  post(C, R, r, bb) {
+    if (this.invalid(R, bb)) return;
+    const b = this.box, A = S.state('cave_air'), P = this.wood(1), f = (x0, y0, z0, x1, y1, z1) => this.fill(R, bb, x0, y0, z0, x1, y1, z1, A, A, false);
+    if (this.two) {
+      f(b[0] + 1, b[1], b[2], b[3] - 1, b[1] + 2, b[5]); f(b[0], b[1], b[2] + 1, b[3], b[1] + 2, b[5] - 1);
+      f(b[0] + 1, b[4] - 2, b[2], b[3] - 1, b[4], b[5]); f(b[0], b[4] - 2, b[2] + 1, b[3], b[4], b[5] - 1);
+      f(b[0] + 1, b[1] + 3, b[2] + 1, b[3] - 1, b[1] + 3, b[5] - 1);
+    } else { f(b[0] + 1, b[1], b[2], b[3] - 1, b[4], b[5]); f(b[0], b[1], b[2] + 1, b[3], b[4], b[5] - 1); }
+    // placeSupportPillar at the four inner corners, where something hangs over them
+    for (const [x, z] of [[b[0] + 1, b[2] + 1], [b[0] + 1, b[5] - 1], [b[3] - 1, b[2] + 1], [b[3] - 1, b[5] - 1]])
+      if (!S.isAir(this.get(R, x, b[4] + 1, z, bb))) this.fill(R, bb, x, b[1], z, x, b[4], z, P, A, false);
+    for (let x = b[0]; x <= b[3]; x++) for (let z = b[2]; z <= b[5]; z++) this.planks(R, bb, P, x, b[1] - 1, z);
+  }
+}
+class MineStairs extends MinePiece {
+  constructor(depth, box, dir, type) { super(box, dir, depth, type); }
+  static find(L, x, y, z, dir) {
+    const b = mv(dir === 'south' ? [0, -5, 0, 2, 2, 8] : dir === 'west' ? [-8, -5, 0, 0, 2, 2] : dir === 'east' ? [0, -5, 0, 8, 2, 2] : [0, -5, -8, 2, 2, 0], x, y, z);
+    return L.hit(b) ? null : b;
+  }
+  addChildren(start, L, r) {
+    const b = this.box, d = this.depth, o = this.dir;
+    if (o === 'south') msAdd(start, L, r, b[0], b[1], b[5] + 1, 'south', d);
+    else if (o === 'west') msAdd(start, L, r, b[0] - 1, b[1], b[2], 'west', d);
+    else if (o === 'east') msAdd(start, L, r, b[3] + 1, b[1], b[2], 'east', d);
+    else msAdd(start, L, r, b[0], b[1], b[2] - 1, 'north', d);
+  }
+  post(C, R, r, bb) {
+    if (this.invalid(R, bb)) return;
+    const A = S.state('cave_air');
+    this.fill(R, bb, 0, 5, 0, 2, 7, 1, A, A, false);
+    this.fill(R, bb, 0, 0, 7, 2, 2, 8, A, A, false);
+    for (let i = 0; i < 5; i++) this.fill(R, bb, 0, 5 - i - (i < 4 ? 1 : 0), 2 + i, 2, 7 - i, 2 + i, A, A, false);
+  }
+}
+const legacyDouble = r => (r.next(26) * 134217728 + r.next(27)) / 9007199254740992;
+// MineshaftStructure: the rooms and tunnels laid out from the start chunk, then sunk below the sea (a mesa one raised
+// toward the surface); ctx.base(x, z): the terrain's height there
+function mineshaftLayout(seed, cx, cz, type, ctx) {
+  const r = startRand(seed, cx, cz);
+  legacyDouble(r);
+  const room = new MineRoom(r, cx * 16 + 2, cz * 16 + 2, type), L = new PieceList();
+  L.add(room);
+  room.addChildren(room, L, r);
+  const b = L.box(), sea = 63;
+  let dy;
+  if (type === 'mesa') {
+    const mx = b[0] + ((b[3] - b[0] + 1) >> 1), my = b[1] + ((b[4] - b[1] + 1) >> 1), mz = b[2] + ((b[5] - b[2] + 1) >> 1);
+    const h = ctx.base(mx, mz), k = h <= sea ? sea : r.nextInt(h - sea + 1) + sea;
+    dy = k - my;
+  } else {
+    const lim = sea - 10;
+    let j = b[4] - b[1] + 1 - 64 + 1;
+    if (j < lim) j += r.nextInt(lim - j);
+    dy = j - b[4];
+  }
+  for (const p of L.list) p.move(0, dy, 0);
+  return { pieces: L.list, pos: [cx * 16 + 8, 50 + dy, cz * 16] };
+}
+// the mineshafts set: one chunk in 250 (legacy_type_3), the kind drawn by weight and tried until one's biome fits
+const mineshaftChance = (seed, cx, cz) => legacyDouble(startRand(seed, cx, cz)) < Math.fround(0.004);
+function mineshaftStart(seed, cx, cz, ctx) {
+  if (!mineshaftChance(seed, cx, cz)) return null;
+  msBiomes();
+  const sel = startRand(seed, cx, cz), kinds = ['normal', 'mesa'];
+  let total = 2;
+  while (kinds.length) {
+    const i = sel.nextInt(total), type = kinds[i], s = mineshaftLayout(seed, cx, cz, type, ctx), b = ctx.qb(s.pos[0] >> 2, s.pos[1] >> 2, s.pos[2] >> 2);
+    if (type === 'mesa' ? MS_MESA.has(b) : !MS_MESA.has(b) && !MS_BLOCKING.has(b)) { s.type = type; return s; }
+    kinds.splice(i, 1); total--;
+  }
+  return null;
+}
+
+/* ---------------- strongholds (StrongholdPieces) ---------------- */
+const SH_DOORS = ['opening', 'opening', 'wood', 'grates', 'iron'];
+// SmoothStoneSelector: the walls cracked, mossy or plain stone bricks, what is inside them cave air
+const SMOOTH = (r, x, y, z, edge) => { if (!edge) return S.state('cave_air'); const f = r.nextFloat(); return S.state(f < 0.2 ? 'cracked_stone_bricks' : f < 0.5 ? 'mossy_stone_bricks' : 'stone_bricks'); };
+// BoundingBox.orientBox (inverted bounds put right, as BoundingBox does)
+function orientBox(x, y, z, ox, oy, oz, w, h, d, dir) {
+  const b = dir === 'north' ? [x + ox, y + oy, z - d + 1 + oz, x + w - 1 + ox, y + h - 1 + oy, z + oz]
+    : dir === 'west' ? [x - d + 1 + oz, y + oy, z + ox, x + oz, y + h - 1 + oy, z + w - 1 + ox]
+    : dir === 'east' ? [x + oz, y + oy, z + ox, x + d - 1 + oz, y + h - 1 + oy, z + w - 1 + ox]
+    : [x + ox, y + oy, z + oz, x + w - 1 + ox, y + h - 1 + oy, z + d - 1 + oz];
+  for (let i = 0; i < 3; i++) if (b[i] > b[i + 3]) { const t = b[i]; b[i] = b[i + 3]; b[i + 3] = t; }
+  return b;
+}
+const rbool = r => r.next(1) !== 0;
+class ShPiece extends Piece {
+  constructor(box, dir, depth) { super(box, dir); this.depth = depth; this.door = 'opening'; }
+  // generateBox with the stone selector (skipAir: only over what isn't air, as Java's alwaysReplace)
+  stone(R, bb, r, x0, y0, z0, x1, y1, z1, skipAir) { this.fillSel(R, bb, x0, y0, z0, x1, y1, z1, skipAir, r, SMOOTH); }
+  area(R, bb, x0, y0, z0, x1, y1, z1, st) { this.fill(R, bb, x0, y0, z0, x1, y1, z1, st, st, false); }
+  put(R, bb, st, x, y, z) { this.set(R, st, x, y, z, bb); }
+  // generateSmallDoor
+  smallDoor(R, bb, type, x, y, z) {
+    const A = S.state('cave_air'), SB = S.state('stone_bricks'), put = (st, a, b, c) => this.set(R, st, a, b, c, bb);
+    if (type === 'wood' || type === 'iron') {
+      for (const [a, b] of [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2], [2, 1], [2, 0]]) put(SB, x + a, y + b, z);
+      const door = S.state(type === 'wood' ? 'oak_door' : 'iron_door');
+      put(door, x + 1, y, z); put(S.set(door, 'half', 'upper'), x + 1, y + 1, z);
+      if (type === 'iron') { put(S.state('stone_button', { facing: 'north' }), x + 2, y + 1, z + 1); put(S.state('stone_button', { facing: 'south' }), x + 2, y + 1, z - 1); }
+    } else if (type === 'grates') {
+      put(A, x + 1, y, z); put(A, x + 1, y + 1, z);
+      const w = S.state('iron_bars', { west: 'true' }), e = S.state('iron_bars', { east: 'true' }), ew = S.state('iron_bars', { east: 'true', west: 'true' });
+      put(w, x, y, z); put(w, x, y + 1, z); put(ew, x, y + 2, z); put(ew, x + 1, y + 2, z); put(ew, x + 2, y + 2, z); put(e, x + 2, y + 1, z); put(e, x + 2, y, z);
+    } else this.area(R, bb, x, y, z, x + 2, y + 2, z, A);
+  }
+  // the doors on to the next pieces: ahead, to the left, to the right
+  fwd(st, L, r, ox, oy) {
+    const b = this.box, d = this.dir;
+    return d === 'north' ? shAdd(st, L, r, b[0] + ox, b[1] + oy, b[2] - 1, d, this.depth) : d === 'south' ? shAdd(st, L, r, b[0] + ox, b[1] + oy, b[5] + 1, d, this.depth)
+      : d === 'west' ? shAdd(st, L, r, b[0] - 1, b[1] + oy, b[2] + ox, d, this.depth) : shAdd(st, L, r, b[3] + 1, b[1] + oy, b[2] + ox, d, this.depth);
+  }
+  left(st, L, r, oy, oz) {
+    const b = this.box;
+    return this.dir === 'north' || this.dir === 'south' ? shAdd(st, L, r, b[0] - 1, b[1] + oy, b[2] + oz, 'west', this.depth) : shAdd(st, L, r, b[0] + oz, b[1] + oy, b[2] - 1, 'north', this.depth);
+  }
+  right(st, L, r, oy, oz) {
+    const b = this.box;
+    return this.dir === 'north' || this.dir === 'south' ? shAdd(st, L, r, b[3] + 1, b[1] + oy, b[2] + oz, 'east', this.depth) : shAdd(st, L, r, b[0] + oz, b[1] + oy, b[5] + 1, 'south', this.depth);
+  }
+  addChildren() {}
+}
+const torch = f => S.state('wall_torch', { facing: f });
+class ShStraight extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; this.l = r.nextInt(2) === 0; this.rt = r.nextInt(2) === 0; }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -1, -1, 0, 5, 5, 7, dir); return b[1] > 10 && !L.hit(b) ? new ShStraight(depth, r, b, dir) : null; }
+  addChildren(st, L, r) { this.fwd(st, L, r, 1, 1); if (this.l) this.left(st, L, r, 1, 2); if (this.rt) this.right(st, L, r, 1, 2); }
+  post(C, R, r, bb) {
+    const A = S.state('cave_air');
+    this.stone(R, bb, r, 0, 0, 0, 4, 4, 6, true);
+    this.smallDoor(R, bb, this.door, 1, 1, 0); this.smallDoor(R, bb, 'opening', 1, 1, 6);
+    for (const [x, z, f] of [[1, 1, 'east'], [3, 1, 'west'], [1, 5, 'east'], [3, 5, 'west']]) if (r.nextFloat() < 0.1) this.put(R, bb, torch(f), x, 2, z);
+    if (this.l) this.area(R, bb, 0, 1, 2, 0, 3, 4, A);
+    if (this.rt) this.area(R, bb, 4, 1, 2, 4, 3, 4, A);
+  }
+}
+class ShPrisonHall extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -1, -1, 0, 9, 5, 11, dir); return b[1] > 10 && !L.hit(b) ? new ShPrisonHall(depth, r, b, dir) : null; }
+  addChildren(st, L, r) { this.fwd(st, L, r, 1, 1); }
+  post(C, R, r, bb) {
+    this.stone(R, bb, r, 0, 0, 0, 8, 4, 10, true);
+    this.smallDoor(R, bb, this.door, 1, 1, 0);
+    this.area(R, bb, 1, 1, 10, 3, 3, 10, S.state('cave_air'));
+    for (const z of [1, 3, 7, 9]) this.stone(R, bb, r, 4, 1, z, 4, 3, z, false);
+    const bars = p => S.state('iron_bars', p), ns = bars({ north: 'true', south: 'true' }), nse = bars({ north: 'true', south: 'true', east: 'true' }), we = bars({ west: 'true', east: 'true' });
+    for (let i = 1; i <= 3; i++) { this.put(R, bb, ns, 4, i, 4); this.put(R, bb, nse, 4, i, 5); this.put(R, bb, ns, 4, i, 6); this.put(R, bb, we, 5, i, 5); this.put(R, bb, we, 6, i, 5); this.put(R, bb, we, 7, i, 5); }
+    this.put(R, bb, ns, 4, 3, 2); this.put(R, bb, ns, 4, 3, 8);
+    const door = S.state('iron_door', { facing: 'west' }), up = S.set(door, 'half', 'upper');
+    this.put(R, bb, door, 4, 1, 2); this.put(R, bb, up, 4, 2, 2); this.put(R, bb, door, 4, 1, 8); this.put(R, bb, up, 4, 2, 8);
+  }
+}
+class ShTurn extends ShPiece {
+  constructor(depth, r, box, dir, right) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; this.isRight = right; }
+  static make(L, r, x, y, z, dir, depth, right) { const b = orientBox(x, y, z, -1, -1, 0, 5, 5, 5, dir); return b[1] > 10 && !L.hit(b) ? new ShTurn(depth, r, b, dir, right) : null; }
+  // (north and east keep left to the left; south and west turn it round)
+  addChildren(st, L, r) { const ne = this.dir === 'north' || this.dir === 'east'; if (ne !== this.isRight) this.left(st, L, r, 1, 1); else this.right(st, L, r, 1, 1); }
+  post(C, R, r, bb) {
+    this.stone(R, bb, r, 0, 0, 0, 4, 4, 4, true);
+    this.smallDoor(R, bb, this.door, 1, 1, 0);
+    const ne = this.dir === 'north' || this.dir === 'east', x = ne !== this.isRight ? 0 : 4;
+    this.area(R, bb, x, 1, 1, x, 3, 3, S.state('cave_air'));
+  }
+}
+class ShRoomCrossing extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; this.kind = r.nextInt(5); }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -4, -1, 0, 11, 7, 11, dir); return b[1] > 10 && !L.hit(b) ? new ShRoomCrossing(depth, r, b, dir) : null; }
+  addChildren(st, L, r) { this.fwd(st, L, r, 4, 1); this.left(st, L, r, 1, 4); this.right(st, L, r, 1, 4); }
+  post(C, R, r, bb) {
+    const A = S.state('cave_air'), SB = S.state('stone_bricks'), put = (st, x, y, z) => this.put(R, bb, st, x, y, z);
+    this.stone(R, bb, r, 0, 0, 0, 10, 6, 10, true);
+    this.smallDoor(R, bb, this.door, 4, 1, 0);
+    this.area(R, bb, 4, 1, 10, 6, 3, 10, A); this.area(R, bb, 0, 1, 4, 0, 3, 6, A); this.area(R, bb, 10, 1, 4, 10, 3, 6, A);
+    if (this.kind === 0) {
+      put(SB, 5, 1, 5); put(SB, 5, 2, 5); put(SB, 5, 3, 5);
+      put(torch('west'), 4, 3, 5); put(torch('east'), 6, 3, 5); put(torch('south'), 5, 3, 4); put(torch('north'), 5, 3, 6);
+      const sl = S.state('smooth_stone_slab');
+      for (const [x, z] of [[4, 4], [4, 5], [4, 6], [6, 4], [6, 5], [6, 6], [5, 4], [5, 6]]) put(sl, x, 1, z);
+    } else if (this.kind === 1) {
+      for (let i = 0; i < 5; i++) { put(SB, 3, 1, 3 + i); put(SB, 7, 1, 3 + i); put(SB, 3 + i, 1, 3); put(SB, 3 + i, 1, 7); }
+      put(SB, 5, 1, 5); put(SB, 5, 2, 5); put(SB, 5, 3, 5); put(S.state('water'), 5, 4, 5);
+    } else if (this.kind === 2) {
+      const CO = S.state('cobblestone'), PL = S.state('oak_planks');
+      for (let j = 1; j <= 9; j++) { put(CO, 1, 3, j); put(CO, 9, 3, j); }
+      for (let k = 1; k <= 9; k++) { put(CO, k, 3, 1); put(CO, k, 3, 9); }
+      for (const [x, y, z] of [[5, 1, 4], [5, 1, 6], [5, 3, 4], [5, 3, 6], [4, 1, 5], [6, 1, 5], [4, 3, 5], [6, 3, 5]]) put(CO, x, y, z);
+      for (let l = 1; l <= 3; l++) { put(CO, 4, l, 4); put(CO, 6, l, 4); put(CO, 4, l, 6); put(CO, 6, l, 6); }
+      put(S.state('wall_torch'), 5, 3, 5);
+      for (let i = 2; i <= 8; i++) {
+        put(PL, 2, 3, i); put(PL, 3, 3, i);
+        if (i <= 3 || i >= 7) { put(PL, 4, 3, i); put(PL, 5, 3, i); put(PL, 6, 3, i); }
+        put(PL, 7, 3, i); put(PL, 8, 3, i);
+      }
+      const lad = S.state('ladder', { facing: 'west' });
+      put(lad, 9, 1, 3); put(lad, 9, 2, 3); put(lad, 9, 3, 3);
+      this.chest(C, R, bb, r, 3, 4, 8, 'chests/stronghold_crossing');
+    }
+  }
+}
+class ShStraightStairsDown extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -1, -7, 0, 5, 11, 8, dir); return b[1] > 10 && !L.hit(b) ? new ShStraightStairsDown(depth, r, b, dir) : null; }
+  addChildren(st, L, r) { this.fwd(st, L, r, 1, 1); }
+  post(C, R, r, bb) {
+    this.stone(R, bb, r, 0, 0, 0, 4, 10, 7, true);
+    this.smallDoor(R, bb, this.door, 1, 7, 0); this.smallDoor(R, bb, 'opening', 1, 1, 7);
+    const st = S.state('cobblestone_stairs', { facing: 'south' }), SB = S.state('stone_bricks');
+    for (let i = 0; i < 6; i++) {
+      for (let x = 1; x <= 3; x++) this.put(R, bb, st, x, 6 - i, 1 + i);
+      if (i < 5) for (let x = 1; x <= 3; x++) this.put(R, bb, SB, x, 5 - i, 1 + i);
+    }
+  }
+}
+// StairsDown: the spiral stairs (the stronghold's first piece too: then it calls for a five-way crossing next)
+class ShStairsDown extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); if (r) this.door = SH_DOORS[r.nextInt(5)]; }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -1, -7, 0, 5, 11, 5, dir); return b[1] > 10 && !L.hit(b) ? new ShStairsDown(depth, r, b, dir) : null; }
+  addChildren(st, L, r) { if (this.source) st.sh.imposed = 'five'; this.fwd(st, L, r, 1, 1); }
+  post(C, R, r, bb) {
+    this.stone(R, bb, r, 0, 0, 0, 4, 10, 4, true);
+    this.smallDoor(R, bb, this.door, 1, 7, 0); this.smallDoor(R, bb, 'opening', 1, 1, 4);
+    const SB = S.state('stone_bricks'), SL = S.state('smooth_stone_slab');
+    for (const [st, x, y, z] of [[SB, 2, 6, 1], [SB, 1, 5, 1], [SL, 1, 6, 1], [SB, 1, 5, 2], [SB, 1, 4, 3], [SL, 1, 5, 3], [SB, 2, 4, 3], [SB, 3, 3, 3], [SL, 3, 4, 3],
+      [SB, 3, 3, 2], [SB, 3, 2, 1], [SL, 3, 3, 1], [SB, 2, 2, 1], [SB, 1, 1, 1], [SL, 1, 2, 1], [SB, 1, 1, 2], [SL, 1, 1, 3]]) this.put(R, bb, st, x, y, z);
+  }
+}
+class ShFiveCrossing extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; this.ll = rbool(r); this.lh = rbool(r); this.rl = rbool(r); this.rh = r.nextInt(3) > 0; }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -4, -3, 0, 10, 9, 11, dir); return b[1] > 10 && !L.hit(b) ? new ShFiveCrossing(depth, r, b, dir) : null; }
+  addChildren(st, L, r) {
+    let i = 3, j = 5;
+    if (this.dir === 'west' || this.dir === 'north') { i = 8 - i; j = 8 - j; }
+    this.fwd(st, L, r, 5, 1);
+    if (this.ll) this.left(st, L, r, i, 1);
+    if (this.lh) this.left(st, L, r, j, 7);
+    if (this.rl) this.right(st, L, r, i, 1);
+    if (this.rh) this.right(st, L, r, j, 7);
+  }
+  post(C, R, r, bb) {
+    const A = S.state('cave_air'), SL = S.state('smooth_stone_slab');
+    this.stone(R, bb, r, 0, 0, 0, 9, 8, 10, true);
+    this.smallDoor(R, bb, this.door, 4, 3, 0);
+    if (this.ll) this.area(R, bb, 0, 3, 1, 0, 5, 3, A);
+    if (this.rl) this.area(R, bb, 9, 3, 1, 9, 5, 3, A);
+    if (this.lh) this.area(R, bb, 0, 5, 7, 0, 7, 9, A);
+    if (this.rh) this.area(R, bb, 9, 5, 7, 9, 7, 9, A);
+    this.area(R, bb, 5, 1, 10, 7, 3, 10, A);
+    this.stone(R, bb, r, 1, 2, 1, 8, 2, 6, false); this.stone(R, bb, r, 4, 1, 5, 4, 4, 9, false); this.stone(R, bb, r, 8, 1, 5, 8, 4, 9, false);
+    this.stone(R, bb, r, 1, 4, 7, 3, 4, 9, false); this.stone(R, bb, r, 1, 3, 5, 3, 3, 6, false);
+    this.area(R, bb, 1, 3, 4, 3, 3, 4, SL); this.area(R, bb, 1, 4, 6, 3, 4, 6, SL);
+    this.stone(R, bb, r, 5, 1, 7, 7, 1, 8, false);
+    this.area(R, bb, 5, 1, 9, 7, 1, 9, SL); this.area(R, bb, 5, 2, 7, 7, 2, 7, SL); this.area(R, bb, 4, 5, 7, 4, 5, 9, SL); this.area(R, bb, 8, 5, 7, 8, 5, 9, SL);
+    this.area(R, bb, 5, 5, 7, 7, 5, 9, S.state('smooth_stone_slab', { type: 'double' }));
+    this.put(R, bb, torch('south'), 6, 5, 6);
+  }
+}
+class ShChestCorridor extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -1, -1, 0, 5, 5, 7, dir); return b[1] > 10 && !L.hit(b) ? new ShChestCorridor(depth, r, b, dir) : null; }
+  addChildren(st, L, r) { this.fwd(st, L, r, 1, 1); }
+  post(C, R, r, bb) {
+    this.stone(R, bb, r, 0, 0, 0, 4, 4, 6, true);
+    this.smallDoor(R, bb, this.door, 1, 1, 0); this.smallDoor(R, bb, 'opening', 1, 1, 6);
+    this.area(R, bb, 3, 1, 2, 3, 1, 4, S.state('stone_bricks'));
+    const sl = S.state('stone_brick_slab');
+    this.put(R, bb, sl, 3, 1, 1); this.put(R, bb, sl, 3, 1, 5); this.put(R, bb, sl, 3, 2, 2); this.put(R, bb, sl, 3, 2, 4);
+    for (let i = 2; i <= 4; i++) this.put(R, bb, sl, 2, 1, i);
+    if (inside(bb, this.wx(3, 3), this.wy(2), this.wz(3, 3))) this.chest(C, R, bb, r, 3, 2, 3, 'chests/stronghold_corridor');
+  }
+}
+class ShLibrary extends ShPiece {
+  constructor(depth, r, box, dir) { super(box, dir, depth); this.door = SH_DOORS[r.nextInt(5)]; this.tall = box[4] - box[1] + 1 > 6; }
+  static make(L, r, x, y, z, dir, depth) {
+    let b = orientBox(x, y, z, -4, -1, 0, 14, 11, 15, dir);
+    if (!(b[1] > 10) || L.hit(b)) { b = orientBox(x, y, z, -4, -1, 0, 14, 6, 15, dir); if (!(b[1] > 10) || L.hit(b)) return null; }
+    return new ShLibrary(depth, r, b, dir);
+  }
+  post(C, R, r, bb) {
+    const PL = S.state('oak_planks'), BK = S.state('bookshelf'), WEB = S.state('cobweb'), box = (a, b, c, d, e, f, st) => this.area(R, bb, a, b, c, d, e, f, st), put = (st, x, y, z) => this.put(R, bb, st, x, y, z);
+    this.stone(R, bb, r, 0, 0, 0, 13, this.tall ? 10 : 5, 14, true);
+    this.smallDoor(R, bb, this.door, 4, 1, 0);
+    // generateMaybeBox: a few cobwebs
+    for (let y = 1; y <= 4; y++) for (let x = 2; x <= 11; x++) for (let z = 1; z <= 13; z++) if (r.nextFloat() <= 0.07) put(WEB, x, y, z);
+    for (let l = 1; l <= 13; l++) {
+      const st = (l - 1) % 4 === 0 ? PL : BK;
+      box(1, 1, l, 1, 4, l, st); box(12, 1, l, 12, 4, l, st);
+      if (st === PL) { put(torch('east'), 2, 3, l); put(torch('west'), 11, 3, l); }
+      if (this.tall) { box(1, 6, l, 1, 9, l, st); box(12, 6, l, 12, 9, l, st); }
+    }
+    for (let k = 3; k < 12; k += 2) { box(3, 1, k, 4, 3, k, BK); box(6, 1, k, 7, 3, k, BK); box(9, 1, k, 10, 3, k, BK); }
+    if (this.tall) {
+      box(1, 5, 1, 3, 5, 13, PL); box(10, 5, 1, 12, 5, 13, PL); box(4, 5, 1, 9, 5, 2, PL); box(4, 5, 12, 9, 5, 13, PL);
+      put(PL, 9, 5, 11); put(PL, 8, 5, 11); put(PL, 9, 5, 10);
+      const fence = (n, s_, e, w) => S.state('oak_fence', { north: String(n), south: String(s_), east: String(e), west: String(w) });
+      const ns = fence(true, true, false, false), ew = fence(false, false, true, true);
+      box(3, 6, 3, 3, 6, 11, ns); box(10, 6, 3, 10, 6, 9, ns); box(4, 6, 2, 9, 6, 2, ew); box(4, 6, 12, 7, 6, 12, ew);
+      put(fence(true, false, true, false), 3, 6, 2); put(fence(false, true, true, false), 3, 6, 12); put(fence(true, false, false, true), 10, 6, 2);
+      for (let m = 0; m <= 2; m++) { put(fence(false, true, false, true), 8 + m, 6, 12 - m); if (m !== 2) put(fence(true, false, true, false), 8 + m, 6, 11 - m); }
+      const lad = S.state('ladder', { facing: 'south' });
+      for (let y = 1; y <= 7; y++) put(lad, 10, y, 13);
+      const fe = fence(false, false, true, false), fw = fence(false, false, false, true), all = fence(true, true, true, true);
+      put(fe, 6, 9, 7); put(fw, 7, 9, 7); put(fe, 6, 8, 7); put(fw, 7, 8, 7); put(all, 6, 7, 7); put(all, 7, 7, 7); put(fe, 5, 7, 7); put(fw, 8, 7, 7);
+      put(fence(true, false, true, false), 6, 7, 6); put(fence(false, true, true, false), 6, 7, 8); put(fence(true, false, false, true), 7, 7, 6); put(fence(false, true, false, true), 7, 7, 8);
+      const T = S.state('torch');
+      for (const [x, z] of [[5, 7], [8, 7], [6, 6], [6, 8], [7, 6], [7, 8]]) put(T, x, 8, z);
+    }
+    this.chest(C, R, bb, r, 3, 3, 5, 'chests/stronghold_library');
+    if (this.tall) { put(S.state('cave_air'), 12, 9, 1); this.chest(C, R, bb, r, 12, 8, 1, 'chests/stronghold_library'); }
+  }
+}
+class ShPortalRoom extends ShPiece {
+  constructor(depth, box, dir) { super(box, dir, depth); }
+  static make(L, r, x, y, z, dir, depth) { const b = orientBox(x, y, z, -4, -1, 0, 11, 8, 16, dir); return b[1] > 10 && !L.hit(b) ? new ShPortalRoom(depth, b, dir) : null; }
+  addChildren(st) { st.sh.portal = this; }
+  // the middle of the portal, and the height of its frames
+  portal() { return [this.wx(5, 10), this.wy(3), this.wz(5, 10)]; }
+  post(C, R, r, bb) {
+    const LAVA = S.state('lava'), put = (st, x, y, z) => this.put(R, bb, st, x, y, z), sel = (a, b, c, d, e, f) => this.stone(R, bb, r, a, b, c, d, e, f, false);
+    sel(0, 0, 0, 10, 7, 15);
+    this.smallDoor(R, bb, 'grates', 4, 1, 0);
+    sel(1, 6, 1, 1, 6, 14); sel(9, 6, 1, 9, 6, 14); sel(2, 6, 1, 8, 6, 2); sel(2, 6, 14, 8, 6, 14); sel(1, 1, 1, 2, 1, 4); sel(8, 1, 1, 9, 1, 4);
+    this.area(R, bb, 1, 1, 1, 1, 1, 3, LAVA); this.area(R, bb, 9, 1, 1, 9, 1, 3, LAVA);
+    sel(3, 1, 8, 7, 1, 12);
+    this.area(R, bb, 4, 1, 9, 6, 1, 11, LAVA);
+    const ns = S.state('iron_bars', { north: 'true', south: 'true' }), we = S.state('iron_bars', { west: 'true', east: 'true' });
+    for (let j = 3; j < 14; j += 2) { this.area(R, bb, 0, 3, j, 0, 4, j, ns); this.area(R, bb, 10, 3, j, 10, 4, j, ns); }
+    for (let i = 2; i < 9; i += 2) this.area(R, bb, i, 3, 15, i, 4, 15, we);
+    sel(4, 1, 5, 6, 1, 7); sel(4, 2, 6, 6, 2, 7); sel(4, 3, 7, 6, 3, 7);
+    const stairs = S.state('stone_brick_stairs', { facing: 'north' });
+    for (let k = 4; k <= 6; k++) { put(stairs, k, 1, 4); put(stairs, k, 2, 5); put(stairs, k, 3, 6); }
+    // the frames, each with an eye one time in ten; all twelve open the portal
+    const eyes = [];
+    let all = true;
+    for (let i = 0; i < 12; i++) { eyes.push(r.nextFloat() > 0.9); all = all && eyes[i]; }
+    const frame = (f, e) => S.state('end_portal_frame', { facing: f, eye: String(e) });
+    const at = [['north', 4, 8], ['north', 5, 8], ['north', 6, 8], ['south', 4, 12], ['south', 5, 12], ['south', 6, 12], ['east', 3, 9], ['east', 3, 10], ['east', 3, 11], ['west', 7, 9], ['west', 7, 10], ['west', 7, 11]];
+    at.forEach(([f, x, z], i) => put(frame(f, eyes[i]), x, 3, z));
+    if (all) { const P = S.state('end_portal'); for (let z = 9; z <= 11; z++) for (let x = 4; x <= 6; x++) put(P, x, 3, z); }
+    const X = this.wx(5, 6), Y = this.wy(3), Z = this.wz(5, 6);
+    if (inside(bb, X, Y, Z)) { R.set(X, Y, Z, S.state('spawner')); if (C.blockEntity) C.blockEntity(X, Y, Z, { type: 'spawner', mob: 'silverfish' }); }
+  }
+}
+// FillerCorridor: a short passage where a piece ran into another at its own height
+class ShFiller extends ShPiece {
+  constructor(depth, box, dir) { super(box, dir, depth); this.steps = dir === 'north' || dir === 'south' ? box[5] - box[2] + 1 : box[3] - box[0] + 1; }
+  static find(L, x, y, z, dir) {
+    const b = orientBox(x, y, z, -1, -1, 0, 5, 5, 4, dir), p = L.hit(b);
+    if (!p || p.box[1] !== b[1]) return null;
+    for (let j = 2; j >= 1; j--) if (!meets(p.box, orientBox(x, y, z, -1, -1, 0, 5, 5, j, dir))) return orientBox(x, y, z, -1, -1, 0, 5, 5, j + 1, dir);
+    return null;
+  }
+  post(C, R, r, bb) {
+    const SB = S.state('stone_bricks'), A = S.state('cave_air');
+    for (let i = 0; i < this.steps; i++) {
+      for (let x = 0; x <= 4; x++) this.put(R, bb, SB, x, 0, i);
+      for (let j = 1; j <= 3; j++) { this.put(R, bb, SB, 0, j, i); for (let x = 1; x <= 3; x++) this.put(R, bb, A, x, j, i); this.put(R, bb, SB, 4, j, i); }
+      for (let x = 0; x <= 4; x++) this.put(R, bb, SB, x, 4, i);
+    }
+  }
+}
+// the pieces in the order of Java's weights: [kind, weight, most of it (0: no limit), maker]
+const SH_KINDS = [['straight', 40, 0, ShStraight.make], ['prison', 5, 5, ShPrisonHall.make], ['left', 20, 0, (L, r, x, y, z, d, n) => ShTurn.make(L, r, x, y, z, d, n, false)],
+  ['right', 20, 0, (L, r, x, y, z, d, n) => ShTurn.make(L, r, x, y, z, d, n, true)], ['room', 10, 6, ShRoomCrossing.make], ['straight_stairs', 5, 5, ShStraightStairsDown.make],
+  ['stairs', 5, 5, ShStairsDown.make], ['five', 5, 4, ShFiveCrossing.make], ['chest', 5, 4, ShChestCorridor.make], ['library', 10, 2, ShLibrary.make], ['portal', 20, 1, ShPortalRoom.make]];
+const SH_MAKE = Object.fromEntries(SH_KINDS.map(k => [k[0], k[3]]));
+const shCan = (w, depth) => (w.max === 0 || w.n < w.max) && (w.kind === 'library' ? depth > 4 : w.kind === 'portal' ? depth > 5 : true);
+// generatePieceFromSmallDoor
+function shFromDoor(st, L, r, x, y, z, dir, depth) {
+  const sh = st.sh;
+  let any = false, total = 0;
+  for (const w of sh.weights) { if (w.max > 0 && w.n < w.max) any = true; total += w.weight; }
+  if (!any) return null;
+  if (sh.imposed) { const k = sh.imposed; sh.imposed = null; const p = SH_MAKE[k](L, r, x, y, z, dir, depth); if (p) return p; }
+  for (let i = 0; i < 5; i++) {
+    let j = r.nextInt(total);
+    for (const w of sh.weights) {
+      j -= w.weight;
+      if (j < 0) {
+        if (!shCan(w, depth) || w === sh.prev) break;
+        const p = SH_MAKE[w.kind](L, r, x, y, z, dir, depth);
+        if (p) { w.n++; sh.prev = w; if (!(w.max === 0 || w.n < w.max)) sh.weights.splice(sh.weights.indexOf(w), 1); return p; }
+      }
+    }
+  }
+  const b = ShFiller.find(L, x, y, z, dir);
+  return b && b[1] > 1 ? new ShFiller(depth, b, dir) : null;
+}
+function shAdd(st, L, r, x, y, z, dir, depth) {
+  if (depth > 50 || Math.abs(x - st.box[0]) > 112 || Math.abs(z - st.box[2]) > 112) return null;
+  const p = shFromDoor(st, L, r, x, y, z, dir, depth + 1);
+  if (p) { L.add(p); st.sh.pending.push(p); }
+  return p;
+}
+// StrongholdStructure: laid out again from a seed one higher until it has its portal room, then sunk below the sea
+function strongholdStart(seed, cx, cz) {
+  for (let i = 0; i < 64; i++) {
+    const r = startRand(BigInt.asIntN(64, seed + BigInt(i)), cx, cz), dir = DIRN[r.nextInt(4)];
+    const start = new ShStairsDown(0, null, Piece.boxOf(cx * 16 + 2, 64, cz * 16 + 2, dir, 5, 11, 5), dir);
+    start.source = true;
+    start.sh = { weights: SH_KINDS.map(([kind, weight, max]) => ({ kind, weight, max, n: 0 })), prev: null, imposed: null, portal: null, pending: [] };
+    const L = new PieceList();
+    L.add(start);
+    start.addChildren(start, L, r);
+    const pend = start.sh.pending;
+    while (pend.length) { const p = pend.splice(r.nextInt(pend.length), 1)[0]; p.addChildren(start, L, r); }
+    const b = L.box(), lim = 63 - 10;
+    let j = b[4] - b[1] + 1 - 64 + 1;
+    if (j < lim) j += r.nextInt(lim - j);
+    for (const p of L.list) p.move(0, j - b[4], 0);
+    if (start.sh.portal) return { pieces: L.list, portal: start.sh.portal };
+  }
+  return null;
+}
+
+/* ---------------- ocean monuments (OceanMonumentPieces) ---------------- */
+// rooms: a 5x5 grid two storeys high with three more on top; [down, up, north, south, west, east] as Direction's 3D order
+const MD = { down: 0, up: 1, north: 2, south: 3, west: 4, east: 5 }, MSTEP = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
+const mIdx = (x, y, z) => y * 25 + z * 5 + x;
+class MRoom { constructor(index) { this.index = index; this.conn = [null, null, null, null, null, null]; this.open = [false, false, false, false, false, false]; this.claimed = false; this.source = false; }
+  link(d, o) { this.conn[d] = o; o.conn[d ^ 1] = this; }
+  special() { return this.index >= 75; }
+  openings() { return this.open.filter(Boolean).length; }
+  // findSource: whether the entrance can be reached through the openings
+  reach() {
+    const seen = new Set(), todo = [this];
+    while (todo.length) {
+      const r = todo.pop();
+      if (seen.has(r)) continue;
+      seen.add(r);
+      if (r.source) return true;
+      for (let d = 0; d < 6; d++) if (r.open[d] && r.conn[d]) todo.push(r.conn[d]);
+    }
+    return false;
+  }
+}
+// MonumentBuilding.generateRoomGraph
+function monumentGraph(r) {
+  const grid = new Array(75).fill(null);
+  for (let x = 0; x < 5; x++) for (let z = 0; z < 4; z++) grid[mIdx(x, 0, z)] = new MRoom(mIdx(x, 0, z));
+  for (let x = 0; x < 5; x++) for (let z = 0; z < 4; z++) grid[mIdx(x, 1, z)] = new MRoom(mIdx(x, 1, z));
+  for (let x = 1; x < 4; x++) for (let z = 0; z < 2; z++) grid[mIdx(x, 2, z)] = new MRoom(mIdx(x, 2, z));
+  const src = grid[mIdx(2, 0, 0)];
+  for (let x = 0; x < 5; x++) for (let z = 0; z < 5; z++) for (let y = 0; y < 3; y++) {
+    const a = grid[mIdx(x, y, z)];
+    if (!a) continue;
+    for (let d = 0; d < 6; d++) {
+      const nx = x + MSTEP[d][0], ny = y + MSTEP[d][1], nz = z + MSTEP[d][2];
+      if (nx < 0 || nx >= 5 || nz < 0 || nz >= 5 || ny < 0 || ny >= 3) continue;
+      const b = grid[mIdx(nx, ny, nz)];
+      if (b) a.link(nz === z ? d : d ^ 1, b);
+    }
+  }
+  const roof = new MRoom(1003), left = new MRoom(1001), right = new MRoom(1002);
+  grid[mIdx(2, 2, 0)].link(MD.up, roof); grid[mIdx(0, 1, 0)].link(MD.south, left); grid[mIdx(4, 1, 0)].link(MD.south, right);
+  roof.claimed = left.claimed = right.claimed = true;
+  src.source = true;
+  const core = grid[mIdx(r.nextInt(4), 0, 2)], E = core.conn[MD.east], N = core.conn[MD.north];
+  for (const q of [core, E, N, E.conn[MD.north], core.conn[MD.up], E.conn[MD.up], N.conn[MD.up], E.conn[MD.north].conn[MD.up]]) q.claimed = true;
+  const list = [];
+  for (const q of grid) if (q) { for (let d = 0; d < 6; d++) q.open[d] = !!q.conn[d]; list.push(q); }
+  for (let d = 0; d < 6; d++) roof.open[d] = !!roof.conn[d];
+  // Util.shuffle
+  for (let i = list.length; i > 1; i--) { const j = r.nextInt(i), t = list[i - 1]; list[i - 1] = list[j]; list[j] = t; }
+  // close up to two openings a room, as long as everything still reaches the entrance
+  for (const q of list) {
+    let closed = 0, tries = 0;
+    while (closed < 2 && tries < 5) {
+      tries++;
+      const d = r.nextInt(6);
+      if (!q.open[d]) continue;
+      const o = q.conn[d];
+      q.open[d] = false; o.open[d ^ 1] = false;
+      if (q.reach() && o.reach()) closed++;
+      else { q.open[d] = true; o.open[d ^ 1] = true; }
+    }
+  }
+  list.push(roof, left, right);
+  return { list, src, core };
+}
+const MP = () => ({ G: S.state('prismarine'), L: S.state('prismarine_bricks'), K: S.state('dark_prismarine'), LAMP: S.state('sea_lantern'), W: S.state('water') });
+const MKEEP = new Set(['ice', 'packed_ice', 'blue_ice', 'water']);
+class MonPiece extends Piece {
+  constructor(box, dir) { super(box, dir); }
+  f(R, bb, x0, y0, z0, x1, y1, z1, st) { this.fill(R, bb, x0, y0, z0, x1, y1, z1, st, st, false); }
+  b(R, bb, x, y, z, st) { this.set(R, st, x, y, z, bb); }
+  // generateWaterBox: water below the sea, air above, ice and water left as they are
+  water(R, bb, x0, y0, z0, x1, y1, z1) {
+    const W = S.state('water');
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      if (MKEEP.has(S.nameOf(this.get(R, x, y, z, bb)))) continue;
+      this.set(R, this.wy(y) >= 63 ? S.AIR : W, x, y, z, bb);
+    }
+  }
+  // generateBoxOnFillOnly: only over water
+  onWater(R, bb, x0, y0, z0, x1, y1, z1, st) {
+    const W = S.state('water');
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) if (this.get(R, x, y, z, bb) === W) this.set(R, st, x, y, z, bb);
+  }
+  floor(R, bb, x, z, down) {
+    const { G, L } = MP(), f = (a, b, c, d, st) => this.f(R, bb, a, 0, b, c, 0, d, st);
+    if (!down) { f(x, z, x + 7, z + 7, G); return; }
+    f(x, z, x + 2, z + 7, G); f(x + 5, z, x + 7, z + 7, G); f(x + 3, z, x + 4, z + 2, G); f(x + 3, z + 5, x + 4, z + 7, G);
+    f(x + 3, z + 2, x + 4, z + 2, L); f(x + 3, z + 5, x + 4, z + 5, L); f(x + 2, z + 3, x + 2, z + 4, L); f(x + 5, z + 3, x + 5, z + 4, L);
+  }
+  meetsChunk(bb, x0, z0, x1, z1) {
+    const a = this.wx(x0, z0), c = this.wz(x0, z0), b = this.wx(x1, z1), d = this.wz(x1, z1);
+    return Math.max(a, b) >= bb[0] && Math.min(a, b) <= bb[3] && Math.max(c, d) >= bb[2] && Math.min(c, d) <= bb[5];
+  }
+  elder(C, bb, x, y, z) {
+    const X = this.wx(x, z), Y = this.wy(y), Z = this.wz(x, z);
+    if (inside(bb, X, Y, Z) && C.blockEntity) C.blockEntity(X, Y, Z, { type: 'mob', mob: 'elder_guardian', opts: { persistent: true } });
+  }
+}
+// a room's box from its place in the grid (OceanMonumentPiece.makeBoundingBox), before the building moves it
+function mRoomBox(dir, index, w, h, d) {
+  const x = index % 5, z = Math.trunc(index / 5) % 5, y = Math.trunc(index / 25);
+  const b = Piece.boxOf(0, 0, 0, dir, w * 8, h * 4, d * 8);
+  return dir === 'north' ? mv(b, x * 8, y * 4, -(z + d) * 8 + 1) : dir === 'south' ? mv(b, x * 8, y * 4, z * 8) : dir === 'west' ? mv(b, -(z + d) * 8 + 1, y * 4, x * 8) : mv(b, z * 8, y * 4, x * 8);
+}
+const MDIM = { core: [2, 2, 2], dx: [2, 1, 1], dxy: [2, 2, 1], dy: [1, 2, 1], dyz: [1, 2, 2], dz: [1, 1, 2] };
+class MonRoom extends MonPiece {
+  constructor(kind, dir, room, box) { const dm = MDIM[kind] || [1, 1, 1]; super(box || mRoomBox(dir, room.index, dm[0], dm[1], dm[2]), dir); this.kind = kind; this.room = room; }
+  post(C, R, r, bb) { this[this.kind](C, R, r, bb); }
+  entry(C, R, r, bb) {
+    const { L } = MP(), q = this.room, f = (...a) => this.f(R, bb, ...a, L);
+    f(0, 3, 0, 2, 3, 7); f(5, 3, 0, 7, 3, 7); f(0, 2, 0, 1, 2, 7); f(6, 2, 0, 7, 2, 7); f(0, 1, 0, 0, 1, 7); f(7, 1, 0, 7, 1, 7); f(0, 1, 7, 7, 3, 7); f(1, 1, 0, 2, 3, 0); f(5, 1, 0, 6, 3, 0);
+    if (q.open[MD.north]) this.water(R, bb, 3, 1, 7, 4, 2, 7);
+    if (q.open[MD.west]) this.water(R, bb, 0, 1, 3, 1, 2, 4);
+    if (q.open[MD.east]) this.water(R, bb, 6, 1, 3, 7, 2, 4);
+  }
+  core(C, R, r, bb) {
+    const { G, L, K, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), b = (x, y, z, st) => this.b(R, bb, x, y, z, st);
+    this.onWater(R, bb, 1, 8, 0, 14, 8, 14, G);
+    f(0, 7, 0, 0, 7, 15, L); f(15, 7, 0, 15, 7, 15, L); f(1, 7, 0, 15, 7, 0, L); f(1, 7, 15, 14, 7, 15, L);
+    for (let y = 1; y <= 6; y++) {
+      const st = y === 2 || y === 6 ? G : L;
+      for (const x of [0, 15]) { f(x, y, 0, x, y, 1, st); f(x, y, 6, x, y, 9, st); f(x, y, 14, x, y, 15, st); }
+      b(1, y, 0, st); f(6, y, 0, 9, y, 0, st); b(14, y, 0, st); f(1, y, 15, 14, y, 15, st);
+    }
+    f(6, 3, 6, 9, 6, 9, K); f(7, 4, 7, 8, 5, 8, S.state('gold_block'));
+    for (const y of [3, 6]) for (const x of [6, 9]) { b(x, y, 6, LAMP); b(x, y, 9, LAMP); }
+    for (const [x, z] of [[5, 6], [5, 9], [10, 6], [10, 9], [6, 5], [9, 5], [6, 10], [9, 10]]) f(x, 1, z, x, 2, z, L);
+    for (const [x, z] of [[5, 5], [5, 10], [10, 5], [10, 10]]) f(x, 2, z, x, 6, z, L);
+    for (const [x, z0, z1] of [[5, 1, 6], [10, 1, 6], [5, 9, 14], [10, 9, 14]]) f(x, 7, z0, x, 7, z1, L);
+    for (const [z, x0, x1] of [[5, 1, 6], [10, 1, 6], [5, 9, 14], [10, 9, 14]]) f(x0, 7, z, x1, 7, z, L);
+    for (const [x, z0, z1] of [[2, 2, 3], [13, 2, 3], [2, 12, 13], [13, 12, 13]]) f(x, 1, z0, x, 1, z1, L);
+    for (const [x, z] of [[3, 2], [12, 2], [3, 13], [12, 13]]) b(x, 1, z, L);
+  }
+  dx(C, R, r, bb) {
+    const { G, L, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), w = this.room, e = w.conn[MD.east];
+    if (Math.trunc(w.index / 25) > 0) { this.floor(R, bb, 8, 0, e.open[MD.down]); this.floor(R, bb, 0, 0, w.open[MD.down]); }
+    if (!w.conn[MD.up]) this.onWater(R, bb, 1, 4, 1, 7, 4, 6, G);
+    if (!e.conn[MD.up]) this.onWater(R, bb, 8, 4, 1, 14, 4, 6, G);
+    for (const [y, st] of [[3, L], [2, G], [1, L]]) { f(0, y, 0, 0, y, 7, st); f(15, y, 0, 15, y, 7, st); f(1, y, 0, 15, y, 0, st); f(1, y, 7, 14, y, 7, st); }
+    f(5, 1, 0, 10, 1, 4, L); f(6, 2, 0, 9, 2, 3, G); f(5, 3, 0, 10, 3, 4, L);
+    this.b(R, bb, 6, 2, 3, LAMP); this.b(R, bb, 9, 2, 3, LAMP);
+    for (const [q, x, a, side] of [[w, 0, 3, MD.west], [e, 15, 11, MD.east]]) {
+      if (q.open[MD.south]) this.water(R, bb, a, 1, 0, a + 1, 2, 0);
+      if (q.open[MD.north]) this.water(R, bb, a, 1, 7, a + 1, 2, 7);
+      if (q.open[side]) this.water(R, bb, x, 1, 3, x, 2, 4);
+    }
+  }
+  dxy(C, R, r, bb) {
+    const { G, L, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), b = (x, y, z, st) => this.b(R, bb, x, y, z, st);
+    const w = this.room, e = w.conn[MD.east], wu = w.conn[MD.up], eu = e.conn[MD.up];
+    if (Math.trunc(w.index / 25) > 0) { this.floor(R, bb, 8, 0, e.open[MD.down]); this.floor(R, bb, 0, 0, w.open[MD.down]); }
+    if (!wu.conn[MD.up]) this.onWater(R, bb, 1, 8, 1, 7, 8, 6, G);
+    if (!eu.conn[MD.up]) this.onWater(R, bb, 8, 8, 1, 14, 8, 6, G);
+    for (let y = 1; y <= 7; y++) { const st = y === 2 || y === 6 ? G : L; f(0, y, 0, 0, y, 7, st); f(15, y, 0, 15, y, 7, st); f(1, y, 0, 15, y, 0, st); f(1, y, 7, 14, y, 7, st); }
+    for (const [x, z0, z1] of [[2, 3, 4], [3, 2, 2], [3, 5, 5], [13, 3, 4], [11, 2, 2], [11, 5, 5]]) f(x, 1, z0, x === 3 || x === 11 ? x + 1 : x, 7, z1, L);
+    f(5, 1, 3, 5, 3, 4, L); f(10, 1, 3, 10, 3, 4, L); f(5, 7, 2, 10, 7, 5, L);
+    for (const [x, z] of [[5, 2], [10, 2], [5, 5], [10, 5]]) { f(x, 5, z, x, 7, z, L); b(x, 4, z, LAMP); }
+    for (const [x, z] of [[6, 2], [9, 2], [6, 5], [9, 5]]) b(x, 6, z, L);
+    f(5, 4, 3, 6, 4, 4, L); f(9, 4, 3, 10, 4, 4, L);
+    for (const [lv, rooms] of [[1, [[w, 0, MD.west], [e, 8, MD.east]]], [5, [[wu, 0, MD.west], [eu, 8, MD.east]]]]) for (const [q, ox, side] of rooms) {
+      if (q.open[MD.south]) this.water(R, bb, ox + 3, lv, 0, ox + 4, lv + 1, 0);
+      if (q.open[MD.north]) this.water(R, bb, ox + 3, lv, 7, ox + 4, lv + 1, 7);
+      if (q.open[side]) { const x = side === MD.west ? 0 : 15; this.water(R, bb, x, lv, 3, x, lv + 1, 4); }
+    }
+  }
+  dy(C, R, r, bb) {
+    const { G, L } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), lo = this.room, up = lo.conn[MD.up];
+    if (Math.trunc(lo.index / 25) > 0) this.floor(R, bb, 0, 0, lo.open[MD.down]);
+    if (!up.conn[MD.up]) this.onWater(R, bb, 1, 8, 1, 6, 8, 6, G);
+    f(0, 4, 0, 0, 4, 7, L); f(7, 4, 0, 7, 4, 7, L); f(1, 4, 0, 6, 4, 0, L); f(1, 4, 7, 6, 4, 7, L);
+    for (const [x, z0, z1] of [[2, 1, 2], [5, 1, 2], [2, 5, 6], [5, 5, 6]]) f(x, 4, z0, x, 4, z1, L);
+    for (const [x, z] of [[1, 2], [6, 2], [1, 5], [6, 5]]) this.b(R, bb, x, 4, z, L);
+    for (const [lv, q] of [[1, lo], [5, up]]) {
+      for (const [d, k] of [[MD.south, 0], [MD.north, 7]]) {
+        if (q.open[d]) { f(2, lv, k, 2, lv + 2, k, L); f(5, lv, k, 5, lv + 2, k, L); f(3, lv + 2, k, 4, lv + 2, k, L); }
+        else { f(0, lv, k, 7, lv + 2, k, L); f(0, lv + 1, k, 7, lv + 1, k, G); }
+      }
+      for (const [d, k] of [[MD.west, 0], [MD.east, 7]]) {
+        if (q.open[d]) { f(k, lv, 2, k, lv + 2, 2, L); f(k, lv, 5, k, lv + 2, 5, L); f(k, lv + 2, 3, k, lv + 2, 4, L); }
+        else { f(k, lv, 0, k, lv + 2, 7, L); f(k, lv + 1, 0, k, lv + 1, 7, G); }
+      }
+    }
+  }
+  dyz(C, R, r, bb) {
+    const { G, L, K, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st);
+    const so = this.room, no = so.conn[MD.north], su = so.conn[MD.up], nu = no.conn[MD.up];
+    if (Math.trunc(so.index / 25) > 0) { this.floor(R, bb, 0, 8, no.open[MD.down]); this.floor(R, bb, 0, 0, so.open[MD.down]); }
+    if (!su.conn[MD.up]) this.onWater(R, bb, 1, 8, 1, 6, 8, 7, G);
+    if (!nu.conn[MD.up]) this.onWater(R, bb, 1, 8, 8, 6, 8, 14, G);
+    for (let y = 1; y <= 7; y++) { const st = y === 2 || y === 6 ? G : L; f(0, y, 0, 0, y, 15, st); f(7, y, 0, 7, y, 15, st); f(1, y, 0, 6, y, 0, st); f(1, y, 15, 6, y, 15, st); }
+    for (let y = 1; y <= 7; y++) f(3, y, 7, 4, y, 8, y === 2 || y === 6 ? LAMP : K);
+    for (const [q, z, c] of [[so, 0, 3], [no, 15, 11]]) {
+      if (q.open[z === 0 ? MD.south : MD.north]) this.water(R, bb, 3, 1, z, 4, 2, z);
+      if (q.open[MD.west]) this.water(R, bb, 0, 1, c, 0, 2, c + 1);
+      if (q.open[MD.east]) this.water(R, bb, 7, 1, c, 7, 2, c + 1);
+    }
+    for (const [q, z, c] of [[su, 0, 3], [nu, 15, 11]]) {
+      if (q.open[z === 0 ? MD.south : MD.north]) this.water(R, bb, 3, 5, z, 4, 6, z);
+      if (q.open[MD.west]) { this.water(R, bb, 0, 5, c, 0, 6, c + 1); f(1, 4, c - 1, 2, 4, c + 2, L); f(1, 1, c - 1, 1, 3, c - 1, L); f(1, 1, c + 2, 1, 3, c + 2, L); }
+      if (q.open[MD.east]) { this.water(R, bb, 7, 5, c, 7, 6, c + 1); f(5, 4, c - 1, 6, 4, c + 2, L); f(6, 1, c - 1, 6, 3, c - 1, L); f(6, 1, c + 2, 6, 3, c + 2, L); }
+    }
+  }
+  dz(C, R, r, bb) {
+    const { G, L, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), so = this.room, no = so.conn[MD.north];
+    if (Math.trunc(so.index / 25) > 0) { this.floor(R, bb, 0, 8, no.open[MD.down]); this.floor(R, bb, 0, 0, so.open[MD.down]); }
+    if (!so.conn[MD.up]) this.onWater(R, bb, 1, 4, 1, 6, 4, 7, G);
+    if (!no.conn[MD.up]) this.onWater(R, bb, 1, 4, 8, 6, 4, 14, G);
+    for (const [y, st] of [[3, L], [2, G], [1, L]]) { f(0, y, 0, 0, y, 15, st); f(7, y, 0, 7, y, 15, st); f(1, y, 0, 7, y, 0, st); f(1, y, 15, 6, y, 15, st); }
+    for (const [x, z0, z1] of [[1, 1, 2], [6, 1, 2], [1, 13, 14], [6, 13, 14]]) { f(x, 1, z0, x, 1, z1, L); f(x, 3, z0, x, 3, z1, L); }
+    for (const [x, z] of [[2, 6], [5, 6], [2, 9], [5, 9]]) f(x, 1, z, x, 3, z, L);
+    f(3, 2, 6, 4, 2, 6, L); f(3, 2, 9, 4, 2, 9, L); f(2, 2, 7, 2, 2, 8, L); f(5, 2, 7, 5, 2, 8, L);
+    for (const [x, z] of [[2, 5], [5, 5], [2, 10], [5, 10]]) { this.b(R, bb, x, 2, z, LAMP); this.b(R, bb, x, 3, z, L); }
+    for (const [q, z, c] of [[so, 0, 3], [no, 15, 11]]) {
+      if (q.open[z === 0 ? MD.south : MD.north]) this.water(R, bb, 3, 1, z, 4, 2, z);
+      if (q.open[MD.west]) this.water(R, bb, 0, 1, c, 0, 2, c + 1);
+      if (q.open[MD.east]) this.water(R, bb, 7, 1, c, 7, 2, c + 1);
+    }
+  }
+  simple(C, R, r, bb) {
+    const { G, L, K, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), q = this.room, design = this.design;
+    if (Math.trunc(q.index / 25) > 0) this.floor(R, bb, 0, 0, q.open[MD.down]);
+    if (!q.conn[MD.up]) this.onWater(R, bb, 1, 4, 1, 6, 4, 6, G);
+    const pillar = design !== 0 && r.nextBoolean() && !q.open[MD.down] && !q.open[MD.up] && q.openings() > 1;
+    if (design === 0) {
+      for (const [x0, z0, lx, lz] of [[0, 0, 1, 1], [5, 0, 6, 1], [0, 5, 1, 6], [5, 5, 6, 6]]) {
+        f(x0, 1, z0, x0 + 2, 1, z0 + 2, L); f(x0, 3, z0, x0 + 2, 3, z0 + 2, L);
+        const ox = x0 === 0 ? x0 : x0 + 2, oz = z0 === 0 ? z0 : z0 + 2, k = x0 !== 0 ? 1 : 0;
+        f(ox, 2, z0, ox, 2, z0 + 2, G); f(x0 + 1 - k, 2, oz, x0 + 2 - k, 2, oz, G);
+        this.b(R, bb, lx, 2, lz, LAMP);
+      }
+      if (q.open[MD.south]) f(3, 3, 0, 4, 3, 0, L); else { f(3, 3, 0, 4, 3, 1, L); f(3, 2, 0, 4, 2, 0, G); f(3, 1, 0, 4, 1, 1, L); }
+      if (q.open[MD.north]) f(3, 3, 7, 4, 3, 7, L); else { f(3, 3, 6, 4, 3, 7, L); f(3, 2, 7, 4, 2, 7, G); f(3, 1, 6, 4, 1, 7, L); }
+      if (q.open[MD.west]) f(0, 3, 3, 0, 3, 4, L); else { f(0, 3, 3, 1, 3, 4, L); f(0, 2, 3, 0, 2, 4, G); f(0, 1, 3, 1, 1, 4, L); }
+      if (q.open[MD.east]) f(7, 3, 3, 7, 3, 4, L); else { f(6, 3, 3, 7, 3, 4, L); f(7, 2, 3, 7, 2, 4, G); f(6, 1, 3, 7, 1, 4, L); }
+    } else if (design === 1) {
+      for (const [x, z] of [[2, 2], [2, 5], [5, 5], [5, 2]]) { f(x, 1, z, x, 3, z, L); this.b(R, bb, x, 2, z, LAMP); }
+      for (const [x0, z0, x1, z1] of [[0, 0, 1, 0], [0, 1, 0, 1], [0, 7, 1, 7], [0, 6, 0, 6], [6, 7, 7, 7], [7, 6, 7, 6], [6, 0, 7, 0], [7, 1, 7, 1]]) f(x0, 1, z0, x1, 3, z1, L);
+      for (const [x, z] of [[1, 0], [0, 1], [1, 7], [0, 6], [6, 7], [7, 6], [6, 0], [7, 1]]) this.b(R, bb, x, 2, z, G);
+      for (const [d, x0, z0, x1, z1] of [[MD.south, 1, 0, 6, 0], [MD.north, 1, 7, 6, 7], [MD.west, 0, 1, 0, 6], [MD.east, 7, 1, 7, 6]])
+        if (!q.open[d]) { f(x0, 1, z0, x1, 1, z1, L); f(x0, 2, z0, x1, 2, z1, G); f(x0, 3, z0, x1, 3, z1, L); }
+    } else {
+      for (const [y, st] of [[1, L], [2, K], [3, L]]) { f(0, y, 0, 0, y, 7, st); f(7, y, 0, 7, y, 7, st); f(1, y, 0, 6, y, 0, st); f(1, y, 7, 6, y, 7, st); }
+      for (const [d, x0, z0, x1, z1] of [[MD.south, 3, 0, 4, 0], [MD.north, 3, 7, 4, 7], [MD.west, 0, 3, 0, 4], [MD.east, 7, 3, 7, 4]]) {
+        f(x0, 1, z0, x1, 2, z1, K);
+        if (q.open[d]) this.water(R, bb, x0, 1, z0, x1, 2, z1);
+      }
+    }
+    if (pillar) { f(3, 1, 3, 4, 1, 4, L); f(3, 2, 3, 4, 2, 4, G); f(3, 3, 3, 4, 3, 4, L); }
+  }
+  top(C, R, r, bb) {
+    const { G, L, K } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), q = this.room, SP = S.state('wet_sponge');
+    if (Math.trunc(q.index / 25) > 0) this.floor(R, bb, 0, 0, q.open[MD.down]);
+    if (!q.conn[MD.up]) this.onWater(R, bb, 1, 4, 1, 6, 4, 6, G);
+    for (let x = 1; x <= 6; x++) for (let z = 1; z <= 6; z++) if (r.nextInt(3) !== 0) { const y = r.nextInt(4) === 0 ? 2 : 3; f(x, y, z, x, 3, z, SP); }
+    for (const [y, st] of [[1, L], [2, K], [3, L]]) { f(0, y, 0, 0, y, 7, st); f(7, y, 0, 7, y, 7, st); f(1, y, 0, 6, y, 0, st); f(1, y, 7, 6, y, 7, st); }
+    f(0, 1, 3, 0, 2, 4, K); f(7, 1, 3, 7, 2, 4, K); f(3, 1, 0, 4, 2, 0, K); f(3, 1, 7, 4, 2, 7, K);
+    if (q.open[MD.south]) this.water(R, bb, 3, 1, 0, 4, 2, 0);
+  }
+  wing(C, R, r, bb) {
+    const { K, L, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), b = (x, y, z, st) => this.b(R, bb, x, y, z, st);
+    if ((this.design & 1) === 0) {
+      for (let i = 0; i < 4; i++) f(10 - i, 3 - i, 20 - i, 12 + i, 3 - i, 20, L);
+      f(7, 0, 6, 15, 0, 16, L); f(6, 0, 6, 6, 3, 20, L); f(16, 0, 6, 16, 3, 20, L); f(7, 1, 7, 7, 1, 20, L); f(15, 1, 7, 15, 1, 20, L);
+      f(7, 1, 6, 9, 3, 6, L); f(13, 1, 6, 15, 3, 6, L); f(8, 1, 7, 9, 1, 7, L); f(13, 1, 7, 14, 1, 7, L); f(9, 0, 5, 13, 0, 5, L);
+      f(10, 0, 7, 12, 0, 7, K); f(8, 0, 10, 8, 0, 12, K); f(14, 0, 10, 14, 0, 12, K);
+      for (let z = 18; z >= 7; z -= 3) { b(6, 3, z, LAMP); b(16, 3, z, LAMP); }
+      for (const [x, z] of [[10, 10], [12, 10], [10, 12], [12, 12]]) b(x, 0, z, LAMP);
+      b(8, 3, 6, LAMP); b(14, 3, 6, LAMP);
+      for (const [x, z] of [[4, 4], [18, 4], [4, 18], [18, 18]]) { b(x, 2, z, L); b(x, 1, z, LAMP); b(x, 0, z, L); }
+      b(9, 7, 20, L); b(13, 7, 20, L);
+      f(6, 0, 21, 7, 4, 21, L); f(15, 0, 21, 16, 4, 21, L);
+      this.elder(C, bb, 11, 2, 16);
+    } else {
+      f(9, 3, 18, 13, 3, 20, L); f(9, 0, 18, 9, 2, 18, L); f(13, 0, 18, 13, 2, 18, L);
+      for (const x of [9, 13]) { b(x, 6, 20, L); b(x, 5, 20, LAMP); b(x, 4, 20, L); }
+      f(7, 3, 7, 15, 3, 14, L);
+      for (const x of [10, 12]) { f(x, 0, 10, x, 6, 10, L); f(x, 0, 12, x, 6, 12, L); for (const z of [10, 12]) { b(x, 0, z, LAMP); b(x, 4, z, LAMP); } }
+      for (const x of [8, 14]) { f(x, 0, 7, x, 2, 7, L); f(x, 0, 14, x, 2, 14, L); }
+      f(8, 3, 8, 8, 3, 13, K); f(14, 3, 8, 14, 3, 13, K);
+      this.elder(C, bb, 11, 5, 13);
+    }
+  }
+  pent(C, R, r, bb) {
+    const { G, L, K, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), b = (x, y, z, st) => this.b(R, bb, x, y, z, st);
+    f(2, -1, 2, 11, -1, 11, L); f(0, -1, 0, 1, -1, 11, G); f(12, -1, 0, 13, -1, 11, G); f(2, -1, 0, 11, -1, 1, G); f(2, -1, 12, 11, -1, 13, G);
+    f(0, 0, 0, 0, 0, 13, L); f(13, 0, 0, 13, 0, 13, L); f(1, 0, 0, 12, 0, 0, L); f(1, 0, 13, 12, 0, 13, L);
+    for (let i = 2; i <= 11; i += 3) { b(0, 0, i, LAMP); b(13, 0, i, LAMP); b(i, 0, 0, LAMP); }
+    f(2, 0, 3, 4, 0, 9, L); f(9, 0, 3, 11, 0, 9, L); f(4, 0, 9, 9, 0, 11, L);
+    for (const [x, z] of [[5, 8], [8, 8], [10, 10], [3, 10]]) b(x, 0, z, L);
+    f(3, 0, 3, 3, 0, 7, K); f(10, 0, 3, 10, 0, 7, K); f(6, 0, 10, 7, 0, 10, K);
+    for (const x of [3, 10]) for (let z = 2; z <= 8; z += 3) f(x, 0, z, x, 2, z, L);
+    f(5, 0, 10, 5, 2, 10, L); f(8, 0, 10, 8, 2, 10, L); f(6, -1, 7, 7, -1, 8, K);
+    this.water(R, bb, 6, -1, 3, 7, -1, 4);
+    this.elder(C, bb, 6, 1, 6);
+  }
+}
+// the room a fitter makes of a free grid room (FitDoubleXYRoom ... FitSimpleRoom, in that order), claiming what it covers
+function mFit(r, dir, q) {
+  const E = q.conn[MD.east], N = q.conn[MD.north], U = q.conn[MD.up], free = o => o && !o.claimed, claim = (...a) => { for (const o of a) o.claimed = true; };
+  let kind;
+  if (q.open[MD.east] && free(E) && q.open[MD.up] && free(U) && E.open[MD.up] && free(E.conn[MD.up])) { claim(q, E, U, E.conn[MD.up]); kind = 'dxy'; }
+  else if (q.open[MD.north] && free(N) && q.open[MD.up] && free(U) && N.open[MD.up] && free(N.conn[MD.up])) { claim(q, N, U, N.conn[MD.up]); kind = 'dyz'; }
+  else if (q.open[MD.north] && free(N)) { claim(q, N); kind = 'dz'; }
+  else if (q.open[MD.east] && free(E)) { claim(q, E); kind = 'dx'; }
+  else if (q.open[MD.up] && free(U)) { claim(q, U); kind = 'dy'; }
+  else if (!q.open[MD.west] && !q.open[MD.east] && !q.open[MD.north] && !q.open[MD.south] && !q.open[MD.up]) { claim(q); kind = 'top'; }
+  else { claim(q); kind = 'simple'; }
+  const p = new MonRoom(kind, dir, q);
+  if (kind === 'simple') p.design = r.nextInt(3);
+  return p;
+}
+const boxCorners = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2])];
+class Monument extends MonPiece {
+  constructor(r, x, z, dir) {
+    super(Piece.boxOf(x, 39, z, dir, 58, 23, 58), dir);
+    const g = monumentGraph(r);
+    g.src.claimed = true;
+    this.kids = [new MonRoom('entry', dir, g.src), new MonRoom('core', dir, g.core)];
+    for (const q of g.list) if (!q.claimed && !q.special()) this.kids.push(mFit(r, dir, q));
+    const o = [this.wx(9, 22), this.wy(0), this.wz(9, 22)];
+    for (const k of this.kids) k.move(o[0], o[1], o[2]);
+    const at = (x, y, z) => [this.wx(x, z), this.wy(y), this.wz(x, z)];
+    // (Random.nextInt(): all 32 bits)
+    const k = r.next(32) | 0;
+    const w1 = new MonRoom('wing', dir, null, boxCorners(at(1, 1, 1), at(23, 8, 21))), w2 = new MonRoom('wing', dir, null, boxCorners(at(34, 1, 1), at(56, 8, 21)));
+    w1.design = k; w2.design = k + 1 | 0;
+    this.kids.push(w1, w2, new MonRoom('pent', dir, null, boxCorners(at(22, 13, 22), at(35, 17, 35))));
+  }
+  move(dx, dy, dz) { super.move(dx, dy, dz); if (this.kids) for (const k of this.kids) k.move(dx, dy, dz); }
+  post(C, R, r, bb) {
+    const { G, L, K, LAMP } = MP(), f = (a, b, c, d, e, g, st) => this.f(R, bb, a, b, c, d, e, g, st), b = (x, y, z, st) => this.b(R, bb, x, y, z, st), wb = (...a) => this.water(R, bb, ...a);
+    wb(0, 0, 0, 58, Math.max(63, 64) - this.box[1], 58);
+    for (const [flip, x] of [[false, 0], [true, 33]]) if (this.meetsChunk(bb, x, 0, x + 23, 20)) {
+      f(x, 0, 0, x + 24, 0, 20, G); wb(x, 1, 0, x + 24, 10, 20);
+      for (let i = 0; i < 4; i++) {
+        f(x + i, i + 1, i, x + i, i + 1, 20, L); f(x + i + 7, i + 5, i + 7, x + i + 7, i + 5, 20, L); f(x + 17 - i, i + 5, i + 7, x + 17 - i, i + 5, 20, L);
+        f(x + 24 - i, i + 1, i, x + 24 - i, i + 1, 20, L); f(x + i + 1, i + 1, i, x + 23 - i, i + 1, i, L); f(x + i + 8, i + 5, i + 7, x + 16 - i, i + 5, i + 7, L);
+      }
+      f(x + 4, 4, 4, x + 6, 4, 20, G); f(x + 7, 4, 4, x + 17, 4, 6, G); f(x + 18, 4, 4, x + 20, 4, 20, G); f(x + 11, 8, 11, x + 13, 8, 20, G);
+      for (const z of [12, 15, 18]) b(x + 12, 9, z, L);
+      const lft = x + (flip ? 19 : 5), rgt = x + (flip ? 5 : 19);
+      for (let z = 20; z >= 5; z -= 3) b(lft, 5, z, L);
+      for (let z = 19; z >= 7; z -= 3) b(rgt, 5, z, L);
+      for (let i = 0; i < 4; i++) b(flip ? x + 24 - (17 - i * 3) : x + 17 - i * 3, 5, 5, L);
+      b(rgt, 5, 5, L);
+      f(x + 11, 1, 12, x + 13, 7, 12, G); f(x + 12, 1, 11, x + 12, 7, 13, G);
+    }
+    if (this.meetsChunk(bb, 22, 5, 35, 17)) {
+      wb(25, 0, 0, 32, 8, 20);
+      for (let i = 0; i < 4; i++) {
+        const z = 5 + i * 4;
+        f(24, 2, z, 24, 4, z, L); f(22, 4, z, 23, 4, z, L); b(25, 5, z, L); b(26, 6, z, L); b(26, 5, z, LAMP);
+        f(33, 2, z, 33, 4, z, L); f(34, 4, z, 35, 4, z, L); b(32, 5, z, L); b(31, 6, z, L); b(31, 5, z, LAMP);
+        f(27, 6, z, 30, 6, z, G);
+      }
+    }
+    if (this.meetsChunk(bb, 15, 20, 42, 21)) {
+      f(15, 0, 21, 42, 0, 21, G); wb(26, 1, 21, 31, 3, 21);
+      for (const [x0, y, x1] of [[21, 12, 36], [17, 11, 40], [16, 10, 41], [15, 9, 42], [15, 8, 42], [15, 7, 42], [16, 6, 41], [17, 5, 40], [21, 4, 36], [22, 3, 26], [31, 3, 35], [23, 2, 25], [32, 2, 34]]) f(x0, y, 21, x1, y, 21, G);
+      f(28, 4, 20, 29, 4, 21, L);
+      for (const [x, y] of [[27, 3], [30, 3], [26, 2], [31, 2], [25, 1], [32, 1]]) b(x, y, 21, L);
+      for (let i = 0; i < 7; i++) { b(28 - i, 6 + i, 21, K); b(29 + i, 6 + i, 21, K); }
+      for (let i = 0; i < 4; i++) { b(28 - i, 9 + i, 21, K); b(29 + i, 9 + i, 21, K); }
+      b(28, 12, 21, K); b(29, 12, 21, K);
+      for (let i = 0; i < 3; i++) for (let y = 8; y <= 9; y++) { b(22 - i * 2, y, 21, K); b(35 + i * 2, y, 21, K); }
+      for (const [x0, y0, x1, y1] of [[15, 13, 42, 15], [15, 1, 15, 6], [16, 1, 16, 5], [17, 1, 20, 4], [21, 1, 21, 3], [22, 1, 22, 2], [23, 1, 24, 1], [42, 1, 42, 6], [41, 1, 41, 5], [37, 1, 40, 4], [36, 1, 36, 3], [33, 1, 34, 1], [35, 1, 35, 2]]) wb(x0, y0, 21, x1, y1, 21);
+    }
+    if (this.meetsChunk(bb, 21, 21, 36, 36)) {
+      f(21, 0, 22, 36, 0, 36, G); wb(21, 1, 22, 36, 23, 36);
+      for (let i = 0; i < 4; i++) { f(21 + i, 13 + i, 21 + i, 36 - i, 13 + i, 21 + i, L); f(21 + i, 13 + i, 36 - i, 36 - i, 13 + i, 36 - i, L); f(21 + i, 13 + i, 22 + i, 21 + i, 13 + i, 35 - i, L); f(36 - i, 13 + i, 22 + i, 36 - i, 13 + i, 35 - i, L); }
+      f(25, 16, 25, 32, 16, 32, G);
+      for (const [x, z] of [[25, 25], [32, 25], [25, 32], [32, 32]]) f(x, 17, z, x, 19, z, L);
+      for (const [x, y, z, st] of [[26, 20, 26, L], [27, 21, 27, L], [27, 20, 27, LAMP], [26, 20, 31, L], [27, 21, 30, L], [27, 20, 30, LAMP], [31, 20, 31, L], [30, 21, 30, L], [30, 20, 30, LAMP], [31, 20, 26, L], [30, 21, 27, L], [30, 20, 27, LAMP]]) b(x, y, z, st);
+      f(28, 21, 27, 29, 21, 27, G); f(27, 21, 28, 27, 21, 29, G); f(28, 21, 30, 29, 21, 30, G); f(30, 21, 28, 30, 21, 29, G);
+    }
+    // the lower walls
+    if (this.meetsChunk(bb, 0, 21, 6, 58)) {
+      f(0, 0, 21, 6, 0, 57, G); wb(0, 1, 21, 6, 7, 57); f(4, 4, 21, 6, 4, 53, G);
+      for (let i = 0; i < 4; i++) f(i, i + 1, 21, i, i + 1, 57 - i, L);
+      for (let z = 23; z < 53; z += 3) b(5, 5, z, L);
+      b(5, 5, 52, L); f(4, 1, 52, 6, 3, 52, G); f(5, 1, 51, 5, 3, 53, G);
+    }
+    if (this.meetsChunk(bb, 51, 21, 58, 58)) {
+      f(51, 0, 21, 57, 0, 57, G); wb(51, 1, 21, 57, 7, 57); f(51, 4, 21, 53, 4, 53, G);
+      for (let i = 0; i < 4; i++) f(57 - i, i + 1, 21, 57 - i, i + 1, 57 - i, L);
+      for (let z = 23; z < 53; z += 3) b(52, 5, z, L);
+      b(52, 5, 52, L); f(51, 1, 52, 53, 3, 52, G); f(52, 1, 51, 52, 3, 53, G);
+    }
+    if (this.meetsChunk(bb, 0, 51, 57, 57)) {
+      f(7, 0, 51, 50, 0, 57, G); wb(7, 1, 51, 50, 10, 57);
+      for (let i = 0; i < 4; i++) f(i + 1, i + 1, 57 - i, 56 - i, i + 1, 57 - i, L);
+    }
+    // the middle walls
+    if (this.meetsChunk(bb, 7, 21, 13, 50)) {
+      f(7, 0, 21, 13, 0, 50, G); wb(7, 1, 21, 13, 10, 50); f(11, 8, 21, 13, 8, 53, G);
+      for (let i = 0; i < 4; i++) f(i + 7, i + 5, 21, i + 7, i + 5, 54, L);
+      for (let z = 21; z <= 45; z += 3) b(12, 9, z, L);
+    }
+    if (this.meetsChunk(bb, 44, 21, 50, 54)) {
+      f(44, 0, 21, 50, 0, 50, G); wb(44, 1, 21, 50, 10, 50); f(44, 8, 21, 46, 8, 53, G);
+      for (let i = 0; i < 4; i++) f(50 - i, i + 5, 21, 50 - i, i + 5, 54, L);
+      for (let z = 21; z <= 45; z += 3) b(45, 9, z, L);
+    }
+    if (this.meetsChunk(bb, 8, 44, 49, 54)) {
+      f(14, 0, 44, 43, 0, 50, G); wb(14, 1, 44, 43, 10, 50);
+      for (let x = 12; x <= 45; x += 3) {
+        b(x, 9, 45, L); b(x, 9, 52, L);
+        if ([12, 18, 24, 33, 39, 45].includes(x)) for (const [y, z] of [[9, 47], [9, 50], [10, 45], [10, 46], [10, 51], [10, 52], [11, 47], [11, 50], [12, 48], [12, 49]]) b(x, y, z, L);
+      }
+      for (let i = 0; i < 3; i++) f(8 + i, 5 + i, 54, 49 - i, 5 + i, 54, G);
+      f(11, 8, 54, 46, 8, 54, L); f(14, 8, 44, 43, 8, 53, G);
+    }
+    // the upper walls
+    if (this.meetsChunk(bb, 14, 21, 20, 43)) {
+      f(14, 0, 21, 20, 0, 43, G); wb(14, 1, 22, 20, 14, 43); f(18, 12, 22, 20, 12, 39, G); f(18, 12, 21, 20, 12, 21, L);
+      for (let i = 0; i < 4; i++) f(i + 14, i + 9, 21, i + 14, i + 9, 43 - i, L);
+      for (let z = 23; z <= 39; z += 3) b(19, 13, z, L);
+    }
+    if (this.meetsChunk(bb, 37, 21, 43, 43)) {
+      f(37, 0, 21, 43, 0, 43, G); wb(37, 1, 22, 43, 14, 43); f(37, 12, 22, 39, 12, 39, G); f(37, 12, 21, 39, 12, 21, L);
+      for (let i = 0; i < 4; i++) f(43 - i, i + 9, 21, 43 - i, i + 9, 43 - i, L);
+      for (let z = 23; z <= 39; z += 3) b(38, 13, z, L);
+    }
+    if (this.meetsChunk(bb, 15, 37, 42, 43)) {
+      f(21, 0, 37, 36, 0, 43, G); wb(21, 1, 37, 36, 14, 43); f(21, 12, 37, 36, 12, 39, G);
+      for (let i = 0; i < 4; i++) f(15 + i, i + 9, 43 - i, 42 - i, i + 9, 43 - i, L);
+      for (let x = 21; x <= 36; x += 3) b(x, 13, 38, L);
+    }
+    // the pillars it stands on
+    for (let j = 0; j < 7; j++) {
+      let k = 0;
+      while (k < 7) {
+        if (k === 0 && j === 3) k = 6;
+        const x = j * 9, z = k * 9;
+        for (let a = 0; a < 4; a++) for (let c = 0; c < 4; c++) { b(x + a, 0, z + c, L); this.column(R, L, x + a, -1, z + c, bb); }
+        k += j !== 0 && j !== 6 ? 6 : 1;
+      }
+    }
+    for (let i = 0; i < 5; i++) {
+      wb(-1 - i, i * 2, -1 - i, -1 - i, 23, 58 + i); wb(58 + i, i * 2, -1 - i, 58 + i, 23, 58 + i);
+      wb(-i, i * 2, -1 - i, 57 + i, 23, -1 - i); wb(-i, i * 2, 58 + i, 57 + i, 23, 58 + i);
+    }
+    for (const k of this.kids) if (meets(k.box, bb)) k.post(C, R, r, bb);
+  }
+}
+
+/* ---------------- starts ---------------- */
+// WorldgenRandom.setLargeFeatureSeed: the random a start is made with
+function startRand(seed, cx, cz) {
+  const big = (h, l) => (BigInt(h) << 32n) | BigInt(l >>> 0);
+  const [sh, sl] = VG.hiLo(seed), r = new VG.JRandF(sh, sl);
+  r.nextLong(); const a = big(VG.R64.h, VG.R64.l);
+  r.nextLong(); const b = big(VG.R64.h, VG.R64.l);
+  const [h, l] = VG.hiLo((BigInt(cx) * a) ^ (BigInt(cz) * b) ^ seed);
+  return new VG.JRandF(h, l);
+}
+// the pieces of a structure's start in chunk (cx, cz), as Java lays them out (null: a kind made elsewhere)
+const MAKERS = {
+  jungle_pyramid: (seed, cx, cz) => [new JungleTemple(startRand(seed, cx, cz), cx * 16, cz * 16)],
+  swamp_hut: (seed, cx, cz) => [new SwampHut(startRand(seed, cx, cz), cx * 16, cz * 16)],
+  desert_pyramid: (seed, cx, cz) => [new DesertPyramid(startRand(seed, cx, cz), cx * 16, cz * 16, seed)],
+  buried_treasure: (seed, cx, cz) => [new BuriedTreasure(cx * 16 + 9, cz * 16 + 9)],
+  mineshaft: (seed, cx, cz, ctx) => { const s = mineshaftStart(seed, cx, cz, ctx); return s && s.type === 'normal' ? s.pieces : []; },
+  mineshaft_mesa: (seed, cx, cz, ctx) => { const s = mineshaftStart(seed, cx, cz, ctx); return s && s.type === 'mesa' ? s.pieces : []; },
+  stronghold: (seed, cx, cz) => { const s = strongholdStart(seed, cx, cz); return s ? s.pieces : []; },
+  monument: (seed, cx, cz) => { const r = startRand(seed, cx, cz), x = cx * 16 - 29, z = cz * 16 - 29; return [new Monument(r, x, z, DIRN[r.nextInt(4)])]; },
+};
+// the structures this engine builds: the game's name for each, and how many chunks its pieces reach from its start chunk
+const GAME = { jungle_pyramid: 'jungle_temple', swamp_hut: 'swamp_hut', desert_pyramid: 'desert_pyramid', buried_treasure: 'buried_treasure', mineshaft: 'mineshaft', mineshaft_mesa: 'mineshaft', stronghold: 'stronghold', monument: 'ocean_monument' },
+  REACH = { jungle_pyramid: 0, swamp_hut: 0, desert_pyramid: 1, buried_treasure: 0, mineshaft: 6, mineshaft_mesa: 6, stronghold: 9, monument: 2 };
+const ENGINE = new Set(Object.values(GAME));
+function makeStart(name, seed, cx, cz, ctx) {
+  const mk = MAKERS[name];
+  if (!mk) return null;
+  const pieces = mk(seed, cx, cz, ctx);
+  if (!pieces || !pieces.length) return null;
+  const b = pieces[0].box.slice();
+  for (const p of pieces) for (let i = 0; i < 3; i++) { b[i] = Math.min(b[i], p.box[i]); b[i + 3] = Math.max(b[i + 3], p.box[i + 3]); }
+  return { name, cx, cz, pieces, box: b };
+}
+// StructureStart.placeInChunk: the pieces that reach the chunk
+function placeInChunk(C, start, r, bb) {
+  for (const p of start.pieces) if (meets(p.box, bb)) p.post(C, C.R, r, bb);
+}
+
+// the structures of each step in the registry's order (the index the step's random is seeded with)
+const STEPS = {
+  3: ['buried_treasure', 'mineshaft', 'mineshaft_mesa', 'trail_ruins', 'trial_chambers'],
+  4: ['abandoned_camp_bamboo_jungle', 'abandoned_camp_birch_forest', 'abandoned_camp_cherry_grove', 'abandoned_camp_dappled_forest', 'abandoned_camp_flower_forest',
+    'abandoned_camp_forest', 'abandoned_camp_meadow', 'abandoned_camp_old_growth_birch_forest', 'abandoned_camp_old_growth_pine_taiga', 'abandoned_camp_old_growth_spruce_taiga',
+    'abandoned_camp_pale_garden', 'abandoned_camp_savanna', 'abandoned_camp_snowy_taiga', 'abandoned_camp_sparse_jungle', 'abandoned_camp_swamp', 'abandoned_camp_taiga',
+    'abandoned_camp_windswept_forest', 'abandoned_camp_wooded_badlands', 'bastion_remnant', 'desert_pyramid', 'end_city', 'igloo', 'jungle_pyramid', 'mansion', 'monument',
+    'ocean_ruin_cold', 'ocean_ruin_warm', 'pillager_outpost', 'ruined_portal', 'ruined_portal_desert', 'ruined_portal_jungle', 'ruined_portal_mountain', 'ruined_portal_nether',
+    'ruined_portal_ocean', 'ruined_portal_swamp', 'shipwreck', 'shipwreck_beached', 'stronghold', 'swamp_hut', 'village_desert', 'village_plains', 'village_savanna',
+    'village_snowy', 'village_taiga'],
+  7: ['ancient_city', 'fortress', 'nether_fossil'],
+};
+// the structures of a step, before its features (the decoration's C.structures hook)
+function run(C, step, r, deco) {
+  const list = STEPS[step];
+  if (!list || !C.structStarts) return;
+  const x0 = C.R.cx * 16, z0 = C.R.cz * 16, bb = [x0, -64, z0, x0 + 15, 319, z0 + 15];
+  for (let j = 0; j < list.length; j++) {
+    if (!MAKERS[list[j]]) continue;
+    const starts = C.structStarts(list[j]);
+    if (!starts || !starts.length) continue;
+    r.setSeed(VF.featureSeed(deco, j, step));
+    for (const s of starts) placeInChunk(C, s, r, bb);
+  }
+}
+return { Piece, Scattered, xform, reorient, startRand, makeStart, placeInChunk, run, STEPS, MAKERS, GAME, REACH, ENGINE, DIRN, mineshaftStart, mineshaftChance, strongholdStart,
+  // a stronghold start's portal: the middle of the portal and its frames' height
+  portalOf: st => { const p = st.pieces.find(q => q instanceof ShPortalRoom); return p ? p.portal() : null; } };
 })();
 
 /* @file 19_waterlog_gen.js */
@@ -23639,7 +25352,7 @@ class Game {
   // freshly generated portal rooms: some frames already hold an eye
   initStructureMeta(c) {
     const w = this.world, seed = w.seed, bx = c.cx * 16, bz = c.cz * 16;
-    if (w.vanilla) { const g = this.genInfo(); for (const s of g.strongholdsNear(bx, bz, 64)) this.initPortalFrames(c, g.portalRoomOf(s)); return; }
+    if (w.vanilla) { const g = this.genInfo(); if (g.vdeco && g.deco) return; for (const s of g.strongholdsNear(bx, bz, 64)) this.initPortalFrames(c, g.portalRoomOf(s)); return; }
     this.initPortalFrames(c, portalRoomAt(seed, Math.floor((bx + 8) / PORTAL_ROOM_REGION), Math.floor((bz + 8) / PORTAL_ROOM_REGION)));
   }
   initPortalFrames(c, p) {
@@ -27964,6 +29677,8 @@ class EnderDragon extends Mob {
 // extra: { ench: level, [min, max] or { key: level } }, { rand: true } (one random enchantment), { book: key, [keys] or true, lvl },
 // { potion }, { dmg: [min, max] } (durability left), { amp: [min, max] } (ominous bottles), { trim: { pattern, material } }
 const LOOT = {
+  // the arrow traps of jungle temples
+  jungle_temple_dispenser: [[[1, 2], [['arrow', 30, 2, 7]]]],
   village_plains_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['dandelion', 2], ['poppy', 1], ['potato', 10, 1, 7], ['bread', 10, 1, 4], ['apple', 10, 1, 5], ['book', 1], ['feather', 1], ['emerald', 2, 1, 4], ['oak_sapling', 5, 1, 2]]], [[1, 1], [['bundle', 1], [null, 2]]]],
   village_desert_house: [[[3, 8], [['clay_ball', 1], ['green_dye', 1], ['cactus', 10, 1, 4], ['wheat', 10, 1, 7], ['bread', 10, 1, 4], ['book', 1], ['dead_bush', 2, 1, 3], ['emerald', 1, 1, 3]]], [[1, 1], [['bundle', 1], [null, 2]]]],
   village_savanna_house: [[[3, 8], [['gold_nugget', 1, 1, 3], ['short_grass', 5], ['tall_grass', 5], ['bread', 10, 1, 4], ['wheat_seeds', 10, 1, 5], ['emerald', 2, 1, 4], ['acacia_sapling', 10, 1, 2], ['saddle', 1], ['torch', 1, 1, 2], ['bucket', 1]]], [[1, 1], [['bundle', 1], [null, 2]]]],
@@ -29012,7 +30727,11 @@ class Minecart extends Vehicle {
     const o = opts || {};
     if (!o.loading) {
       this.data.kind = o.kind || 'minecart';
-      if (this.data.kind === 'chest_minecart') this.data.items = new Array(27).fill(null);
+      if (this.data.kind === 'chest_minecart') {
+        this.data.items = new Array(27).fill(null);
+        // one a structure made with its loot (a mineshaft's): rolled now, like a chest's
+        if (o.loot && typeof fillLoot === 'function') { const be = { kind: 'chest', loot: o.loot }; fillLoot(be); this.data.items = be.items; }
+      }
       if (this.data.kind === 'hopper_minecart') this.data.items = new Array(5).fill(null);
     }
     this.pitch = 0;
