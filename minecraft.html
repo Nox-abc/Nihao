@@ -33821,7 +33821,7 @@ Game.prototype.renderHandSide = function (held, s, alpha, l) {
     if (held.id === I.CROSSBOW && held.tag && held.tag.charged && h < 0.001 && main) P.t(o * -0.641864, 0, 0).ry(o * 10);
   }
   // the item model's own first-person transform (Part 118); beds, banners, pots, chests, heads and shulker boxes as their models
-  if (itemModelKind(held)) { drawItemIn(this, r, held, main ? 'fp' : 'fpl', P.m, l, !main); return; }
+  if (itemModelKind(held, main ? 'fp' : 'fpl')) { drawItemIn(this, r, held, main ? 'fp' : 'fpl', P.m, l, !main); return; }
   const style = itemStyle(held.id);
   applyDisplay(P, itemDisplay(held, main ? 'fp' : 'fpl'), !main);
   if (style !== 'sprite') { this.pushBlockItem(r, P.m, held.id, l); return; }
@@ -66193,8 +66193,8 @@ function itemDisplaySet(st) {
 const itemDisplay = (st, place) => ITEM_DISPLAYS[itemDisplaySet(st)][ITEM_PLACES.indexOf(place)];
 const displayMatrix = (d, left) => { const P = handPose(); if (d) applyDisplay(P, d, left); return P.m; };
 
-// the items drawn as models of their own: beds, banners, pots, chests, shulker boxes, heads and shields
-function itemModelKind(st) {
+// the items drawn as models of their own: beds, banners, pots, chests, shulker boxes, heads and shields (in any place)
+function itemModelKind(st, place) {
   const id = st && st.id;
   if (id === undefined || !ITEMS[id]) return null;
   if (id === I.DECORATED_POT) return 'pot';
@@ -66318,7 +66318,7 @@ function drawItemModel(g, r, st, kind, m, light) {
 // transform for the place goes on top
 function drawItemIn(g, r, st, place, M, light, left) {
   const d = itemDisplay(st, place);
-  drawItemModel(g, r, st, itemModelKind(st), d ? M4.mul(M4.create(), M, displayMatrix(d, left)) : M, light);
+  drawItemModel(g, r, st, itemModelKind(st, place), d ? M4.mul(M4.create(), M, displayMatrix(d, left)) : M, light);
 }
 
 /* ---------------- held ---------------- */
@@ -66363,7 +66363,7 @@ function groundSpread(e, st, n, flat, zs) {
 ItemEntity.prototype.render = function (r, a) {
   const st = this.stack;
   if (!st || !ITEMS[st.id]) return;
-  const p = this.ipos(a), g = this.game, L = this.lightAt(), age = this.age + a, kind = itemModelKind(st), style = itemStyle(st.id);
+  const p = this.ipos(a), g = this.game, L = this.lightAt(), age = this.age + a, kind = itemModelKind(st, 'ground'), style = itemStyle(st.id);
   const bob = Math.sin(age / 10 + this.spin) * 0.1 + 0.1, turn = age / 20 + this.spin;
   // far away or with a full vertex buffer, a flat item is a picture turning with it
   if (!kind && style === 'sprite' && ((p[0] - r.org[0]) ** 2 + (p[1] - r.org[1]) ** 2 + (p[2] - r.org[2]) ** 2 >= 24 * 24 || r.dynN >= 50000)) {
@@ -66405,7 +66405,7 @@ Game.prototype.drawShelfItems = function (r) {
     const m = w.getMeta(x, y, z), [fx, fz] = shelfFront(m), [rx, rz] = shelfRight(m), l = w.getLightRaw(x, y, z), li = [l >> 4, l & 15];
     be.items.forEach((st, i) => {
       if (!st) return;
-      const k = 0.25, back = !itemModelKind(st) && itemStyle(st.id) === 'sprite' ? 0.25 : 0.18, s = (i - 1) * 0.3125;
+      const k = 0.25, back = !itemModelKind(st, 'on_shelf') && itemStyle(st.id) === 'sprite' ? 0.25 : 0.18, s = (i - 1) * 0.3125;
       const cx = x + 0.5 + rx * s - fx * back, cy = y + 0.5 + (be.bottom ? -0.25 + k * 0.5 : 0), cz = z + 0.5 + rz * s - fz * back;
       drawItemIn(this, r, st, 'on_shelf', new Float32Array([rx * k, 0, rz * k, 0, 0, k, 0, 0, fx * k, 0, fz * k, 0, cx, cy, cz, 1]), li, false);
     });
@@ -66495,6 +66495,574 @@ GOALS.raid = m => {
   m.nav = null;
   if (m.onGround && !m.vehicle && Math.random() < 0.02) m.vy = 0.42;
   return true;
+};
+
+/* @file 223_tridents_arrows.js */
+/* ===================================================================
+   PART 120 — TRIDENTS AND ARROWS DRAWN LIKE JAVA'S
+   A trident is drawn as Java's trident model (the pole, its base and
+   three spikes, from entity/trident) when held, in first and third
+   person, and in flight or stuck in a block, pointing the way it flies;
+   lying on the ground, in a frame or on a shelf it stays the flat
+   picture, as in Java. Arrows in flight are drawn as Java's arrow: two
+   crossed strips with the fletching's cross at the back, from the
+   arrow, tipped arrow and spectral arrow textures, and they quiver for
+   a moment when they hit a block.
+   =================================================================== */
+
+/* ---------------- the trident ---------------- */
+// TridentModel (32x32): the pole, its base and the three spikes
+const TRIDENT_CUBES = [[0, 6, -0.5, 2, -0.5, 1, 25, 1], [4, 0, -1.5, 0, -0.5, 3, 2, 1], [4, 3, -2.5, -3, -0.5, 1, 4, 1], [0, 0, -0.5, -4, -0.5, 1, 4, 1], [4, 3, 1.5, -3, -0.5, 1, 4, 1, 0, 1]];
+// the game's own picture of it when no pack has one: a dark teal pole, the prongs and their base bright
+defSkin('entity/trident/trident', 32, 32, () => skinParts(32, 32, [{ n: 'pole', c: [TRIDENT_CUBES[0]] }, { n: 'head', c: TRIDENT_CUBES.slice(1, 4) }], {
+  pole: (f, x, y, W, H, R) => nz((y + x) % 7 === 0 ? [46, 92, 88] : [58, 112, 106], R, 0.06),
+  head: (f, x, y, W, H, R, ci) => nz(ci === 0 ? [92, 170, 160] : y === 0 ? [196, 236, 228] : [132, 206, 196], R, 0.05),
+}, strHash('trident')), ['entity/trident']);
+// the model through xf (pixels of the model -> where they are drawn)
+function pushTridentModel(r, xf, light) {
+  const vt = VTEX['entity/trident/trident'];
+  if (!vt) return false;
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th, uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+  for (const c of TRIDENT_CUBES) emitVCube(r, c, xf, uvx, [1, 1, 1, 1], light);
+  return true;
+}
+// held: trident_in_hand's transforms in the hands (TridentSpecialRenderer, turned over, from the item block's corner); lying about it
+// is the flat picture with item/generated's
+ITEM_DISPLAYS.trident = [[[0, -90, 25], [-3, 17, 1], 1], [[0, 90, -25], [13, 17, 1], 1], [[0, 60, 0], [11, 17, -2], 1], [[0, 60, 0], [3, 17, 12], 1],
+  ITEM_DISPLAYS.generated[4], ITEM_DISPLAYS.generated[5], ITEM_DISPLAYS.generated[6]];
+DISPLAY_NAMED.trident = 'trident';
+const HAND_PLACES = new Set(['fp', 'fpl', 'tp', 'tpl']);
+const _itemDisplaySetTR = itemDisplaySet;
+itemDisplaySet = function (st) { return st.id === I.TRIDENT ? 'trident' : _itemDisplaySetTR(st); };
+const _itemModelKindTR = itemModelKind;
+itemModelKind = function (st, place) {
+  if (st && st.id === I.TRIDENT) return HAND_PLACES.has(place) && VTEX['entity/trident/trident'] ? 'trident' : null;
+  return _itemModelKindTR(st, place);
+};
+const _drawItemModelTR = drawItemModel;
+drawItemModel = function (g, r, st, kind, m, light) {
+  if (kind !== 'trident') return _drawItemModelTR(g, r, st, kind, m, light);
+  const tm = M4.mul(M4.create(), M4.mul(M4.create(), m, M4.trans(M4.create(), -0.5, -0.5, -0.5)), M4.scale(M4.create(), 1, -1, -1));
+  pushTridentModel(r, q => M4.xform(tm, q[0] / 16, q[1] / 16, q[2] / 16), light);
+  if (hasGlint(st)) { const G = g.glintQ || (g.glintQ = []), gr = { dv(x, y, z, u, v) { G.push([x, y, z, u, v, -1, 1, 1, 1, 1, 15, 15]); } }; pushTridentModel(gr, q => M4.xform(tm, q[0] / 16, q[1] / 16, q[2] / 16), { flat: true, 0: 15, 1: 15 }); }
+};
+
+/* ---------------- arrows ---------------- */
+// the game's own arrow pictures: the side (16x5) with the head ahead and the fletching behind, the fletching's cross (5x5)
+function arrowSkin(head, shaft, feather) {
+  return () => {
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const g = c.getContext('2d'), img = g.createImageData(32, 32), d = img.data, R = mulberry32(strHash('arrow' + head));
+    const put = (x, y, col) => { const o = (y * 32 + x) * 4, k = 0.9 + R() * 0.15; d[o] = col[0] * k; d[o + 1] = col[1] * k; d[o + 2] = col[2] * k; d[o + 3] = 255; };
+    for (let x = 1; x < 15; x++) put(x, 2, shaft);
+    for (const [x, y] of [[12, 1], [12, 3], [13, 1], [13, 2], [13, 3], [14, 2], [15, 2], [11, 0], [11, 4]]) put(x, y, head);
+    for (const [x, y] of [[0, 1], [1, 1], [2, 1], [0, 3], [1, 3], [2, 3], [1, 0], [1, 4], [3, 0], [3, 4]]) put(x, y, feather);
+    for (let y = 5; y < 10; y++) for (let x = 0; x < 5; x++) if (x === 2 || y === 7) put(x, y, (x === 2 && y === 7) ? shaft : feather);
+    g.putImageData(img, 0, 0);
+    return c;
+  };
+}
+defSkin('entity/projectiles/arrow', 32, 32, arrowSkin([168, 168, 168], [124, 92, 56], [236, 236, 236]));
+defSkin('entity/projectiles/tipped_arrow', 32, 32, arrowSkin([140, 60, 160], [124, 92, 56], [236, 236, 236]));
+defSkin('entity/projectiles/spectral_arrow', 32, 32, arrowSkin([250, 226, 110], [200, 170, 70], [255, 240, 160]));
+// Java's yaw and pitch of something flying (Projectile.updateRotation), in degrees
+const flightAngles = d => [Math.atan2(d[0], d[2]) * 180 / Math.PI, Math.atan2(d[1], Math.hypot(d[0], d[2])) * 180 / Math.PI];
+// ArrowRenderer: turned to its flight, quivering after a hit, rolled 45 degrees, 0.05625 a unit, the fletching's cross 7 back from the
+// middle and the two crossed strips along it
+function pushArrow(r, vt, M, light) {
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / 32, kv = rg.h / 32, uv = (u, v) => [(rg.x + u * 32 * ku) / A, (rg.y + v * 32 * kv) / A];
+  const quad = (m, pts) => { for (const [x, y, z, u, v] of pts) { const q = M4.xform(m, x, y, z), t = uv(u, v); r.dv(q[0], q[1], q[2], t[0], t[1], -1, 1, 1, 1, 1, light[0], light[1]); } };
+  quad(M, [[-7, -2, -2, 0, 0.15625], [-7, -2, 2, 0.15625, 0.15625], [-7, 2, 2, 0.15625, 0.3125], [-7, 2, -2, 0, 0.3125]]);
+  quad(M, [[-7, 2, -2, 0, 0.15625], [-7, 2, 2, 0.15625, 0.15625], [-7, -2, 2, 0.15625, 0.3125], [-7, -2, -2, 0, 0.3125]]);
+  let m = M;
+  for (let j = 0; j < 4; j++) {
+    m = M4.mul(M4.create(), m, M4.rotX(M4.create(), Math.PI / 2));
+    quad(m, [[-8, -2, 0, 0, 0], [8, -2, 0, 0.5, 0], [8, 2, 0, 0.5, 0.15625], [-8, 2, 0, 0, 0.15625]]);
+  }
+}
+const arrowTexture = st => st && st.id === I.SPECTRAL_ARROW ? 'entity/projectiles/spectral_arrow' : st && st.id === I.TIPPED_ARROW ? 'entity/projectiles/tipped_arrow' : 'entity/projectiles/arrow';
+// AbstractArrow.onHitBlock: stuck where it went in, backed off a twentieth of a block (the game's stops a step into the block)
+function stuckPos(e) {
+  if (e._stuckAt && e._stuckAt.x === e.x && e._stuckAt.y === e.y && e._stuckAt.z === e.z) return e._stuckAt.p;
+  const w = e.game.world, d = e.dir, l = Math.hypot(d[0], d[1], d[2]) || 1, ux = d[0] / l, uy = d[1] / l, uz = d[2] / l;
+  let k = 0;
+  while (k < 1 && SOLID[w.getBlock(Math.floor(e.x - ux * k), Math.floor(e.y - uy * k), Math.floor(e.z - uz * k))]) k += 0.01;
+  const p = [e.x - ux * (k + 0.05), e.y - uy * (k + 0.05), e.z - uz * (k + 0.05)];
+  e._stuckAt = { x: e.x, y: e.y, z: e.z, p };
+  return p;
+}
+const _projRenderTA = Projectile.prototype.render;
+Projectile.prototype.render = function (r, a) {
+  if (this.kind !== 'arrow' && this.kind !== 'trident') return _projRenderTA.call(this, r, a);
+  const p = this.stuck ? stuckPos(this) : this.ipos(a), [yr, xr] = flightAngles(this.dir || [this.vx, this.vy, this.vz]);
+  const lr = this.game.world.getLightRaw(Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2])), L = [lr >> 4, lr & 15];
+  const P = handPose();
+  P.t(p[0], p[1], p[2]).ry(yr - 90);
+  if (this.kind === 'trident') {
+    // ThrownTridentRenderer: pointing the way it flies
+    P.rz(xr + 90);
+    const m = P.m;
+    if (!pushTridentModel(r, q => M4.xform(m, q[0] / 16, q[1] / 16, q[2] / 16), L)) return _projRenderTA.call(this, r, a);
+    if (this.stack && hasGlint(this.stack)) { const g = this.game, G = g.glintQ || (g.glintQ = []), gr = { dv(x, y, z, u, v) { G.push([x, y, z, u, v, -1, 1, 1, 1, 1, 15, 15]); } }; pushTridentModel(gr, q => M4.xform(m, q[0] / 16, q[1] / 16, q[2] / 16), { flat: true, 0: 15, 1: 15 }); }
+    return;
+  }
+  const vt = VTEX[arrowTexture(this.arrowStack)];
+  if (!vt) return _projRenderTA.call(this, r, a);
+  P.rz(xr);
+  const f = (this.shake || 0) - a;
+  if (f > 0) P.rz(-Math.sin(f * 3) * f);
+  P.rx(45).s(0.05625).t(-4, 0, 0);
+  pushArrow(r, vt, P.m, L);
+};
+// AbstractArrow.shakeTime: 7 ticks of quivering after hitting a block
+const _projTickTA = Projectile.prototype.tick;
+Projectile.prototype.tick = function () {
+  if (this.shake > 0) this.shake--;
+  const was = this.stuck, r = _projTickTA.apply(this, arguments);
+  if (this.kind === 'arrow' && this.stuck && !was) this.shake = 7;
+  return r;
+};
+
+/* @file 224_banners.js */
+/* ===================================================================
+   PART 121 — BANNERS DRAWN LIKE JAVA'S
+   A banner standing or hanging in the world is drawn the way
+   BannerRenderer draws it rather than as a block model: the pole and
+   crossbar from the banner_base texture and the flag, twenty pixels by
+   forty and one thick, all at two thirds of the size, the flag hanging
+   from the bar and swaying slowly to and fro as the world's time goes
+   by, each banner a little out of step with its neighbours by where it
+   is. A banner on a wall hangs from a bar just off the wall, down past
+   the block below. A raid captain wears its banner on its head as the
+   banner's model, the way Java puts a banner item on a head. A banner's
+   outline is Java's (a post's box standing, a board along the wall
+   hanging), oak planks fly off it when it is hit or broken, and like
+   the other blocks drawn by renderers of their own it shows no cracks
+   while being broken.
+   =================================================================== */
+const BANNER_IDS = new Set(BLOCK_NAMES.map((n, i) => i).filter(i => SHAPE[i] === SH.BANNER));
+const IS_BANNER = new Uint8Array(MAXB);
+for (const id of BANNER_IDS) { NOMESH[id] = 1; IS_BANNER[id] = 1; }
+
+// every banner on screen has its design in a slot of the model atlas now, so there are more slots, and one already drawn this frame
+// is never painted over (a design that finds none free waits for the next frame)
+const BANNER_SLOTS_ALL = 64;
+for (let k = BANNER_SLOTS; k < BANNER_SLOTS_ALL; k++) defSkin('banner/slot' + k, 20, 40, () => { const c = document.createElement('canvas'); c.width = 20; c.height = 40; return c; });
+BANTEX.frame = 0;
+const _frameBR = Game.prototype.frame;
+Game.prototype.frame = function () { BANTEX.frame++; return _frameBR.apply(this, arguments); };
+bannerTexture = function (g, color, patterns) {
+  if (!ATLAS.canvas || !g.r || !g.r.atlas) return null;
+  if (BANTEX.atlas !== ATLAS.canvas) { BANTEX.atlas = ATLAS.canvas; BANTEX.slots = []; for (let k = 0; k < BANNER_SLOTS_ALL; k++) BANTEX.slots.push({ key: 'banner/slot' + k, id: null, used: 0, frame: -1 }); }
+  const id = bannerKey(color, patterns);
+  let s = BANTEX.slots.find(q => q.id === id);
+  if (!s) {
+    s = BANTEX.slots.reduce((a, b) => a.used <= b.used ? a : b);
+    const vt = VTEX[s.key];
+    if (!vt || s.frame === BANTEX.frame) return null;
+    const img = new ImageData(bannerPixels(color, patterns), 20, 40), gl = g.r.gl;
+    ATLAS.canvas.getContext('2d').putImageData(img, vt.reg.x, vt.reg.y);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, g.r.atlas);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, vt.reg.x, vt.reg.y, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    s.id = id;
+  }
+  s.used = ++BANTEX.clock; s.frame = BANTEX.frame;
+  return VTEX[s.key];
+};
+
+/* ---------------- the model ---------------- */
+// BannerModel and BannerFlagModel (64x64): the pole (standing banners only), the bar, the flag hanging from its pivot
+const BANNER_POLE = [44, 0, -1, -42, -1, 2, 42, 2];
+const BANNER_BARS = [[0, 42, -10, -20.5, 9.5, 20, 2, 2], [0, 42, -10, -44, -1, 20, 2, 2]];
+const BANNER_FLAG = [0, 0, -10, 0, -2, 20, 40, 1];
+// BannerFlagModel.setupAnim: the flag's tilt for where it is in its sway (0..1)
+const flagTilt = f => (-0.0125 + 0.01 * Math.cos(Math.PI * 2 * f)) * Math.PI;
+// M: the model's pixels to where they are drawn (3x4); vt: the design's slot; tilt: the flag's turn about its bar
+function drawBannerModel(r, M, standing, vt, tilt, light) {
+  const xf = q => BKM.ap(M, q[0], q[1], q[2]), base = VTEX['entity/banner_base'], A = ATLAS.S;
+  if (base) {
+    const rg = base.reg, ku = rg.w / base.tw, kv = rg.h / base.th, uvx = (u, v) => [(rg.x + u * ku) / A, (rg.y + v * kv) / A];
+    if (standing) emitVCube(r, BANNER_POLE, xf, uvx, [1, 1, 1, 1], light, 0);
+    emitVCube(r, BANNER_BARS[standing ? 1 : 0], xf, uvx, [1, 1, 1, 1], light, 0);
+  }
+  if (!vt) return;
+  // the flag (the design on its front, seen through on its back, the edges its outer pixels), lit as entities are
+  const py = standing ? -44 : -20.5, pz = standing ? 0 : 10.5, c = Math.cos(tilt), s = Math.sin(tilt), rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th;
+  for (const fc of guiCubeFaces(BANNER_FLAG, q => xf([q[0], py + q[1] * c - q[2] * s, pz + q[1] * s + q[2] * c]), null)) {
+    const P = fc.P, uv = flagUV(fc.U);
+    const ax = P[1][0] - P[0][0], ay = P[1][1] - P[0][1], az = P[1][2] - P[0][2], bx = P[2][0] - P[0][0], by = P[2][1] - P[0][1], bz = P[2][2] - P[0][2];
+    let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-12) continue;
+    nx /= nl; ny /= nl; nz /= nl;
+    const sh = 0.6 * nx * nx + 0.8 * nz * nz + (ny > 0 ? 1 : 0.5) * ny * ny;
+    for (let k = 0; k < 4; k++) r.dv(P[k][0], P[k][1], P[k][2], (rg.x + uv[k][0] * ku) / A, (rg.y + uv[k][1] * kv) / A, -1, sh, sh, sh, 1, light[0], light[1]);
+  }
+}
+// BannerRenderer.render: from the middle of the block's floor, turned by the banner's rotation (a sixteenth of a turn a step) or away
+// from its wall, two thirds of the model's size and turned over
+function bannerTransform(x, y, z, m) {
+  const a = (m & 16) ? -(m & 3) * Math.PI / 2 : -(m & 15) * Math.PI / 8, k = 2 / 3 / 16;
+  return BKM.mul(BKM.mul(BKM.t(x + 0.5, y, z + 0.5), BKM.ry(a)), [k, 0, 0, 0, 0, -k, 0, 0, 0, 0, -k, 0]);
+}
+// where the flag is in its sway: a hundred ticks to and fro, offset by the banner's place (x*7 + y*9 + z*13)
+const bannerSway = (x, yJava, z, t) => ((((x * 7 + yJava * 9 + z * 13 + Math.floor(t)) % 100) + 100) % 100 + (t - Math.floor(t))) / 100;
+
+// BannerBlock's and WallBannerBlock's shapes, for the outline and what a click finds: a post's box standing, a board 12.5 high along
+// the wall hanging (nothing to bump into)
+const BANNER_WALL_BOXES = [[0, 0, 0, 16, 12.5, 2], [14, 0, 0, 16, 12.5, 16], [0, 0, 14, 16, 12.5, 16], [0, 0, 0, 2, 12.5, 16]];
+const _shapeBoxesBR = shapeBoxes;
+shapeBoxes = function (id, meta, conn, forCollision, ctx) {
+  if (!IS_BANNER[id]) return _shapeBoxesBR(id, meta, conn, forCollision, ctx);
+  if (forCollision) return [];
+  return [(meta & 16) ? BANNER_WALL_BOXES[meta & 3].slice() : [4, 0, 4, 12, 16, 12]];
+};
+
+// a banner's block model has only its particle texture, oak planks: what flies off when it is hit or broken
+for (const k of ['blockBreak', 'hitBlock']) {
+  const f = Particles.prototype[k];
+  Particles.prototype[k] = function (x, y, z, id, ...rest) { return f.call(this, x, y, z, IS_BANNER[id] ? B.OAK_PLANKS : id, ...rest); };
+}
+
+// the cracks of a block being broken are drawn on its block model, so blocks drawn by renderers of their own (banners, chests, heads,
+// shulker boxes, decorated pots) show none, as in Java
+const _renderSelectionBR = Game.prototype.renderSelection;
+Game.prototype.renderSelection = function (eye, env) {
+  const p = this.player, t = this.target;
+  if (!p || !t || !p.mining || !NOMESH[t.id]) return _renderSelectionBR.call(this, eye, env);
+  const m = p.mining;
+  p.mining = null;
+  try { return _renderSelectionBR.call(this, eye, env); } finally { p.mining = m; }
+};
+
+/* ---------------- the banners around ---------------- */
+// each chunk's banners, found again when one is put down or taken away there; a few chunks are searched a frame
+function chunkBanners(c) {
+  if (!c._banners || c._bannersB !== c.blocks) {
+    const l = [], b = c.blocks;
+    for (let i = 0, n = b.length; i < n; i++) if (IS_BANNER[b[i]]) l.push(i);
+    c._banners = l; c._bannersB = b;
+  }
+  return c._banners;
+}
+const _setBlockBR = World.prototype.setBlock;
+World.prototype.setBlock = function (x, y, z, id) {
+  const old = this.getBlock(x, y, z), r = _setBlockBR.apply(this, arguments);
+  if (IS_BANNER[old] || IS_BANNER[id]) { const c = this.getChunk(x >> 4, z >> 4); if (c) c._banners = null; }
+  return r;
+};
+// every banner within 64 blocks of the camera (BlockEntityRenderer's view distance), patterned or plain
+Game.prototype.drawBanners = function (r, alpha) {
+  const w = this.world, p = this.player;
+  if (!w || !p || !VTEX['entity/banner_base']) return;
+  const eye = r.org, pcx = Math.floor(eye[0]) >> 4, pcz = Math.floor(eye[2]) >> 4, t = w.tick + alpha;
+  let budget = 6;
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.blocks) continue;
+    if (!c._banners || c._bannersB !== c.blocks) { if (budget-- <= 0) continue; chunkBanners(c); }
+    for (const i of c._banners) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15), id = w.getBlock(x, y, z);
+      if (!IS_BANNER[id] || (x + 0.5 - eye[0]) ** 2 + (y + 0.5 - eye[1]) ** 2 + (z + 0.5 - eye[2]) ** 2 > 64 * 64) continue;
+      const m = w.getMeta(x, y, z), be = w.getBE(x, y, z), pats = be && be.type === 'banner' && be.patterns || [];
+      const lr = w.getLightRaw(x, y, z);
+      drawBannerModel(r, bannerTransform(x, y, z, m), !(m & 16), bannerTexture(this, BLK[id].color, pats), flagTilt(bannerSway(x, y - (w.yOff || 0), z, t)), [lr >> 4, lr & 15]);
+    }
+  }
+};
+
+/* ---------------- worn ---------------- */
+// a raid captain's banner: CustomHeadLayer.translateToHead (a quarter block up, turned round, 0.625 of the size, turned over), then the
+// banner item's 'head' display; its own model, in place of a picture of the design
+const BANNER_HEAD = [[0, 180, 0], [0, 16, 7], 1.5];
+const _renderExtraBR = Mob.prototype.renderExtra;
+Mob.prototype.renderExtra = function (r, a, p, yaw, st, light, at) {
+  const d = this.data, b = d && d.banner;
+  if (!b || !at || !ITEMS[b.id] || !isBannerItem(b.id) || !VTEX['entity/banner_base']) return _renderExtraBR.call(this, r, a, p, yaw, st, light, at);
+  d.banner = null;
+  try { _renderExtraBR.call(this, r, a, p, yaw, st, light, at); } finally { d.banner = b; }
+  const PM = atMatrix(at, 'head');
+  if (!PM) return;
+  const P = handPose();
+  P.s(16).t(0, -0.25, 0).ry(180).s(0.625, -0.625, -0.625);
+  applyDisplay(P, BANNER_HEAD, false);
+  drawItemModel(this.game, r, b, 'banner', M4.mul(M4.create(), PM, P.m), light);
+};
+
+/* @file 225_cracks.js */
+/* ===================================================================
+   PART 122 — CRACKS ON THE BLOCK'S OWN MODEL LIKE JAVA'S
+   The cracks of a block being broken are drawn the way Java draws
+   them: on the block's own model rather than on its outline box. A
+   torch cracks on the torch, a stair on its two steps, a flower on its
+   crossed planes, a fence on its post and the bars joining it to its
+   neighbours; faces hidden by the blocks around are left out. Each
+   face takes the crack texture by where its corners are in the block,
+   turned the way Java's SheetedDecalTextureGenerator turns it for the
+   face's direction, so the cracks line up across a block's faces.
+   =================================================================== */
+
+/* ---------------- one block's quads ---------------- */
+// the block goes through the chunk mesher's own code on its own, its neighbours as they are in the world (the faces they hide, the
+// shapes they join); what comes out is kept as quads, in blocks from the block's corner
+const CK_PI = 9 * PAD2 + 9 * PADW + 9, CK_TINT = new Uint8Array(9).fill(255);
+const CK_MB = { q: [], cur: [], nm: 0, v(x, y, z) { this.cur.push([x / 16, y / 16, z / 16]); if (this.cur.length === 4) { this.q.push(this.cur); this.cur = []; } } };
+function blockQuads(w, id, meta, x, y, z) {
+  for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const i = CK_PI + dy * PAD2 + dz * PADW + dx;
+    pBlk[i] = w.getBlock(x + dx, y + dy, z + dz); pMeta[i] = w.getMeta(x + dx, y + dy, z + dz); pLight[i] = w.getLightRaw(x + dx, y + dy, z + dz);
+  }
+  pBlk[CK_PI] = id; pMeta[CK_PI] = meta;
+  const mb = CK_MB, pi = CK_PI, l = pLight[pi], shape = SHAPE[id], both = pts => { quad(mb, pts, 0, UV_FULL, 0, 0, 0, 0, 0, 0); quad(mb, [pts[1], pts[0], pts[3], pts[2]], 0, UV_FULL, 0, 0, 0, 0, 0, 0); };
+  mb.q = []; mb.cur = [];
+  if (!id || NOMESH[id]) return mb.q;
+  try {
+    switch (shape) {
+      case SH.CUBE:
+        for (let f = 0; f < 6; f++) {
+          const n = pBlk[pi + FND[f]];
+          if (OPAQUE[n] || (n === id && CULLSAME[id])) continue;
+          mb.q.push(FV[f].map(v => [v[0], v[1], v[2]]));
+        }
+        if (BLK[id].shell) emitBoxPart(mb, shellPart(id), 0, 0, 0, pi, l, id, meta, 255, 255, 255, 0);
+        break;
+      case SH.CROSS: case SH.TALL: meshCross(mb, id, meta, pi, 0, 0, 0, CK_TINT, 0, w, x, y, z); break;
+      case SH.TORCH: meshTorch(mb, 0, 0, 0, meta & 7, l, 0); break;
+      case SH.LADDER:
+        both(meta === 1 ? [[1, 0, 16], [1, 0, 0], [1, 16, 0], [1, 16, 16]] : meta === 2 ? [[15, 0, 0], [15, 0, 16], [15, 16, 16], [15, 16, 0]]
+          : meta === 3 ? [[0, 0, 1], [16, 0, 1], [16, 16, 1], [0, 16, 1]] : [[16, 0, 15], [0, 0, 15], [0, 16, 15], [16, 16, 15]]);
+        break;
+      case SH.CROP:
+        for (const o of [4, 12]) { both([[o, -1, 0], [o, -1, 16], [o, 15, 16], [o, 15, 0]]); both([[16, -1, o], [0, -1, o], [0, 15, o], [16, 15, o]]); }
+        break;
+      case SH.CACTUS:
+        for (let f = 0; f < 6; f++) {
+          const n = pBlk[pi + FND[f]];
+          if ((f === 2 || f === 3) && (OPAQUE[n] || n === id)) continue;
+          emitCubeFace(mb, f, 0, 0, 0, 0, pi, 0, 255, 255, 255, 0, f < 2 || f > 3 ? 1 : 0);
+        }
+        break;
+      case SH.LANTERN: meshLantern(mb, 0, 0, 0, pi, l, 0, meta === 1); break;
+      case SH.DOOR: case SH.FRAME: case SH.STAIRS: case SH.SLAB: case SH.LAYER: emitBoxList(mb, shapeBoxes(id, meta, 0, false), 0, 0, 0, pi, id, meta, () => 0); break;
+      case SH.PANE: case SH.FENCE: emitBoxList(mb, shapeBoxes(id, meta, padCtx(pi, id).conn, false), 0, 0, 0, pi, id, meta, () => 0); break;
+      case SH.LIQUID: case SH.PORTAL: case SH.EPORTAL: break;
+      default:
+        if (MDL[shape]) emitParts(mb, blockParts(id, meta, DYNAMIC_SHAPES.has(shape) ? padCtx(pi, id) : null), 0, 0, 0, pi, id, meta, CK_TINT, 0, 0);
+    }
+  } catch (e) { mb.q = []; mb.err = e; }
+  return mb.q;
+}
+
+/* ---------------- the cracks ---------------- */
+// Direction.getApproximateNearest (DOWN, UP, NORTH, SOUTH, WEST, EAST, the first of equals kept), as our faces (+X -X +Y -Y +Z -Z)
+const CK_ORDER = [3, 2, 5, 4, 1, 0], CK_N = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+function nearestFace(nx, ny, nz) {
+  let best = -Infinity, f = 2;
+  for (const k of CK_ORDER) { const d = nx * CK_N[k][0] + ny * CK_N[k][1] + nz * CK_N[k][2]; if (d > best) { best = d; f = k; } }
+  return f;
+}
+// SheetedDecalTextureGenerator: the corner's place in the block turned half round Y, a quarter back about X, then by the face's
+// direction's rotation; the crack texture's u and v are minus its x and y
+const DECAL_UV = [(x, y, z) => [z, -y], (x, y, z) => [-z, -y], (x, y, z) => [x, z], (x, y, z) => [x, -z], (x, y, z) => [x, -y], (x, y, z) => [-x, -y]];
+function crackQuads(w, x, y, z) {
+  const out = [];
+  for (const q of blockQuads(w, w.getBlock(x, y, z), w.getMeta(x, y, z), x, y, z)) {
+    const ax = q[1][0] - q[0][0], ay = q[1][1] - q[0][1], az = q[1][2] - q[0][2], bx = q[2][0] - q[0][0], by = q[2][1] - q[0][1], bz = q[2][2] - q[0][2];
+    let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    if (Math.hypot(nx, ny, nz) < 1e-9) { const cx = q[3][0] - q[0][0], cy = q[3][1] - q[0][1], cz = q[3][2] - q[0][2]; nx = ay * cz - az * cy; ny = az * cx - ax * cz; nz = ax * cy - ay * cx; }
+    if (Math.hypot(nx, ny, nz) < 1e-9) continue;
+    const f = nearestFace(nx, ny, nz), uv = q.map(p => DECAL_UV[f](p[0], p[1], p[2]));
+    // the texture repeats; kept to one copy of it a quad
+    const u0 = Math.floor(Math.min(uv[0][0], uv[1][0], uv[2][0], uv[3][0]) + 1e-6), v0 = Math.floor(Math.min(uv[0][1], uv[1][1], uv[2][1], uv[3][1]) + 1e-6);
+    out.push(q.map((p, k) => [p[0], p[1], p[2], uv[k][0] - u0, uv[k][1] - v0]));
+  }
+  return out;
+}
+// RenderType.crumbling: the crack texture multiplies what is under it twice over (DST_COLOR x SRC_COLOR), its clear pixels dropped,
+// a little in front of the faces under it (polygon offset -1, -10) and writing no depth
+const _dynFlushCK = Renderer.prototype.dynFlush;
+Renderer.prototype.dynFlush = function (vp, env, opts) {
+  if (!(opts && opts.crumble)) return _dynFlushCK.call(this, vp, env, opts);
+  const gl = this.gl;
+  gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.DST_COLOR, gl.SRC_COLOR, gl.ONE, gl.ZERO);
+  gl.depthMask(false); gl.depthFunc(gl.LEQUAL); gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(-1, -10);
+  try { return _dynFlushCK.call(this, vp, env, { fullBright: true }); } finally { gl.disable(gl.POLYGON_OFFSET_FILL); gl.depthMask(true); gl.depthFunc(gl.LESS); }
+};
+// the block being broken: its outline as before, then the cracks on its model
+const _renderSelectionCK = Game.prototype.renderSelection;
+Game.prototype.renderSelection = function (eye, env) {
+  const p = this.player, t = this.target, m = p && p.mining;
+  if (!t || !m || !(p.mineProgress > 0) || t.x !== m.x || t.y !== m.y || t.z !== m.z) return _renderSelectionCK.call(this, eye, env);
+  p.mining = null;
+  try { _renderSelectionCK.call(this, eye, env); } finally { p.mining = m; }
+  const qs = crackQuads(this.world, t.x, t.y, t.z);
+  if (!qs.length) return;
+  const r = this.r, layer = texL('destroy_' + Math.min(9, Math.floor(p.mineProgress * 10)));
+  r.org = [0, 0, 0];
+  for (const q of qs) for (const v of q) r.dv(t.x + v[0] - eye[0], t.y + v[1] - eye[1], t.z + v[2] - eye[2], v[3], v[4], layer, 1, 1, 1, 1, 15, 15);
+  r.dynFlush(r.vp, env, { crumble: true });
+  r.org = eye;
+};
+
+/* @file 226_block_particles.js */
+/* ===================================================================
+   PART 123 — BLOCK PARTICLES LIKE JAVA'S
+   The bits that fly off blocks are Java's terrain particles: a block
+   breaks into a grid of bits over its own shape (four a block along
+   each side, at least two however thin, so a slab gives half as many
+   and a flower a dozen), each bit a random quarter of the block's
+   particle texture, darkened and tinted like the block, falling and
+   bouncing as Java's do and lasting a random 4 to 40 ticks. Hitting a
+   block throws off a small bit from the face being hit. Every block
+   uses the texture its Java model names for particles: oak planks for
+   beds, banners and chests, soul sand for heads, obsidian for ender
+   chests, the front of furnaces and crafting tables, stripped logs for
+   shelves, and so on. Sprinting kicks up bits of the block underfoot,
+   and landing after a fall of more than about four blocks throws up a
+   burst of them, more the harder the fall, for mobs as well.
+   =================================================================== */
+
+/* ---------------- each block's particle texture ---------------- */
+// the texture Java's block model gives as its particle; by default the block's first face (its lit or powered look when it has one)
+const PARTICLE_TEX = {};
+const ptexSet = (names, f) => { for (const n of names) { const id = B[n.toUpperCase()]; if (id !== undefined) PARTICLE_TEX[id] = f; } };
+const ptexName = n => id => texLayer(n, FACETEX[id * 6]);
+ptexSet(COLORS.map(c => c + '_bed').concat(COLORS.map(c => c + '_banner'), ['chest', 'trapped_chest', 'tripwire_hook']), ptexName('oak_planks'));
+ptexSet(['creeper_head', 'dragon_head', 'piglin_head', 'player_head', 'skeleton_skull', 'wither_skeleton_skull', 'zombie_head'], ptexName('soul_sand'));
+ptexSet(['ender_chest'], ptexName('obsidian'));
+for (const w of ['acacia', 'birch', 'cherry', 'dark_oak', 'jungle', 'mangrove', 'oak', 'pale_oak', 'poplar', 'spruce']) ptexSet([w + '_shelf'], ptexName('stripped_' + w + '_log'));
+ptexSet(['crimson_shelf'], ptexName('stripped_crimson_stem')); ptexSet(['warped_shelf'], ptexName('stripped_warped_stem')); ptexSet(['bamboo_shelf'], ptexName('stripped_bamboo_block'));
+// orientable blocks: their front (lit furnaces' lit front)
+ptexSet(['furnace', 'lit_furnace', 'smoker', 'blast_furnace', 'carved_pumpkin', 'jack_o_lantern', 'observer', 'loom'], (id, m) => ((m & ALTMASK[id]) ? FACETEX_ALT : FACETEX)[id * 6 + 4]);
+// dispensers and droppers: the front facing sideways, the furnace top facing up or down (orientable_vertical's side)
+ptexSet(['dispenser', 'dropper'], (id, m) => (m & 7) === 2 || (m & 7) === 3 ? FACETEX[id * 6 + 2] : FACETEX[id * 6 + 4]);
+for (const [n, t] of [['crafting_table', 'crafting_table_front'], ['fletching_table', 'fletching_table_front'], ['smithing_table', 'smithing_table_front'], ['crafter', 'crafter_north'],
+  ['command_block', 'command_block_back'], ['chain_command_block', 'chain_command_block_back'], ['repeating_command_block', 'repeating_command_block_back'], ['jigsaw', 'jigsaw_top'],
+  ['beacon', 'glass'], ['enchanting_table', 'enchanting_table_bottom'], ['stonecutter', 'stonecutter_bottom'], ['sculk_sensor', 'sculk_sensor_bottom'],
+  ['calibrated_sculk_sensor', 'sculk_sensor_bottom'], ['sculk_shrieker', 'sculk_shrieker_bottom'], ['scaffolding', 'scaffolding_top'], ['lever', 'cobblestone'],
+  ['decorated_pot', 'terracotta'], ['honey_block', 'honey_block_top'], ['chiseled_bookshelf', 'chiseled_bookshelf_top'], ['daylight_detector', 'daylight_detector_top'],
+  ['azalea', 'azalea_plant'], ['flowering_azalea', 'azalea_plant'], ['big_dripleaf', 'big_dripleaf_top'], ['small_dripleaf', 'big_dripleaf_stem'], ['campfire', 'campfire_log'],
+  ['soul_campfire', 'campfire_log'], ['piston_head', 'piston_top'], ['redstone_wire', 'redstone_dust_dot'], ['shelf_mushroom', 'shelf_mushroom_particle'],
+  ['bamboo_hanging_sign', 'bamboo_planks']]) ptexSet([n], ptexName(t));
+ptexSet(['cocoa'], (id, m) => texLayer('cocoa_stage' + ((m >> 2) % 3), FACETEX[id * 6]));
+ptexSet(['pitcher_plant'], (id, m) => texLayer((m & 1) ? 'pitcher_crop_top_stage_4' : 'pitcher_crop_bottom_stage_4', FACETEX[id * 6]));
+function particleLayer(id, meta) {
+  const f = PARTICLE_TEX[id];
+  if (f) return f(id, meta || 0);
+  if (id === B.GRASS_BLOCK) return TEX_DIRT;
+  return ((meta & ALTMASK[id]) ? FACETEX_ALT : FACETEX)[id * 6];
+}
+// blocks with no terrain particles (BlockBehaviour.Properties.noTerrainParticles, or nothing to show)
+const NO_TERRAIN = new Uint8Array(MAXB);
+for (const n of ['barrier', 'light', 'structure_void', 'moving_piston', 'water', 'lava', 'end_portal', 'end_gateway']) { const id = B[n.toUpperCase()]; if (id !== undefined) NO_TERRAIN[id] = 1; }
+
+/* ---------------- the particle ---------------- */
+// TerrainParticle: Particle's random push, the block's particle texture (a quarter of it, from a random spot), 0.6 of white tinted
+// like the block (but grass blocks, whose particle is dirt), half the usual size, Java's gravity and friction, 4 to 40 ticks
+function terrainTint(w, id, meta, bx, bz) {
+  const k = TINT[id];
+  if (!k || id === B.GRASS_BLOCK) return [0.6, 0.6, 0.6];
+  const c = w.getChunk(bx >> 4, bz >> 4);
+  if (!c || !c.tint) return [0.6, 0.6, 0.6];
+  const t = tintRGB(k, c.tint, (((bz & 15) << 4) | (bx & 15)) * 9, meta);
+  return [0.6 * t[0] / 255, 0.6 * t[1] / 255, 0.6 * t[2] / 255];
+}
+function terrainParticle(P, x, y, z, xa, ya, za, id, meta, bx, by, bz, power, scale) {
+  if (!id || NO_TERRAIN[id]) return;
+  const R = Math.random, v = PJ.push(xa, ya, za);
+  // Particle.setPower: slower, the upward 0.1 kept
+  if (power !== undefined) { v[0] *= power; v[1] = (v[1] - 0.1) * power + 0.1; v[2] *= power; }
+  P.add({ x, y, z, vx: v[0], vy: v[1], vz: v[2], life: Math.floor(4 / (R() * 0.9 + 0.1)), layer: particleLayer(id, meta), u: R() * 3 / 4, v: R() * 3 / 4, us: 0.25,
+    size: PJ.quad() / 2 * (scale || 1), col: terrainTint(P.game.world, id, meta, bx, bz), grav: 1, fr: 0.98, phys: true, fn: PJ.step });
+}
+// the boxes of a block's outline (its VoxelShape), in pixels
+function outlineBoxes(w, id, meta, x, y, z) {
+  const sh = SHAPE[id];
+  if (sh === SH.CUBE) return [[0, 0, 0, 16, 16, 16]];
+  const ctx = w && (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? w.shapeCtx(x, y, z, id) : null;
+  const bs = shapeBoxes(id, meta, ctx ? ctx.conn : 0, false, ctx);
+  return bs && bs.length ? bs : [[0, 0, 0, 16, 16, 16]];
+}
+
+/* ---------------- breaking and hitting ---------------- */
+// the block as it was before it went (its state and shape), for its breaking bits
+const _breakBlockBP = Game.prototype.breakBlock;
+Game.prototype.breakBlock = function (x, y, z) {
+  const w = this.world, id = w && w.getBlock(x, y, z);
+  if (id) { const meta = w.getMeta(x, y, z); this._broke = { x, y, z, id, meta, boxes: outlineBoxes(w, id, meta, x, y, z) }; }
+  try { return _breakBlockBP.apply(this, arguments); } finally { this._broke = null; }
+};
+// ParticleEngine.destroy: over each box of the shape, max(2, ceil(size / 0.25)) bits along each side, sent out from the box's middle
+Particles.prototype.blockBreak = function (x, y, z, id) {
+  const g = this.game, b = g._broke, here = b && b.x === x && b.y === y && b.z === z && b.id === id, meta = here ? b.meta : 0;
+  if (!id || NO_TERRAIN[id]) return;
+  const boxes = here ? b.boxes : outlineBoxes(null, id, meta, x, y, z);
+  this._force = true;
+  try {
+    for (const bx of boxes) {
+      const x1 = bx[0] / 16, y1 = bx[1] / 16, z1 = bx[2] / 16, dx = Math.min(1, bx[3] / 16 - x1), dy = Math.min(1, bx[4] / 16 - y1), dz = Math.min(1, bx[5] / 16 - z1);
+      const ni = Math.max(2, Math.ceil(dx / 0.25)), nj = Math.max(2, Math.ceil(dy / 0.25)), nk = Math.max(2, Math.ceil(dz / 0.25));
+      for (let i = 0; i < ni; i++) for (let j = 0; j < nj; j++) for (let k = 0; k < nk; k++) {
+        const fx = (i + 0.5) / ni, fy = (j + 0.5) / nj, fz = (k + 0.5) / nk;
+        terrainParticle(this, x + fx * dx + x1, y + fy * dy + y1, z + fz * dz + z1, fx - 0.5, fy - 0.5, fz - 0.5, id, meta, x, y, z);
+      }
+    }
+  } finally { this._force = false; }
+};
+// ParticleEngine.crack: a bit a tenth of a block off the face being hit, somewhere over the shape's bounds, slowed and smaller
+Particles.prototype.hitBlock = function (x, y, z, id, f) {
+  const w = this.game.world, meta = w.getMeta(x, y, z);
+  if (!id || NO_TERRAIN[id] || w.getBlock(x, y, z) !== id) return;
+  const bb = [1, 1, 1, 0, 0, 0];
+  for (const b of outlineBoxes(w, id, meta, x, y, z)) for (let k = 0; k < 3; k++) { bb[k] = Math.min(bb[k], b[k] / 16); bb[k + 3] = Math.max(bb[k + 3], b[k + 3] / 16); }
+  const R = Math.random;
+  let px = x + R() * (bb[3] - bb[0] - 0.2) + 0.1 + bb[0], py = y + R() * (bb[4] - bb[1] - 0.2) + 0.1 + bb[1], pz = z + R() * (bb[5] - bb[2] - 0.2) + 0.1 + bb[2];
+  if (f === 3) py = y + bb[1] - 0.1; else if (f === 2) py = y + bb[4] + 0.1; else if (f === 5) pz = z + bb[2] - 0.1;
+  else if (f === 4) pz = z + bb[5] + 0.1; else if (f === 1) px = x + bb[0] - 0.1; else if (f === 0) px = x + bb[3] + 0.1;
+  this._force = true;
+  try { terrainParticle(this, px, py, pz, 0, 0, 0, id, meta, x, y, z, 0.2, 0.6); } finally { this._force = false; }
+};
+
+/* ---------------- running and landing ---------------- */
+// Entity.spawnSprintParticle: each tick of sprinting (not in water or lava, not sneaking), a bit of the block underfoot kicked back
+function sprintDust(e) {
+  if (!e.sprinting || e.inWater || e.inLava || e.sneaking || e.mode === 3 || !(e.health > 0)) return;
+  const w = e.game.world, bx = Math.floor(e.x), by = Math.floor(e.y - 0.2), bz = Math.floor(e.z), id = w.getBlock(bx, by, bz);
+  if (id && !NO_TERRAIN[id]) terrainParticle(e.game.particles, e.x + (Math.random() - 0.5) * e.w, e.y + 0.1, e.z + (Math.random() - 0.5) * e.w, e.vx * -4, 1.5, e.vz * -4, id, w.getMeta(bx, by, bz), bx, by, bz);
+}
+const _playerTickBP = Player.prototype.tick;
+Player.prototype.tick = function () { const r = _playerTickBP.apply(this, arguments); sprintDust(this); return r; };
+// LivingEntity.checkFallDamage: landing from past the safe distance throws up 150 x min(0.2 + power / 15, 2.5) bits of the block landed on
+// (power: the drop past the safe distance, rounded down), from the middle of the feet or the edge of the block they stand on, each sent
+// off at random (0.15 a tick on average)
+const gaussBP = () => { let u = 0; while (!u) u = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random()); };
+function landingDust(e, dist, safe) {
+  if (!(dist > 0) || e.inWater || e.inLava) return;
+  const power = Math.floor(dist + 1e-6 - safe);
+  if (power <= 0) return;
+  const g = e.game, w = g.world, hw = (e.w || 0.6) / 2;
+  // the block underfoot, or the one the feet stand on at the edge (Entity.getOnPos)
+  let bx = Math.floor(e.x), by = Math.floor(e.y - 0.2), bz = Math.floor(e.z), id = w.getBlock(bx, by, bz);
+  if (!id) for (const [ox, oz] of [[-hw, -hw], [hw, -hw], [-hw, hw], [hw, hw]]) { const cx = Math.floor(e.x + ox), cz = Math.floor(e.z + oz), c = w.getBlock(cx, by, cz); if (c) { bx = cx; bz = cz; id = c; break; } }
+  if (!id || NO_TERRAIN[id]) return;
+  let px = e.x, pz = e.z;
+  if (bx !== Math.floor(e.x) || bz !== Math.floor(e.z)) {
+    const d3 = px - bx - 0.5, d5 = pz - bz - 0.5, d6 = Math.max(Math.abs(d3), Math.abs(d5));
+    px = bx + 0.5 + d3 / d6 * 0.5; pz = bz + 0.5 + d5 / d6 * 0.5;
+  }
+  const n = Math.floor(150 * Math.min(Math.fround(0.2) + power / 15, 2.5)), meta = w.getMeta(bx, by, bz);
+  for (let i = 0; i < n; i++) terrainParticle(g.particles, px, e.y, pz, gaussBP() * 0.15, gaussBP() * 0.15, gaussBP() * 0.15, id, meta, bx, by, bz);
+}
+const _playerLandedBP = Player.prototype.landed;
+Player.prototype.landed = function (dist) {
+  if (!this.flying && !this.gliding && !this.effectLevel('slow_falling') && this.mode !== 3) landingDust(this, dist, 3 + this.effectLevel('jump_boost'));
+  return _playerLandedBP.apply(this, arguments);
+};
+const _mobLandedBP = Mob.prototype.landed;
+Mob.prototype.landed = function (dist) {
+  const T = this.T || {};
+  if (!T.flying && !(this instanceof Hanging)) landingDust(this, dist, typeof T.noFall === 'number' && T.noFall < 1000 ? T.noFall : 3);
+  return _mobLandedBP.apply(this, arguments);
 };
 
 </script>

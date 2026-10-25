@@ -836,6 +836,32 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   their bow. An illager attacking with a weapon swings it down from above its head, and one without a weapon reaches
   out like a zombie. When raiders win a raid they stand about jumping until it ends, and vindicators and evokers
   celebrate with their arms up. Illagers riding something sit with their legs out.
+- **Tridents and arrows like Java's** (Part 120): a trident is now drawn as Java's 3D trident (the pole, its base and
+  three prongs, from the trident texture) when you or a drowned hold it and when it flies or sticks in a block, pointing
+  the way it flies. On the ground, in a frame or on a shelf it stays the flat picture, as in Java. Arrows in flight are
+  drawn the way Java draws them: two crossed strips with the fletching's cross at the back, with the arrow, tipped
+  arrow and spectral arrow textures. An arrow quivers for a moment when it hits a block, and arrows and tridents stick
+  out of the block's face as in Java instead of sinking into it and going dark.
+- **Banners like Java's** (Part 121): banners standing or hanging in the world are now drawn as Java's banner model
+  instead of a block model: the pole and crossbar from the banner_base texture and the flag hanging from the bar, two
+  thirds of full size. The flag sways slowly to and fro with the world's time, each banner a little out of step with
+  its neighbours. A banner on a wall hangs from a bar just off the wall, down past the block below, as in Java. A raid
+  captain now wears its banner on its head as the banner's 3D model. A banner's outline is Java's (a post-sized box
+  when standing, a thin board along the wall when hanging), and breaking one throws off oak plank bits. As in Java,
+  banners, chests, heads, shulker boxes and decorated pots no longer show cracks while you break them, since Java
+  draws those on the block model and these blocks are drawn by renderers of their own.
+- **Cracks on the block's own shape like Java's** (Part 122): when you break a block, the cracks are now drawn on the
+  block's own model instead of on its outline box: on a stair's two steps, a fence's post and the bars joining it to its
+  neighbours, a flower's crossed planes. Faces hidden by neighbouring blocks get none. Each face places the crack
+  texture by where it is in the block, turned for the face's direction the way Java does it, and the cracks darken what
+  is under them with Java's blending, so the default pack's crack textures look as they do in Java.
+- **Block particles like Java's** (Part 123): the bits that fly off blocks now behave like Java's. A broken block bursts
+  into a grid of bits over its own shape (64 for a full block, half as many for a slab), each a random quarter of the
+  block's particle texture, darkened and tinted like the block, falling and bouncing as Java's do for a random 4 to 40
+  ticks. Hitting a block throws off a small bit from the face you hit. Every block uses the texture its Java model
+  names for particles: beds, banners and chests give oak planks, heads soul sand, ender chests obsidian, furnaces and
+  crafting tables their front, shelves stripped logs. Sprinting now kicks up bits of the block underfoot, and landing
+  after a fall of more than about four blocks throws up a burst of them, more the harder the fall, for mobs too.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
