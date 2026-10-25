@@ -14310,6 +14310,9 @@ function tintRGB(k, tint, to, meta) {
   return t;
 }
 
+// a cube face's texture turned in quarter steps (a model face's "rotation"), set around the call by the blocks that turn theirs
+let CUBE_UVROT = 0;
+const UVROT_FN = [];   // id -> (meta, face) -> quarter turns of that face's texture
 function emitCubeFace(mb, f, lx, ly, lz, sy, pi, layer, tr, tg, tb, fl, inset) {
   const npi = pi + FND[f];
   const base = f * 4;
@@ -14338,7 +14341,9 @@ function emitCubeFace(mb, f, lx, ly, lz, sy, pi, layer, tr, tg, tb, fl, inset) {
     const sh = fs * AOC[_ao[v]];
     let px = p[0] * 16, pz = p[2] * 16;
     if (inset) { if (f === 0) px -= inset; else if (f === 1) px += inset; else if (f === 4) pz -= inset; else if (f === 5) pz += inset; }
-    mb.v(X + px, Y + p[1] * 16, Z + pz, layer, p[3], p[4], _sk[v], _bl[v], tr * sh, tg * sh, tb * sh, fl);
+    let u = p[3], w = p[4];
+    if (CUBE_UVROT) { const r = CUBE_UVROT; if (r === 1) { u = p[4]; w = 16 - p[3]; } else if (r === 2) { u = 16 - p[3]; w = 16 - p[4]; } else { u = 16 - p[4]; w = p[3]; } }
+    mb.v(X + px, Y + p[1] * 16, Z + pz, layer, u, w, _sk[v], _bl[v], tr * sh, tg * sh, tb * sh, fl);
   }
 }
 function quad(mb, pts, layer, uvs, sky, blk, r, g, b, fl, flTopOnly) {
@@ -14736,7 +14741,10 @@ function meshSection(world, c, sy) {
             }
             continue;
           }
+          const ur = UVROT_FN[id];
+          if (ur) CUBE_UVROT = ur(meta, f);
           emitCubeFace(mb, f, lx, ly, lz, sy, pi, faceLayer(id, meta, f), tr, tg, tb, fl, 0);
+          CUBE_UVROT = 0;
         }
         // the inner cube of slime and honey blocks, seen through the shell
         if (d.shell) emitBoxPart(mb, shellPart(id), X, Y, Z, pi, pLight[pi], id, meta, 255, 255, 255, 0);
@@ -56116,7 +56124,10 @@ function mvDrawBlock(w, r, id, meta, cx, cy, cz, ox, oy, oz) {
         else { emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, TEX_DIRT, 255, 255, 255, 0, 0); emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, TEX_GRASS_OVERLAY, tint[to], tint[to + 1], tint[to + 2], 0, 0); }
         continue;
       }
+      const ur = UVROT_FN[id];
+      if (ur) CUBE_UVROT = ur(meta, f);
       emitCubeFace(MV_MB, f, 0, 0, 0, 0, MV_PI, faceLayer(id, meta, f), tr, tg, tb, 0, 0);
+      CUBE_UVROT = 0;
     }
   } else if (shape === SH.STAIRS || shape === SH.SLAB || shape === SH.LAYER || shape === SH.FENCE || shape === SH.PANE) {
     emitBoxList(MV_MB, shapeBoxes(id, meta, 0, false), 0, 0, 0, MV_PI, id, meta, null);
@@ -65612,6 +65623,493 @@ AUDIO.play = function (name, x, y, z, ...rest) {
     case 'spear_hit': this.noiseHit(dst, 'lowpass', wood ? 500 : 800, 1, 0.1, 0.45); this.tone(dst, wood ? 'triangle' : 'square', wood ? 180 : 320, wood ? 120 : 220, 0.06, 0.05, t0 + 0.01); break;
     case 'spear_use': this.noiseHit(dst, 'bandpass', wood ? 700 : 1100, 2, 0.2, 0.2); if (!wood) this.tone(dst, 'triangle', 880, 660, 0.12, 0.04, t0 + 0.05); break;
     case 'spear_lunge': this.noiseHit(dst, 'bandpass', 600, 0.8, 0.3, 0.35); break;
+  }
+};
+
+/* @file 218_icon_view.js */
+/* ===================================================================
+   PART 115 — INVENTORY ICONS SEEN LIKE JAVA'S
+   Java draws an item in a slot with its model's "gui" display transform
+   (translation, rotation X then Y then Z, scale, about the model's middle),
+   square on and lit by the GUI's two lights. A block model's [30, 225, 0]
+   at 0.625 shows its top, its east face on the left and its north face on
+   the right; stairs, fences and walls are turned the other way round
+   ([30, 135, 0]), gates, chests, heads and shulker boxes look at the viewer
+   ([30, 45, 0]) and beds look along their length ([30, 340, 0]). Icons are
+   drawn that way into a depth buffer, each model in the shape and state
+   its item model has (furnaces facing north, barrels up, the inventory
+   shapes of fences and walls, both halves of a bed).
+   =================================================================== */
+
+// [rotation (degrees), translation (pixels), scale]
+const GUI_BLOCK = [[30, 225, 0], [0, 0, 0], 0.625];
+// a display transform as a function from a point in the model (pixels, 0..16 across the block) to the icon: 64 pixels across the slot's
+// 16, y down, and the depth towards the viewer
+function guiProj(view) {
+  const [r, t, s] = view, S = Array.isArray(s) ? s : [s, s, s];
+  const mul = (A, B) => A.map(row => [0, 1, 2].map(j => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j]));
+  const c = r.map(d => Math.cos(d * D2R)), s3 = r.map(d => Math.sin(d * D2R));
+  const R = mul(mul([[1, 0, 0], [0, c[0], -s3[0]], [0, s3[0], c[0]]], [[c[1], 0, s3[1]], [0, 1, 0], [-s3[1], 0, c[1]]]), [[c[2], -s3[2], 0], [s3[2], c[2], 0], [0, 0, 1]]);
+  const M = R.map(row => [row[0] * S[0], row[1] * S[1], row[2] * S[2]]);
+  const det = M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+  const f = (x, y, z) => {
+    x -= 8; y -= 8; z -= 8;
+    const vx = t[0] + M[0][0] * x + M[0][1] * y + M[0][2] * z, vy = t[1] + M[1][0] * x + M[1][1] * y + M[1][2] * z, vz = t[2] + M[2][0] * x + M[2][1] * y + M[2][2] * z;
+    return [32 + vx * 4, 32 - vy * 4, vz, vx, vy];
+  };
+  return { f, det };
+}
+// the GUI's lights as seen by the model's turned normals (Lighting: (0.2, 1, -0.7) and (-0.2, 1, 0.7), turned -22.5 about y after 135 about
+// x): block models are lit from the side (the top full, the left face 0.8, the right 0.6), flat items and a few models from the front
+const GUI_LIGHT = (() => {
+  const nz = v => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+  const a = 135 * D2R, b = -22.5 * D2R;
+  const tf = v => { const y = v[1] * Math.cos(a) - v[2] * Math.sin(a), z = v[1] * Math.sin(a) + v[2] * Math.cos(a); return [v[0] * Math.cos(b) + z * Math.sin(b), y, -v[0] * Math.sin(b) + z * Math.cos(b)]; };
+  const L = [nz([0.2, 1, -0.7]), nz([-0.2, 1, 0.7])].map(tf);
+  return { side: L.map(v => [v[0], -v[1], v[2]]), front: L };
+})();
+const guiShade = (n, L) => Math.min(1, 0.4 + 0.6 * (Math.max(0, L[0][0] * n[0] + L[0][1] * n[1] + L[0][2] * n[2]) + Math.max(0, L[1][0] * n[0] + L[1][1] * n[1] + L[1][2] * n[2])));
+
+/* ---------------- a model's faces ---------------- */
+// each direction's corners in Java's order (FaceInfo), so a face's outward normal is (b - a) x (d - a)
+const GUI_CORNERS = [
+  [[1, 1, 1], [1, 0, 1], [1, 0, 0], [1, 1, 0]], [[0, 1, 0], [0, 0, 0], [0, 0, 1], [0, 1, 1]], [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]],
+  [[0, 0, 1], [0, 0, 0], [1, 0, 0], [1, 0, 1]], [[0, 1, 1], [0, 0, 1], [1, 0, 1], [1, 1, 1]], [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0]],
+];
+// the faces of a block's model parts (pixels), with the texture coordinates the world draws them with (emitBoxPart, emitQuadPart)
+function guiModelFaces(id, meta, ps, shift) {
+  const out = [], dz = shift || 0;
+  for (const p of ps) {
+    const tk = p.tint !== undefined ? p.tint : TINT[id];
+    if (p.q) {
+      const L = p.t ? texLayer(p.t, FACETEX[id * 6]) : FACETEX[id * 6], ins = p.insetXZ || 0, ur = p.uvr;
+      const ca = p.yaw ? Math.cos(p.yaw) : 1, sa = p.yaw ? Math.sin(p.yaw) : 0, P = [], U = [];
+      for (const v of p.q) {
+        let x = v[0], z = v[2], u = v[3], w = v[4];
+        if (ins) { x = x <= 0 ? ins : x >= 16 ? 16 - ins : x; z = z <= 0 ? ins : z >= 16 ? 16 - ins : z; u = u <= 0 ? ins : u >= 16 ? 16 - ins : u; w = w <= 0 ? ins : w >= 16 ? 16 - ins : w; }
+        if (ur) { u = ur[0] + u / 16 * (ur[2] - ur[0]); w = ur[1] + w / 16 * (ur[3] - ur[1]); }
+        if (p.yaw) { const ex = x - 8, ez = z - 8; x = 8 + ex * ca - ez * sa; z = 8 + ex * sa + ez * ca; }
+        P.push([x, v[1], z + dz]); U.push([u, w]);
+      }
+      out.push({ P, U, L, tk, two: !!p.two });
+      continue;
+    }
+    const bx = p.b, ca = p.yaw ? Math.cos(p.yaw) : 1, sa = p.yaw ? Math.sin(p.yaw) : 0;
+    for (let f = 0; f < 6; f++) {
+      let L;
+      if (p.t) { if (!p.t[f]) continue; L = texLayer(p.t[f], FACETEX[id * 6 + f]); } else L = faceLayer(id, meta, f);
+      const rr = p.uv ? p.uv[f] : null, P = [], U = [], rq = !rr && !p.t && UVROT_FN[id] ? UVROT_FN[id](meta, f) : 0;
+      for (const c of GUI_CORNERS[f]) {
+        const px = c[0] ? bx[3] : bx[0], py = c[1] ? bx[4] : bx[1], pz = c[2] ? bx[5] : bx[2];
+        let u, v;
+        if (rr) {
+          let su, tv;
+          if (f === 0) { su = (bx[5] - pz) / (bx[5] - bx[2] || 1); tv = (bx[4] - py) / (bx[4] - bx[1] || 1); }
+          else if (f === 1) { su = (pz - bx[2]) / (bx[5] - bx[2] || 1); tv = (bx[4] - py) / (bx[4] - bx[1] || 1); }
+          else if (f === 4) { su = (px - bx[0]) / (bx[3] - bx[0] || 1); tv = (bx[4] - py) / (bx[4] - bx[1] || 1); }
+          else if (f === 5) { su = (bx[3] - px) / (bx[3] - bx[0] || 1); tv = (bx[4] - py) / (bx[4] - bx[1] || 1); }
+          else if (f === 2) { su = (px - bx[0]) / (bx[3] - bx[0] || 1); tv = (pz - bx[2]) / (bx[5] - bx[2] || 1); }
+          else { su = (px - bx[0]) / (bx[3] - bx[0] || 1); tv = (bx[5] - pz) / (bx[5] - bx[2] || 1); }
+          if (p.ur && f >= 2 && f <= 3) { const k = f === 2 ? p.ur : 4 - p.ur, t = su; if (k === 1) { su = tv; tv = 1 - t; } else if (k === 2) { su = 1 - su; tv = 1 - tv; } else if (k === 3) { su = 1 - tv; tv = t; } }
+          u = rr[0] + su * (rr[2] - rr[0]); v = rr[1] + tv * (rr[3] - rr[1]);
+        } else if (f === 0) { u = 16 - pz; v = 16 - py; } else if (f === 1) { u = pz; v = 16 - py; }
+        else if (f === 4) { u = px; v = 16 - py; } else if (f === 5) { u = 16 - px; v = 16 - py; }
+        else if (f === 2) { u = px; v = pz; } else { u = px; v = 16 - pz; }
+        if (rq) { const t = u; if (rq === 1) { u = v; v = 16 - t; } else if (rq === 2) { u = 16 - u; v = 16 - v; } else { u = 16 - v; v = t; } }
+        let x = px, z = pz;
+        if (p.yaw) { const ex = px - 8, ez = pz - 8; x = 8 + ex * ca - ez * sa; z = 8 + ex * sa + ez * ca; }
+        P.push([x, py, z + dz]); U.push([u, v]);
+      }
+      out.push({ P, U, L, tk, two: !!p.twoSided });
+    }
+  }
+  return out;
+}
+
+/* ---------------- drawing ---------------- */
+// the faces seen through a display transform into a 64x64 picture: far faces first, a depth buffer for the solid texels, see-through
+// texels blended over what is behind them, texels nearly clear left out (as the item shader's cut-out)
+function guiRaster(faces, view, light, tintFor) {
+  const S = 64, px = new Uint8ClampedArray(S * S * 4), zb = new Float32Array(S * S).fill(-1e9);
+  const pr = guiProj(view), L = GUI_LIGHT[light || 'side'], R = TEX.res, list = [];
+  for (const fc of faces) {
+    const src = fc.img ? fc.img.px : TEX.imgs && TEX.imgs[fc.L];
+    if (!src) continue;
+    const Q = fc.P.map(p => pr.f(p[0], p[1], p[2]));
+    const ax = Q[1][3] - Q[0][3], ay = Q[1][4] - Q[0][4], az = Q[1][2] - Q[0][2], bx = Q[3][3] - Q[0][3], by = Q[3][4] - Q[0][4], bz = Q[3][2] - Q[0][2];
+    let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-9) continue;
+    const sg = pr.det < 0 ? -1 / nl : 1 / nl;
+    nx *= sg; ny *= sg; nz *= sg;
+    if (nz <= 1e-6) { if (!fc.two) continue; nx = -nx; ny = -ny; nz = -nz; }
+    const b = fc.flat ? 1 : guiShade([nx, ny, nz], L), t = tintFor && fc.tk ? tintFor(fc.tk) : null;
+    let umin = 1e9, umax = -1e9, vmin = 1e9, vmax = -1e9;
+    for (const [u, v] of fc.U) { umin = Math.min(umin, u); umax = Math.max(umax, u); vmin = Math.min(vmin, v); vmax = Math.max(vmax, v); }
+    list.push({ Q, U: fc.U, src, img: fc.img, k: [(t ? t[0] / 255 : 1) * b, (t ? t[1] / 255 : 1) * b, (t ? t[2] / 255 : 1) * b], z: (Q[0][2] + Q[1][2] + Q[2][2] + Q[3][2]) / 4, uv: [umin, umax - 1e-4, vmin, vmax - 1e-4] });
+  }
+  list.sort((a, b) => a.z - b.z);
+  for (const e of list) {
+    for (const [i0, i1, i2] of [[0, 1, 2], [0, 2, 3]]) {
+      const A = e.Q[i0], B2 = e.Q[i1], C = e.Q[i2];
+      const den = (B2[1] - C[1]) * (A[0] - C[0]) + (C[0] - B2[0]) * (A[1] - C[1]);
+      if (Math.abs(den) < 1e-9) continue;
+      const x0 = Math.max(0, Math.floor(Math.min(A[0], B2[0], C[0]))), x1 = Math.min(S - 1, Math.ceil(Math.max(A[0], B2[0], C[0])));
+      const y0 = Math.max(0, Math.floor(Math.min(A[1], B2[1], C[1]))), y1 = Math.min(S - 1, Math.ceil(Math.max(A[1], B2[1], C[1])));
+      const Ua = e.U[i0], Ub = e.U[i1], Uc = e.U[i2], uv = e.uv;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const sx = x + 0.5, sy = y + 0.5;
+        const l0 = ((B2[1] - C[1]) * (sx - C[0]) + (C[0] - B2[0]) * (sy - C[1])) / den, l1 = ((C[1] - A[1]) * (sx - C[0]) + (A[0] - C[0]) * (sy - C[1])) / den, l2 = 1 - l0 - l1;
+        if (l0 < 0 || l1 < 0 || l2 < 0) continue;
+        const z = l0 * A[2] + l1 * B2[2] + l2 * C[2], o = y * S + x;
+        if (z < zb[o] - 1e-4) continue;
+        const u = Math.min(uv[1], Math.max(uv[0], l0 * Ua[0] + l1 * Ub[0] + l2 * Uc[0])), v = Math.min(uv[3], Math.max(uv[2], l0 * Ua[1] + l1 * Ub[1] + l2 * Uc[1]));
+        const im = e.img, si = im ? (Math.min(im.h - 1, Math.max(0, Math.floor(v * im.k))) * im.w + Math.min(im.w - 1, Math.max(0, Math.floor(u * im.k)))) * 4
+          : ((((Math.floor(v * R / 16) % R) + R) % R) * R + (((Math.floor(u * R / 16) % R) + R) % R)) * 4, a = e.src[si + 3];
+        if (a < 26) continue;
+        const r = e.src[si] * e.k[0], g = e.src[si + 1] * e.k[1], bl = e.src[si + 2] * e.k[2], q = o * 4;
+        if (a >= 250) { px[q] = r; px[q + 1] = g; px[q + 2] = bl; px[q + 3] = 255; zb[o] = z; continue; }
+        const f = a / 255, da = px[q + 3] / 255, oa = f + da * (1 - f);
+        px[q] = (r * f + px[q] * da * (1 - f)) / oa; px[q + 1] = (g * f + px[q + 1] * da * (1 - f)) / oa; px[q + 2] = (bl * f + px[q + 2] * da * (1 - f)) / oa; px[q + 3] = oa * 255;
+      }
+    }
+  }
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  c.getContext('2d').putImageData(new ImageData(px, S, S), 0, 0);
+  return c;
+}
+
+/* ---------------- which model, in which state, seen how ---------------- */
+// the state the item model shows: turning blocks face north (glazed terracotta south, a shelf mushroom on a wall to its south; an anvil
+// long from north to south, as its unturned model), barrels, pistons and rods point up
+function guiItemMeta(id) {
+  if (SHAPE[id] === SH.ROD) return 2;
+  switch (FMODE[id]) {
+    case 2: return BLK[id].glazed || BLK[id].name === 'shelf_mushroom' ? 0 : BLK[id].model === 'anvil' ? 1 : 2;
+    case 3: return SHAPE[id] === SH.PISTON || SHAPE[id] === SH.ROD ? 2 : 5;
+    case 4: return 2;
+  }
+  return 0;
+}
+// the inventory models of the shapes that have their own (fence_inventory, wall_inventory, template_fence_gate, the bottom trapdoor and the
+// raised pressure plate) and the stairs model as it is
+const GUI_SHAPES = {
+  [SH.STAIRS]: () => [BX(0, 0, 0, 16, 8, 16), BX(8, 8, 0, 16, 16, 16)],
+  [SH.FENCE]: () => [BX(6, 0, 0, 10, 16, 4), BX(6, 0, 12, 10, 16, 16), BX(7, 12, -2, 9, 15, 18), BX(7, 6, -2, 9, 9, 18)],
+  [SH.WALL]: () => [BX(4, 0, 4, 12, 16, 12), BX(5, 0, 0, 11, 13, 16)],
+  [SH.GATE]: () => [BX(0, 5, 7, 2, 16, 9), BX(14, 5, 7, 16, 16, 9), BX(6, 6, 7, 8, 15, 9), BX(8, 6, 7, 10, 15, 9), BX(2, 6, 7, 6, 9, 9), BX(2, 12, 7, 6, 15, 9), BX(10, 6, 7, 14, 9, 9), BX(10, 12, 7, 14, 15, 9)],
+  [SH.TRAPDOOR]: () => [BX(0, 0, 0, 16, 3, 16, null, [[0, 16, 16, 13], [0, 16, 16, 13], [0, 0, 16, 16], [0, 0, 16, 16], [0, 16, 16, 13], [0, 16, 16, 13]])],
+  [SH.PLATE]: () => [BX(1, 0, 1, 15, 1, 15)],
+  [SH.BUTTON]: () => [BX(5, 6, 6, 11, 10, 10, null, [[6, 12, 10, 16], [6, 12, 10, 16], [5, 10, 11, 6], [5, 6, 11, 10], [5, 12, 11, 16], [5, 12, 11, 16]])],
+  [SH.LAYER]: () => [BX(0, 0, 0, 16, 2, 16)],
+};
+// models of single blocks that differ from the world's: the chorus plant with all six arms; a cactus's sides set in a pixel
+const GUI_NAMED_PARTS = {
+  chorus_plant: () => [BX(2, 14, 2, 14, 16, 14), BX(0, 2, 2, 2, 14, 14), BX(2, 2, 0, 14, 14, 2), BX(2, 2, 14, 14, 14, 16), BX(14, 2, 2, 16, 14, 14), BX(2, 0, 2, 14, 2, 14), BX(2, 2, 2, 14, 14, 14)],
+  cactus: id => {
+    const n = f => TEX.names[FACETEX[id * 6 + f]];
+    return [BX(0, 0, 0, 16, 16, 16, [null, null, n(2), n(3), null, null]), BX(0, 0, 1, 16, 16, 15, [null, null, null, null, n(4), n(5)]), BX(1, 0, 0, 15, 16, 16, [n(0), n(1), null, null, null, null])];
+  },
+};
+// display transforms of the models that have their own
+const GUI_VIEWS = {
+  [SH.STAIRS]: [[30, 135, 0], [0, 0, 0], 0.625], [SH.FENCE]: [[30, 135, 0], [0, 0, 0], 0.625], [SH.WALL]: [[30, 135, 0], [0, 0, 0], 0.625],
+  [SH.GATE]: [[30, 45, 0], [0, -1, 0], 0.8], [SH.BED]: [[30, 340, 0], [2, 3, 0], 0.5325],
+};
+const GUI_VIEW_NAMED = {
+  lectern: [[30, 225, 0], [0, 0, 0], 0.6], heavy_core: [[30, 225, 0], [0, 3, 0], 1], dried_ghast: [[30, 225, 0], [0.4, 1.6, 0], 0.8], straw_bed: GUI_VIEWS[SH.BED],
+  big_dripleaf: [[30, 225, 0], [0, -2, 0], 0.625], shelf_mushroom: [[30, 225, 0], [3.25, -3, 0], 1], calibrated_sculk_sensor: [[30, 45, 0], [0, 0, 0], 0.625],
+};
+const guiViewOf = id => GUI_VIEW_NAMED[BLK[id].name] || (IS_SHELF[id] ? [[30, 225, 0], [2.5, -1.5, 0], 0.625] : null) || GUI_VIEWS[SHAPE[id]] || GUI_BLOCK;
+// models lit from the front in the inventory (gui_light front)
+const GUI_FRONT_LIT = new Set(['shelf_mushroom', 'calibrated_sculk_sensor']);
+const guiLightOf = id => GUI_FRONT_LIT.has(BLK[id].name) ? 'front' : 'side';
+// a bed item's model: both halves facing north, the foot a block further south (the bed items' composite model)
+function guiBedFaces(id) {
+  const m = guiItemMeta(id) & 3, head = blockParts(id, 4 | 2, null), foot = blockParts(id, 2, null);
+  return [...guiModelFaces(id, m, head), ...guiModelFaces(id, m, foot, 16)];
+}
+// the model of a block item in the item model's state (the parts the inventory and the hand draw)
+const _itemPartsGV = itemParts;
+itemParts = function (id) {
+  const sh = SHAPE[id], named = GUI_NAMED_PARTS[BLK[id].name];
+  if (named) return named(id);
+  if (GUI_SHAPES[sh]) return GUI_SHAPES[sh]();
+  const meta = guiItemMeta(id);
+  if (meta && sh !== SH.PISTON && BLK[id].name !== 'straw_bed') {
+    const ps = blockParts(id, meta, DYNAMIC_SHAPES.has(sh) ? { conn: 0, up: 0, upWall: false, wire: 0, chorus: 0 } : null);
+    if (ps) return ps;
+  }
+  return _itemPartsGV(id);
+};
+// the straw bed's inventory model is both halves too (its in-hand model stays the smaller one)
+function guiStrawBedFaces(id) {
+  const ps = rotParts(SB_Q.head, 2), foot = rotParts(SB_Q.foot, 2);
+  return [...guiModelFaces(id, 0, ps), ...guiModelFaces(id, 0, foot, 16)];
+}
+// Java's item tints: leaves #48B518 (birch's and spruce's their own, mangrove's #92C648), lily pads #71C35C
+const _blockTintForGV = blockTintFor;
+blockTintFor = function (id) {
+  const f = _blockTintForGV(id), mangrove = BLK[id] && BLK[id].name === 'mangrove_leaves';
+  return k => { const t = k !== undefined ? k : TINT[id]; return t === 2 ? (mangrove ? [146, 198, 72] : [72, 181, 24]) : t === 6 ? [113, 195, 92] : f(k); };
+};
+// block icons (cubes and models) drawn through their display transforms
+drawIsoParts = function (g, id, meta, ps, tintFor) {
+  const name = BLK[id] && BLK[id].name, named = GUI_NAMED_PARTS[name];
+  const faces = name === 'straw_bed' ? guiStrawBedFaces(id) : guiModelFaces(id, guiItemMeta(id), named ? named(id) : ps);
+  g.drawImage(guiRaster(faces, guiViewOf(id), guiLightOf(id), tintFor), 0, 0);
+};
+// beds: the model of both halves rather than a flat picture
+const _iconForGV = iconFor;
+iconFor = function (id, tag, st) {
+  if (SHAPE[id] !== SH.BED || !TEX.imgs || !isBlockId(id)) return _iconForGV(id, tag, st);
+  const key = 'bedmodel#' + id;
+  return ICONS[key] || (ICONS[key] = guiRaster(guiBedFaces(id), GUI_VIEWS[SH.BED], 'side', blockTintFor(id)).toDataURL());
+};
+// in hand, dropped and framed: the item model's state too (a furnace's front to the north). An item frame turns what it holds half
+// round (ItemFrameRenderer), so a block model shows its north face; chests, heads and shulker boxes turn back with their own fixed views
+const _pushBlockItemGV = Game.prototype.pushBlockItem;
+Game.prototype.pushBlockItem = function (r, m, id, l) {
+  const meta = guiItemMeta(id), named = GUI_NAMED_PARTS[BLK[id] && BLK[id].name], special = CHEST_DRAWN.has(id) || HEAD_IDS.has(id) || SHULKER_IDS.has(id);
+  if (this._xformHolder instanceof ItemFrame && !special) { m = Float32Array.from(m); for (const k of [0, 1, 2, 8, 9, 10]) m[k] = -m[k]; }
+  if ((!meta && !named && !UVROT_FN[id]) || special || itemStyle(id) === 'sprite') return _pushBlockItemGV.call(this, r, m, id, l);
+  const tf = blockTintFor(id);
+  for (const fc of guiModelFaces(id, meta, named ? named(id) : itemStyle(id) === 'cube' ? [BX(0, 0, 0, 16, 16, 16)] : itemParts(id))) {
+    const tk = tf(fc.tk), tint = tk ? tk.map(c => c / 255) : [1, 1, 1];
+    const a = fc.P[0], b = fc.P[1], d = fc.P[3];
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+    const s = jShade(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    for (const order of [[0, 1, 2, 3], [1, 0, 3, 2]]) for (const k of order) {
+      const p = fc.P[k], q = M4.xform(m, p[0] / 16 - 0.5, p[1] / 16 - 0.5, p[2] / 16 - 0.5);
+      r.dv(q[0], q[1], q[2], fc.U[k][0] / 16, fc.U[k][1] / 16, fc.L, tint[0] * s, tint[1] * s, tint[2] * s, 1, l[0], l[1]);
+    }
+  }
+};
+
+/* ---------------- heads and shulker boxes seen the same way ---------------- */
+// painted from their models as before, the points going through the item's display transform (template_skull: [30, 45, 0], 3 pixels up,
+// full size; the dragon's head 0.6 and 2 pixels up and left; template_shulker_box: [30, 45, 0] at 0.625)
+const guiPaintView = view => { const pr = guiProj(view); return (x, y, z) => { const q = pr.f(x, y, z); return [q[0], q[1], -q[2]]; }; };
+const HEAD_GUI = guiPaintView([[30, 45, 0], [0, 3, 0], 1]), DRAGON_GUI = guiPaintView([[30, 45, 0], [-2, 2, 0], 0.6]), SHULKER_GUI = guiPaintView([[30, 45, 0], [0, 0, 0], 0.625]);
+const _iconForGH = iconFor;
+iconFor = function (id, tag, st) {
+  if (!ATLAS.canvas || !(HEAD_IDS.has(id) || SHULKER_IDS.has(id))) return _iconForGH(id, tag, st);
+  const head = HEAD_IDS.has(id), name = BLK[id].name, K = head && HEAD_KINDS[name], key = head ? K && K.key : shulkerKey(id);
+  const ck = (head ? 'headgui#' : 'shulkergui#') + (head ? name : key);
+  if (ICONS[ck]) return ICONS[ck];
+  const pass = key && skinPass(key, head ? K.parts : SB_PARTS);
+  if (!pass) return _iconForGH(id, tag, st);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  if (head) {
+    const P = { head: [0, Math.PI, 0] };
+    if (K.anim) K.anim(P, 0);
+    if (name === 'dragon_head') P['head#s'] = 0.75;
+    // the skull renderer's item space: turned over, its bottom on the block's floor in the middle
+    const V = name === 'dragon_head' ? DRAGON_GUI : HEAD_GUI;
+    paintModel(g, { parts: K.parts }, P, [pass], q => V(8 - q[0], -q[1], 8 + q[2]));
+  } else paintModel(g, { parts: SB_PARTS }, {}, [pass], q => SHULKER_GUI(8 + q[0], 24 - q[1], 8 - q[2]));
+  return ICONS[ck] = c.toDataURL();
+};
+
+/* ---------------- banners and decorated pots ---------------- */
+// a model texture's pixels (texture pixels, k atlas pixels each), for faces drawn from it
+const GUI_SKINS = { atlas: null, m: {} };
+function guiSkin(key) {
+  if (GUI_SKINS.atlas !== ATLAS.canvas) { GUI_SKINS.atlas = ATLAS.canvas; GUI_SKINS.m = {}; }
+  if (key in GUI_SKINS.m) return GUI_SKINS.m[key];
+  const vt = VTEX[key];
+  if (!vt || !ATLAS.canvas) return GUI_SKINS.m[key] = null;
+  const r = vt.reg;
+  return GUI_SKINS.m[key] = { px: ATLAS.canvas.getContext('2d').getImageData(r.x, r.y, r.w, r.h).data, w: r.w, h: r.h, k: r.w / vt.tw };
+}
+// faces of a model cube [u, v, x, y, z, w, h, d, grow] (the box unwrap the mob models use), through xf into block pixels; only: the
+// unwrap's faces to keep
+function guiCubeFaces(c, xf, img, only) {
+  const [u, v, x, y, z, w, h, d] = c, g = c[8] || 0, out = [];
+  const x0 = x - g, x1 = x + w + g, y0 = y - g, y1 = y + h + g, z0 = z - g, z1 = z + d + g;
+  const P = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]].map(xf);
+  const F = { f4: u, f5: u + d, f6: u + d + w, f7: u + d + w + w, f8: u + d + w + d, f9: u + d + w + d + w, f10: v, f11: v + d, f12: v + d + h };
+  VFACES.forEach(([idx, a, b, cc, dd], fi) => {
+    if (only && !only.includes(fi)) return;
+    const u1 = F[a], v1 = F[b], u2 = F[cc], v2 = F[dd];
+    out.push({ P: [P[idx[0]], P[idx[1]], P[idx[2]], P[idx[3]]], U: [[u2, v1], [u1, v1], [u1, v2], [u2, v2]], img, two: true });
+  });
+  return out;
+}
+// a model part's placement: turned (Z after Y after X, as ModelPart) about its pivot, then moved there
+function guiPart(off, rot) {
+  const m = rot ? vRot(rot) : null;
+  return q => m ? [off[0] + m[0] * q[0] + m[1] * q[1] + m[2] * q[2], off[1] + m[3] * q[0] + m[4] * q[1] + m[5] * q[2], off[2] + m[6] * q[0] + m[7] * q[1] + m[8] * q[2]] : [off[0] + q[0], off[1] + q[1], off[2] + q[2]];
+}
+// the pole and bar of a banner (entity/banner/banner_base); the game paints dark wood when no pack has one
+defSkin('entity/banner_base', 64, 64, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), R = mulberry32(strHash('banner_base'));
+  for (const [x0, y0, x1, y1] of [[44, 0, 52, 44], [0, 42, 44, 46]]) for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const k = 0.85 + R() * 0.2 - ((x + y * 3) % 7 === 0 ? 0.12 : 0), col = [92 * k, 70 * k, 44 * k];
+    g.fillStyle = `rgb(${col.map(Math.round).join(',')})`; g.fillRect(x, y, 1, 1);
+  }
+  return c;
+}, ['entity/banner/banner_base']);
+// the flag's own unwrap: the design in front, seen through from behind on the back, its edge colours round the sides
+function guiFlagImage(color, patterns) {
+  const d = bannerPixels(color, patterns), px = new Uint8ClampedArray(64 * 64 * 4);
+  const put = (x, y, sx, sy) => { const s = (sy * 20 + sx) * 4, o = (y * 64 + x) * 4; px[o] = d[s]; px[o + 1] = d[s + 1]; px[o + 2] = d[s + 2]; px[o + 3] = 255; };
+  for (let y = 0; y < 40; y++) for (let x = 0; x < 20; x++) { put(1 + x, 1 + y, x, y); put(22 + x, 1 + y, 19 - x, y); }
+  for (let y = 0; y < 40; y++) { put(0, 1 + y, 0, y); put(21, 1 + y, 19, y); }
+  for (let x = 0; x < 20; x++) { put(1 + x, 0, x, 0); put(21 + x, 0, x, 39); }
+  return { px, w: 64, h: 64, k: 1 };
+}
+// BannerRenderer's model (flag 20x40x1 hanging from the bar 32 pixels up and leaning back a little, pole, bar) at two thirds, turned
+// over, its middle at the block's: template_banner's view, lit from the front
+function guiBannerFaces(color, patterns) {
+  const base = guiSkin('entity/banner_base'), flag = guiFlagImage(color, patterns), lean = -0.0025 * Math.PI, c = Math.cos(lean), s = Math.sin(lean);
+  const toBlock = q => [8 + q[0] * 2 / 3, 8 - q[1] * 2 / 3, 8 - q[2] * 2 / 3];
+  const out = guiCubeFaces([0, 0, -10, 0, -2, 20, 40, 1], q => toBlock([q[0], -32 + q[1] * c - q[2] * s, q[1] * s + q[2] * c]), flag);
+  if (base) out.push(...guiCubeFaces([44, 0, -1, -30, -1, 2, 42, 2], toBlock, base), ...guiCubeFaces([0, 42, -10, -32, -1, 20, 2, 2], toBlock, base));
+  return out;
+}
+const GUI_BANNER = [[30, 20, 0], [0, -3.25, 0], 0.5325];
+// the pot's neck, rim, top and bottom (entity/decorated_pot/decorated_pot_base); the game paints terracotta when no pack has one
+defSkin('entity/decorated_pot/decorated_pot_base', 32, 32, () => {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const g = c.getContext('2d'), R = mulberry32(strHash('decorated_pot_base'));
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    const hole = y < 8 && (x >= 8 && x < 24) && Math.abs((x % 8) - 3.5) < 2.5 && Math.abs(y - 3.5) < 2.5, used = y < 12 || (y >= 13 && y < 27 && x < 28);
+    if (!used) continue;
+    const k = 0.9 + R() * 0.15, col = hole ? [60, 32, 26] : [152 * k, 84 * k, 66 * k];
+    g.fillStyle = `rgb(${col.map(Math.round).join(',')})`; g.fillRect(x, y, 1, 1);
+  }
+  return c;
+});
+// DecoratedPotRenderer's model: the neck and rim turned over above the body, the top and bottom, and each side's picture (the plain
+// side or a sherd's pattern) on its outer face only; decorated_pot's view [30, 45, 0] at 0.6, lit from the front
+function guiPotFaces(sherds) {
+  const base = guiSkin('entity/decorated_pot/decorated_pot_base'), out = [];
+  if (base) {
+    out.push(...guiCubeFaces([0, 0, 4, 17, 4, 8, 3, 8, -0.1], guiPart([0, 37, 16], [Math.PI, 0, 0]), base), ...guiCubeFaces([0, 5, 5, 20, 5, 6, 1, 6, 0.2], guiPart([0, 37, 16], [Math.PI, 0, 0]), base));
+    out.push(...guiCubeFaces([-14, 13, 0, 0, 0, 14, 0, 14], guiPart([1, 16, 1]), base, [0, 1]), ...guiCubeFaces([-14, 13, 0, 0, 0, 14, 0, 14], guiPart([1, 0, 1]), base, [0, 1]));
+    for (const f of out) f.two = false;
+  }
+  const S = sherds || ['brick', 'brick', 'brick', 'brick'];
+  [[[15, 16, 1], [0, 0, Math.PI]], [[1, 16, 1], [0, -Math.PI / 2, Math.PI]], [[15, 16, 15], [0, Math.PI / 2, Math.PI]], [[1, 16, 15], [Math.PI, 0, 0]]].forEach(([off, rot], k) => {
+    const it = ITEM_BY_NAME[S[k]], sherd = it && ITEMS[it.id].sherd, L = sherd ? texLayer(sherd + '_pottery_pattern', -1) : -1, layer = L >= 0 ? L : texLayer('decorated_pot_side', FACETEX[B.DECORATED_POT * 6]);
+    for (const f of guiCubeFaces([1, 0, 0, 0, 0, 14, 16, 0], guiPart(off, rot), null, [3])) out.push(Object.assign(f, { img: undefined, L: layer, two: false }));
+  });
+  return out;
+}
+const GUI_POT = [[30, 45, 0], [0, 0, 0], 0.6];
+const _iconForGB = iconFor;
+iconFor = function (id, tag, st) {
+  if (!TEX.imgs || !ATLAS.canvas) return _iconForGB(id, tag, st);
+  if (isBannerItem(id)) {
+    const color = BLK[ITEMS[id].block].color, pats = tag && tag.patterns || [], key = 'bannergui#' + bannerKey(color, pats);
+    return ICONS[key] || (ICONS[key] = guiRaster(guiBannerFaces(color, pats), GUI_BANNER, 'front').toDataURL());
+  }
+  if (id === I.DECORATED_POT) {
+    const sh = tag && tag.sherds, key = 'potgui#' + (sh ? sh.join(',') : '');
+    return ICONS[key] || (ICONS[key] = guiRaster(guiPotFaces(sh), GUI_POT, 'front').toDataURL());
+  }
+  return _iconForGB(id, tag, st);
+};
+
+/* @file 219_glazed_terracotta.js */
+/* ===================================================================
+   PART 116 — GLAZED TERRACOTTA TURNS ITS PATTERN LIKE JAVA'S
+   template_glazed_terracotta turns the pattern on each side (north a
+   quarter, east a half, south three quarters, west not at all) and the
+   blockstates turn the whole model a quarter for each facing (south as it
+   is, then west, north, east), the top and bottom with it. So the same
+   block laid in different directions makes Java's patterns, and the item
+   shows the unturned model.
+   =================================================================== */
+// quarter turns of each face's pattern in the unturned model: east, west, up, down, south, north
+const GLAZED_TURNS = [2, 0, 0, 0, 3, 1];
+// a placed block (facing south, west, north, east = meta 0..3): the model turned clockwise from above by a quarter each, its sides
+// carrying their own turn round with them, the top turning with the block and the bottom (seen from below) the other way
+const glazedTurn = (m, f) => { const k = m & 3; return ((f === 2 ? k : f === 3 ? -k : GLAZED_TURNS[f] - k) % 4 + 4) % 4; };
+for (let id = 1; id < MAXB; id++) if (BLK[id] && BLK[id].glazed) UVROT_FN[id] = glazedTurn;
+
+/* @file 220_decorated_pots.js */
+/* ===================================================================
+   PART 117 — DECORATED POTS DRAWN LIKE JAVA'S
+   A decorated pot is drawn the way DecoratedPotRenderer draws it rather
+   than as a block model squeezed into the block: the body's four sides
+   (the plain side or each sherd's pattern), its top and bottom, and the
+   neck and rim standing four pixels above the block, turned to face the
+   way the pot was put down. A pot wobbles when something is put in it
+   and shakes when it can't take it, as in Java.
+   =================================================================== */
+NOMESH[B.DECORATED_POT] = 1;
+// DecoratedPotBlock's shape: the body's box, a full block high
+const _modelCollisionDP = modelCollision;
+modelCollision = function (id, meta, ctx) { return id === B.DECORATED_POT ? [[1, 0, 1, 15, 16, 15]] : _modelCollisionDP(id, meta, ctx); };
+// the model's faces for a set of sherds (the inventory icon's, Part 115), kept while the textures stay the same
+const POT_MODELS = new Map();
+function potModel(sherds) {
+  const key = sherds ? sherds.join(',') : '', e = POT_MODELS.get(key);
+  if (e && e.atlas === ATLAS.canvas && e.tex === TEX.imgs) return e.f;
+  const f = guiPotFaces(sherds);
+  POT_MODELS.set(key, { f, atlas: ATLAS.canvas, tex: TEX.imgs });
+  return f;
+}
+// DecoratedPotRenderer.render: turned about the middle of its base by its facing (the front to the south at meta 0), then the wobble
+// (WobbleStyle POSITIVE for 7 ticks after taking an item, NEGATIVE for 10 after refusing one)
+function potTransform(x, y, z, m, be, t) {
+  let M = BKM.mul(BKM.t(x + 0.5, y, z + 0.5), BKM.ry(-(m & 3) * Math.PI / 2));
+  const wb = be && be._wobble;
+  if (wb) {
+    const f = (t - wb[0]) / (wb[1] > 0 ? 7 : 10);
+    if (f >= 0 && f <= 1) {
+      if (wb[1] > 0) {
+        const a = f * Math.PI * 2, rx = -1.5 * (Math.cos(a) + 0.5) * Math.sin(a / 2) / 64, rz = Math.sin(a) / 64;
+        M = BKM.mul(M, BKM.mul(BKM.rx(rx), BKM.rz(rz)));
+      } else M = BKM.mul(M, BKM.ry(Math.sin(-f * 3 * Math.PI) * 0.125 * (1 - f)));
+    }
+  }
+  return BKM.mul(M, BKM.t(-0.5, 0, -0.5));
+}
+function drawPotModel(r, M, sherds, light) {
+  const vt = VTEX['entity/decorated_pot/decorated_pot_base'];
+  if (!vt) return;
+  const A = ATLAS.S, rg = vt.reg, ku = rg.w / vt.tw, kv = rg.h / vt.th;
+  for (const fc of potModel(sherds)) {
+    const P = fc.P.map(p => BKM.ap(M, p[0] / 16, p[1] / 16, p[2] / 16));
+    const ax = P[1][0] - P[0][0], ay = P[1][1] - P[0][1], az = P[1][2] - P[0][2], bx = P[3][0] - P[0][0], by = P[3][1] - P[0][1], bz = P[3][2] - P[0][2];
+    let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl; ny /= nl; nz /= nl;
+    // lit like the other block entities: by how much the face turns to each axis
+    const s = 0.6 * nx * nx + 0.8 * nz * nz + (ny > 0 ? 1 : 0.5) * ny * ny;
+    for (let k = 0; k < 4; k++) {
+      const [u, v] = fc.U[k], uv = fc.img ? [(rg.x + u * ku) / A, (rg.y + v * kv) / A] : [u / 16, v / 16];
+      r.dv(P[k][0], P[k][1], P[k][2], uv[0], uv[1], fc.img ? -1 : fc.L, s, s, s, 1, light[0], light[1]);
+    }
+  }
+}
+// the pots around, every one of them (the sides are part of the model now, not laid over a block); each chunk's list of pots kept
+// until a pot is put down somewhere (a pot's block entity being set marks it)
+let POT_GEN = 0;
+Game.prototype.drawPots = function (r, a) {
+  const p = this.player, w = this.world;
+  if (!p || !w) return;
+  if (this._potDirty) { POT_GEN++; this._potDirty = false; }
+  const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4, t = w.tick + (a || 0);
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+    const c = w.getChunk(pcx + dx, pcz + dz);
+    if (!c || c.state < 2 || !c.blocks) continue;
+    if (!c._pots || c._potsB !== c.blocks || c._potsG !== POT_GEN) {
+      const l = [];
+      for (let i = c.blocks.indexOf(B.DECORATED_POT); i >= 0; i = c.blocks.indexOf(B.DECORATED_POT, i + 1)) l.push(i);
+      c._pots = l; c._potsB = c.blocks; c._potsG = POT_GEN;
+    }
+    for (const i of c._pots) {
+      const x = c.cx * 16 + (i & 15), y = i >> 8, z = c.cz * 16 + ((i >> 4) & 15);
+      if (w.getBlock(x, y, z) !== B.DECORATED_POT || (x + 0.5 - p.x) ** 2 + (z + 0.5 - p.z) ** 2 > 48 * 48) continue;
+      const be = w.getBE(x, y, z), lr = w.getLightRaw(x, y, z);
+      drawPotModel(r, potTransform(x, y, z, w.getMeta(x, y, z), be, t), potSherds(be), [lr >> 4, lr & 15]);
+    }
   }
 };
 

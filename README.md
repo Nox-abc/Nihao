@@ -800,6 +800,25 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Item and loot check against 26.3**: every item's data and every chest list was compared with 26.3's. Nether stars
   now burn in fire and lava like other items (explosions still can't hurt them), and small ocean ruins hold buried
   treasure maps half as often as before.
+- **Inventory icons seen like Java's** (Part 115): Java shows a block in a slot through its item model's own view, and
+  for an ordinary block that view has the top, the east face on the left and the north face on the right. The game's
+  icons looked from the other side, so furnaces, pumpkins, looms, smokers and crafting tables had their fronts on the
+  wrong side and stairs, fences, gates and walls came out mirrored. Icons are now drawn the way Java draws them: each
+  item model's view (stairs, fences and walls turned the other way round, fence gates, heads, chests and shulker boxes
+  facing you, lecterns and other models at their own size and place), the block in the state its item model shows
+  (furnaces facing north, barrels with the lid up, end rods and lightning rods upright, trapdoors and pressure plates on
+  the floor, a snow layer two pixels deep, the chorus plant with all its arms, cactus sides set in a pixel), lit by
+  the inventory's two lights, which leave the top full, the left side at 80% and the right at 60%. Beds, banners
+  (patterned ones too) and decorated pots (with their sherds) are now small 3D models in the inventory rather than flat
+  pictures, leaves and lily pads take Java's item colours, and blocks held in the hand or set in item frames use the
+  same item state, so a furnace in a frame shows its front as in Java.
+- **Glazed terracotta patterns** (Part 116): each glazed terracotta's pattern now turns with the direction it faces,
+  exactly as Java's model turns it on every side, its top and its bottom, so laying them in different directions makes
+  the same patterns as in Java. Pushed by pistons they keep their pattern.
+- **Decorated pots drawn like Java's** (Part 117): a placed decorated pot is now drawn with Java's pot model instead of a
+  block squeezed into one space: its four sides (plain or each sherd's pattern), its top and bottom, and the neck and
+  rim standing a quarter of a block above, turned to face whoever put it down. It wobbles when you put something in and
+  shakes when it can't take any more, and its box is a full block high, as in Java.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
