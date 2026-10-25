@@ -7828,8 +7828,48 @@ class OSet {
   // the first one, taken out (it may go in again later, at the end)
   shift() { if (this.h >= this.q.length) return null; const e = this.q[this.h++]; this.k.delete(pkey(e[0], e[1], e[2])); return e; }
 }
-// new ObjectArrayList<>(set), sorted by y (List.sort is stable)
-const byY = s => s.list().sort((a, b) => a[1] - b[1]);
+// java.util.HashSet<BlockPos>: Vec3i.hashCode spread by HashMap.hash into a table of 16 doubled whenever the count passes
+// three quarters of it (an entry keeps its order among those of its bucket when the table grows)
+const jposHash = (x, y, z) => { const h = (Math.imul(y + Math.imul(z, 31) | 0, 31) + x) | 0; return h ^ (h >>> 16); };
+// the order a HashSet filled in this order iterates in
+const javaSetOrder = q => { const s = new JSet(); for (const p of q) s.add(p[0], p[1], p[2]); return s.order(); };
+// a HashSet taken from the front (its iterator's first) while others go in, as TreeFeature.updateLeaves uses its sets
+class JSet {
+  constructor() { this.cap = 16; this.t = new Map(); this.k = new Set(); this.lo = 0; }
+  get size() { return this.k.size; }
+  add(x, y, z) {
+    const key = pkey(x, y, z);
+    if (this.k.has(key)) return false;
+    this.k.add(key);
+    const e = [x, y, z, jposHash(x, y, z)], i = e[3] & (this.cap - 1), bk = this.t.get(i) || this.t.set(i, []).get(i);
+    bk.push(e);
+    if (i < this.lo) this.lo = i;
+    // HashMap.treeifyBin: a ninth entry in one bucket of a table under 64 grows the table instead
+    if (bk.length > 8 && this.cap < 64) this.grow();
+    if (this.k.size > this.cap * 0.75) this.grow();
+    return true;
+  }
+  // its iteration order
+  order() { return [...this.t.keys()].sort((a, b) => a - b).flatMap(i => this.t.get(i).map(e => [e[0], e[1], e[2]])); }
+  grow() {
+    const old = [...this.t.keys()].sort((a, b) => a - b).map(i => this.t.get(i));
+    this.cap *= 2; this.t = new Map(); this.lo = 0;
+    for (const bk of old) for (const f of bk) { const j = f[3] & (this.cap - 1); (this.t.get(j) || this.t.set(j, []).get(j)).push(f); }
+  }
+  shift() {
+    if (!this.k.size) return null;
+    let i = this.lo;
+    while (!(this.t.get(i) || []).length) i++;
+    this.lo = i;
+    const bk = this.t.get(i), e = bk.shift();
+    if (!bk.length) this.t.delete(i);
+    this.k.delete(pkey(e[0], e[1], e[2]));
+    return e;
+  }
+}
+// new ObjectArrayList<>(set), sorted by y (List.sort is stable); pumpkinSets: in the order they were put in, as the reference
+// generator keeps them
+const byY = s => (VF.pumpkinSets ? s.list() : javaSetOrder(s.list())).sort((a, b) => a[1] - b[1]);
 
 /* ---- the tree being placed ---- */
 const REPL = S.tag('replaceable_by_trees'), LOGS = S.tag('logs'), LEAVES = S.tag('leaves'), KEEP = S.tag('prevents_nearby_leaf_decay');
@@ -8558,9 +8598,10 @@ function updateLeaves(R, box, logs, decos, roots) {
   const inside = (x, y, z) => x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1;
   for (const s of [decos, roots]) for (const [x, y, z] of s.list()) if (inside(x, y, z)) shape[idx(x, y, z)] = 1;
   const toCheck = [];
-  for (let i = 0; i < 7; i++) toCheck.push(new OSet());
-  // the trunk set in the order it was placed (leafLogsByY: sorted by height, as the reference generator does)
-  for (const [x, y, z] of VF.leafLogsByY ? logs.list().sort((a, b) => a[1] - b[1]) : logs.list()) toCheck[0].add(x, y, z);
+  // the seven HashSets, the first filled from the trunk set (leafLogsByY: the reference generator's lists, the trunk
+  // sorted by height, each taken in the order things went in)
+  for (let i = 0; i < 7; i++) toCheck.push(VF.leafLogsByY ? new OSet() : new JSet());
+  for (const [x, y, z] of VF.leafLogsByY ? byY(logs) : javaSetOrder(logs.list())) toCheck[0].add(x, y, z);
   let d = 0;
   for (;;) {
     while (d >= 7 || toCheck[d].size) {
@@ -24212,7 +24253,9 @@ class Game {
       }
       if (this.ui.screen) { if (e.code === 'Escape' && this.ui.screen === 'scr-pause') { this.ui.show(null); this.lockPointer(); } return; }
       if (e.repeat && !['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft'].includes(e.code)) return;
-      inp.keys.add(e.code); inp.pressQ.add(e.code);
+      // a key held down (the system's repeats) stays held but is pressed only once, as Java sees a key go down
+      if (!e.repeat && !inp.keys.has(e.code)) inp.pressQ.add(e.code);
+      inp.keys.add(e.code);
       if (p.dead) return;
       if (/^Digit[1-9]$/.test(e.code)) { p.sel = +e.code.slice(5) - 1; this.ui.refreshHotbar(); this.ui.showItemName(p.held); }
       switch (e.code) {

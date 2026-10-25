@@ -887,6 +887,12 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
 - **Fence gates in walls like Java's** (Part 126): a fence gate with a wall beside it, along the line it closes, now sits
   three pixels lower, as Java draws gates set into walls, so its top lines up with the wall; its outline is lower too,
   open or shut, and it still stops you just as before. Fences beside a gate don't lower it.
+- **Trees decorated in Java's order, keys pressed like Java's** (Part 127): Java keeps a tree's logs and leaves in hash
+  sets, so the vines, cocoa pods, propagules, bee nests and creaking hearts it adds go to the leaves and logs in that
+  set's order; the game now walks them in exactly that order (checked against Java's own HashSet), so the same seed
+  puts the same vines and pods on the same trees, and the leaves' distances are worked out the way Java's pass does.
+  Holding a key no longer counts as pressing it again and again: holding space doesn't switch flying on and off,
+  holding W doesn't start sprinting, and a quick double tap of space flies (or lands) and of W sprints, as in Java.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
