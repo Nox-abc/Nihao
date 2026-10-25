@@ -2,7 +2,9 @@
 
 **Download [`minecraft.html`](minecraft.html) and open it in a browser. That's it.**
 No install, no server, no build step: the whole game is a single self-contained file
-(WebGL2 + JavaScript, about 2 MB). It works offline once downloaded.
+(WebGL2 + JavaScript, about 5.5 MB) running on its own small 3D engine written for it, with no libraries. It works offline
+once downloaded. [`minecraft.min.html`](minecraft.min.html) is the same game squeezed to about 3.7 MB (the readable
+source is `minecraft.html`).
 
 > **Blockcraft is NOT AN OFFICIAL MINECRAFT PRODUCT. It is NOT APPROVED BY OR ASSOCIATED WITH
 > MOJANG OR MICROSOFT.** It is a fan-made game inspired by Minecraft Java Edition 1.21 (Tricky
@@ -943,6 +945,11 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   End cities are laid out as Java lays them out, ships with their elytra and dragon heads included, when your
   Minecraft jar is added (the game's own cities stand in for them otherwise); /locate end_city finds them. Gateways lead
   out to the islands the way Java's do. Banners and heads hung on walls in structures from your jar now show up too.
+- **A lighter engine** (Part 135): the game no longer stalls to read pictures back from the graphics card while you play
+  (passing through blocks, and the first sight of each kind of mob, each froze the game for a moment); the lighting is
+  worked out once a frame into a 16 x 16 lightmap read at each corner of a face, as Java does, instead of for every pixel;
+  and solid blocks are drawn by a shader with nothing see-through, so the graphics card can skip what lies behind them.
+  The squeezed `minecraft.min.html` is new too.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

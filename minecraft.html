@@ -20386,13 +20386,19 @@ const M4 = {
   xform(m, x, y, z) { return [m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]]; },
 };
 
+// read in the vertex shaders, as Java's core shaders do: the colour of a vertex's sky and block light from the 16 x 16 lightmap
+// (made on the CPU by lightMapBytes when its inputs change), interpolated across the face
+const SH_LIGHTMAP_FN = `
+uniform sampler2D uLightMap;
+vec3 lightMap(vec2 L){ return texture(uLightMap, clamp(L / 16.0 + 0.5 / 16.0, vec2(0.5 / 16.0), vec2(15.5 / 16.0))).rgb; }`;
 const SH_CHUNK_V = `#version 300 es
 precision highp float;
 layout(location=0) in vec4 aPos;
 layout(location=1) in vec4 aDat;
 layout(location=2) in vec4 aCol;
 uniform mat4 uVP; uniform vec3 uOff; uniform float uTime; uniform vec3 uCamW; uniform vec4 uAnimRate; uniform float uFogSph;
-out vec3 vUV; out vec3 vCol; out vec2 vLight; out float vDist; out float vSolid; out float vNoMip;
+${SH_LIGHTMAP_FN}
+out vec3 vUV; out vec3 vCol; out vec3 vLight; out float vDist; out float vSolid; out float vNoMip;
 void main(){
   vec3 p = aPos.xyz / 64.0 + uOff;
   int fl = int(aCol.a * 255.0 + 0.5);
@@ -20421,7 +20427,7 @@ void main(){
   gl_Position = uVP * vec4(p, 1.0);
   vUV = vec3(uv, layer);
   vCol = aCol.rgb;
-  vLight = aDat.zw / 16.0;
+  vLight = lightMap(aDat.zw / 16.0);
   // cylindrical terrain fog like vanilla since 1.18, spherical under water and lava
   vDist = mix(length(p.xz), length(p), uFogSph);
 }`;
@@ -20476,29 +20482,34 @@ function mipLevels(data, n, R) {
 // texture units of the eight layer arrays (1 is the item atlas, 3..5 the sky)
 const TEX_UNITS = [0, 2, 6, 7, 8, 9, 10, 11];
 // Java Edition's lightmap (LightTexture): sky light in the sky's colour plus warm block light, pulled 4% toward
-// grey, brightened by night vision, darkened by the darkness effect, then the brightness option's curve
-const SH_LIGHT_FN = `
-uniform float uSkyLvl; uniform vec3 uSkyCol; uniform float uBlockLvl; uniform float uDimAmb; uniform float uForceBright;
-uniform float uGamma; uniform float uNightVision; uniform float uDarkness; uniform float uDarkenWorld;
-float bright(float l){ float f = clamp(l, 0.0, 15.0) / 15.0; return mix(f / (4.0 - 3.0 * f), 1.0, uDimAmb); }
-vec3 lightCol(vec2 L){
-  float s = bright(L.x) * uSkyLvl, b = bright(L.y) * uBlockLvl;
-  vec3 c = vec3(b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4));
-  if (uForceBright > 0.5) c = clamp(mix(c, vec3(0.99, 1.12, 1.0), 0.25), 0.0, 1.0);
-  else { c = mix(c + uSkyCol * s, vec3(0.75), 0.04); c = mix(c, c * vec3(0.7, 0.6, 0.6), uDarkenWorld); }
-  if (uNightVision > 0.0) { float m = max(c.r, max(c.g, c.b)); if (m < 1.0) c = mix(c, c / max(m, 1e-4), uNightVision); }
-  if (uForceBright < 0.5) c = clamp(c - vec3(uDarkness), 0.0, 1.0);
-  c = mix(c, 1.0 - pow(1.0 - c, vec3(4.0)), uGamma);
-  return clamp(mix(c, vec3(0.75), 0.04), 0.0, 1.0);
-}`;
+// grey, brightened by night vision, darkened by the darkness effect, then the brightness option's curve: its 256 colours
+function lightMapBytes(out, lm, gamma, nv, darken) {
+  const bright = l => { const f = Math.min(15, Math.max(0, l)) / 15; return f / (4 - 3 * f) + (1 - f / (4 - 3 * f)) * lm.amb; };
+  const sc = lm.skyCol, dark = lm.dark || 0, cl = v => v < 0 ? 0 : v > 1 ? 1 : v;
+  for (let by = 0; by < 16; by++) for (let sx = 0; sx < 16; sx++) {
+    const s = bright(sx) * lm.sky, b = bright(by) * lm.block;
+    let r = b, g = b * ((b * 0.6 + 0.4) * 0.6 + 0.4), bl = b * (b * b * 0.6 + 0.4);
+    if (lm.force > 0.5) { r = cl(r + (0.99 - r) * 0.25); g = cl(g + (1.12 - g) * 0.25); bl = cl(bl + (1 - bl) * 0.25); }
+    else {
+      r = (r + sc[0] * s) * 0.96 + 0.03; g = (g + sc[1] * s) * 0.96 + 0.03; bl = (bl + sc[2] * s) * 0.96 + 0.03;
+      r += (r * 0.7 - r) * darken; g += (g * 0.6 - g) * darken; bl += (bl * 0.6 - bl) * darken;
+    }
+    if (nv > 0) { const m = Math.max(r, g, bl); if (m < 1) { const k = 1 / Math.max(m, 1e-4); r += (r * k - r) * nv; g += (g * k - g) * nv; bl += (bl * k - bl) * nv; } }
+    if (lm.force <= 0.5) { r = cl(r - dark); g = cl(g - dark); bl = cl(bl - dark); }
+    const up = c => c + (1 - (1 - c) ** 4 - c) * gamma;
+    r = up(r); g = up(g); bl = up(bl);
+    const o = (by * 16 + sx) * 4;
+    out[o] = Math.round(cl(r * 0.96 + 0.03) * 255); out[o + 1] = Math.round(cl(g * 0.96 + 0.03) * 255); out[o + 2] = Math.round(cl(bl * 0.96 + 0.03) * 255); out[o + 3] = 255;
+  }
+  return out;
+}
 // the lightmap of full daylight (screens drawn without a world)
 const LM_DAY = { sky: 1, skyCol: [1, 1, 1], block: 1.5, amb: 0, force: 0 };
 const SH_CHUNK_F = `#version 300 es
 precision highp float; precision highp sampler2DArray;
 ${SH_TEX_FN}
 uniform vec3 uFogCol; uniform vec2 uFog; uniform float uAlphaTest; uniform float uAlphaMul;
-${SH_LIGHT_FN}
-in vec3 vUV; in vec3 vCol; in vec2 vLight; in float vDist; in float vSolid; in float vNoMip;
+in vec3 vUV; in vec3 vCol; in vec3 vLight; in float vDist; in float vSolid; in float vNoMip;
 out vec4 o;
 void main(){
   // "cutout" blocks read only the full-size texture and keep pixels from alpha 0.1, the others take mipmaps and 0.5
@@ -20506,10 +20517,13 @@ void main(){
   vec4 c = texArrG(vUV, dFdx(vUV.xy) * m, dFdy(vUV.xy) * m);
   if (vSolid > 0.5) c.a = 1.0;
   else if (c.a < (m > 0.5 ? uAlphaTest : min(uAlphaTest, 0.1))) discard;
-  vec3 col = c.rgb * vCol * lightCol(vLight);
+  vec3 col = c.rgb * vCol * vLight;
   float f = clamp((vDist - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);
   o = vec4(mix(col, uFogCol, f), c.a * uAlphaMul);
 }`;
+// the same for solid blocks only: no alpha test, so the graphics card can skip the pixels hidden behind nearer ones before
+// shading them (a shader that may discard turns that off for everything it draws)
+const SH_CHUNK_F_SOLID = SH_CHUNK_F.replace(/  if \(vSolid > 0\.5\) c\.a = 1\.0;\n  else if \([^\n]*\n/, '  c.a = 1.0;\n');
 const SH_SKY_V = `#version 300 es
 precision highp float;
 uniform mat4 uInv;
@@ -20596,15 +20610,15 @@ layout(location=1) in vec3 aUV;
 layout(location=2) in vec4 aCol;
 layout(location=3) in vec2 aLight;
 uniform mat4 uVP;
-out vec3 vUV; out vec4 vCol; out vec2 vLight; out float vDist;
-void main(){ gl_Position = uVP * vec4(aPos, 1.0); vUV = aUV; vCol = aCol; vLight = aLight; vDist = length(aPos.xz); }`;
+${SH_LIGHTMAP_FN}
+out vec3 vUV; out vec4 vCol; out vec3 vLight; out float vDist;
+void main(){ gl_Position = uVP * vec4(aPos, 1.0); vUV = aUV; vCol = aCol; vLight = lightMap(aLight); vDist = length(aPos.xz); }`;
 const SH_DYN_F = `#version 300 es
 precision highp float; precision highp sampler2DArray;
 ${SH_TEX_FN}
 uniform sampler2D uAtlas;
 uniform vec3 uFogCol; uniform vec2 uFog; uniform float uFullBright; uniform float uGlint; uniform float uTime; uniform vec2 uGlintK; uniform float uGlintAtlas;
-${SH_LIGHT_FN}
-in vec3 vUV; in vec4 vCol; in vec2 vLight; in float vDist; out vec4 o;
+in vec3 vUV; in vec4 vCol; in vec3 vLight; in float vDist; out vec4 o;
 void main(){
   vec4 c = vUV.z < -0.5 ? texture(uAtlas, vUV.xy) : texArr(vUV);
   if (c.a < 0.1) discard;
@@ -20618,7 +20632,7 @@ void main(){
     o = vec4(vec3(0.5, 0.2, 0.9) * (0.25 + g * 0.75) * vCol.a * uGlintK.y, 1.0);
     return;
   }
-  vec3 L = uFullBright > 0.5 ? vec3(1.0) : lightCol(vLight);
+  vec3 L = uFullBright > 0.5 ? vec3(1.0) : vLight;
   vec3 col = c.rgb * vCol.rgb * L;
   float f = clamp((vDist - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);
   o = vec4(mix(col, uFogCol, f), c.a * vCol.a);
@@ -20639,6 +20653,18 @@ precision highp float; layout(location=0) in vec3 aPos; uniform mat4 uVP; void m
 const SH_LINE_F = `#version 300 es
 precision highp float; uniform vec4 uCol; out vec4 o; void main(){ o = uCol; }`;
 
+// a section's opaque quads (4 vertices of 16 bytes) put in place with the solid ones first; how many vertices are solid
+// (the flags byte of each vertex is its 16th: FL_SOLID)
+function solidFirst(data, nv) {
+  const b = new Uint8Array(data.buffer, data.byteOffset, nv * 16), nq = nv >> 2;
+  let ns = 0, mixed = false;
+  for (let q = 0; q < nq; q++) if (b[q * 64 + 15] & 128) { if (ns !== q) mixed = true; ns++; }
+  if (!mixed || ns === nq) return ns * 4;
+  const tmp = b.slice(0, nq * 64);
+  let a = 0, c = ns;
+  for (let q = 0; q < nq; q++) b.set(tmp.subarray(q * 64, q * 64 + 64), ((tmp[q * 64 + 15] & 128) ? a++ : c++) * 64);
+  return ns * 4;
+}
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -20646,12 +20672,13 @@ class Renderer {
     if (!gl) throw new Error('WebGL2 is not supported by this browser.');
     this.gl = gl;
     this.progChunk = this.prog(SH_CHUNK_V, SH_CHUNK_F);
+    this.progSolid = SH_CHUNK_F_SOLID !== SH_CHUNK_F ? this.prog(SH_CHUNK_V, SH_CHUNK_F_SOLID) : this.progChunk;
     this.progSky = this.prog(SH_SKY_V, SH_SKY_F);
     this.progDyn = this.prog(SH_DYN_V, SH_DYN_F);
     this.progCloud = this.prog(SH_CLOUD_V, SH_CLOUD_F);
     this.progLine = this.prog(SH_LINE_V, SH_LINE_F);
     this.u = {};
-    for (const [name, p] of [['chunk', this.progChunk], ['sky', this.progSky], ['dyn', this.progDyn], ['cloud', this.progCloud], ['line', this.progLine]]) {
+    for (const [name, p] of [['chunk', this.progChunk], ['solid', this.progSolid], ['sky', this.progSky], ['dyn', this.progDyn], ['cloud', this.progCloud], ['line', this.progLine]]) {
       const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS), m = {};
       for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); m[info.name] = gl.getUniformLocation(p, info.name); }
       this.u[name] = m;
@@ -20835,7 +20862,7 @@ class Renderer {
       gl.bindBuffer(gl.ARRAY_BUFFER, s[vboKey]);
       gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
     };
-    if (mesh.opq) { setup('vao', 'vbo', mesh.opq); s.n = Math.min(mesh.nOpq, this.maxQuads * 4); } else s.n = 0;
+    if (mesh.opq) { const ns = solidFirst(mesh.opq, mesh.nOpq); setup('vao', 'vbo', mesh.opq); s.n = Math.min(mesh.nOpq, this.maxQuads * 4); s.ns = Math.min(ns, s.n); } else s.n = s.ns = 0;
     if (mesh.trn) { setup('tvao', 'tvbo', mesh.trn); s.tn = Math.min(mesh.nTrn, this.maxQuads * 4); } else s.tn = 0;
   }
   freeSection(s) {
@@ -20924,6 +20951,24 @@ class Renderer {
   setLightUniforms(u, env) {
     const gl = this.gl;
     const lm = env.lm || LM_DAY;
+    // the lightmap, made again only when what it depends on has changed
+    const gamma = Math.max(0, OPTIONS.brightness - (lm.darkGamma || 0)), nv = env.nightVision || 0, dw = env.darkenWorld || 0;
+    const key = lm.sky + ',' + lm.skyCol + ',' + lm.block + ',' + lm.amb + ',' + lm.force + ',' + (lm.dark || 0) + ',' + gamma + ',' + nv + ',' + dw;
+    if (!this.lightTex) {
+      this.lightTex = gl.createTexture(); this.lightPx = new Uint8Array(1024);
+      gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 16, 16, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+    if (this.lightKey !== key) {
+      this.lightKey = key;
+      gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 16, 16, gl.RGBA, gl.UNSIGNED_BYTE, lightMapBytes(this.lightPx, lm, gamma, nv, dw));
+      gl.activeTexture(gl.TEXTURE0);
+    }
+    if (u.uLightMap) { gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, this.lightTex); gl.uniform1i(u.uLightMap, 12); gl.activeTexture(gl.TEXTURE0); }
     gl.uniform1f(u.uSkyLvl, lm.sky); gl.uniform3fv(u.uSkyCol, lm.skyCol); gl.uniform1f(u.uBlockLvl, lm.block);
     gl.uniform1f(u.uDimAmb, lm.amb); gl.uniform1f(u.uForceBright, lm.force); gl.uniform1f(u.uDarkness, lm.dark || 0);
     gl.uniform1f(u.uGamma, Math.max(0, OPTIONS.brightness - (lm.darkGamma || 0)));
@@ -20951,16 +20996,23 @@ class Renderer {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.depthMask(true);
   }
-  drawChunks(world, cam, env, translucent) {
-    const gl = this.gl, u = this.u.chunk;
-    gl.useProgram(this.progChunk);
+  // the uniforms of a chunk shader
+  chunkProgram(p, u, cam, env) {
+    const gl = this.gl;
+    gl.useProgram(p);
     gl.uniformMatrix4fv(u.uVP, false, this.vp);
     gl.uniform1f(u.uTime, env.time);
     gl.uniform3f(u.uCamW, cam[0], cam[1], cam[2]);
     gl.uniform4fv(u.uAnimRate, this.animRate || [10, 4, 8, 3]);
     this.setLightUniforms(u, env);
     this.bindTex(u);
+  }
+  drawChunks(world, cam, env, translucent) {
+    const gl = this.gl;
+    let u = this.u.chunk;
     if (!translucent) {
+      u = this.u.solid;
+      this.chunkProgram(this.progSolid, u, cam, env);
       gl.uniform1f(u.uAlphaTest, 0.5); gl.uniform1f(u.uAlphaMul, 1);
       let drawn = 0, quads = 0;
       const list = this.visible = [], far2 = (env.fogEnd + 24) * (env.fogEnd + 24);
@@ -20975,14 +21027,26 @@ class Renderer {
         const oy = sy * 16 - cam[1];
         if (!this.boxVisible(ox, oy, oz, ox + 16, oy + 16, oz + 16)) continue;
         list.push([s, ox, oz, ox + 8, oy + 8, oz + 8]);
-        if (!s.n) continue;
+        if (!s.ns) continue;
         gl.uniform3f(u.uOff, ox, -cam[1], oz);
         gl.bindVertexArray(s.vao);
-        gl.drawElements(gl.TRIANGLES, (s.n >> 2) * 6, gl.UNSIGNED_INT, 0);
-        drawn++; quads += s.n >> 2;
+        gl.drawElements(gl.TRIANGLES, (s.ns >> 2) * 6, gl.UNSIGNED_INT, 0);
+        drawn++; quads += s.ns >> 2;
+      }
+      // then the cutout blocks (leaves, plants, glass panes...) with the alpha test
+      u = this.u.chunk;
+      this.chunkProgram(this.progChunk, u, cam, env);
+      gl.uniform1f(u.uAlphaTest, 0.5); gl.uniform1f(u.uAlphaMul, 1);
+      for (const [s, ox, oz] of list) {
+        if (s.n <= s.ns) continue;
+        gl.uniform3f(u.uOff, ox, -cam[1], oz);
+        gl.bindVertexArray(s.vao);
+        gl.drawElements(gl.TRIANGLES, ((s.n - s.ns) >> 2) * 6, gl.UNSIGNED_INT, (s.ns >> 2) * 24);
+        drawn++; quads += (s.n - s.ns) >> 2;
       }
       this.stats.drawn = drawn; this.stats.quads = quads; this.stats.cand = cand.length;
     } else {
+      this.chunkProgram(this.progChunk, u, cam, env);
       const list = (this.visible || []).filter(e => e[0].tn);
       list.sort((a, b) => (b[3] * b[3] + b[4] * b[4] + b[5] * b[5]) - (a[3] * a[3] + a[4] * a[4] + a[5] * a[5]));
       gl.uniform1f(u.uAlphaTest, 0.01); gl.uniform1f(u.uAlphaMul, 1);
@@ -21782,7 +21846,10 @@ function buildMobAtlas(game, packImg) {
     g.drawImage(it.im, 0, 0, it.im.width, it.im.height, x, y, it.w, it.h);
     VTEX[it.key] = { reg: { x, y, w: it.w, h: it.h }, tw: it.sk.tw, th: it.th, legacy: it.th < it.sk.th * 0.75, pack: it.im !== it.sk.canvas };
   }
-  ATLAS.canvas = c; ATLAS.S = S;
+  // which pixels are see-through, taken now while the canvas is still the CPU's (reading it back once drawn is slow)
+  const px = g.getImageData(0, 0, S, S).data, al = new Uint8Array(S * S);
+  for (let i = 0; i < al.length; i++) al[i] = px[i * 4 + 3] >= 26 ? 1 : 0;
+  ATLAS.canvas = c; ATLAS.S = S; ATLAS.alpha = al; ATLAS.px = px;
   if (game && game.r) game.r.uploadAtlas(c);
 }
 
@@ -21840,16 +21907,24 @@ function emitVCube(r, c, xf, uvx, tint, light, two) {
 }
 // Java draws models from both sides (entityCutoutNoCull): through a cube's see-through pixels the inside of its other faces shows
 // (a chicken's legs are painted on the back of the leg only). Per texture and cube: the faces to draw from the inside too.
+// a region of the atlas as RGBA bytes, from the copy kept when it was built (no read back from the graphics card)
+function atlasPixels(x, y, w, h) {
+  const S = ATLAS.S, P = ATLAS.px;
+  if (!P) return ATLAS.canvas.getContext('2d').getImageData(x, y, w, h).data;
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let r = 0; r < h; r++) out.set(P.subarray(((y + r) * S + x) * 4, ((y + r) * S + x + w) * 4), r * w * 4);
+  return out;
+}
 function insideFaces(vt, c) {
   const m = vt.two || (vt.two = new WeakMap());
   let f = m.get(c);
   if (f !== undefined) return f;
   f = 0;
   try {
-    const rg = vt.reg, W = rg.w, H = rg.h;
+    const rg = vt.reg, W = rg.w, H = rg.h, A = ATLAS.alpha, S = ATLAS.S;
     if (!vt.alpha) {
-      const px = ATLAS.canvas.getContext('2d').getImageData(rg.x, rg.y, W, H).data, al = new Uint8Array(W * H);
-      for (let i = 0; i < al.length; i++) al[i] = px[i * 4 + 3] >= 26 ? 1 : 0;
+      const al = new Uint8Array(W * H);
+      if (A) for (let y = 0; y < H; y++) al.set(A.subarray((rg.y + y) * S + rg.x, (rg.y + y) * S + rg.x + W), y * W);
       vt.alpha = al;
     }
     const [u, v, , , , w, h, d] = c, ku = W / vt.tw, kv = H / vt.th;
@@ -36206,7 +36281,7 @@ function glyphW() {
   const vt = VTEX['font/ascii'], W = FONT3D.w;
   W.fill(0);
   if (vt && vt.pack && ATLAS.canvas) {
-    const k = vt.reg.w / 128, rw = vt.reg.w, d = ATLAS.canvas.getContext('2d').getImageData(vt.reg.x, vt.reg.y, vt.reg.w, vt.reg.h).data;
+    const k = vt.reg.w / 128, rw = vt.reg.w, d = atlasPixels(vt.reg.x, vt.reg.y, vt.reg.w, vt.reg.h);
     for (let code = 33; code < 127; code++) {
       const cx = (code % 16) * 8, cy = (code >> 4) * 8;
       for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if (d[(Math.floor((cy + y + 0.5) * k) * rw + Math.floor((cx + x + 0.5) * k)) * 4 + 3] > 127) W[code] = Math.max(W[code], x + 1);
@@ -36666,7 +36741,7 @@ function bannerMask(n) {
   if (BANNER_MASKS.m[n]) return BANNER_MASKS.m[n];
   const vt = VTEX['entity/banner/' + n], out = new Float32Array(20 * 40 * 4);
   if (vt && ATLAS.canvas) {
-    if (!BANNER_MASKS.data) BANNER_MASKS.data = ATLAS.canvas.getContext('2d').getImageData(0, 0, ATLAS.S, ATLAS.S).data;
+    if (!BANNER_MASKS.data) BANNER_MASKS.data = ATLAS.px || ATLAS.canvas.getContext('2d').getImageData(0, 0, ATLAS.S, ATLAS.S).data;
     const d = BANNER_MASKS.data, k = vt.reg.w / 64, S = ATLAS.S;
     for (let y = 0; y < 40; y++) for (let x = 0; x < 20; x++) {
       const s = ((vt.reg.y + Math.floor((y + 1.5) * k)) * S + vt.reg.x + Math.floor((x + 1.5) * k)) * 4, o = (y * 20 + x) * 4;
@@ -48084,7 +48159,7 @@ const SHIELD_BITMAPS = {
   skull: ['..####..', '.######.', '.#.##.#.', '.######.', '..#..#..', '#..##..#', '.##..##.', '#......#'],
 };
 const SHIELD_MASKS = { atlas: null, m: {} };
-const regionPixels = vt => ATLAS.canvas.getContext('2d').getImageData(vt.reg.x, vt.reg.y, vt.reg.w, vt.reg.h).data;
+const regionPixels = vt => atlasPixels(vt.reg.x, vt.reg.y, vt.reg.w, vt.reg.h);
 // one layer of a design over the whole 64x64 texture: RGBA 0..1 (the front of the plate is at 1, 1, 12x22)
 function shieldMask(n) {
   if (SHIELD_MASKS.atlas !== ATLAS.canvas) { SHIELD_MASKS.atlas = ATLAS.canvas; SHIELD_MASKS.m = {}; }
@@ -66575,7 +66650,7 @@ Mob.prototype.tick = function () {
 // ScreenEffectRenderer.getViewBlockingState: any of eight points around the eyes (a square 0.8 of the width across, 0.1 high) in a
 // block that blocks the view (the same blocks as for suffocating; barriers aren't drawn); its particle texture, a tenth as bright, on
 // a square 2 across half a block in front of the eyes, so that only its middle fills the screen
-const WALL_VIEW = { id: -1, res: 0 };
+const WALL_VIEW = { id: -1, res: 0, urls: new Map() };
 const _renderWorldSF = Game.prototype.renderWorld;
 Game.prototype.renderWorld = function (alpha, dt, panorama) {
   const r = _renderWorldSF.apply(this, arguments);
@@ -66592,8 +66667,12 @@ Game.prototype.renderWorld = function (alpha, dt, panorama) {
   }
   if (!id) { if (fx.style.display !== 'none') fx.style.display = 'none'; return r; }
   if (WALL_VIEW.id !== id || WALL_VIEW.res !== TEX.res) {
+    // (each block's picture made once per texture size: encoding it is far too slow to do as you pass through blocks)
+    if (WALL_VIEW.res !== TEX.res) WALL_VIEW.urls = new Map();
     WALL_VIEW.id = id; WALL_VIEW.res = TEX.res;
-    fx.style.backgroundImage = 'url(' + tileCanvas(id === B.GRASS_BLOCK ? FACETEX[B.DIRT * 6] : FACETEX[id * 6], null, 0.1).toDataURL() + ')';
+    let url = WALL_VIEW.urls.get(id);
+    if (!url) { url = 'url(' + tileCanvas(id === B.GRASS_BLOCK ? FACETEX[B.DIRT * 6] : FACETEX[id * 6], null, 0.1).toDataURL() + ')'; WALL_VIEW.urls.set(id, url); }
+    fx.style.backgroundImage = url;
   }
   const hh = 0.5 * Math.tan((this.fovCur || 70) * Math.PI / 360), cv = this.canvas, aspect = cv && cv.height ? cv.width / cv.height : 16 / 9;
   fx.style.backgroundSize = (200 / (hh * 2 * aspect)).toFixed(1) + '% ' + (200 / (hh * 2)).toFixed(1) + '%';
@@ -70705,7 +70784,7 @@ function spearHandModel(st) {
   if (!vt || !ATLAS.canvas) return null;
   const memo = SP_MODELS.get(key);
   if (memo && memo.atlas === ATLAS.canvas) return memo.m;
-  const rg = vt.reg, A = ATLAS.S, G = 32, px = ATLAS.canvas.getContext('2d', { willReadFrequently: true }).getImageData(rg.x, rg.y, rg.w, rg.h).data;
+  const rg = vt.reg, A = ATLAS.S, G = 32, px = atlasPixels(rg.x, rg.y, rg.w, rg.h);
   const op = (x, y) => x >= 0 && y >= 0 && x < G && y < G && px[(Math.floor((y + 0.5) * rg.h / G) * rg.w + Math.floor((x + 0.5) * rg.w / G)) * 4 + 3] > 128;
   const uv = (u, v) => [(rg.x + u * rg.w) / A, (rg.y + v * rg.h) / A], P = (x, y) => [x / G - 0.5, 0.5 - y / G], th = 1 / 32, q = [];
   const quad = (pts, s) => q.push(pts.map(([x, y, z, u, v]) => [x, y, z, ...uv(u, v), s]));
@@ -71102,7 +71181,7 @@ function guiSkin(key) {
   const vt = VTEX[key];
   if (!vt || !ATLAS.canvas) return GUI_SKINS.m[key] = null;
   const r = vt.reg;
-  return GUI_SKINS.m[key] = { px: ATLAS.canvas.getContext('2d').getImageData(r.x, r.y, r.w, r.h).data, w: r.w, h: r.h, k: r.w / vt.tw };
+  return GUI_SKINS.m[key] = { px: atlasPixels(r.x, r.y, r.w, r.h), w: r.w, h: r.h, k: r.w / vt.tw };
 }
 // faces of a model cube [u, v, x, y, z, w, h, d, grow] (the box unwrap the mob models use), through xf into block pixels; only: the
 // unwrap's faces to keep
