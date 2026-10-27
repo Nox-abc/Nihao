@@ -18744,6 +18744,7 @@ class World {
     // keep height map roughly correct (used only for seeding new chunks)
     const col = ((z & 15) << 4) | (x & 15);
     if (opN > 0 && y >= c.hmap[col]) c.hmap[col] = y + 1;
+    if (opN > 0 && c.ltop !== undefined && y > c.ltop) c.ltop = y;
     else if (opN === 0 && y === c.hmap[col] - 1) {
       let yy = y;
       while (yy >= 0 && OPACITY[c.blocks[(yy << 8) | col]] === 0) yy--;
@@ -18753,8 +18754,13 @@ class World {
   lightChunk(c) {
     const bl = c.blocks, L = c.light;
     const hm = c.hmap = new Uint16Array(256);
+    // the layers above the highest block are all air: lit by the sky at once, and nothing more to look at there
+    let top = CH_TOP;
+    while (top >= 0) { const o = top << 8; let k = 0; while (k < 256 && !bl[o + k]) k++; if (k < 256) break; top--; }
+    c.ltop = top;
+    if (this.hasSky && top < CH_TOP) L.fill(0xF0, (top + 1) << 8);
     for (let col = 0; col < 256; col++) {
-      let y = CH_TOP;
+      let y = top;
       for (; y >= 0; y--) { if (OPACITY[bl[(y << 8) | col]] > 0) break; if (this.hasSky) L[(y << 8) | col] = 0xF0; }
       hm[col] = y + 1;
     }
@@ -18767,13 +18773,15 @@ class World {
       for (let s = 0; s < 4; s++) {
         const n = nb[s];
         if (!n) continue;
+        // (sky light: above the blocks of both, both are full)
+        const yEnd = sky && n.ltop !== undefined ? Math.min(CH_H, Math.max(top, n.ltop) + 2) : CH_H;
         for (let k = 0; k < 16; k++) {
           // our cell (ax,az) local, neighbour cell (nx,nz) local
           let ax, az, nx, nz;
           if (s === 0) { ax = 15; az = k; nx = 0; nz = k; } else if (s === 1) { ax = 0; az = k; nx = 15; nz = k; }
           else if (s === 2) { ax = k; az = 15; nx = k; nz = 0; } else { ax = k; az = 0; nx = k; nz = 15; }
           const nwx = n.cx * 16 + nx, nwz = n.cz * 16 + nz, awx = bx + ax, awz = bz + az;
-          for (let y = 0; y < CH_H; y++) {
+          for (let y = 0; y < yEnd; y++) {
             const vi = n.light[(y << 8) | (nz << 4) | nx], ai = L[(y << 8) | (az << 4) | ax];
             const nv = sky ? vi >> 4 : vi & 15, av = sky ? ai >> 4 : ai & 15;
             if (nv > av + 1) lqA[n0++] = pk(nwx, y, nwz, ox, oz);
@@ -18810,7 +18818,7 @@ class World {
     {
       an = border(false);
       const mt = c.meta;
-      for (let i = 0; i < CH_VOL; i++) {
+      for (let i = 0, e = (top + 1) << 8; i < e; i++) {
         let em = EMIT[bl[i]];
         if (em && EMITF[bl[i]]) em = EMITF[bl[i]](mt[i]);
         if (em) { L[i] = (L[i] & 0xF0) | em; lqA[an++] = pk(bx + (i & 15), i >> 8, bz + ((i >> 4) & 15), ox, oz); }
@@ -20916,7 +20924,7 @@ class Renderer {
     return this.occList = out;
   }
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2) * (OPTIONS.resScale || 1);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2) * (OPTIONS.resScale || 1) * (this.autoScale ? this.autoScale() : 1);
     const w = Math.floor(this.canvas.clientWidth * dpr), h = Math.floor(this.canvas.clientHeight * dpr);
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
   }
@@ -46005,7 +46013,7 @@ CMDS.help = function (r, ctx) {
 // the defaults of Options.java, for what options saved before this update don't have
 const OPT_DEFAULTS = {
   graphics: 1, chunkBuilder: 0, simDist: 12, maxFps: 120, attackIndicator: 1, particles: 0, mipmaps: 4, entityShadows: true, distortion: 1, entityDist: 1,
-  fovEffect: 1, autosaveIndicator: true, glintSpeed: 0.5, glintStrength: 0.75, menuBlur: 5, biomeBlend: 2,
+  fovEffect: 1, autosaveIndicator: true, glintSpeed: 0.5, glintStrength: 0.75, menuBlur: 5, biomeBlend: 2, autoRes: true,
   vol: { record: 1, weather: 1, block: 1, hostile: 1, neutral: 1, player: 1, ambient: 1, voice: 1 }, subtitles: false, directionalAudio: false,
   invertMouse: false, scrollSens: 1, discreteScroll: false, rawInput: true, toggleCrouch: false, toggleSprint: false, autoJump: false, opTab: false,
   chatVisibility: 0, chatColors: true, chatLinks: true, chatLinksPrompt: true, chatOpacity: 1, textBgOpacity: 0.5, chatScale: 1, chatLineSpacing: 0, chatDelay: 0,
@@ -46071,6 +46079,7 @@ const OPT = {
   menuBlur: { label: 'Menu Background Blur', slider: [0, 10, 1], fmt: v => v, apply: () => { const g = optGame(); if (g) applyMenuBlur(g.ui.screen); } },
   biomeBlend: { label: 'Biome Blend', slider: [0, 7, 1], fmt: v => v === 0 ? 'OFF' : (v * 2 + 1) + 'x' + (v * 2 + 1), apply: () => applyBiomeBlend(), tip: 'How many blocks grass, leaves and water blend their biome colours over.' },
   nightVision: { label: 'Night Vision', bool: true, tip: 'See in the dark everywhere, as with a potion of Night Vision.' },
+  autoRes: { label: 'Auto Resolution', bool: true, apply: () => { const g = optGame(); if (g && g.r) g.r.resize(); }, tip: 'Lowers the resolution by itself while the game runs slowly, and raises it back when it can.' },
   resScale: { label: 'Render Resolution', slider: [0.4, 1, 0.05], fmt: optPct, tip: 'Draws the world at a lower resolution, which is faster on slow computers.' },
   // music & sounds
   volume: { label: 'Master Volume', slider: [0, 1, 0.01], fmt: optOffPct },
@@ -46142,7 +46151,7 @@ const OPT = {
 const OPT_SCREENS = {
   video: { title: 'Video Settings', items: ['graphics', 'renderDist', 'chunkBuilder', 'simDist', 'smooth', 'maxFps', 'vsync', 'bobbing', 'gui', 'attackIndicator', 'brightness', 'clouds',
     'fullscreen', 'particles', 'mipmaps', 'entityShadows', 'distortion', 'entityDist', 'fovEffect', 'autosaveIndicator', 'glintSpeed', 'glintStrength', 'menuBlur', 'biomeBlend',
-    'nightVision', 'resScale'] },
+    'nightVision', 'resScale', 'autoRes'] },
   sounds: { title: 'Music & Sound Options', items: [['volume'], 'music', 'vol.record', 'vol.weather', 'vol.block', 'vol.hostile', 'vol.neutral', 'vol.player', 'vol.ambient', 'vol.voice', ['device'], 'subtitles', 'directionalAudio'] },
   controls: { title: 'Controls', items: [{ link: 'Mouse Settings...', to: 'mouse' }, { link: 'Key Binds...', to: 'keybinds' }, 'toggleCrouch', 'toggleSprint', 'autoJump', 'opTab'] },
   mouse: { title: 'Mouse Settings', parent: 'controls', items: ['sens', 'invertMouse', 'scrollSens', 'discreteScroll', 'touchscreen', 'rawInput'] },
@@ -66650,12 +66659,17 @@ Mob.prototype.tick = function () {
 // ScreenEffectRenderer.getViewBlockingState: any of eight points around the eyes (a square 0.8 of the width across, 0.1 high) in a
 // block that blocks the view (the same blocks as for suffocating; barriers aren't drawn); its particle texture, a tenth as bright, on
 // a square 2 across half a block in front of the eyes, so that only its middle fills the screen
-const WALL_VIEW = { id: -1, res: 0, urls: new Map() };
+const WALL_VIEW = { id: -1, res: 0 };
 const _renderWorldSF = Game.prototype.renderWorld;
 Game.prototype.renderWorld = function (alpha, dt, panorama) {
   const r = _renderWorldSF.apply(this, arguments);
   let fx = $('fx-wall');
-  if (!fx) { fx = document.createElement('div'); fx.id = 'fx-wall'; fx.style.cssText = 'position:fixed;inset:0;pointer-events:none;display:none;image-rendering:pixelated;background-position:50% 50%;background-repeat:no-repeat;transform:scaleX(-1)'; const s = $('fx-water'); s.parentNode.insertBefore(fx, s); }
+  if (!fx) {
+    fx = document.createElement('div'); fx.id = 'fx-wall'; fx.style.cssText = 'position:fixed;inset:0;pointer-events:none;display:none;overflow:hidden;transform:scaleX(-1)';
+    // (the picture is drawn straight into a canvas the page stretches: turning it into an image URL waits for the graphics card)
+    const cv = document.createElement('canvas'); cv.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);image-rendering:pixelated';
+    fx.appendChild(cv); const s = $('fx-water'); s.parentNode.insertBefore(fx, s);
+  }
   const p = this.player, w = this.world;
   let id = 0;
   if (p && !panorama && !this.thirdPerson && p.mode !== 3 && w) {
@@ -66666,16 +66680,17 @@ Game.prototype.renderWorld = function (alpha, dt, panorama) {
     }
   }
   if (!id) { if (fx.style.display !== 'none') fx.style.display = 'none'; return r; }
+  const cv = fx.firstChild;
   if (WALL_VIEW.id !== id || WALL_VIEW.res !== TEX.res) {
-    // (each block's picture made once per texture size: encoding it is far too slow to do as you pass through blocks)
-    if (WALL_VIEW.res !== TEX.res) WALL_VIEW.urls = new Map();
     WALL_VIEW.id = id; WALL_VIEW.res = TEX.res;
-    let url = WALL_VIEW.urls.get(id);
-    if (!url) { url = 'url(' + tileCanvas(id === B.GRASS_BLOCK ? FACETEX[B.DIRT * 6] : FACETEX[id * 6], null, 0.1).toDataURL() + ')'; WALL_VIEW.urls.set(id, url); }
-    fx.style.backgroundImage = url;
+    const R = TEX.res, src = TEX.imgs[id === B.GRASS_BLOCK ? FACETEX[B.DIRT * 6] : FACETEX[id * 6]], g = (cv.width = cv.height = R, cv.getContext('2d')), img = g.createImageData(R, R);
+    if (src) for (let i = 0; i < R * R * 4; i += 4) { img.data[i] = src[i] * 0.1; img.data[i + 1] = src[i + 1] * 0.1; img.data[i + 2] = src[i + 2] * 0.1; img.data[i + 3] = src[i + 3]; }
+    g.putImageData(img, 0, 0);
   }
-  const hh = 0.5 * Math.tan((this.fovCur || 70) * Math.PI / 360), cv = this.canvas, aspect = cv && cv.height ? cv.width / cv.height : 16 / 9;
-  fx.style.backgroundSize = (200 / (hh * 2 * aspect)).toFixed(1) + '% ' + (200 / (hh * 2)).toFixed(1) + '%';
+  const hh = 0.5 * Math.tan((this.fovCur || 70) * Math.PI / 360), c0 = this.canvas, aspect = c0 && c0.height ? c0.width / c0.height : 16 / 9;
+  const wcss = (200 / (hh * 2 * aspect)).toFixed(1) + '%', hcss = (200 / (hh * 2)).toFixed(1) + '%';
+  if (cv.style.width !== wcss) cv.style.width = wcss;
+  if (cv.style.height !== hcss) cv.style.height = hcss;
   if (fx.style.display !== 'block') fx.style.display = 'block';
   return r;
 };
@@ -72686,7 +72701,8 @@ void main(){
   if (off.x < 0.0) off = -off;
   gl_Position = vec4((p0.xyz / p0.w + vec3(off * aSide, 0.0)) * p0.w, p0.w);
 }`;
-Renderer.prototype.drawWideLines = function (pts, col) {
+// (made when a world starts: compiling a shader the first time you look at a block stalls that frame)
+Renderer.prototype.initWide = function () {
   const gl = this.gl;
   if (!this.progWide) {
     this.progWide = this.prog(SH_WIDE_V, SH_LINE_F);
@@ -72698,6 +72714,12 @@ Renderer.prototype.drawWideLines = function (pts, col) {
     gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 28, 24);
     gl.bindVertexArray(null);
   }
+};
+const _startWorldWL = Game.prototype.startWorld;
+Game.prototype.startWorld = function (...a) { if (this.r && this.r.initWide) this.r.initWide(); return _startWorldWL.apply(this, a); };
+Renderer.prototype.drawWideLines = function (pts, col) {
+  const gl = this.gl;
+  this.initWide();
   const n = pts.length / 6, d = new Float32Array(n * 6 * 7);
   let o = 0;
   for (let i = 0; i < n; i++) {
@@ -72896,6 +72918,54 @@ for (let id = 0; id < MAXB; id++) if (SHAPE[id] === SH.GATE) OUTLINE_OF.set(id, 
   const h = w && gateInWall(m, w.shapeCtx(x, y, z, id)) ? 13 : 16;
   return (m & 1) ? [[6, 0, 0, 10, h, 16]] : [[0, 0, 6, 16, h, 10]];
 });
+
+/* @file 230_auto_res.js */
+/* ===================================================================
+   Part 136: Auto Resolution — when the frame rate stays well under what
+   it should be, the world is drawn at a lower resolution (down to half)
+   and raised back when there is room again. If drawing fewer pixels
+   does not help (the computer is slow elsewhere), the step is undone.
+   =================================================================== */
+(() => {
+const AR = { scale: 1, dts: [], t: 0, good: 0, before: 0, last: 1, hold: 0, settle: 0, up: 0, upHold: 0 };
+Renderer.prototype.autoScale = () => OPTIONS.autoRes === false ? 1 : AR.scale;
+const median = a => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+function setScale(g, s) {
+  AR.scale = Math.round(s * 100) / 100;
+  if (g.r) g.r.resize();
+}
+const _start = Game.prototype.startWorld;
+Game.prototype.startWorld = function (...a) { AR.settle = 3; AR.before = 0; AR.dts.length = 0; AR.t = 0; return _start.apply(this, a); };
+const _play = Game.prototype.playFrame;
+Game.prototype.playFrame = function (dt) {
+  if (OPTIONS.autoRes !== false && !document.hidden && !PAUSE_SCREENS.has(this.ui.screen)) {
+    AR.dts.push(dt); AR.t += dt;
+    if (AR.t >= 2) {
+      // the frame rate over the last two seconds, by the middle frame (a hitch while chunks load is not counted)
+      const fps = 1 / Math.max(median(AR.dts), 1e-3), want = Math.min(60, OPTIONS.maxFps >= 260 ? 60 : OPTIONS.maxFps);
+      AR.dts.length = 0; AR.t = 0;
+      if (AR.hold > 0) AR.hold--;
+      if (AR.upHold > 0) AR.upHold--;
+      if (AR.up > 0) AR.up--;
+      // (not while the world around is first loaded: that is slow however many pixels there are)
+      if (AR.settle > 0) AR.settle--;
+      else if (AR.before) {
+        // the last step down: undone, and no more for twenty seconds, when it did not help
+        if (fps < AR.before * 1.06) { setScale(this, AR.last); AR.hold = 10; }
+        AR.before = 0;
+      } else if (fps < want * 0.8 && AR.scale > 0.5 && !AR.hold) {
+        AR.before = fps; AR.last = AR.scale; AR.good = 0;
+        // (going back down soon after going up: stay there a minute rather than go up and down)
+        if (AR.up) AR.upHold = 30;
+        setScale(this, Math.max(0.5, AR.scale - (fps < want * 0.5 ? 0.2 : 0.1)));
+      } else if (fps >= want * 0.95 && AR.scale < 1 && !AR.upHold) {
+        if (++AR.good >= 3) { AR.good = 0; AR.up = 5; setScale(this, Math.min(1, AR.scale + 0.05)); }
+      } else AR.good = 0;
+    }
+  }
+  return _play.call(this, dt);
+};
+})();
 
 </script>
 </body>

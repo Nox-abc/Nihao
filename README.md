@@ -950,6 +950,11 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   worked out once a frame into a 16 x 16 lightmap read at each corner of a face, as Java does, instead of for every pixel;
   and solid blocks are drawn by a shader with nothing see-through, so the graphics card can skip what lies behind them.
   The squeezed `minecraft.min.html` is new too.
+- **Auto Resolution** (Part 136, in Video Settings, on by default): when the game keeps running well under 60 frames a
+  second, the world is drawn at a lower resolution (down to half) and raised back when there is room again; if fewer
+  pixels don't help, it goes back. Going inside a block no longer copies a picture back from the graphics card, the
+  outline shader is ready when the world starts instead of halting the game the first time it is needed, and lighting new
+  chunks skips the empty air above the terrain.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.
