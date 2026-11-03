@@ -955,6 +955,13 @@ drop decay rules and the rest (the ones about servers are accepted and kept).
   pixels don't help, it goes back. Going inside a block no longer copies a picture back from the graphics card, the
   outline shader is ready when the world starts instead of halting the game the first time it is needed, and lighting new
   chunks skips the empty air above the terrain.
+- **Lighter game ticks** (Part 137): about a quarter less work every tick, and the worst ticks a fraction of what they
+  were. Random ticks pass over every block that never takes one (stone, dirt, water, ores, logs...) and over whole
+  sections holding nothing else, as Java does; mobs look once at the blocks around them for water, lava, cobwebs,
+  cauldrons and campfires instead of again for each check; the collision boxes are gathered without looking up the chunk
+  of every block or making new arrays; zombies, foxes and rabbits only search for turtle eggs, berries and carrots where
+  there are any; blocks changed in a tick (fire spreading) are redrawn once a frame instead of once a change; at most three
+  ticks run to catch up in one frame; and the world generating threads leave two cores free for the game and the browser.
 - **Parrots** are tamed with seeds one time in ten (cookies kill them), sit on their owner's
   shoulders until a jump, a swim, flying, sleep or a hit sends them off, dance by a playing
   jukebox and now and then imitate the monsters around them.

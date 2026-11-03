@@ -18642,6 +18642,18 @@ class World {
     if (!c || !c.light) return 0xF0;
     return c.light[(y << 8) | ((z & 15) << 4) | (x & 15)];
   }
+  // does any loaded chunk touching the box (x0, z0)-(x1, z1) hold this block? (each chunk's answer kept until it changes)
+  anyBlockNear(id, x0, z0, x1, z1) {
+    for (let cz = z0 >> 4; cz <= z1 >> 4; cz++) for (let cx = x0 >> 4; cx <= x1 >> 4; cx++) {
+      const c = this.getChunk(cx, cz);
+      if (!c || !c.blocks) continue;
+      if (!c._has || c._hasV !== (c.bver || 0) || c._hasOf !== c.blocks) { c._has = new Map(); c._hasV = c.bver || 0; c._hasOf = c.blocks; }
+      let h = c._has.get(id);
+      if (h === undefined) c._has.set(id, h = c.blocks.indexOf(id) >= 0);
+      if (h) return true;
+    }
+    return false;
+  }
   isLoadedAt(x, z) { const c = this.getChunk(x >> 4, z >> 4); return !!(c && c.state >= 2); }
   // mark the sections that contain (x,y,z) or any of its 26 neighbours dirty
   touch(x, y, z) {
@@ -18837,7 +18849,8 @@ class World {
     const i = (y << 8) | ((z & 15) << 4) | (x & 15);
     const old = c.blocks[i], oldMeta = c.meta[i];
     if (old === id && oldMeta === meta) return false;
-    c.blocks[i] = id; c.meta[i] = meta;
+    c.blocks[i] = id; c.meta[i] = meta; BLOCK_VER++; c.bver = (c.bver || 0) + 1;
+    if (c.rtk) c.rtk[y >> 4] = 2;
     c.modified = true; c.unsaved = true;
     // the top block of each column (vanilla's WORLD_SURFACE height map, for natural spawning)
     const ws = c.wsurf;
@@ -21147,21 +21160,32 @@ class Renderer {
 /* ===================================================================
    ENTITIES: physics, mobs, items, particles, box models
    =================================================================== */
-const _boxes = [];
+const _boxes = [], _boxPool = [], _boxCols = [];
+// blocks collectBoxes notes it passed (BOXES_SAW): 1 scaffolding
+const BOX_FLAG = new Uint8Array(65536);
+// (the boxes' arrays are reused from call to call: what a caller wants to keep it copies)
+let _boxN = 0, BOXES_SAW = 0;
+const boxOut = (a, b, c, d, e, f) => { let o = _boxPool[_boxN]; if (!o) o = _boxPool[_boxN] = [0, 0, 0, 0, 0, 0]; _boxN++; o[0] = a; o[1] = b; o[2] = c; o[3] = d; o[4] = e; o[5] = f; _boxes.push(o); };
 function collectBoxes(world, x0, y0, z0, x1, y1, z1) {
-  _boxes.length = 0;
+  _boxes.length = 0; _boxN = 0; BOXES_SAW = 0;
+  const fx0 = Math.floor(x0), fx1 = Math.floor(x1), fz0 = Math.floor(z0), fz1 = Math.floor(z1), nx = fx1 - fx0 + 1;
+  // each column's chunk, if it is loaded (looked up once, not for every block)
+  for (let z = fz0; z <= fz1; z++) for (let x = fx0; x <= fx1; x++) { const c = world.getChunk(x >> 4, z >> 4); _boxCols[(z - fz0) * nx + x - fx0] = c && c.state >= 2 && c.blocks ? c : null; }
   // start one block lower: fences reach 1.5 blocks high
-  for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let x = Math.floor(x0); x <= Math.floor(x1); x++) {
-    if (!world.isLoadedAt(x, z)) { _boxes.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
-    if (y < 0) { _boxes.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
-    const id = world.getBlock(x, y, z);
+  for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) for (let z = fz0; z <= fz1; z++) for (let x = fx0; x <= fx1; x++) {
+    const ch = _boxCols[(z - fz0) * nx + x - fx0];
+    if (!ch) { boxOut(x, y, z, x + 1, y + 1, z + 1); continue; }
+    if (y < 0) { boxOut(x, y, z, x + 1, y + 1, z + 1); continue; }
+    const id = y > CH_TOP ? 0 : ch.blocks[(y << 8) | ((z & 15) << 4) | (x & 15)];
+    if (!id) continue;
+    BOXES_SAW |= BOX_FLAG[id];
     if (!SOLID[id]) continue;
-    if (SHAPE[id] === SH.CUBE) { _boxes.push([x, y, z, x + 1, y + CUBE_TOP[id], z + 1]); continue; }
+    if (SHAPE[id] === SH.CUBE) { boxOut(x, y, z, x + 1, y + CUBE_TOP[id], z + 1); continue; }
     const sh = SHAPE[id], ctx = (sh === SH.FENCE || sh === SH.PANE || DYNAMIC_SHAPES.has(sh)) ? world.shapeCtx(x, y, z, id) : null;
     // bamboo's stalk is where its model stands, off the middle of the block (Part 124)
     let ox = x, oz = z;
     if (OFFSET[id]) { const o = plantOffset(id, x, z); ox += o[0] / 16; oz += o[2] / 16; }
-    for (const b of shapeBoxes(id, world.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx)) _boxes.push([ox + b[0] / 16, y + b[1] / 16, oz + b[2] / 16, ox + b[3] / 16, y + b[4] / 16, oz + b[5] / 16]);
+    for (const b of shapeBoxes(id, world.getMeta(x, y, z), ctx ? ctx.conn : 0, true, ctx)) boxOut(ox + b[0] / 16, y + b[1] / 16, oz + b[2] / 16, ox + b[3] / 16, y + b[4] / 16, oz + b[5] / 16);
   }
   return _boxes;
 }
@@ -21205,6 +21229,28 @@ function aabbHitsBlock(world, x0, y0, z0, x1, y1, z1, pred) {
   }
   return false;
 }
+
+// the different blocks in the cells an entity's box touches (and whether any of them holds water), kept until it moves to
+// other cells or a block changes: the checks of a tick that each look for one kind of block there (water, lava, cobwebs,
+// cauldrons, campfires...) skip at once when it isn't there
+let BLOCK_VER = 0;
+function boxIds(e) {
+  const w = e.game.world, hw = e.w / 2 + 0.01, x0 = Math.floor(e.x - hw), x1 = Math.floor(e.x + hw), z0 = Math.floor(e.z - hw), z1 = Math.floor(e.z + hw);
+  const y0 = Math.floor(e.y - 0.01), y1 = Math.floor(e.y + e.h + 0.01);
+  let b = e._box;
+  if (b && b.v === BLOCK_VER && b.w === w && b.x0 === x0 && b.x1 === x1 && b.y0 === y0 && b.y1 === y1 && b.z0 === z0 && b.z1 === z1) return b;
+  if (!b) b = e._box = { ids: [], v: 0, w: null, x0: 0, x1: 0, y0: 0, y1: 0, z0: 0, z1: 0, wet: false };
+  b.v = BLOCK_VER; b.w = w; b.x0 = x0; b.x1 = x1; b.y0 = y0; b.y1 = y1; b.z0 = z0; b.z1 = z1; b.wet = false;
+  const ids = b.ids; ids.length = 0;
+  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    const id = w.getBlock(x, y, z);
+    if (!ids.includes(id)) ids.push(id);
+    if (!b.wet && id !== 0 && id !== B.WATER && w.isWet && w.isWet(x, y, z)) b.wet = true;
+  }
+  return b;
+}
+const boxHas = (e, id) => boxIds(e).ids.includes(id);
+const boxAny = (e, pred) => { const ids = boxIds(e).ids; for (let i = 0; i < ids.length; i++) if (pred(ids[i])) return true; return false; };
 
 /* ---------------- texture atlas for box models ---------------- */
 const ATLAS = { canvas: null, ctx: null, x: 0, y: 0, rowH: 0, S: 512 };
@@ -21330,6 +21376,9 @@ class Entity {
   savePrev() { this.px = this.x; this.py = this.y; this.pz = this.z; this.pyaw = this.yaw; }
   updateFluids() {
     const w = this.game.world, hw = this.w / 2 - 0.001;
+    // (nothing to do with no water or lava about)
+    const ids = boxIds(this).ids;
+    if (!ids.includes(B.WATER) && !ids.includes(B.LAVA)) { this.inWater = this.inLava = this.headInWater = false; return; }
     this.inWater = aabbHitsBlock(w, this.x - hw, this.y + 0.01, this.z - hw, this.x + hw, this.y + this.h * 0.6, this.z + hw, id => id === B.WATER);
     this.inLava = aabbHitsBlock(w, this.x - hw, this.y + 0.01, this.z - hw, this.x + hw, this.y + this.h * 0.6, this.z + hw, id => id === B.LAVA);
     const ey = this.y + (this.eyeH || this.h * 0.85);
@@ -28654,7 +28703,8 @@ class Game {
     this.workers = [];
     try {
       const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-      const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
+      // (two cores left free: one for the game itself, one for the browser's drawing)
+      const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2));
       for (let i = 0; i < n; i++) {
         const w = new Worker(url);
         w.onmessage = e => {
@@ -28701,6 +28751,7 @@ class Game {
   }
   // meta/be/ents come from a save; gen holds what the generator made for a fresh chunk (block states, loot chests, mobs)
   onChunkData(cx, cz, seed, blocks, biomes, meta, be, dim, ents, gen, bio3) {
+    BLOCK_VER++;
     const w = this.world;
     if (!w || (seed | 0) !== (w.seed | 0) || (dim && dim !== w.dim)) return;
     const c = w.chunks.get(w.key(cx, cz));
@@ -29461,8 +29512,9 @@ class Game {
     if (!paused) {
       this.acc += dt;
       let n = 0;
-      while (this.acc >= 0.05 && n < 5 && this.state === 'playing') { this.gameTick(); this.acc -= 0.05; n++; }
-      if (n === 5) this.acc = 0;
+      // (at most three ticks to catch up in one frame: a slow frame isn't followed by a slower one)
+      while (this.acc >= 0.05 && n < 3 && this.state === 'playing') { this.gameTick(); this.acc -= 0.05; n++; }
+      if (n === 3) this.acc = 0;
       if (this.state !== 'playing') return;
     }
     const alpha = paused ? 1 : Math.min(1, this.acc / 0.05);
@@ -29545,20 +29597,42 @@ class Game {
     const d = Math.max(Math.abs(cx - (Math.floor(p.x) >> 4)), Math.abs(cz - (Math.floor(p.z) >> 4)));
     return d <= this.simDistance();
   }
+  // the blocks a random tick does nothing to (all but those the randomTick parts handle: plants that grow, grass and
+  // mycelium, fire and lava, ice and snow, farmland, copper, lit redstone ore...), the bulk of the ground: passed over at
+  // once, and a section of nothing else not looked into (LevelChunkSection.isRandomlyTicking)
+  static noRandomTick() {
+    if (Game._noRT) return Game._noRT;
+    const t = Game._noRT = new Uint8Array(Math.max(BLK.length, 65536)).fill(1);
+    for (const n of ['GRASS_BLOCK', 'MYCELIUM', 'SUGAR_CANE', 'CACTUS', 'BAMBOO', 'KELP', 'TWISTING_VINES', 'WEEPING_VINES', 'CAVE_VINES', 'VINE', 'SWEET_BERRY_BUSH',
+      'COCOA', 'FARMLAND', 'ICE', 'SNOW', 'BUDDING_AMETHYST', 'FIRE', 'SOUL_FIRE', 'LAVA', 'NETHER_PORTAL', 'TURTLE_EGG', 'NETHER_WART', 'TORCHFLOWER_CROP', 'BEETROOTS',
+      'OPEN_EYEBLOSSOM', 'CLOSED_EYEBLOSSOM', 'CREAKING_HEART', 'FROSTED_ICE', 'DRIED_GHAST', 'PITCHER_CROP']) if (B[n] !== undefined) t[B[n]] = 0;
+    for (let id = 0; id < BLK.length; id++) {
+      const d = BLK[id];
+      if (!d || d.sapling || d.crop || d.stem || d.copper !== undefined) t[id] = 0;
+    }
+    // azaleas grow only with bone meal; redstone ore only goes out while lit (2: one that counts only so)
+    for (const n of ['AZALEA', 'FLOWERING_AZALEA']) if (B[n] !== undefined) t[B[n]] = 1;
+    if (typeof REDSTONE_ORES !== 'undefined') for (const id of REDSTONE_ORES) t[id] = 2;
+    return t;
+  }
   // random ticks: ticking chunks whose middle is within 128 blocks of the player
   randomTicks() {
     const w = this.world, p = this.player;
-    const pcx = Math.floor(p.x / 16), pcz = Math.floor(p.z / 16), R = Math.min(8, this.simDistance()), n = this.rule ? this.rule('randomTickSpeed') : 3;
+    const pcx = Math.floor(p.x / 16), pcz = Math.floor(p.z / 16), R = Math.min(8, this.simDistance()), n = this.rule ? this.rule('randomTickSpeed') : 3, NO_RT = Game.noRandomTick();
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       const c = w.getChunk(pcx + dx, pcz + dz);
       if (!c || c.state < 2) continue;
       if (((pcx + dx) * 16 + 8 - p.x) ** 2 + ((pcz + dz) * 16 + 8 - p.z) ** 2 >= 16384) continue;
+      // which sections hold any block that takes random ticks (LevelChunkSection.isRandomlyTicking), worked out again when one changes
+      if (!c.rtk || c.rtkOf !== c.blocks) { c.rtk = new Uint8Array(CH_SECS).fill(2); c.rtkOf = c.blocks; }
       for (let sy = 0; sy < CH_SECS; sy++) {
         if (!c.meshes[sy]) continue;
+        if (c.rtk[sy] === 2) { const bl = c.blocks, mt = c.meta; let any = 0; for (let i = sy * 4096, e = i + 4096; i < e; i++) { const v = NO_RT[bl[i]]; if (v === 0 || v === 2 && (mt[i] & 1)) { any = 1; break; } } c.rtk[sy] = any; }
+        if (!c.rtk[sy]) continue;
         for (let k = 0; k < n; k++) {
           const r = (Math.random() * 4096) | 0, i = sy * 4096 + r;
           const id = c.blocks[i];
-          if (id === 0 || id === B.STONE || id === B.DEEPSLATE || id === B.NETHERRACK || id === B.END_STONE || id === B.BASALT) continue;
+          if (NO_RT[id] === 1) continue;
           this.randomTick(c.cx * 16 + (i & 15), i >> 8, c.cz * 16 + ((i >> 4) & 15), id);
         }
       }
@@ -33772,7 +33846,8 @@ Game.prototype.compost = function (x, y, z, st) {
 function rsTickers(c) {
   if (c._rsT) return c._rsT;
   const out = [], bl = c.blocks;
-  for (let i = 0; i < CH_VOL; i++) { const b = bl[i]; if (b === B.HOPPER || b === B.DAYLIGHT_DETECTOR) out.push(i); }
+  for (const id of [B.HOPPER, B.DAYLIGHT_DETECTOR]) for (let i = bl.indexOf(id); i >= 0; i = bl.indexOf(id, i + 1)) out.push(i);
+  out.sort((a, b) => a - b);
   return c._rsT = out;
 }
 const _setBlockRS = World.prototype.setBlock;
@@ -49148,7 +49223,7 @@ MOB_INIT.wolf = function (m, o) {
 // the natural spawner hands each pack one SpawnGroupData; outside of it there is none
 for (const k of ['vSpawnInChunk', 'vInitialSpawn']) {
   const f = Game.prototype[k];
-  if (f) Game.prototype[k] = function (...a) { try { return f.apply(this, a); } finally { this._spawnGroup = null; } };
+  if (f) Game.prototype[k] = function (a, b, c, d, e) { try { return f.call(this, a, b, c, d, e); } finally { this._spawnGroup = null; } };
 }
 
 // coats: fur, the darker back, the pale belly and muzzle, and spots or stripes on some
@@ -50339,6 +50414,17 @@ const AVOID = {
   wolf: { from: new Set(['llama', 'trader_llama']), r: 24, walk: 1.5, run: 1.5, base: 0.3, ok: (m, e) => !m.data.tame && (e.data.strength || 1) >= Math.floor(Math.random() * 5) },
 };
 for (const t of ['skeleton', 'stray', 'bogged', 'wither_skeleton']) AVOID[t] = { from: new Set(['wolf']), r: 6, walk: 1, run: 1.2, base: 0.25 };
+// the kinds of mob about, this tick
+function mobTypesNow(g) {
+  const w = g.world;
+  if (g._typesTick !== w.tick || g._typesN !== g.entities.length) {
+    g._typesTick = w.tick; g._typesN = g.entities.length;
+    const s = new Set();
+    for (const e of g.entities) if (e instanceof Mob && !e.dead) s.add(e.type);
+    g._types = [...s];
+  }
+  return g._types;
+}
 GOALS.avoid = function (m) {
   const a = AVOID[m.type];
   if (!a) return false;
@@ -50347,6 +50433,7 @@ GOALS.avoid = function (m) {
   if (m._avoid && !m._avoid.dead && m.age % 10 && !m.navDone()) return m.followPath() || true;
   m._avoid = null;
   let best = null, bd = a.r;
+  if (!mobTypesNow(m.game).some(t => a.from.has(t))) return false;
   for (const e of m.game.entities) if (e instanceof Mob && !e.dead && a.from.has(e.type)) { const d = m.distTo(e); if (d < bd && m.canSee(e)) { bd = d; best = e; } }
   if (!best || a.ok && !a.ok(m, best)) return false;
   for (let k = 0; k < 10; k++) {
@@ -51585,7 +51672,7 @@ GOALS.stampEggs = function (m) {
   if (d.eggAt && !ok(...d.eggAt)) d.eggAt = null;
   if (!d.eggAt) {
     if ((d.eggCd = (d.eggCd === undefined ? Math.floor(Math.random() * 200) : d.eggCd) - 1) > 0) return false;
-    d.eggAt = nearestBlockFrom(m, 24, 3, ok);
+    d.eggAt = w.anyBlockNear(B.TURTLE_EGG, Math.floor(m.x) - 24, Math.floor(m.z) - 24, Math.floor(m.x) + 24, Math.floor(m.z) + 24) ? nearestBlockFrom(m, 24, 3, ok) : null;
     d.eggCd = d.eggAt ? 20 : 200 + Math.floor(Math.random() * 200);
     if (!d.eggAt) return false;
     d.stampT = 0; d.eggTry = 0;
@@ -51938,7 +52025,8 @@ Object.assign(GOALS, {
     if (!d.berry) {
       if ((d.berryCd = (d.berryCd === undefined ? Math.floor(Math.random() * 200) : d.berryCd) - 1) > 0) return false;
       d.berryCd = 200 + Math.floor(Math.random() * 200);
-      d.berry = nearestBlockFrom(m, 12, 1, ok);
+      const fx = Math.floor(m.x), fz = Math.floor(m.z);
+      d.berry = w.anyBlockNear(B.SWEET_BERRY_BUSH, fx - 12, fz - 12, fx + 12, fz + 12) || w.anyBlockNear(B.CAVE_VINES, fx - 12, fz - 12, fx + 12, fz + 12) ? nearestBlockFrom(m, 12, 1, ok) : null;
       if (!d.berry) return false;
       d.berryWait = 0; d.berryTry = 0; d.sitting = false;
     }
@@ -54513,7 +54601,7 @@ GOALS.rabbitRaid = function (m) {
   if (m.age % 2 || !g.rule('mobGriefing')) return false;
   m._raidNext = Math.ceil((200 + Math.floor(Math.random() * 200)) / 2) * 2;
   if (m.data.carrotT > 0) return false;
-  const s = nearestBlockFrom(m, 16, 1, (x, y, z) => w.getBlock(x, y, z) === B.FARMLAND && w.getBlock(x, y + 1, z) === B.CARROTS && (w.getMeta(x, y + 1, z) & 7) >= 7);
+  const s = w.anyBlockNear(B.CARROTS, Math.floor(m.x) - 16, Math.floor(m.z) - 16, Math.floor(m.x) + 16, Math.floor(m.z) + 16) && nearestBlockFrom(m, 16, 1, (x, y, z) => w.getBlock(x, y, z) === B.FARMLAND && w.getBlock(x, y + 1, z) === B.CARROTS && (w.getMeta(x, y + 1, z) & 7) >= 7);
   if (!s) return false;
   m._raid = { x: s[0], y: s[1] + 1, z: s[2], can: true, t: 1 };
   m.goTo(s[0] + 0.5, s[1] + 1, s[2] + 0.5, m.T.walk * 0.7 / 0.6);
@@ -56976,7 +57064,7 @@ for (const t of ['spider', 'cave_spider']) {
 function webStuck(m, base) {
   if (m.type === 'spider' || m.type === 'cave_spider' || m.T.noClip) return base.call(m);
   const w = m.game.world, hw = m.w / 2;
-  if (!aabbHitsBlock(w, m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw, id => BLK[id].web)) return base.call(m);
+  if (!boxAny(m, id => BLK[id].web) || !aabbHitsBlock(w, m.x - hw, m.y, m.z - hw, m.x + hw, m.y + m.h, m.z + hw, id => BLK[id].web)) return base.call(m);
   const x0 = m.x, y0 = m.y, z0 = m.z, weave = m.effectLevel && m.effectLevel('weaving') ? 2 : 1;
   const r = base.call(m);
   m.x = x0 + (m.x - x0) * 0.25 * weave; m.y = y0 + (m.y - y0) * (weave > 1 ? 0.25 : 0.05); m.z = z0 + (m.z - z0) * 0.25 * weave;
@@ -64595,10 +64683,12 @@ Game.prototype.displayTicks = function () {
   const w = this.world, p = this.player, P = this.particles;
   if (!w || !p) return;
   const px = Math.floor(p.x), py = Math.floor(p.y), pz = Math.floor(p.z), R = Math.random, r = n => (R() * n) | 0;
+  // (only Nether biomes have ambient particles)
+  const ambient = w.dim === 'nether';
   const one = (x, y, z) => {
     const id = w.getBlock(x, y, z), f = ANIM[id];
     if (f) f(this, w, x, y, z, w.getMeta(x, y, z), P, id);
-    if (SOLID[id] === 1 && SHAPE[id] === SH.CUBE) return;
+    if (!ambient || SOLID[id] === 1 && SHAPE[id] === SH.CUBE) return;
     const c = w.getChunk(x >> 4, z >> 4), amb = c && c.biomes && BIOME_AMBIENT[c.biomes[((z & 15) << 4) | (x & 15)]];
     if (!amb || R() > amb[0]) return;
     const a = x + R(), b = y + R(), cz = z + R();
@@ -67970,6 +68060,7 @@ TEXGEN.push(function texJavaModels() {
    =================================================================== */
 
 const SCAF = B.SCAFFOLDING;
+BOX_FLAG[SCAF] |= 1;
 // Block.isFaceSturdy(UP): a whole top face; full blocks always (soul sand and mud too: their outline is the whole block)
 function scafSturdyTop(w, x, y, z) {
   const id = w.getBlock(x, y, z);
@@ -68072,7 +68163,7 @@ function scafCollision(w, x, y, z, e) {
 const _collectBoxesSF = collectBoxes;
 collectBoxes = function (world, x0, y0, z0, x1, y1, z1) {
   const out = _collectBoxesSF.apply(this, arguments), e = typeof SM_MOVING !== 'undefined' ? SM_MOVING : null;
-  if (!e || !e.game) return out;
+  if (!e || !e.game || !(BOXES_SAW & 1)) return out;
   for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let x = Math.floor(x0); x <= Math.floor(x1); x++) {
     if (world.getBlock(x, y, z) !== SCAF) continue;
     const bx = scafCollision(world, x, y, z, e);
@@ -68318,7 +68409,7 @@ function cauldronContentAt(e) {
 const _updateFluidsCD = Entity.prototype.updateFluids;
 Entity.prototype.updateFluids = function () {
   const res = _updateFluidsCD.apply(this, arguments);
-  if (this.dead || typeof this.hurt !== 'function' || !this.game || !this.game.world || this.health === undefined) return res;
+  if (this.dead || typeof this.hurt !== 'function' || !this.game || !this.game.world || this.health === undefined || !boxHas(this, B.CAULDRON)) return res;
   const hit = cauldronContentAt(this);
   if (!hit) return res;
   const [x, y, z, m] = hit, g = this.game, w = g.world;
@@ -68392,7 +68483,7 @@ World.prototype.setWet = function (x, y, z, on) {
   const i = (y << 8) | ((z & 15) << 4) | (x & 15);
   if (!c.wl) { if (!on) return false; c.wl = new Uint8Array(CH_VOL >> 3); }
   if (!!wlGet(c.wl, i) === !!on) return false;
-  wlSet(c.wl, i, on);
+  wlSet(c.wl, i, on); BLOCK_VER++;
   c.modified = c.unsaved = true;
   const m = this.getMeta(x, y, z);
   if (id === B.SEA_PICKLE) this.setBlock(x, y, z, id, on ? m | 4 : m & ~4);
@@ -68541,7 +68632,10 @@ const _updateFluidsWL = Entity.prototype.updateFluids;
 Entity.prototype.updateFluids = function () {
   const res = _updateFluidsWL.apply(this, arguments);
   const w = this.game && this.game.world;
-  if (!w) return res;
+  if (!w || this.inWater && this.headInWater) return res;
+  // (only blocks always in water, or holding it, count here)
+  const bx = boxIds(this);
+  if (!bx.wet && !boxAny(this, id => id !== B.WATER && WATERY[id] === 1)) return res;
   const held = (id, x, y, z) => id !== B.WATER && (WATERY[id] === 1 || w.isWet(x, y, z));
   const top = (x, y, z) => y + (w.waterAt(x, y + 1, z) ? 1 : 8 / 9);
   if (!this.inWater) {
@@ -68835,16 +68929,19 @@ Entity.prototype.updateFluids = function () {
   if (this.dead || !this.game || !this.game.world || typeof this.hurt !== 'function' || this.health === undefined) return res;
   const w = this.game.world, isPlayer = this === this.game.player;
   // Frost Walker: when the wearer's block changes (EnchantmentHelper.runLocationChangedEffects)
-  const at = Math.floor(this.x) + ',' + Math.floor(this.y) + ',' + Math.floor(this.z);
-  if (at !== this._fwAt) {
-    this._fwAt = at;
+  const ax = Math.floor(this.x), ay = Math.floor(this.y), az = Math.floor(this.z);
+  if (ax !== this._fwX || ay !== this._fwY || az !== this._fwZ) {
+    this._fwX = ax; this._fwY = ay; this._fwZ = az;
     const lvl = enchLevel(fwBoots(this), 'frost_walker');
     if (lvl > 0 && this.onGround && !this.riding && !this.vehicle && !(isPlayer && this.mode === 3)) frostWalk(this, lvl);
   }
+  // (nothing that burns about: nothing more to see to)
+  const camp = boxHas(this, B.CAMPFIRE) || boxHas(this, B.SOUL_CAMPFIRE);
+  if (!camp && (isPlayer || !this.onGround || !BLK[w.getBlock(Math.floor(this.x), Math.floor(this.y - 0.2), Math.floor(this.z))].magma)) return res;
   if (fwBurnProof(this)) return res;
   // CampfireBlock.entityInside: a lit campfire in the box burns (1, soul 2)
   const hw = (this.w || 0.6) / 2;
-  for (let y = Math.floor(this.y); y <= Math.floor(this.y + (this.h || 1)); y++) for (let z = Math.floor(this.z - hw); z <= Math.floor(this.z + hw); z++) for (let x = Math.floor(this.x - hw); x <= Math.floor(this.x + hw); x++) {
+  if (camp) for (let y = Math.floor(this.y); y <= Math.floor(this.y + (this.h || 1)); y++) for (let z = Math.floor(this.z - hw); z <= Math.floor(this.z + hw); z++) for (let x = Math.floor(this.x - hw); x <= Math.floor(this.x + hw); x++) {
     const id = w.getBlock(x, y, z);
     if ((id === B.CAMPFIRE || id === B.SOUL_CAMPFIRE) && !(w.getMeta(x, y, z) & 4) && this.y < y + 7 / 16) { this.hurt(id === B.SOUL_CAMPFIRE ? 2 : 1, 'in_fire'); return res; }
   }
@@ -72964,6 +73061,56 @@ Game.prototype.playFrame = function (dt) {
     }
   }
   return _play.call(this, dt);
+};
+})();
+
+/* @file 231_tick_speed.js */
+/* ===================================================================
+   Part 137: lighter ticks — blocks changed during a game tick (fire
+   spreading, crops growing, mobs breaking doors...) have their chunks'
+   meshes rebuilt once, after the ticks of the frame and before it is
+   drawn, instead of again for every change
+   =================================================================== */
+(() => {
+const Q = new Set();
+let inTick = 0;
+const _remesh = Game.prototype.remeshNear;
+Game.prototype.remeshNear = function (x, z) {
+  if (!inTick) return _remesh.call(this, x, z);
+  Q.add(this.world.key(x >> 4, z >> 4));
+};
+// the queued chunks and the ones round them: each one's sections that changed, meshed now
+Game.prototype.flushRemesh = function () {
+  if (!Q.size) return;
+  const w = this.world, done = new Set();
+  for (const k of Q) {
+    const c0 = w.chunks.get(k);
+    if (!c0) continue;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const c = w.getChunk(c0.cx + dx, c0.cz + dz);
+      if (!c || done.has(c) || c.state < 2 || !this.neighborsLit(c)) continue;
+      done.add(c);
+      for (let sy = 0; sy < CH_SECS; sy++) if (c.dirty[sy]) { c.dirty[sy] = 0; this.r.uploadSection(c, sy, meshSection(w, c, sy)); }
+    }
+  }
+  Q.clear();
+};
+const _tick = Game.prototype.gameTick;
+Game.prototype.gameTick = function () {
+  const w = this.world;
+  inTick++;
+  try { return _tick.call(this); }
+  finally {
+    inTick--;
+    // (a new world, or another dimension: what was queued belongs to the old one)
+    if (this.world !== w) Q.clear();
+    else if (!inTick && this.state !== 'playing') this.flushRemesh();
+  }
+};
+const _update = Game.prototype.updateChunks;
+Game.prototype.updateChunks = function (budget) {
+  if (!inTick && this.world) this.flushRemesh();
+  return _update.call(this, budget);
 };
 })();
 
